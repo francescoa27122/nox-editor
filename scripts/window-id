@@ -1,0 +1,8 @@
+#!/bin/sh
+# Print the window id of a running app's main window, for `screencapture -l`.
+# Compiles on first use and caches the binary next to this script.
+set -e
+here="$(cd "$(dirname "$0")" && pwd)"
+bin="$here/.window-id.bin"
+[ -x "$bin" ] && [ "$bin" -nt "$here/window-id.swift" ] || swiftc -O "$here/window-id.swift" -o "$bin"
+exec "$bin" "${1:-Nox}"

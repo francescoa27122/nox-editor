@@ -9,3 +9,6 @@ coverage/
 
 # Editor/agent tooling config, not part of the project.
 .claude/
+
+# Compiled helper, rebuilt on demand.
+scripts/.window-id.bin

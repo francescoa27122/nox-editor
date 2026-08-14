@@ -1,11 +1,21 @@
 # Screenshots
 
-Referenced by the top-level README. Two are needed:
+Referenced by the top-level README.
 
-| File | What to capture |
+| File | What it shows |
 |---|---|
-| `editor.png` | The editor with a source file open and the explorer showing. The hero shot. |
-| `review.png` | The review panel showing a diff — run an agent, or stage a project-wide replace. |
+| `editor.png` | The editor with the explorer open on Nox's own source |
+| `review.png` | The review panel: a change an agent proposed, before it is applied |
 
-On macOS, <kbd>⌘⇧4</kbd> then <kbd>Space</kbd> then click the window captures
-it cleanly with a shadow. Save into this folder under the names above.
+## Retaking them
+
+Capture the window by its id rather than a screen region — it ignores whatever
+is stacked on top, and macOS adds the drop shadow for you:
+
+```bash
+screencapture -x -l$(scripts/window-id Nox) docs/screenshots/editor.png
+```
+
+`scripts/window-id` is a few lines of Swift that asks the window server for the
+first window belonging to a named app. It needs Screen Recording permission
+for whichever terminal you run it from; nothing else.
