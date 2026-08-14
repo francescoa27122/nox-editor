@@ -148,6 +148,7 @@ src/
 │  ├─ languages.ts       Lazy grammar loading
 │  ├─ commands.ts        Commands CM6 lacks (add cursor above/below, go to line)
 │  ├─ find.ts            Drives CM's search engine from Nox's find panel
+│  ├─ provenance.ts      Who changed what, as ranges. Gutter and tooltip.
 │  ├─ folding.ts         Fold gutter, markers, and fold-to-level
 │  └─ search-highlight.ts Paints matches (CM ties its own highlighting to its panel)
 │
@@ -651,6 +652,33 @@ Notes always autosave, on a 400 ms debounce, and do not follow
 outward-facing act with other observers; a note has none. There is no setting
 of its own either, because a preference that stops saving your notes is a
 preference that loses them.
+
+### Provenance is state, not a view
+
+Search highlighting is a `ViewPlugin` because matches are *derivable*: given
+the query and the document, you can always recompute them. Provenance is not.
+Once a change set is applied, nothing in the document remembers who did it, so
+it has to be recorded as it happens and carried forward — which makes it a
+`StateField` holding a `RangeSet`, mapped through every later change by
+CodeMirror rather than by hand.
+
+The alternative was a position index maintained in the workspace. It would
+have reimplemented `RangeSet.map` and forced the workspace to intercept every
+transaction to keep it current. Putting it in state also means background
+buffers accumulate provenance correctly, because the workspace updates their
+state whether or not a view exists.
+
+Two costs are real. A user's edit has to *subtract* its own changed ranges,
+because CodeMirror's default mapping extends a mark when you type inside it —
+the opposite of "touching a line takes ownership of it". And the field must
+stay out of the settings `Compartment`: reconfiguring a compartment to nothing
+removes its extensions, and removing a `StateField` destroys what it holds, so
+only the gutter and the tooltip are gated by `workbench.showChangeMarks`.
+
+Marks live for the session and no longer, for the same reason the transaction
+log does: persisting them would decouple provenance from undoability, and a
+`git checkout` or an external formatter would leave attribution that is
+confidently wrong. A mark that lies is worse than no mark.
 
 ### A review narrows the change set; it does not apply hunks
 

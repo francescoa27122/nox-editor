@@ -467,7 +467,12 @@ export class SearchService {
           if (source.bufferId) {
             edits.push({
               bufferId: source.bufferId,
-              changes: { from: 0, to: source.text.length, insert: result.text },
+              // One change per match, in the coordinates `computeReplacements`
+              // already resolved them in — not a single from-0-to-end swap.
+              // Provenance marks whatever a change set actually inserted, so
+              // collapsing every match into one edit would mark the entire
+              // file as changed instead of just the matched spans.
+              changes: result.edits,
             });
             // Recorded now, so an edit the user makes while the rest of the
             // walk is still reading gets caught by `apply` instead of being

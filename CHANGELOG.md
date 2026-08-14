@@ -31,8 +31,23 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     no setting: a preference that stops saving your notes is a preference that
     loses them.
 
+- **Change marks.** Lines changed by a project replace, an agent or a plugin
+  carry a quiet bar in the gutter, and hovering says who changed them and why.
+  **Go to Next Change** walks them.
+  - Typing in a marked region clears the mark there, so the gutter decays as
+    you review rather than accumulating all session.
+  - Marks last for the session. Persisting them would mean attribution that a
+    `git checkout` could silently make wrong.
+  - **Show Change Marks** turns the gutter off for anyone who finds it noisy.
+
 ### Fixed
 
+- **A project-wide replace marked whole files as changed, not just the lines
+  it touched.** Replace collapsed every match in a file into one edit spanning
+  the whole document, so provenance — which marks whatever a change set
+  actually inserted — saw one insertion covering the entire file. Replace now
+  emits one edit per match, at the positions it already computed, so only the
+  matched spans carry a mark.
 - The reference-agent test and two documentation links pointed at
   `examples/agents/uppercase.mjs`, which has been
   `examples/uppercase-agent.mjs` since v0.2 was tagged. The test spawned a

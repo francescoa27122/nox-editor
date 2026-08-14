@@ -1,5 +1,6 @@
 import { JobRunner } from '../src/services/jobs';
 import { history } from '@codemirror/commands';
+import type { ChangeSet, Transaction, TransactionSpec } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { applyEdits, computeReplacements, expandReplacement } from '../src/core/replace';
 import { buildSearchRegex } from '../src/core/search-match';
@@ -230,6 +231,38 @@ describe('replace and open buffers', () => {
 
     // The in-memory buffer reflects the change immediately.
     expect(workspace.textOf(id)).toBe('import pin from "x";\n');
+  });
+
+  it('changes only the matched spans, not the whole document', async () => {
+    const { workspace, search } = setup();
+    await workspace.openFolder('/w');
+    // Three matches across two lines: 'const needle = 1;\nconst needle2 = needle;\n'
+    const id = (await workspace.open('/w/a.ts'))!;
+
+    let captured: TransactionSpec | Transaction | undefined;
+    const unregister = workspace.addViewDispatcher((bufferId, spec) => {
+      if (bufferId === id) captured = spec;
+      // Decline, so the background path still applies it and the buffer
+      // ends up with the replaced text like every other test here.
+      return false;
+    });
+
+    await searchFor(search, 'needle');
+    search.setReplacement('pin');
+    await search.replaceAll();
+    unregister();
+
+    const changes = (captured as TransactionSpec).changes as ChangeSet;
+    let ranges = 0;
+    changes.iterChangedRanges(() => {
+      ranges++;
+    }, true);
+
+    // One edit per match, at the positions `computeReplacements` already
+    // resolved — not one `{from: 0, to: length}` edit for the whole file.
+    // The whole-file version is what made provenance mark every line as
+    // changed instead of just the three that were.
+    expect(ranges).toBe(3);
   });
 
   it('saves a clean buffer so disk and editor agree', async () => {
