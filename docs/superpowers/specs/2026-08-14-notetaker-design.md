@@ -153,7 +153,7 @@ list without an error.
 | `notes.json` is not valid JSON | Empty list. Do not throw; the panel must still render. |
 | `version` is unrecognised | Empty list. |
 | A record names a body file that is missing or blank | The note loads with an empty body. Losing one body must not cost the other notes. |
-| A body file exists that no record names | Ignored on load. Never reclaimed: `#nextOrdinal` only increases, so a filename is never reused. |
+| A body file exists that no record names | Ignored on load, and never reclaimed while the app is running — `#nextOrdinal` only increases within a session. It can be reissued after a restart, though: `#nextOrdinal` is recomputed from the surviving records, so deleting the highest-numbered note frees its ordinal for the next launch. Either way the file is blank or overwritten, so nothing is read from it. |
 | A write fails | One notification. The in-memory note is unchanged, so the next debounce retries. |
 
 ## 4. Save semantics
