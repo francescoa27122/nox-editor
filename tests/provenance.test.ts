@@ -333,9 +333,8 @@ describe('tooltip text', () => {
   /**
    * The failure this prevents: the format string's field order or separator
    * changing — e.g. swapping author and description, or losing the ` · `
-   * between them. This is the only test that checks the full three-field
-   * shape against a fixed expected string; the tests below each vary just
-   * one field against this baseline and would not catch the others moving.
+   * between them. Covers the ordinary case: all three fields populated, a
+   * plain minute count.
    */
   it('names the author and the change', () => {
     expect(describeProvenance(record(), now)).toBe('claude-1 · Rewrite the greeting · 10m ago');
@@ -480,9 +479,7 @@ describe('navigation', () => {
   /**
    * The failure this prevents: wrapping around to return the last mark when
    * there's nothing before the cursor — the silent-wrap failure the
-   * null-at-the-ends design exists to avoid — and, since `from = 0` here,
-   * a `Math.max(0, from - 1)` clamp that let the query range go negative
-   * instead of being pinned at 0.
+   * null-at-the-ends design exists to avoid.
    */
   it('returns null before the first mark rather than wrapping', () => {
     expect(previousProvenance(twoMarks(), 0)).toBeNull();
