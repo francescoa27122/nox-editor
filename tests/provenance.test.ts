@@ -7,9 +7,12 @@ import { changeSetAnnotation, type Provenance } from '../src/services/transactio
  * The provenance field against hand-built transactions.
  *
  * No DOM and no workspace: the field is pure state, and driving it directly
- * is the only way to test the interleavings that matter — a mark mapped
- * through an unrelated edit, a mark half-deleted, a second change set landing
- * on top of a first.
+ * is the only way to test recording and mapping in isolation. At this commit
+ * that means: what a change set marks, that the mark carries the author
+ * resolved at record time, and that a mark survives an edit elsewhere in the
+ * document. The clearing rule — a mark shrinking or vanishing under an edit
+ * that overlaps it — arrives with the update rule in a later task, and its
+ * tests belong there, not here.
  */
 
 function record(overrides: Partial<Provenance> = {}): Provenance {
@@ -52,6 +55,12 @@ describe('recording', () => {
     expect(marks(state)).toEqual([[0, 7, 'cs-1']]);
   });
 
+  /**
+   * The failure this prevents: the annotation being dropped, or the author
+   * being resolved at render time instead of record time — either would
+   * leave the label wrong (or blank) once the originating change set has
+   * rotated out of the bounded log.
+   */
   it('carries the author through to the mark', () => {
     const state = applySet(stateWith('x'), { from: 1, insert: 'y' });
 
@@ -70,7 +79,27 @@ describe('recording', () => {
     expect(marks(state)).toEqual([]);
   });
 
+  /**
+   * The failure this prevents: a field that seeds itself from the document
+   * on creation, so a freshly opened file would claim someone authored text
+   * nobody recorded a change set for.
+   */
   it('leaves an untouched document unmarked', () => {
     expect(marks(stateWith('hello'))).toEqual([]);
+  });
+
+  /**
+   * The failure this prevents: the position-mapping bug this whole design
+   * exists to avoid hand-writing. An edit far from a mark must move it, not
+   * corrupt it — and mapping is the entire reason this is a StateField rather
+   * than a ViewPlugin.
+   */
+  it('maps a mark past an unrelated edit earlier in the document', () => {
+    const marked = applySet(stateWith('aaaa....bbbb'), { from: 8, to: 12, insert: 'bbbb' });
+    expect(marks(marked)).toEqual([[8, 12, 'cs-1']]);
+
+    const edited = marked.update({ changes: { from: 0, insert: 'XX' } }).state;
+
+    expect(marks(edited)).toEqual([[10, 14, 'cs-1']]);
   });
 });
