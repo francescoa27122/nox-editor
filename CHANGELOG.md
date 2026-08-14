@@ -32,7 +32,7 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reads and writes one JSON object per line on stdin and stdout — a shell
   script, a Python file, whatever you like. Nox starts it, supervises it, and
   shows what it did in the Agents panel like any other session.
-  - [`examples/agents/uppercase.mjs`](examples/agents/uppercase.mjs) is a
+  - [`examples/uppercase-agent.mjs`](examples/uppercase-agent.mjs) is a
     complete working agent in about eighty lines, meant to be copied.
   - A crash, a hang at startup, or garbage on the wire fails the session with
     the agent's own error message rather than leaving it stuck.

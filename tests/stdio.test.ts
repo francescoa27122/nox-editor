@@ -446,7 +446,7 @@ describe('a real child process', () => {
     workspace.setActive(a);
 
     const transport = new StdioTransport(
-      () => spawnNode('examples/agents/uppercase.mjs'),
+      () => spawnNode('examples/uppercase-agent.mjs'),
       'uppercase',
       { handshakeTimeoutMs: 15_000 },
     );
@@ -455,7 +455,12 @@ describe('a real child process', () => {
     await settle(session);
 
     expect(session.status.get()).toBe('awaiting-review');
-    expect(session.summary.get()).toBe('Proposed one change to a.txt');
+    // The agent's own words, verbatim — the runtime reports what the agent
+    // said rather than describing the proposal itself. Asserting the exact
+    // string keeps this test honest if the example's wording drifts.
+    expect(session.summary.get()).toBe(
+      'Proposed uppercasing line 1 of a.txt. Review it and apply what you want.',
+    );
 
     // It read the file over a pipe, decided from what came back, and proposed
     // an edit built out of it — the whole point of the protocol.

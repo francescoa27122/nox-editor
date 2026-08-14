@@ -403,7 +403,7 @@ the failure modes that matter become ordinary tests — an agent that never
 speaks, one that crashes mid-sentence, one that writes a Python traceback where
 JSON was expected, one that talks before saying hello.
 
-[`examples/agents/uppercase.mjs`](examples/agents/uppercase.mjs) is the
+[`examples/uppercase-agent.mjs`](examples/uppercase-agent.mjs) is the
 reference implementation, about eighty lines. `tests/stdio.test.ts` runs it as
 a real child process, so the wire format, the example and the transport are all
 exercised over genuine pipes.
