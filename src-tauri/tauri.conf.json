@@ -33,7 +33,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg", "deb", "rpm", "nsis"],
     "category": "DeveloperTool",
     "shortDescription": "A fast, dark, keyboard-first text editor",
     "longDescription": "Nox is a fast, dark, keyboard-first text editor built for focus.",

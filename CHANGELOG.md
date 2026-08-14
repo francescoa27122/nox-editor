@@ -33,6 +33,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - CI builds and tests on every push, and a tag now produces macOS (Apple
   Silicon and Intel) and Linux binaries rather than Apple Silicon alone.
+- Linux ships a `.deb` and an `.rpm`, both around 3 MB. The AppImage is gone:
+  it bundles its own GTK and WebKit and came to 77 MB, which is not an
+  editor that claims to be about 4 MB.
+- A tag that disagrees with the version in `tauri.conf.json` is now refused.
+  The bundler names assets from the config rather than the tag, so the two
+  drifting apart shipped binaries labelled with the wrong release.
 
 ## [0.2.0] — 2026-08-13
 
