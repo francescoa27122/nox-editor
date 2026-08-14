@@ -126,8 +126,9 @@
     align-items: center;
     gap: var(--nox-sp-2);
     flex: none;
-    height: 28px;
+    height: var(--nox-tabbar-h);
     padding: 0 var(--nox-sp-3) 0 var(--nox-sp-4);
+    border-bottom: 1px solid var(--nox-border);
   }
 
   .title {
@@ -166,6 +167,7 @@
   }
 
   .empty {
+    margin: 0;
     padding: var(--nox-sp-5) var(--nox-sp-4);
     font-size: var(--nox-fs-sm);
     color: var(--nox-text-faint);
@@ -176,6 +178,8 @@
     flex: 0 1 auto;
     max-height: 40%;
     overflow-y: auto;
+    list-style: none;
+    margin: 0;
     padding: 0 var(--nox-sp-2);
   }
 
