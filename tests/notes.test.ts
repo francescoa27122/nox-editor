@@ -364,3 +364,226 @@ describe('creating and persisting', () => {
     }
   });
 });
+
+/** Fails every config write, to exercise the save-failure path. */
+class RefusingPlatform extends MemoryPlatform {
+  failing = false;
+
+  override async writeConfigFile(name: string, contents: string): Promise<void> {
+    if (this.failing) throw new Error('disk is full');
+    await super.writeConfigFile(name, contents);
+  }
+}
+
+describe('renaming', () => {
+  it('renames a note', async () => {
+    const notes = new NotesService(new MemoryPlatform());
+    const id = notes.create();
+
+    notes.rename(id, 'Reading list');
+
+    expect(notes.notes.get()[0]!.title).toBe('Reading list');
+  });
+
+  /**
+   * The failure this prevents: a blank row in a list that shows nothing but
+   * titles, which the user then cannot pick out to fix.
+   */
+  it('refuses a blank title and keeps the old one', () => {
+    const notes = new NotesService(new MemoryPlatform());
+    const id = notes.create();
+    notes.rename(id, 'Standup');
+
+    notes.rename(id, '   ');
+
+    expect(notes.notes.get()[0]!.title).toBe('Standup');
+  });
+
+  it('trims surrounding whitespace', () => {
+    const notes = new NotesService(new MemoryPlatform());
+    const id = notes.create();
+
+    notes.rename(id, '  Ideas  ');
+
+    expect(notes.notes.get()[0]!.title).toBe('Ideas');
+  });
+
+  /**
+   * The failure this prevents: rename() and select() touch only index-shaped
+   * state (title, selection), so nothing marked the index dirty for the
+   * persist loop's exit check. That check reads #dirtyBodies and #released
+   * only — both empty here — so without a third, index-dirty flag wired into
+   * it, a rename landing while notes.json is already mid-write would see
+   * nothing pending, break the loop, and return having written the
+   * pre-rename title. A second flush() would never be called on the quit
+   * path, so the rename would be lost for good.
+   */
+  it('persists a rename that lands while the index write is still in flight, in one flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    await notes.flush();
+
+    const gate = platform.hold('notes.json');
+    const theFlush = notes.flush();
+    await gate.started; // notes.json write is now stuck (nothing dirty forced it, but flush always writes the index)
+
+    // The race: this lands while the index write is still in flight.
+    notes.rename(id, 'renamed mid-write');
+    gate.release();
+    await theFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get()[0]!.title).toBe('renamed mid-write');
+  });
+});
+
+describe('deleting', () => {
+  /**
+   * The failure this prevents: a selection pointing at a note that no longer
+   * exists, which renders as an editor pane bound to nothing.
+   */
+  it('selects the next note when the selected one is deleted', () => {
+    const notes = new NotesService(new MemoryPlatform());
+    const oldest = notes.create();
+    const middle = notes.create();
+    notes.create();
+    // Order is newest first, so `middle` sits between the other two.
+    notes.select(middle);
+
+    notes.remove(middle);
+
+    expect(notes.selectedId.get()).toBe(oldest);
+    expect(notes.notes.get().map((note) => note.id)).not.toContain(middle);
+  });
+
+  it('falls back to the previous note when the last one is deleted', () => {
+    const notes = new NotesService(new MemoryPlatform());
+    const oldest = notes.create();
+    const newest = notes.create();
+    notes.select(oldest);
+
+    notes.remove(oldest);
+
+    expect(notes.selectedId.get()).toBe(newest);
+  });
+
+  it('clears the selection when the last note goes', () => {
+    const notes = new NotesService(new MemoryPlatform());
+    const only = notes.create();
+
+    notes.remove(only);
+
+    expect(notes.notes.get()).toEqual([]);
+    expect(notes.selectedId.get()).toBeNull();
+  });
+
+  /**
+   * The failure this prevents: the config API has no delete, so a body left
+   * unblanked keeps the full text of a deleted note in the config directory
+   * indefinitely.
+   */
+  it('blanks the body file of a deleted note', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+    const id = notes.create();
+    notes.setBody(id, 'private');
+    await notes.flush();
+    expect(await platform.readConfigFile('note-1.txt')).toBe('private');
+
+    notes.remove(id);
+    await notes.flush();
+
+    expect(await platform.readConfigFile('note-1.txt')).toBe('');
+  });
+
+  it('does not resurrect a deleted note on reload', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+    const keep = notes.create();
+    const drop = notes.create();
+    notes.remove(drop);
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+
+    expect(reloaded.notes.get().map((note) => note.id)).toEqual([keep]);
+  });
+});
+
+describe('switching notes', () => {
+  /**
+   * The failure this prevents: persisting only the *selected* note's body.
+   * Every dirty body must be written, or editing A then switching to B loses
+   * A's text at the next save.
+   */
+  it('writes an edited note that is no longer selected', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+    const first = notes.create();
+    const second = notes.create();
+
+    notes.setBody(first, 'first text');
+    notes.select(second);
+    notes.setBody(second, 'second text');
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    const bodies = new Map(reloaded.notes.get().map((note) => [note.id, note.body]));
+    expect(bodies.get(first)).toBe('first text');
+    expect(bodies.get(second)).toBe('second text');
+  });
+
+  it('remembers which note was selected', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+    const first = notes.create();
+    notes.create();
+    notes.select(first);
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+
+    expect(reloaded.selectedId.get()).toBe(first);
+  });
+});
+
+describe('when the disk refuses', () => {
+  /**
+   * The failure this prevents: swallowing a failed save. Notes have no
+   * on-disk original to fall back on — if the write is lost the text exists
+   * only in memory, so the user has to be told.
+   */
+  it('reports a failed write and keeps the note in memory', async () => {
+    const platform = new RefusingPlatform();
+    const notes = new NotesService(platform);
+    const id = notes.create();
+    platform.failing = true;
+
+    notes.setBody(id, 'text that cannot be saved');
+    await notes.flush();
+
+    expect(notes.error.get()).toBe('disk is full');
+    expect(notes.notes.get()[0]!.body).toBe('text that cannot be saved');
+  });
+
+  it('saves the pending body once the disk comes back', async () => {
+    const platform = new RefusingPlatform();
+    const notes = new NotesService(platform);
+    const id = notes.create();
+    platform.failing = true;
+    notes.setBody(id, 'deferred');
+    await notes.flush();
+
+    platform.failing = false;
+    await notes.flush();
+
+    expect(notes.error.get()).toBeNull();
+    expect(await platform.readConfigFile('note-1.txt')).toBe('deferred');
+  });
+});

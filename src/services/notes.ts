@@ -88,6 +88,19 @@ export class NotesService {
   #nextRevision = 1;
   /** Body files of deleted notes, waiting to be blanked. */
   #released = new Set<string>();
+  /**
+   * Set whenever index-only state — a title, a selection — changes with no
+   * body write to carry it. `#dirtyBodies` and `#released` are both
+   * body-shaped and cannot see a rename or a select; without this, the
+   * persist loop's exit check would think nothing was pending and break with
+   * a rename dropped mid-index-write, the same lost-edit shape closed for
+   * bodies but reopened here. Cleared only when an index write lands and
+   * nothing re-dirtied it while that write was in flight, so a failed write
+   * leaves it set for the next persist call to retry — see `indexFailed` in
+   * `#doPersist` for how a failure this call still avoids spinning the loop
+   * forever on that alone.
+   */
+  #indexDirty = false;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Every call to `#persist` chains onto this rather than running
@@ -186,6 +199,59 @@ export class NotesService {
     this.#schedule();
   }
 
+  rename(id: string, title: string): void {
+    const trimmed = title.trim();
+    // A note with no title is a blank row in a list that shows only titles.
+    if (trimmed.length === 0) return;
+
+    const current = this.notes.get().find((note) => note.id === id);
+    if (!current || current.title === trimmed) return;
+
+    const now = Date.now();
+    this.notes.update((list) =>
+      list.map((note) => (note.id === id ? { ...note, title: trimmed, updatedAt: now } : note)),
+    );
+    // Only the index changed; no body is dirty, but the index itself now is.
+    this.#indexDirty = true;
+    this.#schedule();
+  }
+
+  select(id: string | null): void {
+    if (this.selectedId.get() === id) return;
+    this.selectedId.set(id);
+    this.#indexDirty = true;
+    // Not needed for correctness — `setBody` already updated the signal the
+    // pending write reads. It is a checkpoint: a switch bounds how long a
+    // body lives only in memory, where a kill rather than a clean quit would
+    // lose it.
+    void this.flush();
+  }
+
+  remove(id: string): void {
+    const list = this.notes.get();
+    const index = list.findIndex((note) => note.id === id);
+    if (index < 0) return;
+
+    const file = this.#bodyFiles.get(id);
+    // There is no delete on the config API, so a released body is blanked at
+    // the next save. Leaving it would keep a deleted note's text on disk.
+    if (file) this.#released.add(file);
+    this.#bodyFiles.delete(id);
+    this.#dirtyBodies.delete(id);
+    this.#bodyRevision.delete(id);
+
+    const remaining = list.filter((note) => note.id !== id);
+    this.notes.set(remaining);
+
+    // Never leave the selection on a note that is gone: prefer whichever took
+    // its place, then the one before it.
+    if (this.selectedId.get() === id) {
+      this.selectedId.set(remaining[index]?.id ?? remaining[index - 1]?.id ?? null);
+    }
+    this.#indexDirty = true;
+    this.#schedule();
+  }
+
   /** Write everything pending now, cancelling the debounce. */
   async flush(): Promise<void> {
     if (this.#saveTimer) {
@@ -227,6 +293,10 @@ export class NotesService {
     // but must not make the loops below retry it forever within this one.
     const failed = new Set<string>();
     const failedReleases = new Set<string>();
+    // Whether the index write has already failed once this call — mirrors
+    // `failed` / `failedReleases`: an index write that keeps failing must not
+    // spin the outer loop forever just because `#indexDirty` stays set.
+    let indexFailed = false;
 
     // One full pass — bodies, then released files, then the index — and the
     // whole pass repeats for as long as anything landed during it. A
@@ -309,15 +379,33 @@ export class NotesService {
             : [];
         }),
       };
+      // `rename`/`select` change only this index-shaped state — a title, a
+      // selection — with no body write to carry it, so `#dirtyBodies` and
+      // `#released` cannot see them. Snapshotting the flag before the write
+      // and comparing after it settles is the same trick `#bodyRevision`
+      // plays above: `data` was built from state as of a moment ago, so a
+      // rename landing while this write is in flight makes what just landed
+      // on disk stale, and the flag must survive to force another pass.
+      const dirtyBeforeWrite = this.#indexDirty;
       const problem = await this.#write(INDEX_FILE, JSON.stringify(data));
-      if (problem) failure ??= problem;
+      if (problem) {
+        failure ??= problem;
+        indexFailed = true;
+        // Stay dirty on failure, same as a body: until an index write lands,
+        // a rename or a selection change exists nowhere but memory.
+        this.#indexDirty = true;
+      } else if (this.#indexDirty === dirtyBeforeWrite) {
+        // Nothing set the flag again while the write above was in flight.
+        this.#indexDirty = false;
+      }
 
       // Anything that moved on while the released loop or the index write
       // above were in flight needs another full pass; anything left is
       // either settled or has already failed once this call.
       const stillDirty = [...this.#dirtyBodies].some((id) => !failed.has(id));
       const stillReleased = [...this.#released].some((file) => !failedReleases.has(file));
-      if (!stillDirty && !stillReleased) break;
+      const stillIndexDirty = this.#indexDirty && !indexFailed;
+      if (!stillDirty && !stillReleased && !stillIndexDirty) break;
     }
 
     this.error.set(failure);
