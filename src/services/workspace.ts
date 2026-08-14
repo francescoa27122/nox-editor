@@ -15,12 +15,14 @@ import { basename, canMoveInto, contains, dirname, join, topLevelPaths } from '@
 import { Signal } from '@core/signal';
 import { PlatformError, type Platform } from '@platform/types';
 import {
+  authorLabel,
   changeSetAnnotation,
   TransactionLog,
   type ApplyResult,
   type ChangeSetId,
   type ChangeSetSpec,
   type Edit,
+  type Provenance,
 } from './transactions';
 
 /**
@@ -1007,6 +1009,17 @@ export class WorkspaceService {
     // Validation is complete; from here nothing can refuse.
     const id: ChangeSetId = `cs-${this.#nextChangeSetId++}`;
 
+    // One timestamp for the annotation and the log entry, so a mark and the
+    // log never disagree about when something happened.
+    const at = Date.now();
+    const provenance: Provenance = {
+      changeSetId: id,
+      authorKind: spec.author.kind,
+      authorLabel: authorLabel(spec.author),
+      description: spec.description,
+      at,
+    };
+
     const bufferIds: BufferId[] = [];
     for (const [bufferId, { changes, edits }] of prepared) {
       const buffer = this.#map.get(bufferId)!;
@@ -1017,7 +1030,7 @@ export class WorkspaceService {
         // `isolateHistory` guarantees the set is exactly one history event in
         // this buffer — never merged into adjacent typing. Grouped undo
         // depends on that being true.
-        annotations: [changeSetAnnotation.of(id), isolateHistory.of('full')],
+        annotations: [changeSetAnnotation.of(provenance), isolateHistory.of('full')],
         scrollIntoView: false,
       };
 
@@ -1041,7 +1054,7 @@ export class WorkspaceService {
       description: spec.description,
       author: spec.author,
       bufferIds,
-      at: Date.now(),
+      at,
     });
     return { ok: true, id, bufferIds };
   }

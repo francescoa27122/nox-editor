@@ -36,6 +36,23 @@ export function authorLabel(author: Author): string {
   }
 }
 
+/**
+ * What a marked range knows about itself.
+ *
+ * Denormalised on purpose: whatever renders this never looks anything up. The
+ * log below is bounded, so a change set can rotate out of it while its marks
+ * are still on screen — a tooltip that went blank when that happened would be
+ * its own small lie.
+ */
+export interface Provenance {
+  changeSetId: ChangeSetId;
+  authorKind: Author['kind'];
+  /** `authorLabel(author)`, resolved once at record time. */
+  authorLabel: string;
+  description: string;
+  at: number;
+}
+
 /** One buffer's worth of a change set. Several may target the same buffer. */
 export interface Edit {
   bufferId: BufferId;
@@ -85,12 +102,14 @@ export type ApplyResult =
   | { ok: false; reason: 'empty' };
 
 /**
- * Marks a transaction as belonging to a change set.
+ * Marks a transaction as belonging to a change set, and says who made it.
  *
- * Read by anything that needs to tell a programmatic edit from typing —
- * attribution decorations, and the log itself.
+ * Carries the whole record rather than the id alone: the attribution field in
+ * `editor/provenance.ts` needs the author, and a bare id would force it to
+ * reach back into the log — which is bounded, so the answer would eventually
+ * be "no idea".
  */
-export const changeSetAnnotation = Annotation.define<ChangeSetId>();
+export const changeSetAnnotation = Annotation.define<Provenance>();
 
 /** How many applied change sets the log keeps before dropping the oldest. */
 const LOG_LIMIT = 200;
