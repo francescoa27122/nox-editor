@@ -153,7 +153,7 @@ list without an error.
 | `notes.json` is not valid JSON | Empty list. Do not throw; the panel must still render. |
 | `version` is unrecognised | Empty list. |
 | A record names a body file that is missing or blank | The note loads with an empty body. Losing one body must not cost the other notes. |
-| A body file exists that no record names | Ignored. It is reclaimed the next time that filename is reused. |
+| A body file exists that no record names | Ignored on load. Never reclaimed: `#nextOrdinal` only increases, so a filename is never reused. |
 | A write fails | One notification. The in-memory note is unchanged, so the next debounce retries. |
 
 ## 4. Save semantics

@@ -22,6 +22,7 @@ import type { Platform } from '@platform/types';
 
 const INDEX_FILE = 'notes.json';
 const VERSION = 1;
+/** Fallback for a record whose title was lost, e.g. an empty string on disk. */
 const UNTITLED = 'Untitled note';
 /** Matches the session's debounce; tuned for the same reason — typing. */
 const SAVE_DELAY = 400;
@@ -191,10 +192,15 @@ export class NotesService {
     // so the new row is captured regardless. If the index write ever stops
     // being unconditional, this stops being true and create() needs its own
     // #indexRevision bump.
+    // Numbered rather than a shared "Untitled note": the list shows only
+    // titles, so three fresh notes with the same default would be three
+    // indistinguishable rows. Matches `WorkspaceService.newUntitled`, which
+    // numbers buffers the same way for the same reason.
+    const title = `Untitled note ${ordinal}`;
     // Newest first, and the list never re-sorts afterwards: this is the only
     // place order is decided.
     this.notes.update((list) => [
-      { id, title: UNTITLED, body: '', createdAt: now, updatedAt: now },
+      { id, title, body: '', createdAt: now, updatedAt: now },
       ...list,
     ]);
     this.selectedId.set(id);

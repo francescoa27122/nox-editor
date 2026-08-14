@@ -411,8 +411,14 @@ fn write_config_atomically(path: &Path, contents: &str) -> Result<()> {
     // Same reasoning as a file save: truncate-then-write leaves a window where
     // a crash costs the whole file. A config path always has a parent
     // directory, so the sibling temp always has somewhere to live.
-    let temp = temp_path_for(path);
-    let outcome = write_then_rename(&temp, path, contents.as_bytes());
+    //
+    // Follow a symlink first, exactly as `nox_write_text_file` does: renaming
+    // over the link itself would silently replace it with a regular file and
+    // detach whatever else pointed there — someone symlinking
+    // `~/.config/nox/settings.json` into a dotfiles repo, typically.
+    let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let temp = temp_path_for(&target);
+    let outcome = write_then_rename(&temp, &target, contents.as_bytes());
     if outcome.is_err() {
         let _ = fs::remove_file(&temp);
     }
@@ -590,5 +596,27 @@ mod tests {
             .filter(|name| name != "notes.json")
             .collect();
         assert!(strays.is_empty(), "left behind: {strays:?}");
+    }
+
+    /// The failure this prevents: a config file symlinked into a dotfiles
+    /// repo (a normal thing for this audience) getting silently replaced by
+    /// a regular file on the first settings change, detaching the symlink
+    /// from whatever managed it. Before atomic config writes, `fs::write`
+    /// wrote *through* the link; the rename-based path has to earn that back
+    /// by resolving the link before it picks a temp path, the same as
+    /// `nox_write_text_file` does for file saves.
+    #[cfg(unix)]
+    #[test]
+    fn config_writes_go_through_a_symlink() {
+        let scratch = Scratch::new("config-symlink");
+        let real = scratch.join("real-settings.json");
+        let link = scratch.join("settings.json");
+        fs::write(&real, r#"{"version":1}"#).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        write_config_atomically(&link, r#"{"version":2}"#).expect("write through symlink");
+
+        assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"version":2}"#);
+        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
     }
 }

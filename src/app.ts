@@ -2318,9 +2318,11 @@ export class NoxApp {
     this.#disposeCloseListener = null;
     this.keymap.detach();
     this.watcher.stop();
+    // Notes first: settings and session each have an on-disk original to
+    // fall back on if their flush is lost, but a note does not.
+    await this.notes.flush();
     await this.config.flush();
     await this.session.save();
-    await this.notes.flush();
   }
 }
 

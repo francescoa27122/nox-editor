@@ -249,8 +249,13 @@
     line-height: var(--nox-lh-ui);
   }
 
-  .body:focus {
-    outline: none;
+  /* base.css's global :focus-visible ring is a 3px accent glow, right for a
+     small input but wrong wrapped around this entire writing surface — the
+     body draws it for as long as the note stays focused, however it got
+     focus. Suppressed here rather than in base.css, which other elements
+     still want. */
+  .body:focus-visible {
+    box-shadow: none;
   }
 
   .body::placeholder {

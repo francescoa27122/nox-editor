@@ -94,6 +94,22 @@ describe('creating and persisting', () => {
   });
 
   /**
+   * The failure this prevents: a shared default title, e.g. "Untitled note"
+   * for every fresh note, which makes a list that shows only titles unable
+   * to tell them apart — the same unfindability the panel's own refusal of a
+   * blank rename exists to avoid.
+   */
+  it('gives two notes created in a row distinct default titles', () => {
+    const notes = new NotesService(new MemoryPlatform());
+
+    const first = notes.create();
+    const second = notes.create();
+
+    const titleOf = (id: string) => notes.notes.get().find((note) => note.id === id)!.title;
+    expect(titleOf(first)).not.toBe(titleOf(second));
+  });
+
+  /**
    * The failure this prevents: session v3's write amplification, where one
    * keystroke rewrote every buffer's content because they shared a file.
    */
