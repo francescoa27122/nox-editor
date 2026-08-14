@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import { NotesService } from '../src/services/notes';
 
@@ -15,6 +15,41 @@ class CountingPlatform extends MemoryPlatform {
 
   override async writeConfigFile(name: string, contents: string): Promise<void> {
     this.writes.push(name);
+    await super.writeConfigFile(name, contents);
+  }
+}
+
+/**
+ * Lets a test hold a single `writeConfigFile` call open, to act while that
+ * write is genuinely in flight — the window `MemoryPlatform` normally closes
+ * on the very next microtask, which is why none of the tests above can see
+ * it. `started` resolves the instant the write is reached (so a test never
+ * has to guess a microtask count to win the race), and the call does not
+ * proceed to the real write until `release()` is called.
+ */
+class LatchedPlatform extends MemoryPlatform {
+  #gates = new Map<string, { markStarted: () => void; blocked: Promise<void> }>();
+
+  hold(name: string): { started: Promise<void>; release: () => void } {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#gates.set(name, { markStarted, blocked });
+    return { started, release };
+  }
+
+  override async writeConfigFile(name: string, contents: string): Promise<void> {
+    const gate = this.#gates.get(name);
+    if (gate) {
+      this.#gates.delete(name);
+      gate.markStarted();
+      await gate.blocked;
+    }
     await super.writeConfigFile(name, contents);
   }
 }
@@ -162,5 +197,104 @@ describe('creating and persisting', () => {
     expect(fresh).not.toBe(original);
     const bodies = second.notes.get().map((note) => note.body).sort();
     expect(bodies).toEqual(['new text', 'original text']);
+  });
+
+  /**
+   * The failure this prevents: `#persist` used to clear a note's dirty flag
+   * as soon as its body write resolved, with no check that the note was
+   * still the text it had just written. A keystroke landing during the
+   * write's IPC round trip was silently lost — the next save saw a clean
+   * flag and never wrote the newer text at all.
+   */
+  it('keeps a note dirty when it is edited again while its own body write is still in flight', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    notes.setBody(id, 'hello');
+
+    const gate = platform.hold('note-1.txt');
+    const firstFlush = notes.flush();
+    await gate.started;
+
+    // The race: this lands while the write above is still awaiting the gate.
+    notes.setBody(id, 'hello world');
+    gate.release();
+    await firstFlush;
+
+    // A second save must still find the note dirty and write the newer text
+    // — that is what "kept dirty" means operationally.
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get()[0]!.body).toBe('hello world');
+  });
+
+  /**
+   * The failure this prevents: the debounce timer firing while `flush()` (the
+   * quit path) starts a second, concurrent `#persist`. Two `notes.json`
+   * writes in flight at once can resolve in either order; if the older
+   * persist's write lands last it reverts the index to its own, older
+   * snapshot — silently dropping a note the newer persist had already
+   * recorded, even though that note's body file is sitting right there on
+   * disk.
+   */
+  it('serializes overlapping persists so a slower one cannot revert the index', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const first = notes.create();
+    const gate = platform.hold('notes.json');
+    const firstFlush = notes.flush();
+    await gate.started; // the first persist is now stuck writing the index
+
+    const second = notes.create(); // arrives while the first persist is stuck
+    const secondFlush = notes.flush();
+
+    // Give the second persist's own (unheld) index write every chance to
+    // land before releasing the first's. Serialized, this is a no-op — the
+    // second cannot even start until the first finishes, so it just spins.
+    // Unserialized, it is exactly the ordering that reverts the index: the
+    // two chains race independently, and which one reaches `notes.json`
+    // first is otherwise a coin flip that hides the bug half the time.
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+
+    gate.release();
+    await Promise.all([firstFlush, secondFlush]);
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get().map((note) => note.id).sort()).toEqual(
+      [first, second].sort(),
+    );
+  });
+
+  /**
+   * The failure this prevents: a `#schedule` with no body behind it — every
+   * other test drives persistence through `flush()`, so a debounce that
+   * silently did nothing would still pass all of them, even though
+   * always-autosaving without an explicit flush is the point of this
+   * service.
+   */
+  it('autosaves after the debounce with no explicit flush, collapsing several keystrokes into one write', async () => {
+    vi.useFakeTimers();
+    try {
+      const platform = new CountingPlatform();
+      const notes = new NotesService(platform);
+
+      const id = notes.create();
+      for (const text of ['t', 'te', 'tex', 'text']) notes.setBody(id, text);
+      expect(platform.writes).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(400);
+
+      const bodyWrites = platform.writes.filter((name) => name !== 'notes.json');
+      expect(bodyWrites).toHaveLength(1);
+      expect(await platform.readConfigFile(bodyWrites[0]!)).toBe('text');
+      expect(await platform.readConfigFile('notes.json')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

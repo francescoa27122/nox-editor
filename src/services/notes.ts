@@ -76,9 +76,29 @@ export class NotesService {
   #bodyFiles = new Map<string, string>();
   /** Notes whose body has moved since the last successful write. */
   #dirtyBodies = new Set<string>();
+  /**
+   * Note id → the revision its body was at when the *current or most recent*
+   * write for it started. A keystroke bumps this. Comparing it again after
+   * the write's await settles is what tells a persist whether the text it
+   * just wrote is still the text on the note — if not, another keystroke
+   * landed mid-write and the id must stay dirty rather than being cleared
+   * for words that were never persisted.
+   */
+  #bodyRevision = new Map<string, number>();
+  #nextRevision = 1;
   /** Body files of deleted notes, waiting to be blanked. */
   #released = new Set<string>();
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Every call to `#persist` chains onto this rather than running
+   * immediately, so two saves — the debounce timer firing mid-write, or
+   * `flush()` landing on top of it at quit — can never be in flight at once.
+   * Concurrent index writes can resolve in either order; serializing is what
+   * stops the second one finishing first and being overwritten by the first,
+   * which would revert `notes.json` to the older snapshot and drop whatever
+   * the newer one added.
+   */
+  #saveChain: Promise<void> = Promise.resolve();
   /**
    * Next unused ordinal, feeding both the id and the body filename so the two
    * stay legible together (`n7` ↔ `note-7.txt`). Recomputed on load from the
@@ -141,6 +161,7 @@ export class NotesService {
 
     this.#bodyFiles.set(id, `note-${ordinal}.txt`);
     this.#dirtyBodies.add(id);
+    this.#bodyRevision.set(id, this.#nextRevision++);
     // Newest first, and the list never re-sorts afterwards: this is the only
     // place order is decided.
     this.notes.update((list) => [
@@ -161,6 +182,7 @@ export class NotesService {
       list.map((note) => (note.id === id ? { ...note, body, updatedAt: now } : note)),
     );
     this.#dirtyBodies.add(id);
+    this.#bodyRevision.set(id, this.#nextRevision++);
     this.#schedule();
   }
 
@@ -182,10 +204,23 @@ export class NotesService {
   }
 
   /**
+   * The public entry point for both the debounce timer and `flush()`. Queues
+   * behind whatever save is already running instead of starting a second one
+   * alongside it — see `#saveChain`.
+   */
+  async #persist(): Promise<void> {
+    const run = this.#saveChain.then(() => this.#doPersist());
+    // However `run` settles, the chain itself must not — a rejection sitting
+    // in `#saveChain` would jam every persist queued after it, forever.
+    this.#saveChain = run.catch(() => {});
+    await run;
+  }
+
+  /**
    * Sequential rather than parallel: there are a handful of small files, and
    * the ordering below is the point.
    */
-  async #persist(): Promise<void> {
+  async #doPersist(): Promise<void> {
     const notes = this.notes.get();
     let failure: string | null = null;
 
@@ -198,11 +233,19 @@ export class NotesService {
         this.#dirtyBodies.delete(id);
         continue;
       }
+      const revisionAtStart = this.#bodyRevision.get(id);
       const problem = await this.#write(file, note.body);
-      // Stay dirty on failure so the next save tries again: until this write
-      // lands, the text exists nowhere but memory.
-      if (problem) failure ??= problem;
-      else this.#dirtyBodies.delete(id);
+      if (problem) {
+        // Stay dirty on failure so the next save tries again: until this
+        // write lands, the text exists nowhere but memory.
+        failure ??= problem;
+        continue;
+      }
+      // A setBody landing while the write above was in flight bumped the
+      // revision again — the text just written is already stale, so the id
+      // must stay dirty and get picked up by the next persist instead of
+      // being cleared for words that were never saved.
+      if (this.#bodyRevision.get(id) === revisionAtStart) this.#dirtyBodies.delete(id);
     }
 
     for (const file of [...this.#released]) {
