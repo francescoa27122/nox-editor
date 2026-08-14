@@ -20,6 +20,39 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      # The bundler names assets from tauri.conf.json, not from the tag, so a
+      # tag that disagrees with it ships files labelled with the wrong
+      # release and nothing complains. Checked before anything expensive
+      # runs, and it also holds the three version files to each other.
+      - name: Check the tag matches the configured version
+        run: |
+          set -eu
+          configured=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          package=$(node -p "require('./package.json').version")
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)
+
+          if [ "$package" != "$configured" ] || [ "$cargo" != "$configured" ]; then
+            echo "Version files disagree:"
+            echo "  src-tauri/tauri.conf.json $configured"
+            echo "  package.json              $package"
+            echo "  src-tauri/Cargo.toml      $cargo"
+            exit 1
+          fi
+
+          # A prerelease suffix is fine: v0.3.0-rc1 against version 0.3.0.
+          tag=${GITHUB_REF_NAME#v}
+          case "$tag" in
+            "$configured" | "$configured"-*) ;;
+            *)
+              echo "Tag $GITHUB_REF_NAME does not match the configured version $configured."
+              echo "Bump package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml, then retag."
+              exit 1
+              ;;
+          esac
+
+          echo "Tag $GITHUB_REF_NAME matches version $configured."
+
       - run: npm ci
       - run: npm run check
       - run: npm test
