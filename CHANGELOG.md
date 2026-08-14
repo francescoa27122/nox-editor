@@ -22,12 +22,23 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `terminal.height` are in Settings. Empty shell means your login shell.
   - The browser build says it has no terminal rather than showing a dead one.
 
+- **Notes.** A third sidebar section for your own notes — a list, and an
+  editor for the one you pick. <kbd>⌘⇧N</kbd>, or **Show Notes** in the
+  palette.
+  - They are not workspace files and are stored outside any project, so
+    opening a different folder never changes or hides them.
+  - Always saved, a moment after you stop typing. There is no save button and
+    no setting: a preference that stops saving your notes is a preference that
+    loses them.
+
 ### Fixed
 
 - The reference-agent test and two documentation links pointed at
   `examples/agents/uppercase.mjs`, which has been
   `examples/uppercase-agent.mjs` since v0.2 was tagged. The test spawned a
   path that did not exist and had been failing since the release commit.
+- Config files are written atomically, so a crash part-way through a save can
+  no longer truncate your settings, session or notes.
 
 ### Changed
 

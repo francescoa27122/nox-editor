@@ -136,6 +136,7 @@ src/
 │  ├─ filetree.ts        Explorer model + quick-open index
 │  ├─ watcher.ts         Reacts to changes made outside Nox
 │  ├─ session.ts         Restore folder, tabs, cursors and unsaved work
+│  ├─ notes.ts           The user's own notes. No workspace, by construction.
 │  ├─ ui.ts              Overlay/focus state; owns "what does Escape close"
 │  ├─ notifications.ts   Toasts
 │  └─ search.ts          Project search: query, options, streamed results
@@ -623,6 +624,33 @@ panel to glance at a file must not lose a build log. And `TerminalService`
 deliberately does **not** store output: xterm.js already holds the scrollback,
 and mirroring it into a signal would double the memory of a large `cat` for
 nothing.
+
+### Notes are not files, and are not stored like them
+
+A note has no reader but the user. A file has git, a compiler, and an agent
+staging a change set — which is why files get buffers, transactions, dirty
+tracking and a watcher, and why notes get none of it. `NotesService` takes a
+`Platform` and nothing else: with no workspace in reach, opening another
+folder cannot change or hide notes, and no later edit can make it so by
+accident.
+
+Storage is a small `notes.json` index plus one `note-<n>.txt` per body. One
+JSON holding everything was the obvious alternative and was rejected twice
+over. It would rewrite every note on every keystroke, which is precisely the
+write amplification session v3 caused and v4 undid. And it would put every
+note behind one write: torn once, they are all gone. Split, a torn index costs
+titles and ordering while the bodies survive, and a torn body costs one note.
+
+The cost is real: two files to keep agreed, and a load that has to tolerate an
+index naming a body that is not there. That case is handled by loading the
+note with an empty body rather than dropping it — the title is still worth
+keeping.
+
+Notes always autosave, on a 400 ms debounce, and do not follow
+`files.autoSave`. That setting exists because writing a file is an
+outward-facing act with other observers; a note has none. There is no setting
+of its own either, because a preference that stops saving your notes is a
+preference that loses them.
 
 ### A review narrows the change set; it does not apply hunks
 
