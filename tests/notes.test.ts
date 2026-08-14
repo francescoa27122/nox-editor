@@ -376,6 +376,11 @@ class RefusingPlatform extends MemoryPlatform {
 }
 
 describe('renaming', () => {
+  /**
+   * The failure this prevents: rename() existing but never actually
+   * reaching the note's title — the base case every other rename test in
+   * this block builds on.
+   */
   it('renames a note', async () => {
     const notes = new NotesService(new MemoryPlatform());
     const id = notes.create();
@@ -399,6 +404,11 @@ describe('renaming', () => {
     expect(notes.notes.get()[0]!.title).toBe('Standup');
   });
 
+  /**
+   * The failure this prevents: a title saved with visible leading or
+   * trailing padding, which reads as a rendering bug in any list view that
+   * shows titles verbatim.
+   */
   it('trims surrounding whitespace', () => {
     const notes = new NotesService(new MemoryPlatform());
     const id = notes.create();
@@ -412,9 +422,9 @@ describe('renaming', () => {
    * The failure this prevents: rename() and select() touch only index-shaped
    * state (title, selection), so nothing marked the index dirty for the
    * persist loop's exit check. That check reads #dirtyBodies and #released
-   * only — both empty here — so without a third, index-dirty flag wired into
-   * it, a rename landing while notes.json is already mid-write would see
-   * nothing pending, break the loop, and return having written the
+   * only — both empty here — so without a third signal tracking index-only
+   * changes, a rename landing while notes.json is already mid-write would
+   * see nothing pending, break the loop, and return having written the
    * pre-rename title. A second flush() would never be called on the quit
    * path, so the rename would be lost for good.
    */
@@ -438,6 +448,76 @@ describe('renaming', () => {
     await reloaded.load();
     expect(reloaded.notes.get()[0]!.title).toBe('renamed mid-write');
   });
+
+  /**
+   * The failure this prevents: a boolean "index is dirty" flag cannot tell
+   * "unchanged since this write started" apart from "changed, but the new
+   * value also happens to be true" — which is exactly this shape. The first
+   * rename leaves the flag already true before the index write even starts;
+   * the second rename, landing mid-write, sets it true again, and true===true
+   * looks identical to nothing having happened. A boolean-flagged persist
+   * clears the flag, breaks the loop, and writes only the first rename —
+   * this needs a revision *number*, comparable by exact value, to catch it.
+   */
+  it('persists a second rename that lands on an index write that was already dirty when it started, in one flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    await notes.flush(); // clean baseline: index and body both on disk
+
+    notes.rename(id, 'first rename'); // dirties the index; debounce still pending
+
+    const gate = platform.hold('notes.json');
+    const theFlush = notes.flush(); // starts an index write that is dirty from the moment it begins
+    await gate.started;
+
+    // The race: this lands while that already-dirty write is still in flight.
+    notes.rename(id, 'second rename');
+    gate.release();
+    await theFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get()[0]!.title).toBe('second rename');
+  });
+
+  /**
+   * The failure this prevents: the same boolean-vs-counter gap as above, but
+   * hit on the *second* pass of the persist loop rather than the first. Pass
+   * 1's mid-write rename correctly forces pass 2 (true flips from false, so a
+   * boolean catches it too) — but pass 2's own index write then starts with
+   * the flag already true, so a second rename landing mid-write on pass 2 is
+   * exactly the "true again" case a boolean cannot distinguish from no
+   * change. Two passes, two renames, one flush: only a revision number
+   * survives both.
+   */
+  it('persists two renames that each land during a different pass of the same flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    await notes.flush(); // clean baseline
+
+    const gate1 = platform.hold('notes.json');
+    const theFlush = notes.flush();
+    await gate1.started; // pass 1's index write is stuck
+
+    // Register pass 2's gate before releasing pass 1, so the very next write
+    // to notes.json — whichever pass reaches it — is held too.
+    const gate2 = platform.hold('notes.json');
+    notes.rename(id, 'rename one'); // lands during pass 1's write
+    gate1.release();
+    await gate2.started; // pass 1 finished dirty, forced pass 2, now stuck too
+
+    notes.rename(id, 'rename two'); // lands during pass 2's write
+    gate2.release();
+    await theFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get()[0]!.title).toBe('rename two');
+  });
 });
 
 describe('deleting', () => {
@@ -459,6 +539,14 @@ describe('deleting', () => {
     expect(notes.notes.get().map((note) => note.id)).not.toContain(middle);
   });
 
+  /**
+   * The failure this prevents: remove()'s fallback reads
+   * `remaining[index]` first — the note that slid into the deleted one's
+   * slot — but deleting the *newest* note leaves no note at that index at
+   * all. Without the `?? remaining[index - 1]?.id` fallback behind it, the
+   * selection would land on `undefined` instead of stepping back to the
+   * note that was already there.
+   */
   it('falls back to the previous note when the last one is deleted', () => {
     const notes = new NotesService(new MemoryPlatform());
     const oldest = notes.create();
@@ -470,6 +558,12 @@ describe('deleting', () => {
     expect(notes.selectedId.get()).toBe(newest);
   });
 
+  /**
+   * The failure this prevents: with no note before or after the deleted one,
+   * `remaining[index] ?? remaining[index - 1]?.id ?? null` has to fall all
+   * the way through to `null`. Stopping one step early would leave
+   * `selectedId` pointing at the id that was just removed.
+   */
   it('clears the selection when the last note goes', () => {
     const notes = new NotesService(new MemoryPlatform());
     const only = notes.create();
@@ -499,6 +593,12 @@ describe('deleting', () => {
     expect(await platform.readConfigFile('note-1.txt')).toBe('');
   });
 
+  /**
+   * The failure this prevents: `remove()` drops the note from `notes` and
+   * `#bodyFiles` in memory, but if that never reached disk — e.g. because
+   * nothing marked the index dirty — a reload would rebuild the deleted
+   * note's row from the still-present index entry.
+   */
   it('does not resurrect a deleted note on reload', async () => {
     const platform = new MemoryPlatform();
     const notes = new NotesService(platform);
@@ -538,6 +638,11 @@ describe('switching notes', () => {
     expect(bodies.get(second)).toBe('second text');
   });
 
+  /**
+   * The failure this prevents: `select()` updating the in-memory signal but
+   * never persisting it, so a reload falls back to whichever note happens to
+   * load first instead of the one the user actually had open.
+   */
   it('remembers which note was selected', async () => {
     const platform = new MemoryPlatform();
     const notes = new NotesService(platform);
@@ -572,6 +677,11 @@ describe('when the disk refuses', () => {
     expect(notes.notes.get()[0]!.body).toBe('text that cannot be saved');
   });
 
+  /**
+   * The failure this prevents: a body that failed once being dropped from
+   * `#dirtyBodies` instead of staying pending, so the text is never retried
+   * and is permanently lost once nothing else references it in memory.
+   */
   it('saves the pending body once the disk comes back', async () => {
     const platform = new RefusingPlatform();
     const notes = new NotesService(platform);
