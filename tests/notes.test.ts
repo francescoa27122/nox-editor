@@ -204,9 +204,11 @@ describe('creating and persisting', () => {
    * as soon as its body write resolved, with no check that the note was
    * still the text it had just written. A keystroke landing during the
    * write's IPC round trip was silently lost — the next save saw a clean
-   * flag and never wrote the newer text at all.
+   * flag and never wrote the newer text at all. A single `flush()` must be
+   * enough, because that is the quit path's contract: there is no second
+   * chance once the window is closing.
    */
-  it('keeps a note dirty when it is edited again while its own body write is still in flight', async () => {
+  it('persists a keystroke that lands while its own body write is still in flight, in one flush', async () => {
     const platform = new LatchedPlatform();
     const notes = new NotesService(platform);
 
@@ -214,21 +216,55 @@ describe('creating and persisting', () => {
     notes.setBody(id, 'hello');
 
     const gate = platform.hold('note-1.txt');
-    const firstFlush = notes.flush();
+    const theFlush = notes.flush();
     await gate.started;
 
     // The race: this lands while the write above is still awaiting the gate.
     notes.setBody(id, 'hello world');
     gate.release();
-    await firstFlush;
-
-    // A second save must still find the note dirty and write the newer text
-    // — that is what "kept dirty" means operationally.
-    await notes.flush();
+    await theFlush;
 
     const reloaded = new NotesService(platform);
     await reloaded.load();
     expect(reloaded.notes.get()[0]!.body).toBe('hello world');
+  });
+
+  /**
+   * The failure this prevents: `#doPersist` read every note's body off a
+   * single snapshot taken at the top of the call, but compared the *live*
+   * revision map after each write's await. For the first dirty note in the
+   * loop those two never drift, so a single-note test cannot see the bug —
+   * it takes two: b's edit has to land while a's write, ahead of it in the
+   * same persist, is still in flight. The loop then wrote b's *stale*
+   * pre-edit body (from the entry snapshot) but compared against b's
+   * *already-bumped* revision, concluded nothing had changed, and cleared
+   * b's dirty flag over text that was never saved — and a second flush()
+   * did not recover it, because the loop had already made its one pass.
+   */
+  it('persists a second note\'s edit that lands while an earlier note\'s write is still in flight, in one flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const a = notes.create();
+    const b = notes.create();
+    notes.setBody(a, 'a0');
+    notes.setBody(b, 'b0');
+
+    // `a` was created first, so it is the first id in `#dirtyBodies` and the
+    // first write the drain loop reaches.
+    const gate = platform.hold('note-1.txt');
+    const theFlush = notes.flush();
+    await gate.started;
+
+    // The race: b's edit lands while a's write, ahead of it in this same
+    // persist, is still in flight.
+    notes.setBody(b, 'b1');
+    gate.release();
+    await theFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get().find((note) => note.id === b)!.body).toBe('b1');
   });
 
   /**
