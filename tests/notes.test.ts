@@ -268,6 +268,36 @@ describe('creating and persisting', () => {
   });
 
   /**
+   * The failure this prevents: the body drain closed the window during body
+   * writes, but `#doPersist` still went on to write `notes.json` and return
+   * without ever re-checking `#dirtyBodies` — the same "lost keystroke on
+   * the quit path" bug, just moved from the body-write window to the
+   * index-write window instead of closed. A single `flush()` has to be
+   * enough no matter which write a keystroke happens to land next to.
+   */
+  it('persists an edit that lands while the index write is still in flight, in one flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    notes.setBody(id, 'saved');
+
+    const gate = platform.hold('notes.json');
+    const theFlush = notes.flush();
+    await gate.started; // the body write already landed; the index write is stuck
+
+    // The race: this lands while the index write, not a body write, is in
+    // flight.
+    notes.setBody(id, 'typed while quitting');
+    gate.release();
+    await theFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get()[0]!.body).toBe('typed while quitting');
+  });
+
+  /**
    * The failure this prevents: the debounce timer firing while `flush()` (the
    * quit path) starts a second, concurrent `#persist`. Two `notes.json`
    * writes in flight at once can resolve in either order; if the older

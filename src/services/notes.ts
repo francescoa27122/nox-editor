@@ -222,79 +222,103 @@ export class NotesService {
    */
   async #doPersist(): Promise<void> {
     let failure: string | null = null;
-    // Ids whose write failed on this call. A write that keeps failing must
-    // stay dirty for the *next* persist, but must not make the drain below
-    // retry it forever within this one.
+    // Ids and released files that failed to write on this call. Either kind
+    // of write that keeps failing must stay pending for the *next* persist,
+    // but must not make the loops below retry it forever within this one.
     const failed = new Set<string>();
+    const failedReleases = new Set<string>();
 
-    // Bodies first. An index naming a body that is not on disk yet would
-    // lose that text if the process died between the two writes.
-    //
-    // Drained rather than one pass over a fixed list: a second note's edit
-    // can land while an earlier note's write — ahead of it in this same
-    // loop — is still in flight, and that second note's dirty flag must not
-    // be judged against text this call captured before the edit happened.
-    // Looking the note up fresh, immediately before its own write, is what
-    // keeps the text written and the revision compared in the same tick;
-    // draining is what lets a brand new dirty id (that one, or a whole new
-    // note created mid-persist) get swept up in this same call instead of
-    // needing a second flush() to reach disk.
+    // One full pass — bodies, then released files, then the index — and the
+    // whole pass repeats for as long as anything landed during it. A
+    // setBody or a delete arriving while the *index* write (or the released
+    // loop) is in flight is exactly as capable of being lost as one landing
+    // during a body write, and flush() promises the caller nothing is left
+    // pending when it returns — not "call me again." Each extra pass is
+    // paid for by one real user edit, the same bound the body drain below
+    // already relies on, so this does not introduce a new way to spin
+    // forever: a write that keeps failing is fenced off by `failed` /
+    // `failedReleases` above, not retried into an infinite loop.
     for (;;) {
-      const id = [...this.#dirtyBodies].find((candidate) => !failed.has(candidate));
-      if (!id) break;
+      // Bodies first. An index naming a body that is not on disk yet would
+      // lose that text if the process died between the two writes.
+      //
+      // Drained rather than one pass over a fixed list: a second note's
+      // edit can land while an earlier note's write — ahead of it in this
+      // same loop — is still in flight, and that second note's dirty flag
+      // must not be judged against text this call captured before the edit
+      // happened. Looking the note up fresh, immediately before its own
+      // write, is what keeps the text written and the revision compared in
+      // the same tick.
+      for (;;) {
+        const id = [...this.#dirtyBodies].find((candidate) => !failed.has(candidate));
+        if (!id) break;
 
-      const file = this.#bodyFiles.get(id);
-      const note = this.notes.get().find((entry) => entry.id === id);
-      if (!note || !file) {
-        this.#dirtyBodies.delete(id);
-        continue;
+        const file = this.#bodyFiles.get(id);
+        const note = this.notes.get().find((entry) => entry.id === id);
+        if (!note || !file) {
+          this.#dirtyBodies.delete(id);
+          continue;
+        }
+
+        const revisionAtStart = this.#bodyRevision.get(id);
+        const problem = await this.#write(file, note.body);
+        if (problem) {
+          // Stay dirty on failure so the next save tries again: until this
+          // write lands, the text exists nowhere but memory.
+          failure ??= problem;
+          failed.add(id);
+          continue;
+        }
+        // A setBody landing while the write above was in flight bumped the
+        // revision again — the text just written is already stale, so the
+        // id stays dirty and comes right back around this same loop.
+        if (this.#bodyRevision.get(id) === revisionAtStart) this.#dirtyBodies.delete(id);
       }
 
-      const revisionAtStart = this.#bodyRevision.get(id);
-      const problem = await this.#write(file, note.body);
-      if (problem) {
-        // Stay dirty on failure so the next save tries again: until this
-        // write lands, the text exists nowhere but memory.
-        failure ??= problem;
-        failed.add(id);
-        continue;
+      for (const file of [...this.#released]) {
+        if (failedReleases.has(file)) continue;
+        const problem = await this.#write(file, '');
+        if (problem) {
+          failure ??= problem;
+          failedReleases.add(file);
+        } else {
+          this.#released.delete(file);
+        }
       }
-      // A setBody landing while the write above was in flight bumped the
-      // revision again — the text just written is already stale, so the id
-      // stays dirty and comes right back around this same loop.
-      if (this.#bodyRevision.get(id) === revisionAtStart) this.#dirtyBodies.delete(id);
-    }
 
-    for (const file of [...this.#released]) {
-      const problem = await this.#write(file, '');
+      // Read fresh rather than reusing anything captured before the drain
+      // above: a note created mid-persist has no dirty body left to write
+      // it into the index by the time we get here, but it still needs a
+      // row.
+      const notes = this.notes.get();
+      const data: NotesFile = {
+        version: VERSION,
+        selectedId: this.selectedId.get(),
+        notes: notes.flatMap((note) => {
+          const file = this.#bodyFiles.get(note.id);
+          return file
+            ? [
+                {
+                  id: note.id,
+                  title: note.title,
+                  createdAt: note.createdAt,
+                  updatedAt: note.updatedAt,
+                  body: file,
+                },
+              ]
+            : [];
+        }),
+      };
+      const problem = await this.#write(INDEX_FILE, JSON.stringify(data));
       if (problem) failure ??= problem;
-      else this.#released.delete(file);
-    }
 
-    // Read fresh rather than reusing anything captured before the drain
-    // above: a note created mid-persist has no dirty body left to write it
-    // into the index by the time we get here, but it still needs a row.
-    const notes = this.notes.get();
-    const data: NotesFile = {
-      version: VERSION,
-      selectedId: this.selectedId.get(),
-      notes: notes.flatMap((note) => {
-        const file = this.#bodyFiles.get(note.id);
-        return file
-          ? [
-              {
-                id: note.id,
-                title: note.title,
-                createdAt: note.createdAt,
-                updatedAt: note.updatedAt,
-                body: file,
-              },
-            ]
-          : [];
-      }),
-    };
-    const problem = await this.#write(INDEX_FILE, JSON.stringify(data));
-    if (problem) failure ??= problem;
+      // Anything that moved on while the released loop or the index write
+      // above were in flight needs another full pass; anything left is
+      // either settled or has already failed once this call.
+      const stillDirty = [...this.#dirtyBodies].some((id) => !failed.has(id));
+      const stillReleased = [...this.#released].some((file) => !failedReleases.has(file));
+      if (!stillDirty && !stillReleased) break;
+    }
 
     this.error.set(failure);
   }
