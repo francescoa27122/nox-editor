@@ -1,0 +1,185 @@
+/*
+ * Nox Design System — "Eclipse"
+ * ---------------------------------------------------------------------------
+ * Single source of visual truth. Components must never hardcode a colour,
+ * a radius, a duration or a font. If you need a new value, add a token here.
+ *
+ * The palette is a blue-black night rather than the neutral grey most editors
+ * use. Hierarchy comes from elevation and spacing; borders are near-invisible
+ * on purpose and exist to separate, not to decorate.
+ */
+
+:root,
+[data-nox-theme='eclipse'] {
+  /* --- Surfaces -------------------------------------------------------- */
+  --nox-bg-void: #06070a; /* deepest: behind everything, window edge */
+  --nox-bg-base: #0a0c11; /* app chrome: title bar, status bar */
+  --nox-bg-panel: #0d1016; /* sidebar, tab strip */
+  --nox-bg-editor: #0b0e14; /* the writing surface */
+  --nox-bg-raised: #12161f; /* palette, menus, inputs, popovers */
+  --nox-bg-inset: #080a0e; /* wells, code blocks inside panels */
+  --nox-scrim: rgba(4, 5, 8, 0.6);
+
+  /* --- Interaction states ---------------------------------------------- */
+  --nox-hover: rgba(125, 211, 224, 0.055);
+  --nox-active: rgba(125, 211, 224, 0.1);
+  --nox-selected: rgba(139, 125, 245, 0.14);
+  --nox-selected-strong: rgba(139, 125, 245, 0.22);
+
+  /* --- Borders ---------------------------------------------------------- */
+  --nox-border: #171c26;
+  --nox-border-strong: #242b39;
+  --nox-border-accent: rgba(125, 211, 224, 0.35);
+
+  /* --- Text ------------------------------------------------------------- */
+  --nox-text: #c8d2e4;
+  --nox-text-bright: #e9eff9;
+  --nox-text-muted: #7a8699;
+  --nox-text-faint: #4c5768;
+  --nox-text-on-accent: #04161a;
+
+  /* --- Accents ---------------------------------------------------------- */
+  --nox-accent: #7dd3e0; /* glacial cyan — moonlight on water */
+  --nox-accent-dim: #4b8e99;
+  --nox-accent-glow: rgba(125, 211, 224, 0.22);
+  --nox-violet: #8b7df5; /* twilight — selection, active spine */
+  --nox-violet-dim: #5b52a3;
+
+  /* --- Semantic --------------------------------------------------------- */
+  --nox-success: #7bd88f;
+  --nox-warning: #e3b341;
+  --nox-danger: #f0616d;
+  --nox-info: #6aa9e8;
+  --nox-modified: #e3b341; /* dirty-buffer dot */
+
+  /* --- Editor specifics -------------------------------------------------- */
+  --nox-cursor: #7dd3e0;
+  --nox-selection: rgba(139, 125, 245, 0.26);
+  --nox-selection-blur: rgba(139, 125, 245, 0.13);
+  --nox-line-active: rgba(125, 211, 224, 0.032);
+  --nox-gutter-fg: #3d4657;
+  --nox-gutter-active-fg: #93a2ba;
+  --nox-match-bracket: rgba(125, 211, 224, 0.2);
+  --nox-search-match: rgba(227, 179, 65, 0.22);
+  --nox-search-match-active: rgba(227, 179, 65, 0.45);
+
+  /* --- Syntax ------------------------------------------------------------ */
+  --nox-syn-keyword: #8b7df5;
+  --nox-syn-string: #7bd88f;
+  --nox-syn-number: #e8925c;
+  --nox-syn-comment: #4c5768;
+  --nox-syn-function: #7dd3e0;
+  --nox-syn-type: #e3b341;
+  --nox-syn-variable: #c8d2e4;
+  --nox-syn-property: #93b4d8;
+  --nox-syn-operator: #7a8699;
+  --nox-syn-punctuation: #66718a;
+  --nox-syn-constant: #e8925c;
+  --nox-syn-tag: #f0616d;
+  --nox-syn-attribute: #e3b341;
+  --nox-syn-invalid: #f0616d;
+  --nox-syn-link: #6aa9e8;
+  --nox-syn-heading: #7dd3e0;
+
+  /* --- Typography --------------------------------------------------------- */
+  --nox-font-ui:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui,
+    sans-serif;
+  --nox-font-mono:
+    'JetBrains Mono', 'SF Mono', 'Menlo', ui-monospace, 'Cascadia Code', 'Fira Code',
+    monospace;
+
+  --nox-fs-2xs: 10px;
+  --nox-fs-xs: 11px;
+  --nox-fs-sm: 12px;
+  --nox-fs-md: 13px;
+  --nox-fs-lg: 15px;
+  --nox-fs-xl: 19px;
+  --nox-fs-2xl: 26px;
+
+  --nox-fw-normal: 400;
+  --nox-fw-medium: 500;
+  --nox-fw-semibold: 600;
+
+  --nox-lh-tight: 1.2;
+  --nox-lh-ui: 1.45;
+
+  --nox-tracking-tight: -0.01em;
+  --nox-tracking-wide: 0.06em;
+
+  /* --- Space -------------------------------------------------------------- */
+  --nox-sp-1: 2px;
+  --nox-sp-2: 4px;
+  --nox-sp-3: 6px;
+  --nox-sp-4: 8px;
+  --nox-sp-5: 12px;
+  --nox-sp-6: 16px;
+  --nox-sp-7: 24px;
+  --nox-sp-8: 32px;
+  --nox-sp-9: 48px;
+
+  /* --- Radius ------------------------------------------------------------- */
+  --nox-r-sm: 3px;
+  --nox-r-md: 5px;
+  --nox-r-lg: 8px;
+  --nox-r-xl: 12px;
+  --nox-r-full: 999px;
+
+  /* --- Elevation ---------------------------------------------------------- */
+  --nox-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --nox-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --nox-shadow-lg:
+    0 24px 60px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--nox-border-strong);
+
+  /* --- Motion ------------------------------------------------------------- */
+  /* Budget: nothing over 160ms, nothing on the typing path. */
+  --nox-dur-fast: 90ms;
+  --nox-dur-base: 130ms;
+  --nox-dur-slow: 190ms;
+  --nox-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* --- Layout metrics ------------------------------------------------------ */
+  --nox-titlebar-h: 36px;
+  --nox-tabbar-h: 35px;
+  --nox-statusbar-h: 24px;
+  --nox-sidebar-w: 248px;
+  --nox-sidebar-min-w: 150px;
+  --nox-sidebar-max-w: 520px;
+
+  /* --- Focus ---------------------------------------------------------------- */
+  --nox-focus-ring: 0 0 0 1px var(--nox-bg-base), 0 0 0 3px var(--nox-accent-glow);
+
+  /* --- Z-index scale --------------------------------------------------------- */
+  --nox-z-editor: 1;
+  --nox-z-panel: 10;
+  --nox-z-dropdown: 100;
+  --nox-z-overlay: 1000;
+  --nox-z-toast: 2000;
+}
+
+/*
+ * "Umbra" — a higher-contrast, near-black variant for OLED displays and
+ * bright rooms. Only overrides what differs; everything else cascades.
+ * Proves the token layer is real: a theme is a token override, not a fork.
+ */
+[data-nox-theme='umbra'] {
+  --nox-bg-void: #000000;
+  --nox-bg-base: #030405;
+  --nox-bg-panel: #060709;
+  --nox-bg-editor: #000000;
+  --nox-bg-raised: #0c0e12;
+  --nox-bg-inset: #000000;
+  --nox-border: #14171d;
+  --nox-border-strong: #262b34;
+  --nox-text: #d6dde8;
+  --nox-text-bright: #ffffff;
+  --nox-line-active: rgba(125, 211, 224, 0.05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --nox-dur-fast: 0ms;
+    --nox-dur-base: 0ms;
+    --nox-dur-slow: 0ms;
+  }
+}

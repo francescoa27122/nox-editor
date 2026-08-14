@@ -1,0 +1,548 @@
+import { Signal } from '@core/signal';
+import type { CommandRegistry } from '../commands';
+import type { ContextService } from '../context';
+import type { JobRunner } from '../jobs';
+import { PermissionError, type PermissionService, type Principal } from '../permissions';
+import type { ReviewService, StagedChangeSet } from '../review';
+import type { ChangeSetId } from '../transactions';
+import type { BufferId, WorkspaceService } from '../workspace';
+import type { ModelProvider } from './provider';
+import {
+  failure,
+  success,
+  type AgentRequest,
+  type AgentRun,
+  type AgentTransport,
+  type CoreResponse,
+  type Handshake,
+  PROTOCOL_VERSION,
+} from './protocol';
+
+/**
+ * The agent runtime.
+ *
+ * Almost all of this is wiring, and that is the point: an agent reads through
+ * `ContextService`, acts through `CommandRegistry` under `PermissionService`,
+ * proposes through `ReviewService`, applies through `workspace.apply`, runs
+ * under `JobRunner`, and is undone by `undoChangeSet`. Every one of those
+ * existed and was tested before this file did. If the runtime needed a
+ * privileged path of its own, that would be the sign the platform underneath
+ * it was wrong.
+ *
+ * See AGENT-PLATFORM.md §3.
+ */
+
+export type SessionStatus =
+  | 'running'
+  /** Finished, and its proposal is waiting for a human to decide. */
+  | 'awaiting-review'
+  /** The user kept some or all of it. */
+  | 'applied'
+  /** The user turned the proposal down. */
+  | 'dismissed'
+  /** Finished without proposing anything. */
+  | 'done'
+  | 'cancelled'
+  | 'failed';
+
+/** One thing that happened, in order. The audit trail. */
+export type AgentAction =
+  | { kind: 'instruction'; at: number; text: string }
+  | { kind: 'note'; at: number; text: string }
+  | { kind: 'read'; at: number; method: string; target?: string }
+  | {
+      kind: 'command';
+      at: number;
+      commandId: string;
+      granted: boolean;
+      detail?: string;
+    }
+  | {
+      kind: 'proposal';
+      at: number;
+      description: string;
+      files: number;
+      hunks: number;
+    }
+  | { kind: 'summary'; at: number; text: string }
+  | { kind: 'error'; at: number; message: string };
+
+/**
+ * An action minus its timestamp, which the recorder stamps.
+ *
+ * `Omit` over a union collapses to the keys every member shares, which for
+ * `AgentAction` is just `kind` — so this distributes over the union first.
+ */
+type NewAction = AgentAction extends infer T
+  ? T extends AgentAction
+    ? Omit<T, 'at'>
+    : never
+  : never;
+
+export interface AgentSession {
+  readonly id: string;
+  readonly label: string;
+  readonly instruction: string;
+  readonly principal: Principal;
+  readonly status: Signal<SessionStatus>;
+  readonly actions: Signal<AgentAction[]>;
+  readonly summary: Signal<string | null>;
+  cancel(): void;
+}
+
+/**
+ * A session as the UI sees it: plain data, republished whenever anything
+ * about the session changes.
+ *
+ * The session object keeps `Signal`s for programmatic callers, but a component
+ * cannot subscribe to a store it finds inside an `{#each}` — and publishing
+ * snapshots is how every other service here feeds the interface anyway.
+ */
+export interface AgentSessionSnapshot {
+  id: string;
+  label: string;
+  instruction: string;
+  status: SessionStatus;
+  actions: AgentAction[];
+  summary: string | null;
+  /** How many change sets this session has landed. */
+  changes: number;
+}
+
+export interface SessionOptions {
+  /** Shown as the agent's name. Defaults to the transport's handshake. */
+  label?: string;
+}
+
+export class AgentRuntime {
+  readonly sessions = new Signal<AgentSessionSnapshot[]>([]);
+  /**
+   * Model providers available to start a session with.
+   *
+   * Empty until something registers one. Nox ships no provider: shipping a
+   * default would mean shipping a vendor, and the whole point of the interface
+   * is that the core does not name one.
+   */
+  readonly providers = new Signal<ModelProvider[]>([]);
+
+  #workspace: WorkspaceService;
+  #context: ContextService;
+  #commands: CommandRegistry;
+  #permissions: PermissionService;
+  #review: ReviewService;
+  #jobs: JobRunner;
+  #live: AgentSession[] = [];
+  #nextSession = 1;
+
+  constructor(services: {
+    workspace: WorkspaceService;
+    context: ContextService;
+    commands: CommandRegistry;
+    permissions: PermissionService;
+    review: ReviewService;
+    jobs: JobRunner;
+  }) {
+    this.#workspace = services.workspace;
+    this.#context = services.context;
+    this.#commands = services.commands;
+    this.#permissions = services.permissions;
+    this.#review = services.review;
+    this.#jobs = services.jobs;
+
+    // A session's change count moves when the *user* applies its proposal,
+    // which is not a session event — without this the panel would never offer
+    // to undo the thing it had just helped land.
+    this.#workspace.log.entries.subscribe(() => {
+      // Deciding is the end of the session's story. Leaving it on "awaiting
+      // review" after the user has already applied it describes a state that
+      // stopped being true the moment they clicked.
+      for (const session of this.#live) {
+        if (session.status.get() === 'awaiting-review' && this.changesBy(session.id).length > 0) {
+          session.status.set('applied');
+        }
+      }
+      this.#publish();
+    });
+
+    // The other way a proposal can end: turned down. `staged` going to null
+    // with nothing recorded in the log means nothing was kept.
+    let previouslyStaged: StagedChangeSet | null = null;
+    this.#review.staged.subscribe((staged) => {
+      const gone = previouslyStaged;
+      previouslyStaged = staged;
+      if (staged !== null || gone === null) return;
+      // Held in a local: narrowing a property does not survive into the
+      // closure below, because TypeScript cannot know it stayed an agent.
+      const author = gone.author;
+      if (author.kind !== 'agent') return;
+
+      const session = this.#live.find((entry) => entry.id === author.sessionId);
+      if (!session || session.status.get() !== 'awaiting-review') return;
+      // Applying records a change set *before* clearing `staged`, so anything
+      // still without one here was rejected rather than kept.
+      if (this.changesBy(session.id).length === 0) session.status.set('dismissed');
+      this.#publish();
+    });
+  }
+
+  /**
+   * Start a session. Returns as soon as it is running.
+   *
+   * Concurrent sessions are allowed and deliberately not serialised. Two
+   * agents editing the same buffer is resolved where it is actually decidable
+   * — `workspace.apply` rejects whichever one is working from a revision that
+   * has moved. Locking would block the user's own typing, and queueing would
+   * hide the staleness until after the edit landed.
+   */
+  start(
+    transport: AgentTransport,
+    instruction: string,
+    options: SessionOptions = {},
+  ): AgentSession {
+    const id = `agent-${this.#nextSession++}`;
+    const actions = new Signal<AgentAction[]>([]);
+    const status = new Signal<SessionStatus>('running');
+    const summary = new Signal<string | null>(null);
+
+    const record = (action: NewAction) => {
+      actions.update((current) => [...current, { ...action, at: Date.now() } as AgentAction]);
+      this.#publish();
+    };
+
+    record({ kind: 'instruction', text: instruction });
+
+    const session: AgentSession & { principal: Principal } = {
+      id,
+      label: options.label ?? transport.id,
+      instruction,
+      principal: {
+        kind: 'agent',
+        sessionId: id,
+        label: options.label ?? transport.id,
+      },
+      status,
+      actions,
+      summary,
+      cancel: () => job.cancel(),
+    };
+
+    const job = this.#jobs.run({ title: `${session.label}: ${instruction}` }, async (context) => {
+      context.onCancel(() => transport.dispose?.());
+
+      // Disposed however the run ends, not only when cancelled. An agent is a
+      // *process*: without this, every completed session left one running for
+      // the lifetime of the editor, which a long day of use turns into dozens.
+      // `dispose` is idempotent, so the cancel path calling it too is fine.
+      try {
+        const handshake = await transport.connect();
+        if (handshake.version !== PROTOCOL_VERSION) {
+          throw new Error(
+            `Agent speaks protocol ${handshake.version}; Nox speaks ${PROTOCOL_VERSION}`,
+          );
+        }
+
+        const run: AgentRun = {
+          instruction,
+          context: this.brief(),
+          signal: context.signal,
+        };
+
+        let staged = false;
+        await transport.run(run, async (request) => {
+          if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
+          const response = await this.#handle(session.principal, request, record);
+          if (request.method === 'proposal.stage' && response.ok) staged = true;
+          if (request.method === 'session.summary') {
+            summary.set(request.params.text);
+            this.#publish();
+          }
+          return response;
+        });
+
+        return staged;
+      } finally {
+        transport.dispose?.();
+      }
+    });
+
+    void job.result.then((outcome) => {
+      if (outcome.status === 'cancelled') {
+        status.set('cancelled');
+        record({ kind: 'error', message: 'Cancelled' });
+        return;
+      }
+      if (outcome.status === 'failed') {
+        status.set('failed');
+        record({
+          kind: 'error',
+          message: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+        });
+        return;
+      }
+      // A session that staged something is not finished; it is waiting for a
+      // human. Calling that "done" would imply the change had landed.
+      status.set(outcome.value ? 'awaiting-review' : 'done');
+      this.#publish();
+    });
+
+    this.#live = [session, ...this.#live];
+    this.#publish();
+    return session;
+  }
+
+  /** Republish the snapshot list. Called whenever any session changes. */
+  #publish(): void {
+    this.sessions.set(
+      this.#live.map((session) => ({
+        id: session.id,
+        label: session.label,
+        instruction: session.instruction,
+        status: session.status.get(),
+        actions: session.actions.get(),
+        summary: session.summary.get(),
+        changes: this.changesBy(session.id).length,
+      })),
+    );
+  }
+
+  /** The live session object, for cancelling. */
+  session(id: string): AgentSession | undefined {
+    return this.#live.find((session) => session.id === id);
+  }
+
+  registerProvider(provider: ModelProvider): () => void {
+    this.providers.update((current) => [...current, provider]);
+    return () => this.providers.update((current) => current.filter((entry) => entry !== provider));
+  }
+
+  /** Change sets this session produced, newest first. */
+  changesBy(sessionId: string): ChangeSetId[] {
+    return this.#workspace.log.bySession(sessionId).map((entry) => entry.id);
+  }
+
+  /**
+   * Undo everything a session did, in one step.
+   *
+   * Newest first, because a set applied later may sit on top of an earlier one
+   * in the same buffer's history and would refuse to be taken back out of
+   * order — which `undoChangeSet` reports rather than forcing.
+   */
+  undoSession(sessionId: string): { undone: BufferId[]; skipped: BufferId[] } {
+    const undone: BufferId[] = [];
+    const skipped: BufferId[] = [];
+
+    for (const changeSetId of this.changesBy(sessionId)) {
+      const outcome = this.#workspace.undoChangeSet(changeSetId);
+      undone.push(...outcome.undone);
+      skipped.push(...outcome.skipped);
+    }
+
+    this.#permissions.forgetSession({
+      kind: 'agent',
+      sessionId,
+      label: sessionId,
+    });
+    this.#publish();
+    return { undone, skipped };
+  }
+
+  /** A short description of where the user is, to open a session with. */
+  brief(): string {
+    const buffers = this.#context.openBuffers();
+    const active = buffers.find((buffer) => buffer.isActive);
+    const lines = [`Open files: ${buffers.map((buffer) => buffer.name).join(', ') || 'none'}`];
+    if (active) {
+      lines.push(`Active file: ${active.name} (${active.languageName}, ${active.lineCount} lines)`);
+      const viewport = this.#context.viewport(active.id);
+      if (viewport) lines.push(`On screen: lines ${viewport.from}–${viewport.to}`);
+    }
+    return lines.join('\n');
+  }
+
+  // --- The protocol handler ------------------------------------------------
+
+  async #handle(
+    principal: Principal,
+    request: AgentRequest,
+    record: (action: NewAction) => void,
+  ): Promise<CoreResponse> {
+    const reader = this.#context.reader(principal);
+
+    try {
+      switch (request.method) {
+        case 'context.openBuffers':
+          record({ kind: 'read', method: request.method });
+          return success(request.id, reader.openBuffers());
+
+        case 'context.bufferText': {
+          record({
+            kind: 'read',
+            method: request.method,
+            target: request.params.bufferId,
+          });
+          const { bufferId, ...options } = request.params;
+          const text = reader.bufferText(bufferId, options);
+          return text === null
+            ? failure(request.id, 'not-found', `No buffer ${bufferId}`)
+            : success(request.id, text);
+        }
+
+        case 'context.selection':
+          record({
+            kind: 'read',
+            method: request.method,
+            target: request.params.bufferId,
+          });
+          return success(request.id, reader.selection(request.params.bufferId));
+
+        case 'context.viewport':
+          record({
+            kind: 'read',
+            method: request.method,
+            target: request.params.bufferId,
+          });
+          return success(request.id, reader.viewport(request.params.bufferId));
+
+        case 'context.workspaceTree':
+          record({ kind: 'read', method: request.method });
+          return success(request.id, reader.workspaceTree(request.params));
+
+        case 'context.recentTransactions':
+          record({ kind: 'read', method: request.method });
+          return success(request.id, reader.recentTransactions(request.params?.limit));
+
+        case 'command.execute': {
+          const { commandId, arg } = request.params;
+          if (!this.#commands.has(commandId)) {
+            record({
+              kind: 'command',
+              commandId,
+              granted: false,
+              detail: 'unknown command',
+            });
+            return failure(request.id, 'not-found', `No command ${commandId}`);
+          }
+          try {
+            const ran = await this.#commands.execute(commandId, arg, {
+              principal,
+            });
+            record({
+              kind: 'command',
+              commandId,
+              granted: true,
+              ...(ran ? {} : { detail: 'disabled' }),
+            });
+            return success(request.id, ran);
+          } catch (error) {
+            if (error instanceof PermissionError) {
+              record({
+                kind: 'command',
+                commandId,
+                granted: false,
+                detail: error.message,
+              });
+              return failure(request.id, 'permission-denied', error.message);
+            }
+            throw error;
+          }
+        }
+
+        case 'proposal.stage': {
+          const staged = this.#review.stage({
+            description: request.params.description,
+            author: principal,
+            edits: request.params.edits,
+          });
+          if (!staged) {
+            record({ kind: 'error', message: 'Proposal would change nothing' });
+            return failure(request.id, 'invalid-request', 'That would change nothing');
+          }
+          const hunks = staged.files.reduce((sum, file) => sum + file.hunks.length, 0);
+          record({
+            kind: 'proposal',
+            description: staged.description,
+            files: staged.files.length,
+            hunks,
+          });
+          return success(request.id, { files: staged.files.length, hunks });
+        }
+
+        case 'session.note':
+          record({ kind: 'note', text: request.params.text });
+          return success(request.id, null);
+
+        case 'session.summary':
+          record({ kind: 'summary', text: request.params.text });
+          return success(request.id, null);
+
+        default: {
+          // Exhaustiveness: adding a method without handling it fails to compile.
+          const unreachable: never = request;
+          return failure(
+            (unreachable as { id: number }).id,
+            'unknown-method',
+            'Unsupported method',
+          );
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      record({ kind: 'error', message });
+      return failure(request.id, 'internal', message);
+    }
+  }
+}
+
+/**
+ * Runs an agent in this process, driven by a `ModelProvider`.
+ *
+ * The other implementation of `AgentTransport` — a supervised child process
+ * speaking the same messages as JSON over stdio — is designed but not built.
+ * That is the honest state: everything above this line already treats the
+ * agent as remote, so adding it is a codec and a process supervisor rather
+ * than a change to the runtime.
+ */
+export class ProviderTransport implements AgentTransport {
+  readonly id: string;
+
+  #provider: ModelProvider;
+
+  constructor(provider: ModelProvider) {
+    this.#provider = provider;
+    this.id = provider.id;
+  }
+
+  async connect(): Promise<Handshake> {
+    return { version: PROTOCOL_VERSION, label: this.#provider.label };
+  }
+
+  async run(run: AgentRun, send: (request: AgentRequest) => Promise<CoreResponse>): Promise<void> {
+    let nextId = 1;
+    const stream = this.#provider.complete({
+      instruction: run.instruction,
+      context: run.context,
+      signal: run.signal,
+    });
+
+    // Each response is fed back into the generator, so an agent can read a
+    // file and then decide what to do about it. A one-way stream would make
+    // the context API useless to the thing it exists for.
+    let response: CoreResponse | undefined;
+    while (true) {
+      const step = await stream.next(response);
+      if (step.done || run.signal.aborted) return;
+
+      const chunk = step.value;
+      const request =
+        chunk.type === 'text'
+          ? {
+              id: nextId++,
+              method: 'session.note' as const,
+              params: { text: chunk.text },
+            }
+          : ({ ...chunk.request, id: nextId++ } as AgentRequest);
+
+      response = await send(request);
+    }
+  }
+}

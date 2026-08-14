@@ -1,0 +1,39 @@
+[package]
+name = "nox"
+version = "0.1.0"
+description = "Nox — a fast, dark, keyboard-first text editor"
+edition = "2021"
+rust-version = "1.77"
+default-run = "nox"
+
+[lib]
+name = "nox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Raw notify rather than a debouncer crate: coalescing lives in the renderer
+# where it can be tested. See src/watcher.rs.
+notify = "8"
+# Deleting from the explorer moves to the OS trash rather than unlinking.
+# A text editor should never make a file unrecoverable with one click.
+trash = "5"
+# Project search. `ignore` is ripgrep's walker: parallel, and it honours
+# .gitignore, which is the difference between searching a project and
+# searching a build directory.
+ignore = "0.4"
+regex = "1"
+
+[profile.release]
+# The binary is the product; optimise it like one.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

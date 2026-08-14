@@ -1,0 +1,159 @@
+<div align="center">
+
+# Nox
+
+**A fast, dark, keyboard-first text editor.**
+
+*Nox* — Latin for *night*.
+
+[Try it](#try-it) · [What makes it different](#what-makes-it-different) · [Under the hood](#under-the-hood)
+
+</div>
+
+<!-- SCREENSHOT: hero -->
+![Nox editing its own source](docs/screenshots/editor.png)
+
+---
+
+Nox is a text editor built around one idea: the editor should feel like a
+command center, not a document viewer. Dark, quiet, keyboard-driven, and quick
+enough that you stop noticing it.
+
+It is **not** a VS Code clone. It has its own design language, its own
+shortcuts where they can be better, and a deliberately small surface area. It
+is also about 4 MB, and starts instantly.
+
+I built it because I wanted to know what an editor looks like if you take two
+things seriously from the first line of code: **never losing someone's work**,
+and **letting a program help you edit without ever letting it edit behind your
+back.**
+
+## Try it
+
+You need [Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your
+platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+```bash
+git clone https://github.com/francescoa27122/nox-editor.git
+cd nox-editor
+npm install
+npm run app
+```
+
+The first run compiles the Rust side and takes a few minutes. After that it
+starts in seconds.
+
+**Just want a look?** `npm run dev` opens Nox in your browser against a small
+demo project — no Rust build, nothing touches your disk.
+
+## What makes it different
+
+### It does not lose your work. Ever.
+
+Close the window with unsaved changes and Nox does not ask you a question. It
+just keeps them, and hands them back next time you open it — still unsaved,
+still undoable back to what is on disk.
+
+A dialog can be answered wrong at 2am. Persistence cannot.
+
+Saving writes to a temporary file and renames it into place, so a crash or a
+full disk mid-save can't leave you with half a file. If something else changes
+a file while you have it open, Nox notices and tells you rather than quietly
+picking a winner.
+
+### Undo works across files
+
+Run a project-wide find-and-replace across forty files and press <kbd>⌘Z</kbd>
+**once**. The whole thing goes back, and Nox tells you what it undid. A file
+you've edited since is left alone and reported, not silently reverted with the
+rest.
+
+That works because every programmatic edit is a transaction with an author,
+applied to all of its files or none of them.
+
+### Agents propose. You decide.
+
+<!-- SCREENSHOT: review -->
+![Reviewing a change an agent proposed](docs/screenshots/review.png)
+
+Nox can run an AI agent — but it can't touch your files. An agent reads your
+code through a read-only API and hands back a *proposal*. You get a diff, hunk
+by hunk, and keep the parts you want. Nothing is written until you say so, and
+one button takes a whole session back.
+
+Everything it read, everything it ran, and everything it was refused is on the
+record in the Agents panel.
+
+An agent is any program that speaks a small JSON protocol over stdin and
+stdout — there's a [~130-line example](examples/uppercase-agent.mjs) you can
+copy. Nox ships no AI provider and talks to no service by default; you bring
+your own, or none at all.
+
+**If you never turn any of this on, Nox is not a worse editor for it.** That was
+the rule the whole time.
+
+### Dark only, on purpose
+
+Two dark themes: **Eclipse**, a blue-black night, and **Umbra**, true black for
+OLED. There is no light theme and there isn't going to be — that's the product,
+not an omission.
+
+Every colour, radius and duration comes from one token file. Umbra is a
+30-line override of Eclipse, which is the proof the design system is real.
+
+## The basics
+
+`Mod` is <kbd>⌘</kbd> on macOS, <kbd>Ctrl</kbd> elsewhere.
+
+| | |
+|---|---|
+| <kbd>Mod ⇧ P</kbd> | Everything. The command palette. |
+| <kbd>Mod P</kbd> | Jump to a file |
+| <kbd>Mod E</kbd> | Switch between open files |
+| <kbd>Mod ⇧ F</kbd> | Search the whole project |
+| <kbd>Mod \\</kbd> | Split the editor |
+| <kbd>Mod ,</kbd> | Settings |
+
+Press <kbd>Mod ⌥ K</kbd> for the full list — it's in the app, and it's always
+current. Every action is a command, so anything you can do is in the palette
+whether or not it has a shortcut.
+
+Also in the box: syntax highlighting for nine language families, multiple
+cursors, code folding, split panes, project-wide search and replace with a
+reviewable diff, and a settings panel generated from a schema so it can never
+drift from what's actually configurable.
+
+## Status
+
+**v0.2.** It's young, and it's a personal project rather than a product — but
+it's real software with 518 tests and I use it. Expect rough edges; open an
+issue if you hit one.
+
+Not there yet: no LSP, no Git integration, no plugins. Those are next, in
+roughly that order — see [ROADMAP.md](ROADMAP.md).
+
+## Under the hood
+
+For anyone who wants the deep version:
+
+| | |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | How it's built, and the design decisions with their tradeoffs |
+| [AGENT-PLATFORM.md](AGENT-PLATFORM.md) | The agent layer in full: transactions, permissions, review |
+| [DESIGN.md](DESIGN.md) | The visual system and its rules |
+| [ROADMAP.md](ROADMAP.md) | What's next, and what's deliberately not planned |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Where things go and why |
+
+Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
+[CodeMirror 6](https://codemirror.net). The Rust side owns the window, the
+filesystem and project search; the editor lives in the renderer.
+
+```bash
+npm test          # 518 unit tests
+npm run check     # TypeScript + Svelte
+npm run app:build # a distributable, ~4 MB on macOS
+```
+
+## License
+
+[MIT](LICENSE) — do what you like with it.

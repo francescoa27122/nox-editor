@@ -1,0 +1,29 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    // `node` is here for the tests only: one of them spawns the reference
+    // agent as a real child process to prove the wire protocol end to end.
+    "types": ["vite/client", "svelte", "node"],
+    "paths": {
+      "@core/*": ["./src/core/*"],
+      "@platform/*": ["./src/platform/*"],
+      "@services/*": ["./src/services/*"],
+      "@editor/*": ["./src/editor/*"],
+      "@ui/*": ["./src/ui/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src-tauri"]
+}

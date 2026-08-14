@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+src-tauri/target/
+src-tauri/gen/
+.vite/
+coverage/
+
+# Editor/agent tooling config, not part of the project.
+.claude/
