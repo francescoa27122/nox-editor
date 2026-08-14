@@ -330,6 +330,13 @@ describe('provenanceAt at a boundary', () => {
 describe('tooltip text', () => {
   const now = 1_700_000_600_000; // ten minutes after the fixture's `at`
 
+  /**
+   * The failure this prevents: the format string's field order or separator
+   * changing — e.g. swapping author and description, or losing the ` · `
+   * between them. This is the only test that checks the full three-field
+   * shape against a fixed expected string; the tests below each vary just
+   * one field against this baseline and would not catch the others moving.
+   */
   it('names the author and the change', () => {
     expect(describeProvenance(record(), now)).toBe('claude-1 · Rewrite the greeting · 10m ago');
   });
@@ -344,6 +351,11 @@ describe('tooltip text', () => {
     );
   });
 
+  /**
+   * The failure this prevents: the `minutes < 60` branch swallowing this
+   * case and reporting "120m ago" instead of switching to hours — the only
+   * test that exercises the third branch of the elapsed-time ternary at all.
+   */
   it('falls back to hours past sixty minutes', () => {
     expect(describeProvenance(record({ at: now - 7_200_000 }), now)).toBe(
       'claude-1 · Rewrite the greeting · 2h ago',
@@ -381,6 +393,14 @@ describe('the setting', () => {
     expect(marks(marked)).toEqual([[0, 7, 'cs-1']]);
   });
 
+  /**
+   * The failure this prevents: not recording itself — this passes whether or
+   * not `provenanceField` sits inside the setting's compartment, since with
+   * the setting on a compartmentalised field is present too. What it
+   * actually guards is that `buildExtensions` composes the field in at all
+   * when the setting is on, i.e. wiring, not the record/decay logic the
+   * `recording` and `decaying` blocks above already cover directly.
+   */
   it('records marks with the gutter on, too', () => {
     const state = EditorState.create({ doc: 'hello', extensions: buildExtensions(defaultSettings()) });
 
@@ -400,12 +420,53 @@ describe('navigation', () => {
     return applySet(first, { from: 6, to: 9, insert: 'def' }, record({ changeSetId: 'cs-2' }));
   }
 
+  /**
+   * The failure this prevents: returning the mark the cursor is already
+   * inside instead of skipping it for the one further on. The fixture's
+   * first mark `[0,3)` starts exactly at `from = 0`; if the guard read
+   * `start >= from` instead of `start > from` it would match and return
+   * `{from:0,to:3}` instead of moving on to `{from:6,to:9}`.
+   */
   it('finds the next mark after the cursor', () => {
     expect(nextProvenance(twoMarks(), 0)).toEqual({ from: 6, to: 9 });
   });
 
+  /**
+   * The failure this prevents: a cursor strictly inside a mark being treated
+   * as before it. `between(from + 1, …)` still visits `[6,9)` for a cursor at
+   * 7, because the range overlaps the query window even though the mark's
+   * own `start` (6) is less than `from`. If the guard checked `end > from`
+   * instead of `start > from` it would return the very mark the cursor sits
+   * inside as "next".
+   */
+  it('does not return the mark the cursor is inside as the next one', () => {
+    expect(nextProvenance(twoMarks(), 7)).toBeNull();
+  });
+
+  /**
+   * This is exactly the case the `previousProvenance` correction addresses.
+   * The failure this prevents: with the brief's original
+   * `end < from || start < from`, the mark `[6,9)` also matches — its
+   * `start` (6) is less than `from` (9) — and being visited after `[0,3)` in
+   * `from`-order, it overwrites the correct answer. The cursor, sitting at
+   * the end of `[6,9)`, would then jump right back onto the mark it is
+   * already on instead of moving to the actual previous mark `[0,3)`.
+   */
   it('finds the previous mark before the cursor', () => {
     expect(previousProvenance(twoMarks(), 9)).toEqual({ from: 0, to: 3 });
+  });
+
+  /**
+   * The mirror of the "next" case above, and the interior-cursor case the
+   * `previousProvenance` correction was actually about — a cursor at 7 sits
+   * inside `[6,9)`, not at its end. The failure this prevents: a guard
+   * admitting `[6,9)` because its `start` (6) falls inside the query window
+   * `between(0, from - 1)`, the same class of bug the brief's original
+   * `|| start < from` clause caused, here triggered by an interior cursor
+   * rather than the end-of-mark cursor the test above covers.
+   */
+  it('finds the mark before the one the cursor is inside', () => {
+    expect(previousProvenance(twoMarks(), 7)).toEqual({ from: 0, to: 3 });
   });
 
   /**
@@ -416,10 +477,24 @@ describe('navigation', () => {
     expect(nextProvenance(twoMarks(), 6)).toBeNull();
   });
 
+  /**
+   * The failure this prevents: wrapping around to return the last mark when
+   * there's nothing before the cursor — the silent-wrap failure the
+   * null-at-the-ends design exists to avoid — and, since `from = 0` here,
+   * a `Math.max(0, from - 1)` clamp that let the query range go negative
+   * instead of being pinned at 0.
+   */
   it('returns null before the first mark rather than wrapping', () => {
     expect(previousProvenance(twoMarks(), 0)).toBeNull();
   });
 
+  /**
+   * The failure this prevents: the palette commands, gated on
+   * `#activeHasProvenance()`, staying enabled with nothing to navigate to or
+   * disabled on a document that has marks — `hasProvenance` is the only
+   * thing gating them, so an inverted or wrong-field check here would leave
+   * "Go to Next Change" always clickable or always greyed out.
+   */
   it('reports whether a document has any marks at all', () => {
     expect(hasProvenance(twoMarks())).toBe(true);
     expect(hasProvenance(stateWith('nothing here'))).toBe(false);
