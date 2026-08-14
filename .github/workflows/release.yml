@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# The release job uploads assets to the tag's release.
+permissions:
+  contents: write
+
+jobs:
+  # A tag is a promise. Check it before spending twenty minutes on binaries
+  # nobody should download.
+  gate:
+    name: gate
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  build:
+    name: ${{ matrix.label }}
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing should not deny the others a binary — a partial
+      # release beats no release, and the draft shows exactly what's missing.
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS (Apple Silicon)
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - label: macOS (Intel)
+            os: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          # 22.04 rather than the latest Ubuntu on purpose: a binary linked
+          # against an older glibc runs on newer distributions, not the other
+          # way round.
+          - label: Linux (x86_64)
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ''
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Nox ${{ github.ref_name }}
+          # Left as a draft deliberately: the notes below are the minimum a
+          # download needs to work, not the release notes. Write those, then
+          # publish by hand.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+          releaseBody: |
+            ## Install
+
+            **macOS** — download the `.dmg` for your chip (`aarch64` is Apple
+            Silicon, `x64` is Intel), drag Nox to Applications, then run this
+            once:
+
+            ```bash
+            xattr -dr com.apple.quarantine /Applications/Nox.app
+            ```
+
+            **You will need that command.** The app is ad-hoc signed rather
+            than signed with an Apple Developer ID, so macOS quarantines it on
+            download and refuses to open it with *"Nox is damaged and can't be
+            opened"* — which sounds like a corrupt download but isn't. The
+            command removes the quarantine flag. If you'd rather not run it,
+            build from source instead; `npm run app` does the same thing from
+            code you can read.
+
+            **Linux** — take the `.deb` or the `.AppImage`. Built on Ubuntu
+            22.04, so it needs glibc 2.35 or newer.
+
+            **Windows** — build from source for now.

@@ -6,6 +6,8 @@
 
 *Nox* — Latin for *night*.
 
+[![CI](https://github.com/francescoa27122/nox-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/francescoa27122/nox-editor/actions/workflows/ci.yml)
+
 [Try it](#try-it) · [What makes it different](#what-makes-it-different) · [Under the hood](#under-the-hood)
 
 </div>
@@ -30,7 +32,23 @@ back.**
 
 ## Try it
 
-You need [Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your
+**Download it** from the [latest release](https://github.com/francescoa27122/nox-editor/releases/latest).
+
+On macOS, drag Nox to Applications and run this once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Nox.app
+```
+
+You will need that command. Nox is ad-hoc signed rather than signed with an
+Apple Developer ID, so macOS quarantines it on download and claims it is
+*"damaged"* — which sounds like a corrupt download but isn't.
+
+### Or build it
+
+If there's no build for your platform, or you'd rather not run that command,
+build from source — it's the same thing from code you can read. You need
+[Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your
 platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 ```bash
