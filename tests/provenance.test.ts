@@ -1,7 +1,16 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { buildExtensions } from '../src/editor/extensions';
-import { describeProvenance, provenanceAt, provenanceField, type ProvenanceValue } from '../src/editor/provenance';
+import {
+  clearProvenanceEffect,
+  describeProvenance,
+  hasProvenance,
+  nextProvenance,
+  previousProvenance,
+  provenanceAt,
+  provenanceField,
+  type ProvenanceValue,
+} from '../src/editor/provenance';
 import { defaultSettings } from '../src/services/config/schema';
 import { changeSetAnnotation, type Provenance } from '../src/services/transactions';
 
@@ -381,5 +390,46 @@ describe('the setting', () => {
     }).state;
 
     expect(marks(marked)).toEqual([[0, 7, 'cs-1']]);
+  });
+});
+
+describe('navigation', () => {
+  /** Two marks: [0,3) from cs-1 and [6,9) from cs-2. */
+  function twoMarks(): EditorState {
+    const first = applySet(stateWith('abc...def'), { from: 0, to: 3, insert: 'abc' });
+    return applySet(first, { from: 6, to: 9, insert: 'def' }, record({ changeSetId: 'cs-2' }));
+  }
+
+  it('finds the next mark after the cursor', () => {
+    expect(nextProvenance(twoMarks(), 0)).toEqual({ from: 6, to: 9 });
+  });
+
+  it('finds the previous mark before the cursor', () => {
+    expect(previousProvenance(twoMarks(), 9)).toEqual({ from: 0, to: 3 });
+  });
+
+  /**
+   * The failure this prevents: wrapping silently, which loses your place in
+   * the middle of reviewing a change set that touched several files.
+   */
+  it('returns null at the last mark rather than wrapping', () => {
+    expect(nextProvenance(twoMarks(), 6)).toBeNull();
+  });
+
+  it('returns null before the first mark rather than wrapping', () => {
+    expect(previousProvenance(twoMarks(), 0)).toBeNull();
+  });
+
+  it('reports whether a document has any marks at all', () => {
+    expect(hasProvenance(twoMarks())).toBe(true);
+    expect(hasProvenance(stateWith('nothing here'))).toBe(false);
+  });
+
+  it('clears every mark in the buffer', () => {
+    const cleared = twoMarks().update({ effects: clearProvenanceEffect.of(null) }).state;
+
+    // The failure this prevents: clearing only the marks the cursor is in,
+    // leaving the rest to look like they were missed rather than dismissed.
+    expect(marks(cleared)).toEqual([]);
   });
 });

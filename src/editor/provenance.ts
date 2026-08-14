@@ -1,6 +1,7 @@
 import {
   RangeSet,
   RangeValue,
+  StateEffect,
   StateField,
   type EditorState,
   type Extension,
@@ -36,9 +37,13 @@ export class ProvenanceValue extends RangeValue {
   }
 }
 
+/** Drop every mark in this buffer. The "Clear Change Marks" command. */
+export const clearProvenanceEffect = StateEffect.define<null>();
+
 export const provenanceField = StateField.define<RangeSet<ProvenanceValue>>({
   create: () => RangeSet.empty,
   update(set, tr) {
+    if (tr.effects.some((effect) => effect.is(clearProvenanceEffect))) return RangeSet.empty;
     if (!tr.docChanged) return set;
     // `RangeSet.map` collapses a mark that sat over deleted text into a
     // zero-width range instead of dropping it — CodeMirror only drops an
@@ -174,6 +179,46 @@ export function provenanceAt(state: EditorState, pos: number): Provenance | null
     // Merely ends at `pos`. Keep it only as a fallback, in case no
     // containing mark ever turns up (e.g. `pos` is the end of the document).
     found ??= value.provenance;
+  });
+  return found;
+}
+
+export function hasProvenance(state: EditorState): boolean {
+  return state.field(provenanceField).size > 0;
+}
+
+/**
+ * The first mark starting after `from`, or null.
+ *
+ * Null rather than wrapping: silently returning to the top is how you lose
+ * your place halfway through reviewing a change set.
+ */
+export function nextProvenance(
+  state: EditorState,
+  from: number,
+): { from: number; to: number } | null {
+  let found: { from: number; to: number } | null = null;
+  state.field(provenanceField).between(from + 1, state.doc.length, (start, end) => {
+    if (start > from) {
+      found = { from: start, to: end };
+      return false;
+    }
+    return undefined;
+  });
+  return found;
+}
+
+/** The mirror of `nextProvenance`. */
+export function previousProvenance(
+  state: EditorState,
+  from: number,
+): { from: number; to: number } | null {
+  let found: { from: number; to: number } | null = null;
+  state.field(provenanceField).between(0, Math.max(0, from - 1), (start, end) => {
+    // `end < from` alone: a cursor at or inside a mark must move to the mark
+    // before it, not back onto the one it is already sitting in.
+    if (end < from) found = { from: start, to: end };
+    return undefined;
   });
   return found;
 }

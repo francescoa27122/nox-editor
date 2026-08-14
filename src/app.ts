@@ -27,6 +27,12 @@ import {
 } from '@editor/folding';
 import { buildExtensions } from '@editor/extensions';
 import { FindController } from '@editor/find';
+import {
+  clearProvenanceEffect,
+  hasProvenance,
+  nextProvenance,
+  previousProvenance,
+} from '@editor/provenance';
 import { createPlatform } from '@platform/index';
 import type { Platform } from '@platform/types';
 import { CommandRegistry, type Command } from '@services/commands';
@@ -372,6 +378,46 @@ export class NoxApp {
     }
 
     return this.#runEditor(direction === 'undo' ? undo : redo);
+  }
+
+  #activeHasProvenance(): boolean {
+    const view = this.view.get();
+    return view ? hasProvenance(view.state) : false;
+  }
+
+  /**
+   * Move the cursor to the next or previous marked region.
+   *
+   * Says so when there is nothing further rather than wrapping: a review that
+   * silently returns to the top is a review you lose your place in.
+   */
+  #goToProvenance(direction: 'next' | 'previous'): void {
+    const view = this.view.get();
+    if (!view) return;
+    const from = view.state.selection.main.head;
+    const target =
+      direction === 'next'
+        ? nextProvenance(view.state, from)
+        : previousProvenance(view.state, from);
+
+    if (!target) {
+      this.notifications.info(
+        direction === 'next' ? 'No later changes in this file' : 'No earlier changes in this file',
+      );
+      return;
+    }
+
+    view.dispatch({
+      selection: { anchor: target.from, head: target.to },
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
+
+  #clearProvenance(): void {
+    const view = this.view.get();
+    if (!view) return;
+    view.dispatch({ effects: clearProvenanceEffect.of(null) });
   }
 
   /**
@@ -2132,6 +2178,32 @@ export class NoxApp {
         keywords: ['remove', 'trash'],
         enabled: () => this.notes.selectedId.get() !== null,
         run: () => void this.#deleteSelectedNote(),
+      },
+
+      // --- Change marks -----------------------------------------------------
+      {
+        id: 'provenance.nextChange',
+        title: 'Go to Next Change',
+        category: 'Change Marks',
+        keywords: ['provenance', 'author', 'agent', 'replace'],
+        enabled: () => this.#activeHasProvenance(),
+        run: () => this.#goToProvenance('next'),
+      },
+      {
+        id: 'provenance.previousChange',
+        title: 'Go to Previous Change',
+        category: 'Change Marks',
+        keywords: ['provenance', 'author', 'agent', 'replace'],
+        enabled: () => this.#activeHasProvenance(),
+        run: () => this.#goToProvenance('previous'),
+      },
+      {
+        id: 'provenance.clear',
+        title: 'Clear Change Marks',
+        category: 'Change Marks',
+        keywords: ['provenance', 'dismiss', 'reset'],
+        enabled: () => this.#activeHasProvenance(),
+        run: () => this.#clearProvenance(),
       },
 
       // --- Preferences ------------------------------------------------------
