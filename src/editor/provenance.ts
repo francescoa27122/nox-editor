@@ -38,11 +38,60 @@ export const provenanceField = StateField.define<RangeSet<ProvenanceValue>>({
   create: () => RangeSet.empty,
   update(set, tr) {
     if (!tr.docChanged) return set;
-    const mapped = set.map(tr.changes);
+    // `RangeSet.map` collapses a mark that sat over deleted text into a
+    // zero-width range instead of dropping it — CodeMirror only drops an
+    // empty mapped range when the value's `startSide > 0`, and
+    // `ProvenanceValue` inherits `RangeValue`'s default of 0. Filtered here,
+    // before the branch below, so neither an agent's own deletion nor a
+    // user's leaves a ghost mark behind.
+    const mapped = set.map(tr.changes).update({ filter: (from, to) => to > from });
     const provenance = tr.annotation(changeSetAnnotation);
     return provenance ? addMarks(mapped, tr, provenance) : subtractChanged(mapped, tr);
   },
 });
+
+/**
+ * Split every range in `set` around `spans`, dropping the covered pieces and
+ * keeping whatever flanks survive on either side.
+ *
+ * `RangeSet.update`'s `filter` can only drop a whole range, not divide one —
+ * so it can't express "the middle third of this mark belongs to someone
+ * else" without erasing the thirds either side of it too. Walking pieces by
+ * hand is what both callers below actually need: a user's own edit carving
+ * itself out of a mark, and a later change set overwriting only part of an
+ * earlier one.
+ */
+function subtractSpans(
+  set: RangeSet<ProvenanceValue>,
+  spans: { from: number; to: number }[],
+): Range<ProvenanceValue>[] {
+  const kept: Range<ProvenanceValue>[] = [];
+  const cursor = set.iter();
+
+  while (cursor.value) {
+    let pieces = [{ from: cursor.from, to: cursor.to }];
+    for (const span of spans) {
+      const next: { from: number; to: number }[] = [];
+      for (const piece of pieces) {
+        if (span.to <= piece.from || span.from >= piece.to) {
+          next.push(piece);
+          continue;
+        }
+        if (span.from > piece.from) next.push({ from: piece.from, to: span.from });
+        if (span.to < piece.to) next.push({ from: span.to, to: piece.to });
+      }
+      pieces = next;
+    }
+    for (const piece of pieces) {
+      // A span that exactly consumes a piece leaves nothing: don't hand back
+      // a zero-width bar for text nobody wrote.
+      if (piece.to > piece.from) kept.push(cursor.value.range(piece.from, piece.to));
+    }
+    cursor.next();
+  }
+
+  return kept;
+}
 
 /**
  * Mark what this change set inserted.
@@ -58,18 +107,21 @@ function addMarks(
 ): RangeSet<ProvenanceValue> {
   const value = new ProvenanceValue(provenance);
   const added: Range<ProvenanceValue>[] = [];
+  const spans: { from: number; to: number }[] = [];
 
   tr.changes.iterChanges((_fromA, _toA, fromB, toB) => {
-    if (toB > fromB) added.push(value.range(fromB, toB));
+    if (toB > fromB) {
+      added.push(value.range(fromB, toB));
+      spans.push({ from: fromB, to: toB });
+    }
   });
 
   if (added.length === 0) return set;
-  // A second change set over the same text owns it now; leaving the first
-  // mark in place would name the wrong author for text it no longer wrote.
-  const covered = set.update({
-    filter: (from, to) => !added.some((range) => from < range.to && to > range.from),
-  });
-  return covered.update({ add: added, sort: true });
+  // A second change set owns the text it inserted now; splitting the old
+  // marks around it — rather than dropping any mark it merely overlaps —
+  // keeps the untouched flanks attributed to whoever actually wrote them.
+  const kept = subtractSpans(set, spans);
+  return RangeSet.of([...kept, ...added], true);
 }
 
 /**
@@ -80,11 +132,6 @@ function addMarks(
  * wrote it. Subtracting the inserted span splits the mark around what you
  * typed, which is what makes the gutter decay as you review — and an empty
  * gutter is only meaningful if it can be reached.
- *
- * A pure deletion contributes no cut (`toB > fromB` is false), but `map` still
- * collapses any mark that sat over the deleted text into a zero-width range.
- * Those are filtered out below regardless of whether there were any cuts to
- * apply, so a deletion-only edit can't leave a ghost mark behind.
  */
 function subtractChanged(
   set: RangeSet<ProvenanceValue>,
@@ -95,33 +142,7 @@ function subtractChanged(
     if (toB > fromB) cuts.push({ from: fromB, to: toB });
   });
 
-  const kept: Range<ProvenanceValue>[] = [];
-  const cursor = set.iter();
-
-  while (cursor.value) {
-    let pieces = [{ from: cursor.from, to: cursor.to }];
-    for (const cut of cuts) {
-      const next: { from: number; to: number }[] = [];
-      for (const piece of pieces) {
-        if (cut.to <= piece.from || cut.from >= piece.to) {
-          next.push(piece);
-          continue;
-        }
-        if (cut.from > piece.from) next.push({ from: piece.from, to: cut.from });
-        if (cut.to < piece.to) next.push({ from: cut.to, to: piece.to });
-      }
-      pieces = next;
-    }
-    for (const piece of pieces) {
-      // Zero-width survivors are dropped unconditionally: a mark with no text
-      // is a bar on a line nobody authored, whether it lost its width to a
-      // cut above or to `map` collapsing it around a pure deletion.
-      if (piece.to > piece.from) kept.push(cursor.value.range(piece.from, piece.to));
-    }
-    cursor.next();
-  }
-
-  return RangeSet.of(kept, true);
+  return RangeSet.of(subtractSpans(set, cuts), true);
 }
 
 /** The provenance covering `pos`, or null. Used by the tooltip. */

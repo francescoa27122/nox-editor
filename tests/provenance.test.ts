@@ -41,8 +41,10 @@ function marks(state: EditorState): [number, number, string][] {
   return out;
 }
 
+type ChangeSpec = { from: number; to?: number; insert?: string };
+
 /** Apply a change set the way `WorkspaceService.apply` does. */
-function applySet(state: EditorState, changes: { from: number; to?: number; insert?: string }, provenance = record()): EditorState {
+function applySet(state: EditorState, changes: ChangeSpec | ChangeSpec[], provenance = record()): EditorState {
   return state.update({ changes, annotations: changeSetAnnotation.of(provenance) }).state;
 }
 
@@ -105,7 +107,7 @@ describe('recording', () => {
 });
 
 /** A plain user edit — no change-set annotation. */
-function userEdit(state: EditorState, changes: { from: number; to?: number; insert?: string }): EditorState {
+function userEdit(state: EditorState, changes: ChangeSpec | ChangeSpec[]): EditorState {
   return state.update({ changes }).state;
 }
 
@@ -141,6 +143,15 @@ describe('decaying', () => {
     expect(marks(edited)).toEqual([[0, 3, 'cs-1']]);
   });
 
+  /**
+   * The failure this prevents: none, currently — an insertion at position 0
+   * shifts a following mark forward without ever overlapping it, so this
+   * passes even against the unmodified `mapped` set, with no subtraction
+   * involved. Kept anyway as a guard on CodeMirror's `assoc`/side semantics
+   * for insertion-at-a-boundary: if a future CodeMirror upgrade changed
+   * start-of-document mapping to grow the mark instead, this is what would
+   * catch it.
+   */
   it('does not grow a mark when you type at its start', () => {
     const marked = applySet(stateWith('abc'), { from: 0, to: 3, insert: 'abc' });
 
@@ -168,5 +179,119 @@ describe('decaying', () => {
     const second = applySet(first, { from: 0, to: 3, insert: 'xyz' }, record({ changeSetId: 'cs-2' }));
 
     expect(marks(second)).toEqual([[0, 3, 'cs-2']]);
+  });
+
+  /**
+   * The failure this prevents: an agent deleting text an earlier change set
+   * wrote left a zero-width ghost behind, because `addMarks`'s `added.length
+   * === 0` early return handed back the merely-mapped set without ever
+   * filtering it. The ghost would render as a gutter bar on a line whose
+   * text nobody authored, deleted or not.
+   */
+  it('removes a mark entirely deleted by a second change set', () => {
+    const marked = applySet(stateWith('keep____keep'), { from: 4, to: 8, insert: '____' });
+
+    const deleted = applySet(marked, { from: 4, to: 8 }, record({ changeSetId: 'cs-2' }));
+
+    expect(marks(deleted)).toEqual([]);
+  });
+
+  /**
+   * The failure this prevents: the same ghost as above, but surviving a
+   * transaction that *also* inserts elsewhere — the old `covered` filter only
+   * checked overlap against the new insertion's span, and a zero-width range
+   * far away from it is never "overlapping", so it passed straight through.
+   */
+  it('removes a mark deleted by a change set that also inserts elsewhere', () => {
+    const marked = applySet(stateWith('keep____keep....'), { from: 4, to: 8, insert: '____' });
+
+    const changed = applySet(
+      marked,
+      [
+        { from: 4, to: 8 },
+        { from: 12, to: 16, insert: 'next' },
+      ],
+      record({ changeSetId: 'cs-2' }),
+    );
+
+    expect(marks(changed)).toEqual([[8, 12, 'cs-2']]);
+  });
+
+  /**
+   * The failure this prevents: a second change set touching only the middle
+   * of an earlier mark erased the whole thing, because `RangeSet.update`'s
+   * `filter` can drop a range but can't split one — the untouched flanks on
+   * either side of the overlap were destroyed along with the middle.
+   */
+  it('splits a mark a second change set only partially overlaps, keeping the untouched flanks', () => {
+    const first = applySet(stateWith('aaaaaaaaaa'), { from: 0, to: 10, insert: 'aaaaaaaaaa' });
+
+    const second = applySet(first, { from: 4, to: 6, insert: 'XY' }, record({ changeSetId: 'cs-2' }));
+
+    expect(marks(second)).toEqual([
+      [0, 4, 'cs-1'],
+      [4, 6, 'cs-2'],
+      [6, 10, 'cs-1'],
+    ]);
+  });
+
+  /**
+   * The failure this prevents: the same whole-mark erasure, triggered by mere
+   * adjacency rather than overlap — `map` grows a mark to swallow an
+   * insertion at its own end (see "does not grow a mark" above), and the
+   * grown range then trips the old overlap check against the new change
+   * set's span even though the two never shared a character before mapping.
+   */
+  it('does not erase an adjacent mark when a second change set inserts at its boundary', () => {
+    const first = applySet(stateWith('abc'), { from: 0, to: 3, insert: 'abc' });
+
+    const second = applySet(first, { from: 3, insert: 'XYZ' }, record({ changeSetId: 'cs-2' }));
+
+    expect(marks(second)).toEqual([
+      [0, 3, 'cs-1'],
+      [3, 6, 'cs-2'],
+    ]);
+  });
+
+  /**
+   * The failure this prevents: `subtractChanged` mis-handling a transaction
+   * with more than one cut inside a single mark — e.g. only applying the
+   * first cut, or letting the second cut's coordinates (already shifted by
+   * the first insertion) desync from the piece list.
+   */
+  it('splits a mark around multiple edits in the same transaction', () => {
+    const marked = applySet(stateWith('aaaaaaaaaa'), { from: 0, to: 10, insert: 'aaaaaaaaaa' });
+
+    const edited = userEdit(marked, [
+      { from: 2, insert: 'X' },
+      { from: 6, insert: 'Y' },
+    ]);
+
+    expect(marks(edited)).toEqual([
+      [0, 2, 'cs-1'],
+      [3, 7, 'cs-1'],
+      [8, 12, 'cs-1'],
+    ]);
+  });
+
+  /**
+   * The failure this prevents: a cut that straddles the boundary between two
+   * separate marks trimming only one of them, because the piece-splitting
+   * loop was written and tested against a single mark at a time.
+   */
+  it('trims both marks when one edit spans the boundary between them', () => {
+    const first = applySet(stateWith('aaaaabbbbb'), { from: 0, to: 5, insert: 'aaaaa' });
+    const marked = applySet(first, { from: 5, to: 10, insert: 'bbbbb' }, record({ changeSetId: 'cs-2' }));
+    expect(marks(marked)).toEqual([
+      [0, 5, 'cs-1'],
+      [5, 10, 'cs-2'],
+    ]);
+
+    const edited = userEdit(marked, { from: 3, to: 7, insert: 'XXXX' });
+
+    expect(marks(edited)).toEqual([
+      [0, 3, 'cs-1'],
+      [7, 10, 'cs-2'],
+    ]);
   });
 });
