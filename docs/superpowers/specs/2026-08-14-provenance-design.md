@@ -105,6 +105,19 @@ export interface Provenance {
 
 Held as a `RangeSet<Provenance>` in a `StateField`.
 
+**`Provenance` is defined in `transactions.ts`**, next to `Author` — it is a
+statement about authorship, not about CodeMirror, and putting it in the editor
+layer would make `transactions.ts` the only place that knows who made a change
+without being able to say so.
+
+**`changeSetAnnotation`'s payload changes from `ChangeSetId` to `Provenance`.**
+It currently carries only the id, which is not enough for the field to learn
+the author. Nothing reads the annotation today — it is set in
+`workspace.ts` and read nowhere — so widening it costs no migration, and the
+id travels inside `Provenance` for anything that wants just that. The
+alternative, a second annotation alongside the first, would mean two things to
+keep in step for no benefit.
+
 ## 5. Where it lives, and why a StateField
 
 `src/editor/provenance.ts`, a `StateField<RangeSet<Provenance>>`.
@@ -283,6 +296,8 @@ tooltip read on a mark and the setting toggled.
 
 | File | Change |
 |---|---|
+| `src/services/transactions.ts` | the `Provenance` type; `changeSetAnnotation`'s payload widens to carry it |
+| `src/services/workspace.ts` | `apply()` annotates with the full `Provenance` instead of the bare id |
 | `src/editor/provenance.ts` | new — the state field, gutter, tooltip and navigation helpers |
 | `src/editor/extensions.ts` | compose it, in its own Compartment |
 | `src/services/config/schema.ts` | `workbench.showChangeMarks` |
@@ -292,8 +307,12 @@ tooltip read on a mark and the setting toggled.
 | `ARCHITECTURE.md` | a §4 entry for the StateField-not-ViewPlugin decision |
 | `CHANGELOG.md` | the feature |
 
-`src/services/transactions.ts` is **not** in this list. The annotation it
-already defines is the entire hook this needs.
+This list grew by two files during planning. The original said
+`transactions.ts` was untouched because "the annotation it already defines is
+the entire hook this needs" — which was wrong: the annotation carries a bare
+`ChangeSetId`, and a field that knows only the id cannot say who made the
+change. Recorded rather than quietly fixed, because the mistake is instructive:
+the hook existed, but not the payload.
 
 ## 11. Out of scope, named so they are deferred rather than forgotten
 
