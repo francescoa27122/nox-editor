@@ -7,6 +7,7 @@
 
 mod agent;
 mod fs;
+mod pty;
 mod search;
 mod watcher;
 
@@ -17,6 +18,7 @@ pub fn run() {
         .manage(agent::AgentState::default())
         .manage(watcher::WatcherState::default())
         .manage(search::SearchState::default())
+        .manage(pty::PtyState::default())
         .invoke_handler(tauri::generate_handler![
             fs::nox_home_dir,
             fs::nox_read_text_file,
@@ -41,6 +43,11 @@ pub fn run() {
             agent::nox_agent_send,
             agent::nox_agent_kill,
             agent::nox_agent_kill_all,
+            pty::nox_pty_open,
+            pty::nox_pty_write,
+            pty::nox_pty_resize,
+            pty::nox_pty_close,
+            pty::nox_pty_close_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nox");

@@ -25,6 +25,8 @@ export class WebPlatform extends MemoryPlatform {
     projectSearch: true,
     // A browser tab has no processes to start; see `MemoryPlatform.spawnAgent`.
     agentProcesses: false,
+    // …and no pty. The panel says so rather than showing a dead terminal.
+    terminals: false,
   };
 
   constructor() {

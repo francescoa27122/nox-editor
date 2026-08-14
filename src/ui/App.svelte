@@ -7,6 +7,7 @@
   import EditorArea from './EditorArea.svelte';
   import StatusBar from './StatusBar.svelte';
   import AgentPanel from './AgentPanel.svelte';
+  import TerminalPanel from './TerminalPanel.svelte';
   import ReviewPanel from './ReviewPanel.svelte';
   import Welcome from './Welcome.svelte';
   import Overlays from './Overlays.svelte';
@@ -35,6 +36,15 @@
   // svelte-ignore state_referenced_locally
   const agentsOpen = app.ui.agentsOpen;
 
+  // svelte-ignore state_referenced_locally
+  const terminalOpen = app.ui.terminalOpen;
+  // Latches on first open. The panel hides itself thereafter rather than
+  // unmounting, which is what preserves the scrollback.
+  let terminalMounted = $state(false);
+  $effect(() => {
+    if ($terminalOpen) terminalMounted = true;
+  });
+
   const showExplorer = $derived($settings['workbench.showExplorer']);
   const showStatusBar = $derived($settings['workbench.showStatusBar']);
   const hasBuffers = $derived($buffers.length > 0);
@@ -50,6 +60,9 @@
       // A reload replaces this renderer, and the agent processes it started
       // would otherwise keep running with nobody listening.
       void app.platform.killAllAgents();
+      // Shells too, for the same reason — and a shell left behind holds the
+      // workspace directory open and keeps whatever it was running alive.
+      void app.platform.closeAllTerminals();
     };
     window.addEventListener('beforeunload', beforeUnload);
 
@@ -124,14 +137,24 @@
         diff needs the width, and deciding what to keep is not a thing you do
         out of the corner of your eye while typing somewhere else.
       -->
-      {#if $staged && $reviewOpen}
-        <ReviewPanel />
-      {:else if $agentsOpen}
-        <AgentPanel />
-      {:else if hasBuffers}
-        <EditorArea />
-      {:else}
-        <Welcome />
+      <div class="nox-main-content">
+        {#if $staged && $reviewOpen}
+          <ReviewPanel />
+        {:else if $agentsOpen}
+          <AgentPanel />
+        {:else if hasBuffers}
+          <EditorArea />
+        {:else}
+          <Welcome />
+        {/if}
+      </div>
+
+      <!--
+        Mounted from the first time it is opened and never unmounted, so the
+        scrollback survives hiding the panel. See TerminalPanel.
+      -->
+      {#if terminalMounted}
+        <TerminalPanel />
       {/if}
     </main>
   </div>
@@ -200,6 +223,14 @@
     display: flex;
     flex-direction: column;
     background: var(--nox-bg-editor);
+  }
+
+  /* Takes the space the terminal is not using. */
+  .nox-main-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   /* Kill text-selection flicker while dragging the divider. */

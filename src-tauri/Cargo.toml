@@ -29,6 +29,11 @@ trash = "5"
 # searching a build directory.
 ignore = "0.4"
 regex = "1"
+# A real pty rather than piped stdio. Pipes are not a terminal: programs see
+# a non-tty and turn off colour, line editing and interactivity, so vim, less
+# and even a shell prompt do not work. WezTerm's crate, for the platform
+# differences — a Windows pty is ConPTY, not a file descriptor.
+portable-pty = "0.9"
 
 [profile.release]
 # The binary is the product; optimise it like one.

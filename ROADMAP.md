@@ -71,6 +71,7 @@ The MVP: a real editor you can work in.
 | **Breadcrumb navigation** | The title bar shows the trail; make segments clickable. |
 | **Go to symbol** | Lezer syntax tree scan per file — a real outline without a language server. |
 | **Sticky scroll** | Keep the enclosing function header pinned. |
+| **Terminal** *(shipped early)* | A real pty, not piped stdio, so `vim`, colour and job control work. Previously ruled out as its own project; it turned out to share process supervision with the agent transport, which is what made it affordable. |
 
 ---
 
@@ -150,8 +151,6 @@ reason to build them before the agent exists.
 ## Not planned
 
 - A light theme. Nox is a dark editor; that is the product.
-- A built-in terminal in the near term. Terminals are a genuine project on
-  their own, and yours is one <kbd>⌘Tab</kbd> away.
 - Real-time collaboration before v1. Interesting, enormous, and it would
   distort the document model to chase it early.
 - Web/hosted Nox as a product. The browser target exists to make UI

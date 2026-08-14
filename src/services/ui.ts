@@ -41,7 +41,7 @@ export interface ConfirmRequest {
   resolve: (choiceId: string | null) => void;
 }
 
-export type FocusZone = 'editor' | 'explorer' | 'search' | 'find' | 'overlay';
+export type FocusZone = 'editor' | 'explorer' | 'search' | 'find' | 'overlay' | 'terminal';
 
 export class UIService {
   readonly overlay = new Signal<OverlayKind | null>(null);
@@ -83,6 +83,16 @@ export class UIService {
    * width, and it wrapped to nonsense in a 200px sidebar.
    */
   readonly agentsOpen = new Signal(false);
+  /**
+   * Whether the terminal panel is showing.
+   *
+   * Sits *below* the editor rather than taking it over, unlike review and
+   * agents: the whole point of a terminal in an editor is watching a build
+   * fail next to the code that failed.
+   */
+  readonly terminalOpen = new Signal(false);
+  /** Bumped to ask the terminal to take focus. */
+  readonly focusTerminalRequest = new Signal(0);
   readonly findReplaceMode = new Signal(false);
   readonly prompt = new Signal<PromptRequest | null>(null);
   readonly confirm = new Signal<ConfirmRequest | null>(null);
@@ -122,6 +132,28 @@ export class UIService {
   focusEditor(): void {
     this.focusZone.set('editor');
     this.focusEditorRequest.update((n) => n + 1);
+  }
+
+  /** Open the terminal panel and put the cursor in it. */
+  focusTerminal(): void {
+    this.terminalOpen.set(true);
+    this.focusZone.set('terminal');
+    this.focusTerminalRequest.update((n) => n + 1);
+  }
+
+  /**
+   * Hide the terminal panel. The shell keeps running — closing the panel is
+   * not a reason to kill a build half way through.
+   */
+  hideTerminal(): void {
+    if (!this.terminalOpen.get()) return;
+    this.terminalOpen.set(false);
+    this.focusEditor();
+  }
+
+  toggleTerminal(): void {
+    if (this.terminalOpen.get()) this.hideTerminal();
+    else this.focusTerminal();
   }
 
   /** Show the agents panel, which shares the editor area with review. */

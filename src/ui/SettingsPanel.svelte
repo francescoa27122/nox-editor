@@ -21,7 +21,7 @@
   const { config, ui } = app;
   const settings = config.settings;
 
-  const CATEGORIES: SettingCategory[] = ['Editor', 'Text', 'Files', 'Workbench'];
+  const CATEGORIES: SettingCategory[] = ['Editor', 'Text', 'Files', 'Workbench', 'Terminal'];
 
   let filter = $state('');
   let activeCategory = $state<SettingCategory | 'All'>('All');

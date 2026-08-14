@@ -36,6 +36,7 @@ export class MemoryPlatform implements Platform {
     externalFileDrop: false,
     agentProcesses: false,
     projectSearch: true,
+    terminals: false,
   };
 
   /** path -> contents. Directories are stored with a null value. */
@@ -423,6 +424,21 @@ export class MemoryPlatform implements Platform {
 
   async killAllAgents(): Promise<void> {
     /* No processes in memory; nothing to stop. */
+  }
+
+  /**
+   * There is no pty here.
+   *
+   * Refusing loudly for the same reason as `spawnAgent`: a terminal that
+   * silently produced nothing would look like a shell that had hung. Callers
+   * check `capabilities.terminals` first.
+   */
+  async openTerminal(): Promise<never> {
+    throw new PlatformError('this build has no terminal', 'unsupported');
+  }
+
+  async closeAllTerminals(): Promise<void> {
+    /* No terminals in memory; nothing to close. */
   }
 
   async configDir(): Promise<string | null> {

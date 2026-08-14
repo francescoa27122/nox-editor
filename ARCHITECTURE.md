@@ -588,6 +588,42 @@ starts with.
 Spawning is deliberately not reachable from the agent protocol. An agent
 cannot start another agent — only the user, through configuration.
 
+### The terminal is a pty, and that is not a detail
+
+`agent.rs` already supervises child processes, so a terminal looks like it
+should reuse it. It cannot, and the reason is the whole design.
+
+Piped stdio is not a terminal. A shell handed pipes sees `isatty` return
+false and turns itself off — no prompt redraw, no colour, no line editing —
+and `vim` or `less` refuse to run at all. `src-tauri/src/pty.rs` uses
+`portable-pty` so the kernel presents a real terminal, which is also why
+Windows is not a special case in the renderer: a Windows pty is ConPTY, not a
+file descriptor, and the crate hides that.
+
+Two consequences follow, and both are visible in the code:
+
+**Output is chunks, not lines.** A prompt — `$ ` — has no trailing newline, so
+the line-buffered reads that are right for an agent would hold the prompt back
+until the user typed something: the terminal would look frozen at the exact
+moment it was ready. The reader thread emits `nox://pty-data` with whatever
+arrives.
+
+**A chunk boundary lands anywhere, including mid-character.** `Utf8Stream`
+holds an incomplete trailing sequence back for the next read. Without it, any
+non-English output or box-drawing character has a chance of arriving as two
+replacement glyphs. It is a pure struct precisely so this is testable — the
+case is near impossible to provoke against a real shell and trivial to write
+down.
+
+The panel keeps the rest honest. It sits below the editor rather than taking
+it over, because watching a build fail beside the code that failed is the
+point. It is mounted once and hidden with CSS rather than unmounted, since
+disposing the xterm.js instance would throw away the scrollback — closing the
+panel to glance at a file must not lose a build log. And `TerminalService`
+deliberately does **not** store output: xterm.js already holds the scrollback,
+and mirroring it into a signal would double the memory of a large `cat` for
+nothing.
+
 ### A review narrows the change set; it does not apply hunks
 
 `ReviewService.stage(spec)` computes what each buffer *would* say and diffs it

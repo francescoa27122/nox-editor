@@ -4,6 +4,36 @@ All notable changes to Nox are recorded here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A terminal.** A real pty rather than piped stdio, so programs see a
+  terminal and behave like it: colour, line editing, job control, and `vim` or
+  `less` actually run. <kbd>⌃`</kbd> toggles it, or **Toggle Terminal** in the
+  palette.
+  - It sits *below* the editor rather than taking it over — watching a build
+    fail next to the code that failed is the entire point.
+  - Hiding the panel does not kill the shell, and the scrollback survives:
+    closing a terminal to glance at a file should not lose a build log.
+  - Colours come from the same token file as everything else, so it follows
+    Eclipse and Umbra without a second palette to maintain.
+  - `terminal.shell`, `terminal.fontSize`, `terminal.scrollback` and
+    `terminal.height` are in Settings. Empty shell means your login shell.
+  - The browser build says it has no terminal rather than showing a dead one.
+
+### Fixed
+
+- The reference-agent test and two documentation links pointed at
+  `examples/agents/uppercase.mjs`, which has been
+  `examples/uppercase-agent.mjs` since v0.2 was tagged. The test spawned a
+  path that did not exist and had been failing since the release commit.
+
+### Changed
+
+- CI builds and tests on every push, and a tag now produces macOS (Apple
+  Silicon and Intel) and Linux binaries rather than Apple Silicon alone.
+
 ## [0.2.0] — 2026-08-13
 
 ### Added

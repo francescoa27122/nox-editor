@@ -18,6 +18,8 @@ import {
   type SearchHandle,
   type SearchRequest,
   type SearchSummary,
+  type TerminalSession,
+  type TerminalSpec,
   type Unwatch,
   type WatchEvent,
 } from './types';
@@ -30,6 +32,8 @@ import {
 export class TauriPlatform implements Platform {
   /** Distinguishes concurrent agent processes on the event bus. */
   static #nextAgent = 0;
+  /** The same, for terminals, which share the bus but not the id space. */
+  static #nextTerminal = 0;
   /** Distinguishes one load of the window from the next. */
   static #instance = Math.random().toString(36).slice(2, 8);
 
@@ -44,6 +48,7 @@ export class TauriPlatform implements Platform {
     externalFileDrop: true,
     projectSearch: true,
     agentProcesses: true,
+    terminals: true,
   };
 
   async homeDir(): Promise<string | null> {
@@ -277,6 +282,72 @@ export class TauriPlatform implements Platform {
         await call<void>('nox_agent_kill', { id });
       },
     };
+  }
+
+  async openTerminal(spec: TerminalSpec): Promise<TerminalSession> {
+    // Same reasoning as `spawnAgent`: the instance token keeps ids unique
+    // across a reload, which the Rust side survives.
+    const id = `term-${TauriPlatform.#instance}-${++TauriPlatform.#nextTerminal}`;
+    const dataHandlers: ((data: string) => void)[] = [];
+    const exitHandlers: ((code: number | null) => void)[] = [];
+    // A shell writes its prompt immediately — often before `openTerminal` has
+    // returned. Dropping that would leave the panel blank until the first
+    // keystroke.
+    const buffered: string[] = [];
+    let exitCode: { code: number | null } | null = null;
+    let alive = true;
+
+    const unlisten = await Promise.all([
+      listen<{ id: string; data: string }>('nox://pty-data', (event) => {
+        if (event.payload.id !== id) return;
+        if (dataHandlers.length === 0) buffered.push(event.payload.data);
+        else for (const handler of dataHandlers) handler(event.payload.data);
+      }),
+      listen<{ id: string; code: number | null }>('nox://pty-exit', (event) => {
+        if (event.payload.id !== id || !alive) return;
+        alive = false;
+        exitCode = { code: event.payload.code };
+        for (const handler of exitHandlers) handler(event.payload.code);
+      }),
+    ]);
+
+    const release = () => unlisten.forEach((off) => off());
+
+    try {
+      await call<void>('nox_pty_open', {
+        id,
+        shell: spec.shell ?? null,
+        args: spec.args ?? [],
+        cwd: spec.cwd ?? null,
+        cols: spec.cols,
+        rows: spec.rows,
+      });
+    } catch (error) {
+      release();
+      throw error;
+    }
+
+    return {
+      write: (data) => call<void>('nox_pty_write', { id, data }),
+      resize: (cols, rows) => call<void>('nox_pty_resize', { id, cols, rows }),
+      onData: (handler) => {
+        dataHandlers.push(handler);
+        for (const data of buffered.splice(0)) handler(data);
+      },
+      onExit: (handler) => {
+        exitHandlers.push(handler);
+        if (exitCode) handler(exitCode.code);
+      },
+      close: async () => {
+        alive = false;
+        release();
+        await call<void>('nox_pty_close', { id });
+      },
+    };
+  }
+
+  async closeAllTerminals(): Promise<void> {
+    await invoke('nox_pty_close_all');
   }
 
   /**

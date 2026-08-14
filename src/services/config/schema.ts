@@ -8,7 +8,7 @@
  * nowhere else. No component may hardcode a default.
  */
 
-export type SettingCategory = 'Editor' | 'Text' | 'Files' | 'Workbench';
+export type SettingCategory = 'Editor' | 'Text' | 'Files' | 'Workbench' | 'Terminal';
 
 interface Common {
   label: string;
@@ -98,6 +98,31 @@ export const SETTINGS_SCHEMA = {
     label: 'Restore Session',
     description: 'Reopen the last workspace and tabs on launch.',
     category: 'Workbench',
+  }),
+
+  // --- Terminal ----------------------------------------------------------
+  'terminal.shell': str('', {
+    label: 'Shell',
+    description: 'Program to run. Empty uses your login shell.',
+    category: 'Terminal',
+    placeholder: '/bin/zsh',
+  }),
+  'terminal.fontSize': num(12, { min: 8, max: 32 }, {
+    label: 'Terminal Font Size',
+    description: 'Size of terminal text in pixels.',
+    category: 'Terminal',
+  }),
+  'terminal.scrollback': num(1000, { min: 100, max: 100000 }, {
+    label: 'Scrollback',
+    description: 'Lines of output kept above the top of the terminal.',
+    category: 'Terminal',
+    advanced: true,
+  }),
+  'terminal.height': num(260, { min: 80, max: 900 }, {
+    label: 'Terminal Height',
+    description: 'Height of the terminal panel in pixels.',
+    category: 'Terminal',
+    advanced: true,
   }),
 
   // --- Editor appearance -------------------------------------------------

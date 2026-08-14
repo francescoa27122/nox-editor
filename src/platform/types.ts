@@ -45,6 +45,8 @@ export interface PlatformCapabilities {
   projectSearch: boolean;
   /** True when `spawnAgent` can start an external process. */
   agentProcesses: boolean;
+  /** True when `openTerminal` can give a shell a real pty. */
+  terminals: boolean;
 }
 
 /** What to start, for `Platform.spawnAgent`. */
@@ -81,6 +83,35 @@ export interface AgentProcess {
   onExit(handler: (code: number | null) => void): void;
   /** Stop it and release the listeners. Safe to call twice. */
   kill(): Promise<void>;
+}
+
+/** What to start, for `Platform.openTerminal`. */
+export interface TerminalSpec {
+  /** Defaults to the user's login shell. */
+  shell?: string;
+  args?: string[];
+  /** Defaults to the workspace root. */
+  cwd?: string;
+  cols: number;
+  rows: number;
+}
+
+/**
+ * A running terminal, as a stream of bytes in each direction.
+ *
+ * Deliberately not lines, unlike `AgentProcess`. A shell prompt has no
+ * trailing newline, and a keystroke is not a line — the difference is the
+ * whole reason terminals do not reuse the agent transport.
+ */
+export interface TerminalSession {
+  /** Send keystrokes. Raw: no newline is added. */
+  write(data: string): Promise<void>;
+  /** Tell the shell its window changed, so it knows where to wrap. */
+  resize(cols: number, rows: number): Promise<void>;
+  /** Output, in whatever sized chunks it arrives. Buffered until subscribed. */
+  onData(handler: (data: string) => void): void;
+  onExit(handler: (code: number | null) => void): void;
+  close(): Promise<void>;
 }
 
 export interface SearchRequest {
@@ -227,6 +258,20 @@ export interface Platform {
    * with nothing left to talk to them.
    */
   killAllAgents(): Promise<void>;
+
+  /**
+   * Open a terminal running a real shell.
+   *
+   * Throws `PlatformError('unsupported')` where there is no pty — the browser
+   * target. Check `capabilities.terminals` first.
+   */
+  openTerminal(spec: TerminalSpec): Promise<TerminalSession>;
+
+  /**
+   * Close every terminal, for the same reason as `killAllAgents`: a reload
+   * would otherwise strand a shell with nothing attached to it.
+   */
+  closeAllTerminals(): Promise<void>;
 
   /**
    * Search every file under `root`, streaming results as they are found.

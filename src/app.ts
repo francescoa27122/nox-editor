@@ -48,6 +48,7 @@ import {
 } from '@services/permissions';
 import { SearchService } from '@services/search';
 import { SessionService } from '@services/session';
+import { TerminalService } from '@services/terminal';
 import { UIService } from '@services/ui';
 import { FileWatcherService } from '@services/watcher';
 import { WorkspaceService } from '@services/workspace';
@@ -93,6 +94,7 @@ export class NoxApp {
   readonly agents: AgentRuntime;
   /** Agents the user has configured in `agents.json`. */
   readonly agentConfig: AgentConfigService;
+  readonly terminal: TerminalService;
 
   /** Set by EditorPane once a view exists. Null when no tab is open. */
   readonly view = new Signal<EditorView | null>(null);
@@ -149,6 +151,11 @@ export class NoxApp {
     });
 
     this.agentConfig = new AgentConfigService(platform);
+    this.terminal = new TerminalService(
+      platform,
+      () => this.workspace.rootPath.get(),
+      () => this.config.get('terminal.shell'),
+    );
     this.agents = new AgentRuntime({
       workspace: this.workspace,
       context: this.context,
@@ -2012,6 +2019,40 @@ export class NoxApp {
         },
       },
 
+      // --- Terminal ---------------------------------------------------------
+      {
+        id: 'terminal.toggle',
+        title: 'Toggle Terminal',
+        category: 'Terminal',
+        keyHint: 'Ctrl+`',
+        keywords: ['shell', 'console', 'command line'],
+        // Hidden rather than disabled on the browser target: a command that
+        // can never run is noise in the palette, not a discovery.
+        enabled: () => this.terminal.available,
+        run: () => this.ui.toggleTerminal(),
+      },
+      {
+        id: 'terminal.focus',
+        title: 'Focus Terminal',
+        category: 'Terminal',
+        keywords: ['shell', 'console'],
+        enabled: () => this.terminal.available,
+        run: () => this.ui.focusTerminal(),
+      },
+      {
+        id: 'terminal.restart',
+        title: 'Restart Terminal',
+        category: 'Terminal',
+        keywords: ['shell', 'new', 'kill'],
+        enabled: () => this.terminal.available,
+        run: () => {
+          // The panel owns the measured size, so it does the restart; this
+          // just asks. A command must not guess at geometry.
+          this.ui.focusTerminal();
+          this.terminal.requestRestart();
+        },
+      },
+
       // --- Preferences ------------------------------------------------------
       {
         id: 'prefs.open',
@@ -2100,6 +2141,10 @@ export class NoxApp {
       'Mod+=': 'view.increaseFontSize',
       'Mod+-': 'view.decreaseFontSize',
       'Mod+0': 'view.resetFontSize',
+
+      // Terminal. `Ctrl+\`` rather than a Mod chord on purpose: it is the
+      // convention on every platform, and ⌘` is already macOS's cycle-windows.
+      'Ctrl+`': 'terminal.toggle',
 
       // Preferences
       'Mod+,': 'prefs.open',
