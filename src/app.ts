@@ -38,6 +38,7 @@ import { ContextService } from '@services/context';
 import { FileTreeService } from '@services/filetree';
 import { KeymapService, platformIsMac } from '@services/keymap';
 import { JobRunner } from '@services/jobs';
+import { NotesService } from '@services/notes';
 import { NotificationService } from '@services/notifications';
 import { ReviewService } from '@services/review';
 import {
@@ -95,6 +96,8 @@ export class NoxApp {
   /** Agents the user has configured in `agents.json`. */
   readonly agentConfig: AgentConfigService;
   readonly terminal: TerminalService;
+  /** The user's own notes — not workspace files. See `notes.ts`. */
+  readonly notes: NotesService;
 
   /** Set by EditorPane once a view exists. Null when no tab is open. */
   readonly view = new Signal<EditorView | null>(null);
@@ -164,6 +167,7 @@ export class NoxApp {
       review: this.review,
       jobs: this.jobs,
     });
+    this.notes = new NotesService(platform);
 
     this.#wireServices();
     this.#registerCommands();
@@ -183,6 +187,7 @@ export class NoxApp {
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
     await this.agentConfig.load();
+    await this.notes.load();
     this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
 
     const restored = this.config.get('workbench.restoreSession')
@@ -295,6 +300,12 @@ export class NoxApp {
       if (keys.has('files.excludeFromExplorer')) {
         this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
       }
+    });
+
+    // Notes have no on-disk original to fall back on: a save that does not
+    // land means the text exists only in memory, so it is worth saying.
+    this.notes.error.subscribe((message) => {
+      if (message) this.notifications.error('Could not save notes', message);
     });
   }
 
@@ -1014,6 +1025,41 @@ export class NoxApp {
       validate: (v) => (v.trim().length === 0 ? 'Enter a path' : null),
     });
     return value ? value.trim() : null;
+  }
+
+  async #renameSelectedNote(): Promise<void> {
+    const id = this.notes.selectedId.get();
+    const note = this.notes.notes.get().find((entry) => entry.id === id);
+    if (!note) return;
+
+    const title = await this.ui.askForText({
+      title: 'Rename Note',
+      label: 'Name',
+      initialValue: note.title,
+      confirmLabel: 'Rename',
+      validate: (value) => (value.trim().length === 0 ? 'A note needs a name.' : null),
+    });
+    if (title === null) return;
+    this.notes.rename(note.id, title);
+  }
+
+  async #deleteSelectedNote(): Promise<void> {
+    const id = this.notes.selectedId.get();
+    const note = this.notes.notes.get().find((entry) => entry.id === id);
+    if (!note) return;
+
+    // A confirm rather than an undo: there is no trash to recover from, and
+    // nothing else in the app will resurrect the text.
+    const choice = await this.ui.askToConfirm({
+      title: 'Delete Note',
+      message: `Delete “${note.title}”? This cannot be undone.`,
+      choices: [
+        { id: 'delete', label: 'Delete', danger: true },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+    });
+    if (choice !== 'delete') return;
+    this.notes.remove(note.id);
   }
 
   // --- Commands -----------------------------------------------------------
@@ -2053,6 +2099,41 @@ export class NoxApp {
         },
       },
 
+      // --- Notes ------------------------------------------------------------
+      {
+        id: 'notes.focus',
+        title: 'Show Notes',
+        category: 'Notes',
+        keyHint: 'Mod+Shift+N',
+        keywords: ['note', 'scratch', 'memo'],
+        run: () => this.ui.focusNotes(),
+      },
+      {
+        id: 'notes.new',
+        title: 'New Note',
+        category: 'Notes',
+        keywords: ['note', 'create', 'add'],
+        run: () => {
+          this.notes.create();
+          this.ui.focusNotes();
+        },
+      },
+      {
+        id: 'notes.rename',
+        title: 'Rename Note',
+        category: 'Notes',
+        enabled: () => this.notes.selectedId.get() !== null,
+        run: () => void this.#renameSelectedNote(),
+      },
+      {
+        id: 'notes.delete',
+        title: 'Delete Note',
+        category: 'Notes',
+        keywords: ['remove', 'trash'],
+        enabled: () => this.notes.selectedId.get() !== null,
+        run: () => void this.#deleteSelectedNote(),
+      },
+
       // --- Preferences ------------------------------------------------------
       {
         id: 'prefs.open',
@@ -2120,6 +2201,7 @@ export class NoxApp {
       'Mod+Alt+Shift+Left': 'view.moveEditorToPreviousGroup',
       'Mod+Shift+E': 'nav.focusExplorer',
       'Mod+Shift+F': 'search.focus',
+      'Mod+Shift+N': 'notes.focus',
 
       // Edit
       'Mod+F': 'edit.find',
@@ -2238,6 +2320,7 @@ export class NoxApp {
     this.watcher.stop();
     await this.config.flush();
     await this.session.save();
+    await this.notes.flush();
   }
 }
 
