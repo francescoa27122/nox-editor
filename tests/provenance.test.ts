@@ -1,6 +1,6 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
-import { provenanceField, type ProvenanceValue } from '../src/editor/provenance';
+import { describeProvenance, provenanceAt, provenanceField, type ProvenanceValue } from '../src/editor/provenance';
 import { changeSetAnnotation, type Provenance } from '../src/services/transactions';
 
 /**
@@ -293,5 +293,58 @@ describe('decaying', () => {
       [0, 3, 'cs-1'],
       [7, 10, 'cs-2'],
     ]);
+  });
+});
+
+describe('provenanceAt at a boundary', () => {
+  /**
+   * The failure this prevents: hovering the first character of a newer edit
+   * reporting the older change set it was carved out of, because `between`
+   * touches both the mark ending at `pos` and the mark starting there, and
+   * naively taking the first (`from`-ascending) hit picks the one that only
+   * grazes `pos` rather than the one whose text actually starts at it.
+   */
+  it('prefers the mark that contains pos over one that merely ends there', () => {
+    const first = applySet(stateWith('aaaabbbbbb'), { from: 0, to: 4, insert: 'aaaa' });
+    const second = applySet(first, { from: 4, to: 10, insert: 'bbbbbb' }, record({ changeSetId: 'cs-2' }));
+    expect(marks(second)).toEqual([
+      [0, 4, 'cs-1'],
+      [4, 10, 'cs-2'],
+    ]);
+
+    expect(provenanceAt(second, 4)?.changeSetId).toBe('cs-2');
+  });
+});
+
+describe('tooltip text', () => {
+  const now = 1_700_000_600_000; // ten minutes after the fixture's `at`
+
+  it('names the author and the change', () => {
+    expect(describeProvenance(record(), now)).toBe('claude-1 · Rewrite the greeting · 10m ago');
+  });
+
+  /**
+   * The failure this prevents: "0m ago" for something that just happened,
+   * which reads as a bug rather than as freshness.
+   */
+  it('says "just now" under a minute', () => {
+    expect(describeProvenance(record({ at: now - 20_000 }), now)).toBe(
+      'claude-1 · Rewrite the greeting · just now',
+    );
+  });
+
+  it('falls back to hours past sixty minutes', () => {
+    expect(describeProvenance(record({ at: now - 7_200_000 }), now)).toBe(
+      'claude-1 · Rewrite the greeting · 2h ago',
+    );
+  });
+
+  /**
+   * The failure this prevents: a project replace reading as though someone
+   * else did it. `authorLabel` renders `{kind:'user'}` as "You".
+   */
+  it('renders your own change sets as yours', () => {
+    expect(describeProvenance(record({ authorKind: 'user', authorLabel: 'You', description: 'Replace "foo"' }), now))
+      .toBe('You · Replace "foo" · 10m ago');
   });
 });

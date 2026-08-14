@@ -3,9 +3,11 @@ import {
   RangeValue,
   StateField,
   type EditorState,
+  type Extension,
   type Range,
   type Transaction,
 } from '@codemirror/state';
+import { gutter, GutterMarker, hoverTooltip } from '@codemirror/view';
 import { changeSetAnnotation, type Provenance } from '@services/transactions';
 
 /**
@@ -145,12 +147,93 @@ function subtractChanged(
   return RangeSet.of(subtractSpans(set, cuts), true);
 }
 
-/** The provenance covering `pos`, or null. Used by the tooltip. */
+/**
+ * The provenance covering `pos`, or null. Used by the tooltip.
+ *
+ * `between(pos, pos, …)` treats a point as touching any range whose `from` or
+ * `to` sits on it, so at a boundary between two abutting marks — routine
+ * since Task 2 splits a range wherever a later change set overwrites part of
+ * it — it reports both: the one ending at `pos` and the one starting there.
+ * Ranges arrive in `from` order, so taking the first hit favours the left
+ * (older) mark. That reads backwards for a hover: the character actually
+ * under the pointer at `pos` belongs to the mark that *starts* there, not
+ * the one that merely stops. Preferring a hit where `to > pos` — an actual
+ * character of `pos` is still inside it — over one where `to === pos` fixes
+ * that without changing anything away from a boundary, where only one mark
+ * ever touches `pos` in the first place.
+ */
 export function provenanceAt(state: EditorState, pos: number): Provenance | null {
   let found: Provenance | null = null;
-  state.field(provenanceField).between(pos, pos, (_from, _to, value) => {
-    found = value.provenance;
-    return false;
+  state.field(provenanceField).between(pos, pos, (_from, to, value) => {
+    if (to > pos) {
+      // Actually contains `pos` — take it and stop; nothing later in
+      // `from` order can contain `pos` too without overlapping this one.
+      found = value.provenance;
+      return false;
+    }
+    // Merely ends at `pos`. Keep it only as a fallback, in case no
+    // containing mark ever turns up (e.g. `pos` is the end of the document).
+    found ??= value.provenance;
   });
   return found;
+}
+
+/**
+ * One bar, shared by every marked line.
+ *
+ * Deliberately one appearance for all four author kinds. The mark's job is
+ * "something other than your typing touched this line" — the tooltip carries
+ * who. Four colours in a 2px bar would ask a glance to read more than a glance
+ * can.
+ */
+class ProvenanceMarker extends GutterMarker {
+  override toDOM(): Node {
+    const span = document.createElement('span');
+    span.className = 'nox-provenance-marker';
+    return span;
+  }
+}
+
+const marker = new ProvenanceMarker();
+
+export function provenanceGutter(): Extension {
+  return gutter({
+    class: 'cm-provenanceGutter',
+    lineMarker(view, line) {
+      // `between` stops at the first hit: the line either has attribution or
+      // it does not, and which change set it came from does not change the bar.
+      let hit = false;
+      view.state.field(provenanceField).between(line.from, line.to, () => {
+        hit = true;
+        return false;
+      });
+      return hit ? marker : null;
+    },
+  });
+}
+
+/** "claude-1 · Rewrite the greeting · 10m ago". */
+export function describeProvenance(provenance: Provenance, now: number): string {
+  const elapsed = Math.max(0, now - provenance.at);
+  const minutes = Math.floor(elapsed / 60_000);
+  // "0m ago" reads as a bug rather than as freshness.
+  const when = minutes < 1 ? 'just now' : minutes < 60 ? `${minutes}m ago` : `${Math.floor(minutes / 60)}h ago`;
+  return `${provenance.authorLabel} · ${provenance.description} · ${when}`;
+}
+
+export function provenanceTooltip(): Extension {
+  return hoverTooltip((view, pos) => {
+    const provenance = provenanceAt(view.state, pos);
+    if (!provenance) return null;
+    return {
+      pos,
+      above: true,
+      create() {
+        const dom = document.createElement('div');
+        dom.className = 'cm-tooltip-provenance';
+        dom.textContent = describeProvenance(provenance, Date.now());
+        return { dom };
+      },
+    };
+  });
 }

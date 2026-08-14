@@ -145,6 +145,19 @@ export function noxTheme(options: ThemeOptions): Extension {
         opacity: '1',
         color: 'var(--nox-text-bright)',
       },
+      // --- Provenance gutter ------------------------------------------------
+      '.cm-provenanceGutter': {
+        width: '3px',
+        padding: '0',
+      },
+      // Quiet on purpose: this is somewhere to look when you are curious, not
+      // something that competes for attention while you work.
+      '.cm-provenanceGutter .nox-provenance-marker': {
+        display: 'block',
+        width: '2px',
+        height: '100%',
+        background: 'var(--nox-violet-dim)',
+      },
 
       // --- Active line ----------------------------------------------------
       '.cm-activeLine': {
