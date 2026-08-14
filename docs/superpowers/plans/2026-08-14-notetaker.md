@@ -25,11 +25,12 @@
 
 ## Deviations from the spec, decided while planning
 
-Three, all narrowing:
+Two, both narrowing. (A third — the spec overstating what flushing on a note
+switch protects against — was corrected in the spec itself rather than carried
+here as a deviation.)
 
 1. **No title `<input>` in the panel.** The spec's diagram showed one alongside a `notes.rename` command that opens `ui.askForText` — two rename paths for one operation, and a controlled input whose value changes underneath the caret. The selected note's title is a button; clicking it runs `notes.rename`. This matches how the explorer renames files and removes a focus-management problem entirely.
 2. **One focus signal, not two.** Consequence of (1): `ui.focusNotesRequest` focuses the body textarea, and nothing else needs focusing.
-3. **`select()` flushing is a durability checkpoint, not a correctness fix.** The spec implied switching notes could lose text. It cannot — `setBody` updates the signal synchronously, so the debounced write always sees current text. The flush bounds how long a body lives only in memory before a `kill -9`. The test in Task 3 guards the real regression: persisting only the *selected* note's body instead of every dirty one.
 
 ## File structure
 

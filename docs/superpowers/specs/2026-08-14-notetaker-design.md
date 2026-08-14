@@ -173,10 +173,17 @@ Nothing is added to `SETTINGS_SCHEMA`. `notes.sortOrder` was considered and
 rejected — one order, no preference, until there is a second order worth
 having.
 
-**Flush before switching is load-bearing.** Selecting another note while the
-current one is inside its debounce window must write the pending body first.
-This is the failure mode that shipped in the dialog that kept only the last
-character typed, and it gets a named test.
+**What flushing on a switch does and does not buy.** It is a durability
+checkpoint, not protection against losing text. `setBody` updates the note
+in memory synchronously, so the pending write already sees the current body
+whether or not the selection has moved on; switching cannot lose anything.
+What the flush bounds is how long a body exists *only* in memory, where a
+crash or a `kill -9` — rather than a clean quit — would take it.
+
+The failure that is real, and gets a named test: persisting only the
+**selected** note's body instead of every dirty one. That implementation
+passes every single-note test and loses note A's text the moment you switch
+to note B.
 
 ## 5. Service
 
@@ -341,7 +348,7 @@ comment naming the regression it prevents.
 |---|---|
 | A fresh service against the same platform sees the same notes | Notes that do not survive a restart |
 | `NotesService` is constructible with only a `Platform` | Coupling notes to the workspace, so opening a folder hides them |
-| Selecting another note during the debounce writes the first one | The dialog bug that kept only the last character typed |
+| Editing note A, switching to B, then saving persists both bodies | Persisting only the selected note, which loses A on the switch |
 | N keystrokes produce one write of that body and zero of the others | The session v3 write-amplification, reintroduced |
 | Deleting the selected note selects a neighbour | A selection pointing at a note that no longer exists |
 | Deleting blanks the body file | A deleted note's text left in the config directory |
