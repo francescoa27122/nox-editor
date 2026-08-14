@@ -103,3 +103,70 @@ describe('recording', () => {
     expect(marks(edited)).toEqual([[10, 14, 'cs-1']]);
   });
 });
+
+/** A plain user edit — no change-set annotation. */
+function userEdit(state: EditorState, changes: { from: number; to?: number; insert?: string }): EditorState {
+  return state.update({ changes }).state;
+}
+
+describe('decaying', () => {
+  /**
+   * The failure this prevents: marks that never clear, so the gutter fills up
+   * over a session and an empty gutter stops meaning anything.
+   */
+  it('clears the part of a mark you typed into, keeping the rest', () => {
+    const marked = applySet(stateWith('aaaabbbbcccc'), { from: 0, to: 12, insert: 'aaaabbbbcccc' });
+    expect(marks(marked)).toEqual([[0, 12, 'cs-1']]);
+
+    // Type one character in the middle.
+    const edited = userEdit(marked, { from: 6, insert: 'X' });
+
+    // The touched character is unattributed; the two flanks survive.
+    expect(marks(edited)).toEqual([
+      [0, 6, 'cs-1'],
+      [7, 13, 'cs-1'],
+    ]);
+  });
+
+  /**
+   * The failure this prevents: CodeMirror's default range mapping extends a
+   * mark when you type at its edge, which is the opposite of "touching a line
+   * takes ownership of it".
+   */
+  it('does not grow a mark when you type at its end', () => {
+    const marked = applySet(stateWith('abc'), { from: 0, to: 3, insert: 'abc' });
+
+    const edited = userEdit(marked, { from: 3, insert: 'XYZ' });
+
+    expect(marks(edited)).toEqual([[0, 3, 'cs-1']]);
+  });
+
+  it('does not grow a mark when you type at its start', () => {
+    const marked = applySet(stateWith('abc'), { from: 0, to: 3, insert: 'abc' });
+
+    const edited = userEdit(marked, { from: 0, insert: 'XYZ' });
+
+    expect(marks(edited)).toEqual([[3, 6, 'cs-1']]);
+  });
+
+  it('removes a mark whose text was deleted entirely', () => {
+    const marked = applySet(stateWith('keep____keep'), { from: 4, to: 8, insert: '____' });
+
+    const edited = userEdit(marked, { from: 4, to: 8 });
+
+    // The failure this prevents: a zero-width ghost surviving the deletion and
+    // rendering as a bar on the line that closed over it.
+    expect(marks(edited)).toEqual([]);
+  });
+
+  /**
+   * The failure this prevents: stale authorship after an agent edits its own
+   * earlier work — the mark would still name the first change set.
+   */
+  it('re-attributes a range a second change set overwrites', () => {
+    const first = applySet(stateWith('abc'), { from: 0, to: 3, insert: 'abc' });
+    const second = applySet(first, { from: 0, to: 3, insert: 'xyz' }, record({ changeSetId: 'cs-2' }));
+
+    expect(marks(second)).toEqual([[0, 3, 'cs-2']]);
+  });
+});
