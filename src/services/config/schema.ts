@@ -94,6 +94,11 @@ export const SETTINGS_SCHEMA = {
     description: 'Display the status bar along the bottom edge.',
     category: 'Workbench',
   }),
+  'workbench.showChangeMarks': bool(true, {
+    label: 'Show Change Marks',
+    description: 'Mark lines changed by a replace, an agent or a plugin.',
+    category: 'Workbench',
+  }),
   'workbench.restoreSession': bool(true, {
     label: 'Restore Session',
     description: 'Reopen the last workspace and tabs on launch.',

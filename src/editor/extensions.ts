@@ -27,6 +27,7 @@ import type { Settings } from '@services/config/schema';
 import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
 import { languageCompartment } from './languages';
+import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
 import { searchHighlighter } from './search-highlight';
 import { noxTheme } from './theme';
 
@@ -52,6 +53,7 @@ const compartments = {
   scrollPastEnd: new Compartment(),
   autoIndent: new Compartment(),
   folding: new Compartment(),
+  provenance: new Compartment(),
 } as const;
 
 type CompartmentName = keyof typeof compartments;
@@ -75,6 +77,7 @@ const SETTING_TO_COMPARTMENTS: Partial<Record<keyof Settings, CompartmentName[]>
   'editor.scrollBeyondLastLine': ['scrollPastEnd'],
   'editor.autoIndent': ['autoIndent'],
   'editor.codeFolding': ['folding'],
+  'workbench.showChangeMarks': ['provenance'],
 };
 
 // --- Per-compartment content ------------------------------------------------
@@ -145,6 +148,8 @@ function compartmentContent(name: CompartmentName, s: Settings): Extension {
       return s['editor.autoIndent'] ? indentOnInput() : [];
     case 'folding':
       return foldingExtension(s['editor.codeFolding']);
+    case 'provenance':
+      return s['workbench.showChangeMarks'] ? [provenanceGutter(), provenanceTooltip()] : [];
   }
 }
 
@@ -187,6 +192,11 @@ function staticExtensions(): Extension[] {
     EditorState.allowMultipleSelections.of(true),
     EditorView.clickAddsSelectionRange.of((event) => event.altKey),
     editorKeymap(),
+    // The field is unconditional; only its rendering is compartmentalised.
+    // A compartment reconfigured to nothing removes its extensions, and
+    // removing a StateField destroys the state it holds — so gating the field
+    // on the setting would throw every mark away the moment it was toggled off.
+    provenanceField,
   ];
 }
 

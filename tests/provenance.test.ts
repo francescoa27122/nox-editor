@@ -1,6 +1,8 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
+import { buildExtensions } from '../src/editor/extensions';
 import { describeProvenance, provenanceAt, provenanceField, type ProvenanceValue } from '../src/editor/provenance';
+import { defaultSettings } from '../src/services/config/schema';
 import { changeSetAnnotation, type Provenance } from '../src/services/transactions';
 
 /**
@@ -346,5 +348,38 @@ describe('tooltip text', () => {
   it('renders your own change sets as yours', () => {
     expect(describeProvenance(record({ authorKind: 'user', authorLabel: 'You', description: 'Replace "foo"' }), now))
       .toBe('You · Replace "foo" · 10m ago');
+  });
+});
+
+describe('the setting', () => {
+  /**
+   * The failure this prevents: putting the state field inside the compartment.
+   * Reconfiguring a compartment to nothing removes its extensions, and
+   * removing a StateField destroys the state it holds — so toggling the
+   * setting off would silently throw away every mark recorded so far, and
+   * toggling it back on would show an empty gutter.
+   */
+  it('keeps marks recorded while the gutter is hidden', () => {
+    const off = { ...defaultSettings(), 'workbench.showChangeMarks': false };
+    const state = EditorState.create({ doc: 'hello', extensions: buildExtensions(off) });
+
+    const marked = state.update({
+      changes: { from: 0, to: 5, insert: 'goodbye' },
+      annotations: changeSetAnnotation.of(record()),
+    }).state;
+
+    // Recorded even though nothing is rendering it.
+    expect(marks(marked)).toEqual([[0, 7, 'cs-1']]);
+  });
+
+  it('records marks with the gutter on, too', () => {
+    const state = EditorState.create({ doc: 'hello', extensions: buildExtensions(defaultSettings()) });
+
+    const marked = state.update({
+      changes: { from: 0, to: 5, insert: 'goodbye' },
+      annotations: changeSetAnnotation.of(record()),
+    }).state;
+
+    expect(marks(marked)).toEqual([[0, 7, 'cs-1']]);
   });
 });
