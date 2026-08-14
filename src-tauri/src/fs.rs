@@ -405,10 +405,24 @@ pub fn nox_read_config(app: tauri::AppHandle, name: String) -> Result<Option<Str
     }
 }
 
+/// The write itself, split from the command so it can be tested without an
+/// `AppHandle`.
+fn write_config_atomically(path: &Path, contents: &str) -> Result<()> {
+    // Same reasoning as a file save: truncate-then-write leaves a window where
+    // a crash costs the whole file. A config path always has a parent
+    // directory, so the sibling temp always has somewhere to live.
+    let temp = temp_path_for(path);
+    let outcome = write_then_rename(&temp, path, contents.as_bytes());
+    if outcome.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    outcome
+}
+
 #[tauri::command]
 pub fn nox_write_config(app: tauri::AppHandle, name: String, contents: String) -> Result<()> {
     let path = config_path(&app, &name)?;
-    fs::write(&path, contents).map_err(|e| describe(&e, &path))
+    write_config_atomically(&path, &contents)
 }
 
 #[cfg(test)]
@@ -550,5 +564,31 @@ mod tests {
         // and detach whatever else pointed at the target.
         assert_eq!(fs::read_to_string(&real).unwrap(), "updated\n");
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    }
+
+    /// The failure this prevents: `fs::write` truncates the target before it
+    /// writes, so a crash mid-write leaves a half-written config file. Session
+    /// and notes both keep their index there, and a truncated index reads as
+    /// "you have no notes".
+    #[test]
+    fn config_writes_replace_atomically_and_leave_no_litter() {
+        let scratch = Scratch::new("config-atomic");
+        let path = scratch.0.join("notes.json");
+
+        write_config_atomically(&path, r#"{"version":1}"#).expect("first write");
+        write_config_atomically(&path, r#"{"version":2}"#).expect("overwrite");
+
+        assert_eq!(fs::read_to_string(&path).expect("read"), r#"{"version":2}"#);
+
+        // A `.tmp` sibling left behind would sit in the user's config
+        // directory forever: there is no cleanup pass, and the config API
+        // lists nothing, so nothing would ever notice it.
+        let strays: Vec<String> = fs::read_dir(&scratch.0)
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != "notes.json")
+            .collect();
+        assert!(strays.is_empty(), "left behind: {strays:?}");
     }
 }
