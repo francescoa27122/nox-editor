@@ -3,6 +3,7 @@
   import { useApp } from './context';
   import ExplorerPanel from './ExplorerPanel.svelte';
   import SearchPanel from './SearchPanel.svelte';
+  import NotesPanel from './NotesPanel.svelte';
   import Icon, { type IconName } from './Icon.svelte';
 
   /**
@@ -21,6 +22,7 @@
   const VIEWS: { id: SidebarView; icon: IconName; label: string; command: string }[] = [
     { id: 'explorer', icon: 'sidebar', label: 'Explorer', command: 'nav.focusExplorer' },
     { id: 'search', icon: 'search', label: 'Search', command: 'search.focus' },
+    { id: 'notes', icon: 'note', label: 'Notes', command: 'notes.focus' },
   ];
 </script>
 
@@ -43,6 +45,8 @@
 
   {#if $view === 'search'}
     <SearchPanel />
+  {:else if $view === 'notes'}
+    <NotesPanel />
   {:else}
     <ExplorerPanel />
   {/if}
