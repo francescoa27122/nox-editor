@@ -541,11 +541,14 @@ describe('deleting', () => {
 
   /**
    * The failure this prevents: remove()'s fallback reads
-   * `remaining[index]` first — the note that slid into the deleted one's
-   * slot — but deleting the *newest* note leaves no note at that index at
-   * all. Without the `?? remaining[index - 1]?.id` fallback behind it, the
-   * selection would land on `undefined` instead of stepping back to the
-   * note that was already there.
+   * `remaining[index]?.id` first — the note that slid into the deleted
+   * one's slot. The list is newest-first (`[newest, oldest]`), and deleting
+   * `oldest`, at array index 1, leaves a one-element `remaining` with
+   * nothing at index 1 — the slot the deleted note vacated is past the end
+   * of the array, not filled by a note sliding up. Without the
+   * `?? remaining[index - 1]?.id` fallback behind it, the selection would
+   * land on `undefined` instead of stepping back to the note that was
+   * already there.
    */
   it('falls back to the previous note when the last one is deleted', () => {
     const notes = new NotesService(new MemoryPlatform());
@@ -560,9 +563,12 @@ describe('deleting', () => {
 
   /**
    * The failure this prevents: with no note before or after the deleted one,
-   * `remaining[index] ?? remaining[index - 1]?.id ?? null` has to fall all
-   * the way through to `null`. Stopping one step early would leave
-   * `selectedId` pointing at the id that was just removed.
+   * `remaining[index]?.id ?? remaining[index - 1]?.id ?? null` has to fall
+   * all the way through to the trailing `?? null`. Dropping that fallback
+   * would leave `selectedId` set to `undefined` instead — the `if` branch
+   * still runs and still calls `selectedId.set(...)`, so it is not the
+   * removed note's id that would leak through, but `undefined` is just as
+   * wrong and is exactly what `toBeNull()` below catches.
    */
   it('clears the selection when the last note goes', () => {
     const notes = new NotesService(new MemoryPlatform());
@@ -594,10 +600,12 @@ describe('deleting', () => {
   });
 
   /**
-   * The failure this prevents: `remove()` drops the note from `notes` and
-   * `#bodyFiles` in memory, but if that never reached disk — e.g. because
-   * nothing marked the index dirty — a reload would rebuild the deleted
-   * note's row from the still-present index entry.
+   * The failure this prevents: `remove()` failing to actually drop the note
+   * from `notes` and `#bodyFiles` in memory. The index write itself is
+   * unconditional and always reads `notes` fresh, and `keep`'s dirty body
+   * from `create()` already guarantees at least one pass this call — so a
+   * missing or stale index-dirty signal cannot cause this failure; only
+   * `remove()` leaving the note in those two structures can.
    */
   it('does not resurrect a deleted note on reload', async () => {
     const platform = new MemoryPlatform();
@@ -655,6 +663,44 @@ describe('switching notes', () => {
     await reloaded.load();
 
     expect(reloaded.selectedId.get()).toBe(first);
+  });
+
+  /**
+   * The failure this prevents: `select()` bumps the index revision and then
+   * calls its own `flush()` — nothing else in the app calls a follow-up
+   * flush() after a plain selection change, so this internal, unawaited
+   * flush is the *only* thing that can pick up a rename landing right after
+   * it. That means its index write always starts already carrying an
+   * unpersisted change (the selection itself), the same "already dirty at
+   * write-start" shape as the explicit-flush regression above, but reached
+   * through the path a real title field actually exercises. Captured via
+   * `vi.spyOn` rather than an extra `flush()` call of our own, so this stays
+   * true to "one flush is enough" on the path the app really uses.
+   */
+  it('persists a rename that lands during the index write select() itself triggers, with no follow-up flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+    const first = notes.create();
+    const second = notes.create();
+    await notes.flush(); // clean baseline: both notes and their bodies on disk
+    expect(notes.selectedId.get()).toBe(second); // create() selects the newest
+
+    const gate = platform.hold('notes.json');
+    const flushSpy = vi.spyOn(notes, 'flush');
+    notes.select(first); // selection changes away from `second`, starting select()'s own flush
+    const selectFlush = flushSpy.mock.results[0]!.value as Promise<void>;
+    await gate.started;
+
+    // The race: this lands mid-write, with no flush() call of our own.
+    notes.rename(first, 'renamed during select');
+    gate.release();
+    await selectFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get().find((note) => note.id === first)!.title).toBe(
+      'renamed during select',
+    );
   });
 });
 
