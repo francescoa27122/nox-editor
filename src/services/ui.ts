@@ -19,7 +19,7 @@ export type OverlayKind =
   | 'keybindings';
 
 /** Which panel the sidebar is showing. */
-export type SidebarView = 'explorer' | 'search';
+export type SidebarView = 'explorer' | 'search' | 'notes';
 
 export interface PromptRequest {
   title: string;
@@ -41,7 +41,7 @@ export interface ConfirmRequest {
   resolve: (choiceId: string | null) => void;
 }
 
-export type FocusZone = 'editor' | 'explorer' | 'search' | 'find' | 'overlay' | 'terminal';
+export type FocusZone = 'editor' | 'explorer' | 'search' | 'find' | 'overlay' | 'terminal' | 'notes';
 
 export class UIService {
   readonly overlay = new Signal<OverlayKind | null>(null);
@@ -100,6 +100,8 @@ export class UIService {
   /** Bumped to ask the editor host to take focus. */
   readonly focusEditorRequest = new Signal(0);
   readonly focusExplorerRequest = new Signal(0);
+  /** Bumped to ask the notes panel to put the cursor in the note body. */
+  readonly focusNotesRequest = new Signal(0);
 
   openOverlay(kind: OverlayKind): void {
     this.overlay.set(kind);
@@ -167,6 +169,7 @@ export class UIService {
     // `focusExplorer` for anything that was not search, which set the view
     // straight back to the explorer — invisible while there were only two.
     if (view === 'search') this.focusSearch();
+    else if (view === 'notes') this.focusNotes();
     else if (view === 'explorer') this.focusExplorer();
     else this.sidebarView.set(view);
   }
@@ -181,6 +184,12 @@ export class UIService {
     this.sidebarView.set('search');
     this.focusZone.set('search');
     this.focusSearchRequest.update((n) => n + 1);
+  }
+
+  focusNotes(): void {
+    this.sidebarView.set('notes');
+    this.focusZone.set('notes');
+    this.focusNotesRequest.update((n) => n + 1);
   }
 
   /** True when something is showing that Escape should dismiss. */

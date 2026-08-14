@@ -13,6 +13,12 @@
     'chevron-down': 'M3.5 6 8 10.5 12.5 6',
     folder: 'M2 4.25A1.25 1.25 0 0 1 3.25 3h2.9a1 1 0 0 1 .8.4l.9 1.2h5.15A1.25 1.25 0 0 1 14 5.85v6.4A1.25 1.25 0 0 1 12.75 13.5h-9.5A1.25 1.25 0 0 1 2 12.25Z',
     file: 'M4 2.5h4.6L12 5.9v7.6H4Z M8.5 2.5v3.6H12',
+    // A page with ruled lines and deliberately no folded corner, so it does
+    // not read as `file` at the rail's 15px.
+    note: 'M3.5 2.5h9v11h-9Z M5.75 6h4.5M5.75 8.5h4.5M5.75 11h2.75',
+    // `close` was the alternative and is wrong: it means "dismiss this"
+    // everywhere else, and delete here is permanent.
+    trash: 'M3 4.5h10 M6.25 4.5V2.9a.4.4 0 0 1 .4-.4h2.7a.4.4 0 0 1 .4.4v1.6 M4.6 4.5l.5 8.2a.8.8 0 0 0 .8.8h4.2a.8.8 0 0 0 .8-.8l.5-8.2',
     close: 'M4 4l8 8M12 4l-8 8',
     plus: 'M8 3.5v9M3.5 8h9',
     search: 'M7.25 11.5a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5ZM10.4 10.4 13.5 13.5',
