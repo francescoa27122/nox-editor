@@ -536,12 +536,23 @@ export class OllamaProvider implements ModelProvider {
 
   /**
    * One round trip. Returns the assembled `message.content`, or null when the
-   * stream failed or was aborted — either way there is nothing to parse.
+   * run was cancelled — the one case where there is nothing to parse and
+   * nothing wrong.
+   *
+   * Anything else that stopped the stream **throws**. It used to return null
+   * there too, and the session that produced no output because its server was
+   * not running reported `Done` with an audit trail holding only the echoed
+   * instruction — measured in the running app, against a refused port and
+   * against a model that was not pulled. Throwing is what reaches the user:
+   * the runtime already turns a thrown error into a `failed` session and
+   * records the message in the trail, which is how `Cancelled` gets there too.
    */
   async #ask(messages: ChatMessage[], signal: AbortSignal | undefined): Promise<string | null> {
     const url = `${this.#config.host.replace(/\/+$/, '')}/api/chat`;
     let content = '';
     let failure: string | null = null;
+    /** An error the server sent as a frame rather than as an HTTP status. */
+    let reported: string | null = null;
 
     await new Promise<void>((resolve) => {
       let settled = false;
@@ -579,7 +590,18 @@ export class OllamaProvider implements ModelProvider {
           },
           (line) => {
             try {
-              const frame = JSON.parse(line) as { message?: { content?: string } };
+              const frame = JSON.parse(line) as {
+                error?: unknown;
+                message?: { content?: string };
+              };
+              // A failure the server decided on after it had already answered
+              // 200 arrives here, as a frame, and not as a transport error at
+              // all — so a check on the HTTP status cannot see it and a reader
+              // that only looks at `message.content` files it as an empty turn.
+              if (typeof frame.error === 'string' && frame.error !== '') {
+                reported = frame.error;
+                return;
+              }
               content += frame.message?.content ?? '';
             } catch {
               // A frame that is not JSON is not fatal: the reply so far still
@@ -610,8 +632,55 @@ export class OllamaProvider implements ModelProvider {
         });
     });
 
-    if (failure !== null || signal?.aborted) return null;
+    // Cancellation is checked first and reported as nothing at all. A closed
+    // connection can also surface as a transport error, and a user who
+    // cancelled is owed "Cancelled" rather than a failure they caused on
+    // purpose.
+    if (signal?.aborted) return null;
+
+    if (failure !== null) {
+      const message = reportedError(failure);
+      // Naming the host in both: a refused connection is nearly always the
+      // wrong one, and `agents.json` is not on screen for the user to check.
+      throw new Error(
+        message === null
+          ? `Could not reach the model server at ${this.#config.host}: ${failure}`
+          : `The model server at ${this.#config.host} refused the request: ${message}`,
+      );
+    }
+
+    if (reported !== null) {
+      throw new Error(`The model server at ${this.#config.host} reported: ${reported}`);
+    }
+
     return content;
+  }
+}
+
+/**
+ * Ollama's own message inside `text`, or null if there is none.
+ *
+ * Recorded against 0.32.13, not guessed at. The server says what went wrong in
+ * a JSON object with one `error` string, and that object reaches this file two
+ * ways:
+ *
+ * - as the body of an HTTP failure, which the platform seam hands over as
+ *   `404 Not Found: {"error":"model 'llama3.3:70b' not found"}` — status and
+ *   body, since nothing down there knows which half means anything;
+ * - as a line in an otherwise successful stream — status 200, ordinary frames,
+ *   then `{"error":"pull model manifest: file does not exist"}`.
+ *
+ * Scanning from the first `{` rather than parsing the whole string is what
+ * covers both without the seam having to label them.
+ */
+function reportedError(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  try {
+    const parsed = JSON.parse(text.slice(start)) as { error?: unknown };
+    return typeof parsed.error === 'string' && parsed.error !== '' ? parsed.error : null;
+  } catch {
+    return null;
   }
 }
 

@@ -1,3 +1,4 @@
+import { history } from '@codemirror/commands';
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import type { Platform } from '../src/platform/types';
@@ -5,6 +6,14 @@ import { OllamaProvider, parseTurn, resolveEdit } from '../src/services/agent/ol
 import type { OllamaAgentConfig } from '../src/services/agent/config';
 import type { CoreResponse, RequestBody } from '../src/services/agent/protocol';
 import type { ModelChunk } from '../src/services/agent/provider';
+import { AgentRuntime, ProviderTransport, type AgentSession } from '../src/services/agent/runtime';
+import { CommandRegistry } from '../src/services/commands';
+import { ContextService } from '../src/services/context';
+import { FileTreeService } from '../src/services/filetree';
+import { JobRunner } from '../src/services/jobs';
+import { PermissionService } from '../src/services/permissions';
+import { ReviewService } from '../src/services/review';
+import { WorkspaceService } from '../src/services/workspace';
 
 /**
  * The Ollama provider and the platform seam beneath it.
@@ -490,6 +499,63 @@ function sentOn(bodies: unknown[], index: number): string {
   return JSON.stringify((bodies[index] as { messages: unknown }).messages);
 }
 
+/** The host in `agents.json` during step 7 of the walk. Nothing listens there. */
+const UNREACHABLE: OllamaAgentConfig = { ...CONFIG, host: 'http://127.0.0.1:11499' };
+
+/**
+ * What the transport reports for a refused connection.
+ *
+ * Recorded, not written: reqwest 0.12.28 — the version `src-tauri` builds
+ * against — returns exactly this for a POST to `http://127.0.0.1:11499`, and
+ * `run_stream` hands `error.to_string()` straight to `onEnd`.
+ */
+const REFUSED = 'error sending request for url (http://127.0.0.1:11499/api/chat)';
+
+/**
+ * What the transport reports for a model that is not pulled.
+ *
+ * Recorded against Ollama 0.32.13: `POST /api/chat` with `llama3.3:70b` — the
+ * model set in `agents.json` during step 8 of the walk — answers
+ * `404 Not Found` with `{"error":"model 'llama3.3:70b' not found"}` as the
+ * whole body, which `run_stream` formats as `{status}: {detail}`.
+ */
+const MODEL_MISSING = `404 Not Found: {"error":"model 'llama3.3:70b' not found"}`;
+
+/**
+ * A failure that arrives *inside* a successful stream.
+ *
+ * Recorded against the same 0.32.13 server: status 200, ordinary frames, then
+ * a bare `{"error":"..."}` line. The frames are from `/api/pull`, which is the
+ * endpoint that could be made to fail after its headers were flushed — every
+ * `/api/chat` failure provoked on this server (bad model, unsupported
+ * multimodal input, bad `format`, `think` on a model without it) answered with
+ * a non-2xx status instead. The frame shape is the server's one shape for
+ * saying so mid-stream, and it is the case a status check cannot see.
+ */
+const ERROR_FRAME = [
+  '{"status":"pulling manifest"}',
+  '{"error":"pull model manifest: file does not exist"}',
+];
+
+/** A platform whose single request replays a recorded failure. */
+function failingPlatform(lines: string[], endError: string | null) {
+  let requests = 0;
+  const platform = {
+    capabilities: { localModels: true },
+    async streamJsonLines(
+      _spec: unknown,
+      onLine: (line: string) => void,
+      onEnd: (e: string | null) => void,
+    ) {
+      requests++;
+      for (const line of lines) onLine(line);
+      onEnd(endError);
+      return { async close() {} };
+    },
+  } as unknown as Platform;
+  return { platform, requests: () => requests };
+}
+
 /**
  * A platform that delivers frames a macrotask apart, and counts closes.
  *
@@ -593,23 +659,20 @@ describe('the provider', () => {
   });
 
   /**
-   * The failure this prevents: an unreachable server hanging the session.
-   * `#ask` gets an end event carrying an error and no content, and a loop that
-   * treated that as an empty turn would retry against a server that is not
-   * there until it hit the turn cap.
+   * The failure this prevents: an unreachable server being retried until the
+   * turn cap. `#ask` gets an end event carrying an error and no content, and a
+   * loop that treated that as an empty turn would ask a server that is not
+   * there twelve more times before giving up.
+   *
+   * What the *session* is told about it is the subject of "a failure the user
+   * must see" below; this is only the loop.
    */
-  it('ends the session when the stream reports a failure', async () => {
-    const platform = {
-      capabilities: { localModels: true },
-      async streamJsonLines(_spec: unknown, _onLine: unknown, onEnd: (e: string | null) => void) {
-        onEnd('error sending request for url (http://127.0.0.1:11434/api/chat)');
-        return { async close() {} };
-      },
-    } as unknown as Platform;
+  it('does not retry a stream that reported a failure', async () => {
+    const { platform, requests } = failingPlatform([], REFUSED);
 
-    const chunks = await drain(new OllamaProvider(platform, CONFIG));
+    await expect(drain(new OllamaProvider(platform, UNREACHABLE))).rejects.toThrow();
 
-    expect(chunks).toEqual([]);
+    expect(requests()).toBe(1);
   });
 
   it('stops when the model emits a summary', async () => {
@@ -841,5 +904,108 @@ describe('staging an edit the model quoted', () => {
     await driveWith(new OllamaProvider(platform, CONFIG), answerReads);
 
     expect(bodies.length).toBeLessThanOrEqual(2);
+  });
+});
+
+/**
+ * Start a real session against `platform` and wait for it to finish.
+ *
+ * Nothing below the provider is substituted. The defect these tests exist for
+ * was measured at session level — status `Done`, audit trail holding nothing
+ * but the echoed instruction — and a provider-level assertion could not have
+ * seen it, because the provider returning quietly is precisely the bug.
+ */
+async function runSession(platform: Platform, config: OllamaAgentConfig) {
+  const memory = new MemoryPlatform();
+  const workspace = new WorkspaceService(memory, () => history());
+  const runtime = new AgentRuntime({
+    workspace,
+    context: new ContextService(workspace, new FileTreeService(memory)),
+    commands: new CommandRegistry(),
+    permissions: new PermissionService(() => workspace.rootPath.get()),
+    review: new ReviewService(workspace),
+    jobs: new JobRunner(),
+  });
+
+  const session = runtime.start(
+    new ProviderTransport(new OllamaProvider(platform, config)),
+    'say hello',
+    { label: config.label },
+  );
+
+  // A deadline rather than a fixed number of ticks, for the reason
+  // `tests/agent.test.ts` gives: a loaded machine gets a different budget.
+  const deadline = Date.now() + 10_000;
+  while (session.status.get() === 'running' && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  return session;
+}
+
+/** Everything the session recorded as an error, as one string. */
+function errorsOf(session: AgentSession): string {
+  return session.actions
+    .get()
+    .flatMap((action) => (action.kind === 'error' ? [action.message] : []))
+    .join('\n');
+}
+
+describe('a failure the user must see', () => {
+  /**
+   * The failure this prevents: the one measured in the running app at 532baf6.
+   * With `agents.json` pointing at a port nothing listens on, the session
+   * reported `Local model Done` and its audit trail held exactly one entry —
+   * the echoed instruction. A user whose Ollama is not running is told the
+   * agent succeeded.
+   *
+   * The host is named because a refused connection is almost always the wrong
+   * host, and the message is the only place the user can see which one was
+   * tried — `agents.json` is not on screen.
+   */
+  it('fails the session and names the host when the connection is refused', async () => {
+    const { platform } = failingPlatform([], REFUSED);
+
+    const session = await runSession(platform, UNREACHABLE);
+
+    expect(session.status.get()).toBe('failed');
+    expect(errorsOf(session)).toMatch(/http:\/\/127\.0\.0\.1:11499/);
+  });
+
+  /**
+   * The failure this prevents: the other half of the same measurement. With
+   * the host reachable and the model set to one that is not pulled, the
+   * session again reported `Done` with only the instruction in its trail,
+   * while the server itself was answering `model 'llama3.3:70b' not found`.
+   *
+   * Ollama's own words are surfaced rather than a status line: the message
+   * names the model, which is the thing the user has to change.
+   */
+  it("surfaces Ollama's message when the model is not pulled", async () => {
+    const { platform } = failingPlatform([], MODEL_MISSING);
+
+    const session = await runSession(platform, CONFIG);
+
+    expect(session.status.get()).toBe('failed');
+    expect(errorsOf(session)).toMatch(/model 'llama3\.3:70b' not found/);
+    // The message, not the envelope. `404 Not Found: {"error":"…"}` is what
+    // the transport hands over, and showing that raw puts JSON in front of the
+    // user and buries the one sentence that tells them what to do.
+    expect(errorsOf(session)).not.toMatch(/\{"error"/);
+  });
+
+  /**
+   * The failure this prevents: an error that arrives as a frame rather than as
+   * an HTTP status being read as content and discarded. The stream is a
+   * success by every transport-level measure — 200, frames, a clean end — so
+   * anything that only inspects the status, or only looks for
+   * `message.content`, sees a turn that produced no output and carries on.
+   */
+  it('fails the session when a frame in a successful stream carries an error', async () => {
+    const { platform } = failingPlatform(ERROR_FRAME, null);
+
+    const session = await runSession(platform, CONFIG);
+
+    expect(session.status.get()).toBe('failed');
+    expect(errorsOf(session)).toMatch(/pull model manifest: file does not exist/);
   });
 });
