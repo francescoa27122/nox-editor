@@ -245,4 +245,36 @@ describe('parsing a turn', () => {
     });
     expect(parsed.error).toBeNull();
   });
+
+  /**
+   * The failure this prevents: when an outer object is valid JSON but fails
+   * validation (no recognizable "method") and an inner object is promoted
+   * instead, `text` reverting to the slice before *that* candidate rather
+   * than before the reply's first brace. That would surface a broken JSON
+   * fragment (`{"tool_call":`) as if it were the model's narration.
+   */
+  it('reports narration from before the first brace even when an inner object wins', () => {
+    const parsed = parseTurn('Explanation.\n{"tool_call": {"method":"context.openBuffers"}}');
+    expect(parsed.action).toEqual({ method: 'context.openBuffers' });
+    expect(parsed.text).toBe('Explanation.');
+  });
+
+  /**
+   * The failure this prevents: the retry loop re-scanning from scratch at
+   * every failed `{`, making cost (failing candidates) × (remaining length).
+   * A model stuck repeating a character, or a reply truncated mid-emission,
+   * produces exactly this input shape. A quadratic parser is a smaller
+   * version of the same bug the fence regex had — this bounds it the same
+   * way the fence fix did, at a size too small to make a slow CI run even if
+   * the regression comes back, but far past where the old approach's curve
+   * would already show.
+   */
+  it('resolves a long run of unbalanced braces without quadratic blowup', () => {
+    const input = '{'.repeat(30_000);
+    const start = performance.now();
+    const parsed = parseTurn(input);
+    const elapsed = performance.now() - start;
+    expect(parsed.action).toBeNull();
+    expect(elapsed).toBeLessThan(300);
+  });
 });

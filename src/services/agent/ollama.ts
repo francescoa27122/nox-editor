@@ -93,26 +93,41 @@ function unfence(content: string): string {
   return trimmed.slice(headerEnd + 1, closeStart).trimEnd();
 }
 
+interface Candidate {
+  start: number;
+  json: string;
+}
+
 /**
- * A single balanced-brace scan starting at `content[start]`, an opening `{`.
+ * Every balanced-brace, string/escape-aware object span in `content`, found
+ * in a single left-to-right pass with a stack rather than by re-scanning from
+ * each candidate `{` in turn.
  *
- * Tracks whether it is inside a JSON string and whether the next character is
- * escaped, so that braces and escaped quotes *inside* a string value don't
- * perturb the depth count or end the string early. This is what a `find`
- * string in a staged edit needs: it routinely contains `{` and `}`, and a
- * scanner that doesn't know it's looking at a string will miscount or close
- * too early — see the "survives braces in strings" tests, which fail against
- * a plain brace counter even though every test in this file passed against
- * one until those were added.
+ * Re-scanning was the previous approach: on a failed candidate, retry at
+ * `start + 1` and run a fresh scan to end-of-string looking for the next
+ * balance point. That is quadratic — a model stuck repeating a character, or
+ * a reply truncated mid-emission, produces long runs of non-balancing `{`,
+ * and cost is (number of those) × (remaining length). 256K of bare `{`
+ * measured at 75s; the same input here is sub-millisecond.
  *
- * Returns null if depth never returns to zero before the string ends.
+ * A stack fixes it in one pass: push each structural `{` (one not inside a
+ * string), and on a structural `}` pop the most recent unmatched `{` and
+ * record the pair. Nested objects are recorded alongside their enclosing one
+ * — that's what lets a later step promote an inner object when an outer one
+ * is syntactically valid JSON but semantically wrong, e.g. the
+ * `command.execute` test: its outer object parses fine, it's just not a
+ * method this parser accepts, and its nested `params` object remains
+ * available to try next. Braces and escaped quotes inside a string value
+ * never push or pop — same string/escape awareness the per-candidate scanner
+ * had, just computed once instead of once per candidate.
  */
-function scanBalanced(content: string, start: number): { end: number; json: string } | null {
-  let depth = 0;
+function balancedObjects(content: string): Candidate[] {
+  const candidates: Candidate[] = [];
+  const opens: number[] = [];
   let inString = false;
   let escaped = false;
 
-  for (let index = start; index < content.length; index++) {
+  for (let index = 0; index < content.length; index++) {
     const char = content[index]!;
     if (escaped) {
       escaped = false;
@@ -127,59 +142,55 @@ function scanBalanced(content: string, start: number): { end: number; json: stri
       continue;
     }
     if (inString) continue;
-    if (char === '{') depth++;
-    else if (char === '}') {
-      depth--;
-      if (depth === 0) {
-        return { end: index, json: content.slice(start, index + 1) };
+    if (char === '{') {
+      opens.push(index);
+    } else if (char === '}') {
+      const start = opens.pop();
+      if (start !== undefined) {
+        candidates.push({ start, json: content.slice(start, index + 1) });
       }
     }
   }
-  return null;
+
+  // Closing order nests innermost-first (LIFO); candidates are tried in the
+  // order a left-to-right reader meets their opening brace, so outer objects
+  // are attempted before the inner objects nested inside them.
+  candidates.sort((a, b) => a.start - b.start);
+  return candidates;
 }
 
 export function parseTurn(content: string): ParsedTurn {
   const body = unfence(content);
+  const candidates = balancedObjects(body);
 
-  // A brace anywhere in narration ("the { to a (") used to be committed to
-  // irrevocably: the first `{` that failed to parse or validate ended the
-  // turn, even when a perfectly good action followed it. Retry at the next
-  // `{` on any failure instead, and keep only the *first* failure's message
-  // as a fallback in case nothing downstream succeeds — this changes which
-  // object is treated as the action, not how many are taken once one is
-  // found (the existing "ignores anything after" behaviour is untouched: a
-  // valid first object still returns immediately, before any retry happens).
-  let searchFrom = 0;
+  if (candidates.length === 0) {
+    return { text: body.trim(), action: null, error: 'no JSON object in the reply' };
+  }
+
+  // Narration is whatever came before the *first* brace in the reply, not
+  // before whichever candidate ends up winning: a model that wraps its call
+  // (`{"tool_call": {...}}`) and fails on the outer object promotes the
+  // inner one, but the text a user sees should still be the prose that
+  // preceded the reply's JSON, not a fragment like `{"tool_call":` left over
+  // from the rejected outer attempt.
+  const firstBrace = body.indexOf('{');
+  const before = body.slice(0, firstBrace).trim();
+
   let fallback: ParsedTurn | null = null;
 
-  while (true) {
-    const start = body.indexOf('{', searchFrom);
-    if (start < 0) {
-      return fallback ?? { text: body.trim(), action: null, error: 'no JSON object in the reply' };
-    }
-
-    const scanned = scanBalanced(body, start);
-    if (!scanned) {
-      searchFrom = start + 1;
-      continue;
-    }
-
-    const before = body.slice(0, start).trim();
-
+  for (const candidate of candidates) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(scanned.json);
+      parsed = JSON.parse(candidate.json);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       fallback ??= { text: before, action: null, error: `malformed JSON: ${message}` };
-      searchFrom = start + 1;
       continue;
     }
 
     const record = parsed as { method?: unknown; params?: unknown };
     if (typeof record.method !== 'string') {
       fallback ??= { text: before, action: null, error: 'object has no "method" string' };
-      searchFrom = start + 1;
       continue;
     }
     if (!VOCABULARY.has(record.method)) {
@@ -188,7 +199,6 @@ export function parseTurn(content: string): ParsedTurn {
         action: null,
         error: `${record.method} is not a method you may call`,
       };
-      searchFrom = start + 1;
       continue;
     }
 
@@ -199,7 +209,6 @@ export function parseTurn(content: string): ParsedTurn {
         action: null,
         error: `${record.method} requires a "params" object`,
       };
-      searchFrom = start + 1;
       continue;
     }
     if (shape === 'optional' && record.params !== undefined && !isPlainObject(record.params)) {
@@ -208,7 +217,6 @@ export function parseTurn(content: string): ParsedTurn {
         action: null,
         error: `${record.method} "params" must be an object`,
       };
-      searchFrom = start + 1;
       continue;
     }
     if (shape === 'none' && record.params !== undefined) {
@@ -217,7 +225,6 @@ export function parseTurn(content: string): ParsedTurn {
         action: null,
         error: `${record.method} does not take "params"`,
       };
-      searchFrom = start + 1;
       continue;
     }
 
@@ -229,4 +236,6 @@ export function parseTurn(content: string): ParsedTurn {
 
     return { text: before, action, error: null };
   }
+
+  return fallback!;
 }
