@@ -280,3 +280,40 @@ export function parseTurn(content: string): ParsedTurn {
 
   return fallback!;
 }
+
+/**
+ * Locate `find` in `text` and express the replacement as real offsets.
+ *
+ * The model quotes text rather than computing positions because it cannot
+ * compute positions — measured, not assumed. This is the conversion, and it
+ * is also the only place a bad quote can be caught: `proposal.stage` takes
+ * offsets and will faithfully stage nonsense if given nonsense.
+ *
+ * Ambiguity is refused rather than resolved by taking the first match.
+ * Editing the wrong one of three identical lines produces a diff plausible
+ * enough to accept, which is the failure worth preventing.
+ */
+export function resolveEdit(
+  text: string,
+  find: string,
+  replace: string,
+): { from: number; to: number; insert: string } | { error: string } {
+  if (find.length === 0) {
+    return { error: 'the text to find is empty' };
+  }
+
+  const first = text.indexOf(find);
+  if (first < 0) {
+    return { error: `text not found in the buffer: ${JSON.stringify(find.slice(0, 60))}` };
+  }
+
+  let count = 0;
+  for (let at = first; at >= 0; at = text.indexOf(find, at + 1)) count++;
+  if (count > 1) {
+    return {
+      error: `text is ambiguous, ${count} matches — quote more of the surrounding lines`,
+    };
+  }
+
+  return { from: first, to: first + find.length, insert: replace };
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
-import { parseTurn } from '../src/services/agent/ollama';
+import { parseTurn, resolveEdit } from '../src/services/agent/ollama';
 
 /**
  * The Ollama provider and the platform seam beneath it.
@@ -357,5 +357,49 @@ describe('parsing a turn', () => {
     });
     expect(parsed.error).toBeNull();
     expect(parsed.text).toBe('He said "the { brace" out loud.');
+  });
+});
+
+describe('resolving an edit', () => {
+  const doc = 'export function add(a: number, b: number) {\n  return a + b;\n}\n';
+
+  it('turns quoted text into offsets', () => {
+    const resolved = resolveEdit(doc, 'function add(', 'function sum(');
+    expect(resolved).toEqual({ from: 7, to: 20, insert: 'function sum(' });
+  });
+
+  /**
+   * The failure this prevents: a silent no-op. A model that quotes text which
+   * is not in the buffer has misread it, and staging nothing while reporting
+   * success is the worst available answer.
+   */
+  it('refuses text that is not present', () => {
+    const resolved = resolveEdit(doc, 'function subtract(', 'function sum(');
+    expect(resolved).toEqual({ error: expect.stringMatching(/not found/i) });
+  });
+
+  /**
+   * The failure this prevents: editing the wrong one of several identical
+   * lines. Taking the first match silently corrupts a file in a way the diff
+   * looks plausible enough to accept.
+   */
+  it('refuses ambiguous text and says how many matches', () => {
+    const repeated = 'const x = 1;\nconst x = 1;\n';
+    const resolved = resolveEdit(repeated, 'const x = 1;', 'const y = 2;');
+    expect(resolved).toEqual({ error: expect.stringMatching(/2 matches/) });
+  });
+
+  /**
+   * The failure this prevents: an empty find matching at position 0, which
+   * would insert at the top of the file — never what was meant.
+   */
+  it('refuses an empty find', () => {
+    const resolved = resolveEdit(doc, '', 'anything');
+    expect(resolved).toEqual({ error: expect.stringMatching(/empty/i) });
+  });
+
+  it('allows a replacement that deletes', () => {
+    const resolved = resolveEdit(doc, '  return a + b;\n', '');
+    expect(resolved).toEqual({ from: 44, to: 60, insert: '' });
   });
 });
