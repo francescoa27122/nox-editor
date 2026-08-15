@@ -749,16 +749,38 @@ than by inspecting the parameters — so a range that happens to span the
 document counts as whole however the parameters spell it, and does refresh.
 Refresh itself trusts the agent to stage from its most recent read: a session
 that reads, lets the buffer move, reads again and then stages offsets from the
-*first* read is not refused, which predates this guard and is not closed by it.
+*first* read is not refused by this guard, because the baseline has caught up
+with the buffer. Only the agent knows which read it computed from, which is
+what the declaration below is for.
 The comparison is used because the reader clamps the range and reads a missing
 `lines` as
 the whole document — so `lines: null` and a span past the end are whole reads
 that a parameter test files as narrow, and only a comparison cannot drift.
 
-What remains uncovered is a buffer for which the session called neither of
-those two reads; listing it does not count. Those offsets came from somewhere
-the runtime cannot see, and closing that needs the agent to declare what it
-computed against, which `proposal.stage` has no field for.
+Inference stops there. A buffer for which the session called neither of those
+two reads — listing it does not count — has offsets from somewhere the runtime
+cannot see, and no rule over what it *watched* distinguishes the read an agent
+computed from among several. So `proposal.stage` gained an optional
+`baseRevisions`: buffer id to revision, the same field `ChangeSetSpec` has
+always had, in the plain-JSON shape the wire can carry. Any declared entry the
+buffer is no longer at refuses the stage, under the same `stale` code, and that
+includes an entry for a buffer no edit names — `workspace.apply` reads the
+field that way, and an agent that read a file and concluded it needed no edit
+has a conclusion that goes stale when the file moves.
+
+It is checked **in addition to** the read tracking, never instead of it: an
+agent that declares the current revision while holding offsets from an older
+read is describing a check it did not do, and the baseline still refuses it.
+A malformed declaration refuses too, rather than being ignored — an agent that
+sent one believes it is protected, and staging anyway hands it a guarantee it
+does not have.
+
+What the declaration does *not* do is make agents safe. It is optional,
+because requiring it would break every agent already written, so an agent that
+omits it is exactly where it was. And for a buffer the session never read, the
+declaration is the only check there is: an agent that declares a revision it
+did not compute against has nothing to catch it. The field lets an honest agent
+prove freshness; it cannot make a careless one honest.
 
 Failures surface as failures, and that too is the provider's job rather than
 the seam's. A refused connection and a server that rejects the request are

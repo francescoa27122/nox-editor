@@ -78,6 +78,20 @@ async function run(instruction, context) {
   await demand('session.note', { text: `Proposing a change to ${target.name}` });
 
   // Offsets are into the document, and the first line starts at 0.
+  //
+  // `baseRevisions` says which revision of the file those offsets describe.
+  // The user goes on typing while an agent thinks, and offsets computed before
+  // a keystroke are arithmetically fine and land in the wrong place. Declaring
+  // it means Nox refuses the proposal instead of applying it somewhere this
+  // agent never looked.
+  //
+  // The revision declared is the one from the listing above, which is where
+  // this agent's whole plan started — it picked the target from it, and
+  // `BufferSummary.length` there is the end-of-document offset an appending
+  // agent would stage against. Declaring a fresher revision instead — one read
+  // after the buffer text came back — would claim a check this agent never
+  // did. Under-claiming costs a refusal it could have avoided; over-claiming
+  // costs the user's line.
   await demand('proposal.stage', {
     description: `Uppercase the first line of ${target.name}`,
     edits: [
@@ -86,6 +100,7 @@ async function run(instruction, context) {
         changes: { from: 0, to: firstLine.length, insert: firstLine.toUpperCase() },
       },
     ],
+    baseRevisions: { [target.id]: target.revision },
   });
 
   await demand('session.summary', {

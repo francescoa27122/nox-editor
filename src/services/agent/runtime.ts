@@ -9,6 +9,7 @@ import type { BufferId, WorkspaceService } from '../workspace';
 import type { ModelProvider } from './provider';
 import {
   failure,
+  parseBaseRevisions,
   success,
   type AgentRequest,
   type AgentRun,
@@ -386,6 +387,16 @@ export class AgentRuntime {
 
   // --- The protocol handler ------------------------------------------------
 
+  /**
+   * What to call a buffer in a message to the agent, falling back to its id.
+   *
+   * A refusal that named only `buf-3` would be unreadable to the human the
+   * audit trail is for, and a declaration can name a buffer no edit does.
+   */
+  #nameOf(bufferId: BufferId): string {
+    return this.#workspace.buffers.get().find((buffer) => buffer.id === bufferId)?.name ?? bufferId;
+  }
+
   async #handle(
     principal: Principal,
     request: AgentRequest,
@@ -531,26 +542,66 @@ export class AgentRuntime {
         }
 
         case 'proposal.stage': {
+          // Two checks, and both must pass. This one is the agent's own
+          // declaration of what it computed against; the one below is what the
+          // runtime watched it read. Neither subsumes the other: a declaration
+          // reaches a buffer the session only listed and offsets carried
+          // across a re-read, which the runtime cannot see, and the read
+          // tracking catches an agent that declares the current revision while
+          // holding offsets from an older read — a check it did not do.
+          //
+          // Checked here rather than left to `workspace.apply`, which does
+          // check `baseRevisions` and is where a staged set eventually lands:
+          // that happens when the *user* clicks Apply, long after the agent
+          // has stopped listening, and what rides along by then is
+          // `ReviewFile.baseRevision`, captured at stage time. Staging is the
+          // last moment the agent can be told anything.
+          const declaration = parseBaseRevisions(request.params.baseRevisions);
+          if (!declaration.ok) {
+            record({ kind: 'error', message: declaration.reason });
+            return failure(request.id, 'invalid-request', declaration.reason);
+          }
+
+          // Every declared entry is checked, including one for a buffer no
+          // edit names. `workspace.apply` already reads the identically named,
+          // identically shaped field that way — its stale filter runs over the
+          // whole map regardless of the edits — and a second meaning one layer
+          // up would mean the agent and the runtime disagreed about what a key
+          // means. It is also the only reading that keeps a promise worth
+          // making: an agent that read a file and concluded from it that the
+          // file needs no edit has a conclusion that is stale once it moves.
+          // A declaration can therefore only ever add a refusal, which is why
+          // the field can be optional without being a trap.
+          const declaredStale = [...declaration.declared].find(
+            ([bufferId, revision]) => this.#workspace.revisionOf(bufferId) !== revision,
+          );
+          if (declaredStale) {
+            const [bufferId, revision] = declaredStale;
+            const message =
+              `${this.#nameOf(bufferId)} is at revision ${this.#workspace.revisionOf(bufferId)}, ` +
+              `not the revision ${revision} you declared. Read it again and declare the ` +
+              `revision you computed the offsets against.`;
+            record({ kind: 'error', message });
+            return failure(request.id, 'stale', message);
+          }
+
           // Refused, not narrowed to a smaller window: these offsets were
           // computed against text that is no longer what the buffer says, and
           // applying them writes somewhere other than where the agent looked.
           //
           // What is left alone is a buffer for which this session called
           // neither `context.bufferText` nor `context.selection` — the two
-          // reads that hand back a position in the text. Listing it through
-          // `context.openBuffers` or asking for its viewport does not count.
-          // Those offsets came from somewhere the runtime cannot see, and
-          // guessing about them is not better than the agent's own guard.
-          // Closing that case needs the agent to declare what it computed
-          // against, which `proposal.stage` has no field for.
+          // reads that hand back a position in the text — and which the agent
+          // did not declare either. Listing it through `context.openBuffers`
+          // or asking for its viewport does not count. Those offsets came from
+          // somewhere the runtime cannot see, and guessing about them is not
+          // better than the agent's own guard.
           const stale = request.params.edits.find((edit) => {
             const at = readAt.get(edit.bufferId);
             return at !== undefined && at !== this.#workspace.revisionOf(edit.bufferId);
           });
           if (stale) {
-            const name =
-              this.#workspace.buffers.get().find((buffer) => buffer.id === stale.bufferId)?.name ??
-              stale.bufferId;
+            const name = this.#nameOf(stale.bufferId);
             // Names the read that actually clears it. "Read it again" was
             // advice a range- or numbered-reading agent could follow forever
             // without progress: only a read that hands back the whole document

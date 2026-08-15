@@ -1058,3 +1058,433 @@ describe('what the runtime counts as a plain whole read', () => {
     expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(false);
   });
 });
+
+describe('a declared base revision', () => {
+  /** The summary `context.openBuffers` reported for one buffer. */
+  const listed = (summaries: BufferSummary[], id: string) =>
+    summaries.find((buffer) => buffer.id === id)!;
+
+  /**
+   * The honest case: the agent says what it computed against and it is still
+   * true. A declaration must not cost a working agent its stage.
+   *
+   * Prevents: a check that refuses whenever the field is present, or one that
+   * compares the wrong way round — either of which turns opting into the
+   * guarantee into never being able to stage.
+   */
+  it('stages when the declared revision is the buffer’s current one', async () => {
+    const { runtime, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summary = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a);
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                baseRevisions: { [a]: summary.revision },
+              },
+            },
+          };
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).not.toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(false);
+  });
+
+  /**
+   * The declaration is the whole point: an agent that says which revision its
+   * offsets came from is refused when the buffer is no longer at it, under the
+   * same `stale` code `workspace.apply` already uses for the same mismatch.
+   *
+   * Prevents: a field that is accepted and then ignored, which is worse than
+   * no field at all — the agent believes it is covered.
+   */
+  it('refuses a declaration behind the buffer’s current revision', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summary = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a);
+
+          // The user types while the agent is deciding.
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                baseRevisions: { [a]: summary.revision },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
+    expect(workspace.textOf(a)).toBe(`// header\n${A}`);
+  });
+
+  /**
+   * Hole 1, measured on 9882d92: `BufferSummary.length` is the
+   * end-of-document offset, so a session that lists a buffer and appends at
+   * that length stages against a position the user may have moved — and
+   * `context.openBuffers` establishes no read baseline, so nothing refused it.
+   * The append landed in the middle of the line the user had just typed.
+   *
+   * Prevents: that splice, for any agent willing to say what it listed.
+   */
+  it('refuses an append staged at a length the listing reported', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summary = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a);
+
+          // The user types at the end of the document, past where the listing
+          // said it finished.
+          workspace.applyEdits(a, [{ from: summary.length, to: summary.length, insert: 'six' }]);
+
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Add a footer',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: summary.length, to: summary.length, insert: '// footer\n' },
+                  },
+                ],
+                baseRevisions: { [a]: summary.revision },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'add a footer',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
+    // The user's own line is intact rather than having a footer spliced into it.
+    expect(workspace.textOf(a)).toBe(`${A}six`);
+  });
+
+  /**
+   * Hole 2: refresh trusts the agent to stage from its most recent read. A
+   * session that reads, lets the buffer move, reads again and then stages
+   * offsets from the *first* read clears the read guard, because the baseline
+   * caught up with the buffer. Only the agent knows which read it computed
+   * from, and now it can say.
+   *
+   * Prevents: a whole re-read laundering offsets computed before the user
+   * typed.
+   */
+  it('refuses offsets declared against the first of two reads', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const before = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a).revision;
+
+          const whole = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+          const original = (whole?.ok ? whole.result : '') as string;
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          // A second whole read refreshes the baseline to the current
+          // revision, so the read guard has nothing left to refuse.
+          yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Rewrite from the first read',
+                edits: [
+                  { bufferId: a, changes: { from: 0, to: original.length, insert: 'REPLACED' } },
+                ],
+                baseRevisions: { [a]: before },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'rewrite',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
+  });
+
+  /**
+   * The case the brief left open, decided the way `workspace.apply` already
+   * decided it: a declared entry is checked whether or not an edit names that
+   * buffer. `apply`'s stale filter runs over every `baseRevisions` entry
+   * regardless of the edits, and giving the identically named, identically
+   * shaped field a second meaning one layer up would mean the agent and the
+   * runtime disagreed about what a key means. It is also the safe direction —
+   * a declaration can only ever add a refusal — and it is the only reading
+   * that keeps a real promise: an agent that read `b.txt`, concluded from it
+   * that `b.txt` needs no edit, and edited `a.txt` instead has a conclusion
+   * that is stale the moment `b.txt` moves.
+   *
+   * Prevents: filtering the declaration down to the edited buffers, which
+   * would silently drop exactly the entries an agent added on purpose.
+   */
+  it('refuses a declaration for a buffer the edits do not touch', async () => {
+    const { runtime, workspace, review, a, b } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summaries = (buffers?.ok ? buffers.result : []) as BufferSummary[];
+          const both = {
+            [a]: listed(summaries, a).revision,
+            [b]: listed(summaries, b).revision,
+          };
+
+          // The user types in the file the agent read but decided not to edit.
+          workspace.applyEdits(b, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line of a.txt',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                baseRevisions: both,
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
+    // Named in the refusal, so the agent knows which of the two moved.
+    expect(refusals[0]?.message).toContain('b.txt');
+  });
+
+  /**
+   * The declaration is checked *in addition to* the read guard, never instead
+   * of it. An agent that reads at r5, lets the buffer reach r6 and then
+   * declares r6 while staging offsets from the r5 text is describing a check
+   * it did not do.
+   *
+   * Prevents: treating a present declaration as proof of freshness and
+   * skipping the guard that tracks what the session actually read.
+   */
+  it('still refuses a stale read when the declaration is current', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const whole = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+          const original = (whole?.ok ? whole.result : '') as string;
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          // A listing is not a read, so this hands back the current revision
+          // without refreshing the baseline the whole read established.
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const current = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a).revision;
+
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Rewrite from the first read',
+                edits: [
+                  { bufferId: a, changes: { from: 0, to: original.length, insert: 'REPLACED' } },
+                ],
+                baseRevisions: { [a]: current },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'rewrite',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
+    // The read guard's own advice, not the declaration check's.
+    expect(refusals[0]?.message).toContain('context.bufferText');
+  });
+
+  /**
+   * The guarantee is opt-in. Every shipped agent — the reference agent, every
+   * provider, everything in `tests/stdio.test.ts` — stages without this field,
+   * and a required declaration would break all of them at once.
+   *
+   * Pins that an absent declaration leaves hole 1 exactly where it was:
+   * listed, moved, appended at the listed length, staged. The runtime has
+   * nothing to check and does not pretend otherwise.
+   *
+   * Prevents: making the field mandatory, or inferring a declaration from a
+   * listing, either of which turns an opt-in guarantee into a silent refusal
+   * for agents that never asked for one.
+   */
+  it('stages without a declaration exactly as it did before', async () => {
+    const { runtime, workspace, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summary = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a);
+
+          workspace.applyEdits(a, [{ from: summary.length, to: summary.length, insert: 'six' }]);
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Add a footer',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: summary.length, to: summary.length, insert: '// footer\n' },
+                  },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'add a footer',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).not.toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(false);
+  });
+});
+
+describe('a malformed base-revision declaration', () => {
+  /**
+   * Stage one edit against a buffer nothing has touched, declaring whatever is
+   * passed. Nothing has moved, so the only thing that can refuse is validation.
+   */
+  const stageDeclaring = async (declaration: unknown) => {
+    const { runtime, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                baseRevisions: declaration as Record<string, number>,
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    return { refusals, staged: review.staged.get() };
+  };
+
+  /**
+   * Every one of these refuses rather than staging anyway, and that is the
+   * decision worth stating: an agent that sent a declaration believes it is
+   * protected. Ignoring a malformed one and staging hands it a guarantee it
+   * does not have, which is more dangerous than never having offered the
+   * field. `parseInbound` validates only `id` and `method`, so an
+   * out-of-process agent can put any of these on the wire.
+   *
+   * Prevents: a permissive parse — `Number(value)`, or skipping entries it
+   * cannot read — quietly turning a declaration into no declaration.
+   */
+  const malformed: [name: string, value: unknown][] = [
+    // A JSON array is an object to `typeof`, and `Object.entries` would read
+    // it happily, with numeric string keys that are not buffer ids.
+    ['an array', []],
+    ['a string', 'revision 3'],
+    ['a number', 3],
+    // Not read as "no declaration": `lines: null` degrading to a wider read
+    // costs nothing, but a null declaration read as absent silently drops the
+    // whole promise the agent thinks it asked for.
+    ['null', null],
+    ['a string revision', { 'buffer-1': '3' }],
+    ['a null revision', { 'buffer-1': null }],
+    ['NaN', { 'buffer-1': Number.NaN }],
+    ['Infinity', { 'buffer-1': Number.POSITIVE_INFINITY }],
+  ];
+
+  for (const [name, value] of malformed) {
+    it(`refuses ${name}`, async () => {
+      const { refusals, staged } = await stageDeclaring(value);
+
+      expect(staged).toBeNull();
+      expect(refusals.map((refusal) => refusal.code)).toEqual(['invalid-request']);
+      expect(refusals[0]?.message).toContain('baseRevisions');
+    });
+  }
+});

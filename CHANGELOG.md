@@ -57,6 +57,24 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `git checkout` could silently make wrong.
   - **Show Change Marks** turns the gutter off for anyone who finds it noisy.
 
+- **An agent can say which revision it computed an edit against.**
+  `proposal.stage` takes an optional `baseRevisions` — buffer id to the
+  revision `context.openBuffers` reported — and any entry the buffer has since
+  moved past refuses the whole proposal instead of applying it at offsets that
+  have shifted.
+  - It closes two cases Nox could not otherwise see: an agent that stages
+    against a length it read from a listing, and one that keeps offsets from an
+    earlier read after re-reading the file.
+  - A declared revision for a file the edits do not touch is checked too. An
+    agent that read a file and decided from it not to change that file has a
+    decision that goes stale when the file does.
+  - It is checked in addition to the existing freshness check, never instead
+    of it, and a malformed declaration refuses the proposal rather than being
+    quietly ignored.
+  - It is optional. Agents written before this still work and are exactly as
+    covered as they were; `examples/uppercase-agent.mjs` shows the field in
+    use.
+
 ### Fixed
 
 - **A project-wide replace marked whole files as changed, not just the lines

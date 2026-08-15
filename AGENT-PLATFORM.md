@@ -100,6 +100,9 @@ interface ChangeSetSpec {
 `baseRevisions` is optional: edits computed from a buffer's current state in
 the same tick have nothing to be stale against. It is mandatory in spirit for
 any caller that read a buffer, went away, and came back — which is every agent.
+An agent reaches it through `proposal.stage`'s field of the same name (§3),
+which is a plain JSON object because a `Map` does not survive the wire; the
+runtime converts it and checks it there.
 
 **Revisions are monotonic and separate from `changeCount`.** `changeCount`
 is zeroed by `resetState` as part of dirty tracking, and a revision that can go
@@ -378,6 +381,39 @@ gets past that still has to clear `workspace.apply`, which refuses whichever
 session is working from a revision that has moved by the time it lands. A
 lock would block the user's own typing; a queue would hide the staleness
 until after the edit landed.
+
+**And an agent can say what it computed against.** `proposal.stage` takes an
+optional `baseRevisions`, a plain JSON object of buffer id to revision — the
+same field `ChangeSetSpec` has had since §2.1, in the shape the wire can carry:
+
+```jsonc
+{ "id": 7, "method": "proposal.stage",
+  "params": {
+    "description": "Uppercase the first line of a.txt",
+    "edits": [ /* … */ ],
+    "baseRevisions": { "buf-1": 12 }   // BufferSummary.revision, from context.openBuffers
+  } }
+```
+
+Any entry the buffer is no longer at refuses the whole stage with `stale`,
+including one for a buffer no edit names — `workspace.apply` reads the field
+that way, and an agent that read a file and concluded from it that the file
+needs no edit has a conclusion that goes stale when it moves. Declare the
+revision the offsets were *actually* computed from: the check is made **in
+addition to** the read tracking above, never instead of it, so declaring the
+freshest revision available while holding offsets from an older read is a check
+the agent did not do, and the read tracking still refuses it.
+
+A malformed declaration — anything that is not an object of finite numbers —
+refuses the stage with `invalid-request` rather than being ignored. An agent
+that sent one believes it is protected, and staging anyway would hand it a
+guarantee it does not have.
+
+**It is optional, so it is a guarantee an agent opts into, not one Nox now
+provides.** Requiring it would break every agent already written. An agent that
+omits it gets exactly what it got before: the read tracking, which does not
+cover a buffer the session only listed, and does not know which of two reads
+the offsets came from.
 
 **The provider stream is two-way.** `complete()` returns an async generator,
 and each `yield` returns the response Nox produced for that chunk. A one-way
