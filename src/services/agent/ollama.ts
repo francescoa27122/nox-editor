@@ -1,4 +1,4 @@
-import type { Platform } from '@platform/types';
+import type { JsonLinesStream, Platform } from '@platform/types';
 import type { Edit } from '../transactions';
 import type { BufferId } from '../workspace';
 import type { OllamaAgentConfig } from './config';
@@ -384,6 +384,14 @@ type BufferTexts = Map<string, string>;
  * wrong place, and text with a line-number gutter is not the buffer's text at
  * all — resolving a quote against either produces offsets that land somewhere
  * else entirely, which is the one failure `resolveEdit` exists to prevent.
+ *
+ * Both fields are tested exactly as the reader tests them (`ContextService`'s
+ * `bufferText`), because this guard is only worth anything while the two agree
+ * about what a plain read is. `parseTurn` checks that `params` is an object
+ * and nothing about its fields, so `withLineNumbers: "true"` — a small model
+ * inventing a parameter as a stringified boolean, which is ordinary — is
+ * numbered text to the reader. A `=== true` here would file it as plain and
+ * hand back offsets measured through a gutter.
  */
 function rememberRead(
   request: RequestBody,
@@ -392,7 +400,7 @@ function rememberRead(
 ): void {
   if (request.method !== 'context.bufferText') return;
   const { bufferId, lines, withLineNumbers } = request.params;
-  if (lines !== undefined || withLineNumbers === true) return;
+  if (lines !== undefined || withLineNumbers) return;
   if (!response?.ok || typeof response.result !== 'string') return;
   texts.set(bufferId, response.result);
 }
@@ -468,7 +476,15 @@ export class OllamaProvider implements ModelProvider {
       },
     ];
 
-    const maxTurns = this.#config.maxTurns ?? DEFAULT_MAX_TURNS;
+    // `maxTurns` comes from a hand-edited file and the loader keeps any number
+    // it finds. Zero is the one that matters: the loop body never runs, so the
+    // session reports done having done nothing, which reads as a broken agent
+    // rather than as a number set wrong. Nonsense falls back to the default
+    // instead, since a cap of one is a guess at what was meant.
+    const configured = this.#config.maxTurns;
+    const maxTurns = Number.isFinite(configured)
+      ? Math.max(1, Math.floor(configured!))
+      : DEFAULT_MAX_TURNS;
     const texts: BufferTexts = new Map();
     let consecutiveFailures = 0;
 
@@ -540,6 +556,14 @@ export class OllamaProvider implements ModelProvider {
         resolve();
       };
 
+      /**
+       * Cancel, and settle either way. `close` drops the listeners, so `onEnd`
+       * cannot arrive after it — if closing rejected and nothing else called
+       * `finish`, this promise would never settle and a cancelled session would
+       * sit at "running" for the life of the app.
+       */
+      const cancel = (stream: JsonLinesStream) => void stream.close().then(finish, finish);
+
       void this.#platform
         .streamJsonLines(
           {
@@ -574,10 +598,10 @@ export class OllamaProvider implements ModelProvider {
           // conversation. Cancelling mid-generation is what this is for.
           if (!signal || settled) return;
           if (signal.aborted) {
-            void stream.close().then(finish);
+            cancel(stream);
             return;
           }
-          onAbort = () => void stream.close().then(finish);
+          onAbort = () => cancel(stream);
           signal.addEventListener('abort', onAbort, { once: true });
         })
         .catch((error: unknown) => {

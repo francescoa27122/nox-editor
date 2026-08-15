@@ -429,7 +429,11 @@ function fakePlatform(replies: string[]) {
   const platform = {
     capabilities: { localModels: true },
     async streamJsonLines(spec: { body: unknown }, onLine: (line: string) => void, onEnd: (e: string | null) => void) {
-      bodies.push(spec.body);
+      // Snapshotted, not aliased: `complete` appends to one `messages` array
+      // for the whole conversation, so keeping the reference would make every
+      // recorded body the *final* transcript. Assertions meant as "this was
+      // sent on request N" would then pass for anything said at any point.
+      bodies.push(structuredClone(spec.body));
       const reply = replies[turn++] ?? '{"method":"session.summary","params":{"text":"done"}}';
       for (const frame of framesFor(reply)) onLine(frame);
       onEnd(null);
@@ -481,9 +485,54 @@ function actionFor(chunks: ModelChunk[], method: string): RequestBody | undefine
   return chunk?.type === 'action' ? chunk.request : undefined;
 }
 
-/** Everything the provider has said to the model, across every round trip. */
-function saidTo(bodies: unknown[]): string {
-  return JSON.stringify(bodies.map((body) => (body as { messages: unknown }).messages));
+/** The transcript the provider sent on request `index`, as one string. */
+function sentOn(bodies: unknown[], index: number): string {
+  return JSON.stringify((bodies[index] as { messages: unknown }).messages);
+}
+
+/**
+ * A platform that delivers frames a macrotask apart, and counts closes.
+ *
+ * The other fake replies inside the call that started it, which leaves no
+ * moment at which a request is in flight. Cancelling *during* generation is
+ * the case worth testing, and it needs a stream that is still running when the
+ * test gets control back.
+ */
+function slowPlatform(reply: string, options: { closeRejects?: boolean } = {}) {
+  let closes = 0;
+  let firstFrameSent = () => {};
+  const streaming = new Promise<void>((resolve) => {
+    firstFrameSent = resolve;
+  });
+
+  const platform = {
+    capabilities: { localModels: true },
+    async streamJsonLines(_spec: unknown, onLine: (line: string) => void, onEnd: (e: string | null) => void) {
+      let alive = true;
+      void (async () => {
+        for (const frame of framesFor(reply)) {
+          await new Promise((tick) => setTimeout(tick, 0));
+          // A closed stream is a dropped connection: nothing more arrives, and
+          // `onEnd` never comes either. That is what makes a missing `close()`
+          // a hang rather than a slow success.
+          if (!alive) return;
+          onLine(frame);
+          firstFrameSent();
+        }
+        if (alive) onEnd(null);
+      })();
+
+      return {
+        async close() {
+          closes++;
+          alive = false;
+          if (options.closeRejects) throw new Error('the connection was already gone');
+        },
+      };
+    },
+  } as unknown as Platform;
+
+  return { platform, streaming, closes: () => closes };
 }
 
 describe('the provider', () => {
@@ -572,8 +621,10 @@ describe('the provider', () => {
   });
 
   /**
-   * The failure this prevents: a cancelled session leaving the request open
-   * and the model still generating.
+   * The failure this prevents: a cancelled session carrying on to its next
+   * round trip. Nothing is in flight between turns, so this is the loop's
+   * abort check and nothing else — see the mid-generation test below for the
+   * request that is actually open when a user cancels.
    */
   it('stops when the signal aborts', async () => {
     const controller = new AbortController();
@@ -586,6 +637,66 @@ describe('the provider', () => {
     const after = await stream.next(undefined as never);
 
     expect(after.done).toBe(true);
+  });
+
+  /**
+   * The failure this prevents: a cancelled session leaving the request open
+   * and the model still generating — burning a local GPU on a reply nobody
+   * will read, for as long as it takes to finish.
+   *
+   * A user cancels while tokens are arriving, which is the only moment there
+   * is anything to cancel. `close()` is the assertion that matters: the loop's
+   * own abort check ends the generator either way, so a test that only looked
+   * at `done` would pass with no cancellation happening at all.
+   */
+  it('closes the request when the signal aborts mid-generation', async () => {
+    const controller = new AbortController();
+    const { platform, streaming, closes } = slowPlatform('{"method":"context.openBuffers"}');
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const stream = provider.complete({ instruction: 'x', context: '', signal: controller.signal });
+    const first = stream.next();
+    await streaming;
+    controller.abort();
+
+    expect(await first).toMatchObject({ done: true });
+    expect(closes()).toBe(1);
+  });
+
+  /**
+   * The failure this prevents: a session stuck at "running" for the life of
+   * the app. `close()` drops the listeners, so a rejection there means `onEnd`
+   * can no longer arrive — nothing else would ever settle the round trip.
+   */
+  it('ends the session even when closing the request fails', async () => {
+    const controller = new AbortController();
+    const { platform, streaming } = slowPlatform('{"method":"context.openBuffers"}', {
+      closeRejects: true,
+    });
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const stream = provider.complete({ instruction: 'x', context: '', signal: controller.signal });
+    const first = stream.next();
+    await streaming;
+    controller.abort();
+
+    expect(await first).toMatchObject({ done: true });
+  });
+
+  /**
+   * The failure this prevents: a session that does nothing and reports
+   * success. `maxTurns` is hand-edited and the loader keeps whatever number it
+   * finds, so a zero reaches the loop and its body never runs — which looks
+   * like a broken agent, not a mis-set number.
+   */
+  it('runs a turn however the cap is misconfigured', async () => {
+    for (const maxTurns of [0, -3, Number.NaN]) {
+      const { platform, bodies } = fakePlatform(['{"method":"session.summary","params":{"text":"done"}}']);
+      const chunks = await drain(new OllamaProvider(platform, { ...CONFIG, maxTurns }));
+
+      expect(bodies.length).toBeGreaterThanOrEqual(1);
+      expect(chunks.at(-1)).toMatchObject({ request: { method: 'session.summary' } });
+    }
   });
 });
 
@@ -645,7 +756,13 @@ describe('staging an edit the model quoted', () => {
     const chunks = await driveWith(new OllamaProvider(platform, CONFIG), answerReads);
 
     expect(actionFor(chunks, 'proposal.stage')).toBeUndefined();
-    expect(saidTo(bodies)).toMatch(/context\.bufferText/);
+    // Matched on the refusal's own words. `context.bufferText` would match the
+    // system prompt, which is in every request ever sent.
+    expect(sentOn(bodies, 1)).toMatch(/have not read b1/);
+    // Sent on the second request and not the first: `complete` mutates one
+    // `messages` array, so a fixture recording it by reference would show the
+    // whole conversation on every request and this pair could not disagree.
+    expect(sentOn(bodies, 0)).not.toMatch(/have not read b1/);
     // The session continues: the model is told what to do and does it.
     expect(actionFor(chunks, 'session.summary')).toBeDefined();
   });
@@ -669,7 +786,7 @@ describe('staging an edit the model quoted', () => {
     );
 
     expect(actionFor(chunks, 'proposal.stage')).toBeUndefined();
-    expect(saidTo(bodies)).toMatch(/2 matches/);
+    expect(sentOn(bodies, 2)).toMatch(/2 matches/);
   });
 
   /**
@@ -678,22 +795,35 @@ describe('staging an edit the model quoted', () => {
    * a line range starts in the wrong place and text with a number gutter is
    * not the document at all — either one resolves to offsets that land
    * somewhere else entirely in the real buffer.
+   *
+   * The stringified boolean is not padding. `parseTurn` checks that `params`
+   * is an object and nothing about its fields, and the reader takes any truthy
+   * `withLineNumbers` — so this reply is numbered text coming back, and a
+   * guard testing `=== true` would file it as the plain document. Quoting
+   * `const b = 2;` against `'1\tconst a = 1;\n2\tconst b = 2;'` resolves
+   * cleanly to offset 17, which in the real buffer is the middle of the word
+   * `const`: `const a = 1;\nconsconst b = 3;`. Inventing a parameter as a
+   * string is ordinary behaviour for a small model.
    */
-  it('does not resolve against a numbered or partial read', async () => {
+  it.each([
+    { how: 'line numbers', params: { withLineNumbers: true }, text: '1\tconst a = 1;\n2\tconst b = 2;' },
+    { how: 'line numbers asked for as a string', params: { withLineNumbers: 'true' }, text: '1\tconst a = 1;\n2\tconst b = 2;' },
+    { how: 'a line range', params: { lines: { from: 2, to: 2 } }, text: 'const b = 2;' },
+  ])('does not resolve against a read with $how', async ({ params, text }) => {
     const { platform, bodies } = fakePlatform([
-      '{"method":"context.bufferText","params":{"bufferId":"b1","withLineNumbers":true}}',
+      JSON.stringify({ method: 'context.bufferText', params: { bufferId: 'b1', ...params } }),
       stageReply('b1', 'const b = 2;'),
       '{"method":"session.summary","params":{"text":"done"}}',
     ]);
 
     const chunks = await driveWith(new OllamaProvider(platform, CONFIG), (request) =>
       request.method === 'context.bufferText'
-        ? { id: 1, ok: true, result: '1\tconst a = 1;\n2\tconst b = 2;' }
+        ? { id: 1, ok: true, result: text }
         : { id: 1, ok: true, result: null },
     );
 
     expect(actionFor(chunks, 'proposal.stage')).toBeUndefined();
-    expect(saidTo(bodies)).toMatch(/context\.bufferText/);
+    expect(sentOn(bodies, 2)).toMatch(/have not read b1/);
   });
 
   /**
