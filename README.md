@@ -124,6 +124,16 @@ moved.
 protocol over stdin and stdout — there's a
 [140-line example](examples/uppercase-agent.mjs) you can copy.
 
+**Edit Selection with a Model…** Select some text, describe the change in your
+own words, and skip the whole-workspace session for a two-line fix. The
+selection reaches the model as part of the brief, and the answer comes back
+through the same review panel. Hunks outside what you selected are still
+proposed — never refused — but start unchecked and labelled *outside your
+selection*, because a companion edit elsewhere in the file is often the right
+one and this only changes which box starts ticked. Expect a partial result:
+asked to do two things at once, a local model will often do one and stop, so
+read the diff rather than assume the rest happened.
+
 **If you never turn any of this on, Nox is not a worse editor for it.** That was
 the rule the whole time.
 
@@ -134,8 +144,11 @@ model, a context API, staged change sets and a job runner all shipped before
 any model did, and each one is an editor improvement on its own. What they
 unlock, in roughly this order:
 
-- **Explain, generate, refactor, fix** — everyday commands over a selection,
-  rather than a whole agent session for a two-line change.
+- **Explain selection** — the prose half of "everyday commands over a
+  selection" that editing didn't cover. It has no edit to put through the
+  review panel, so it needs a result surface Nox doesn't have yet: not
+  `NotesPanel`, which is the user's own notes, not a toast, which is
+  transient, and not the agents panel, which is a session trail.
 - **Workspace-aware chat**, with the context set shown and editable instead of
   guessed at behind your back.
 - **Remote models** alongside the local one. A deliberate widening with its own

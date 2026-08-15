@@ -75,6 +75,25 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     covered as they were; `examples/uppercase-agent.mjs` shows the field in
     use.
 
+- **Edit Selection with a Model…** A command for a two-line change: select
+  text, say what to do with it in your own words, and the answer comes back
+  through the same review panel a full agent session uses. Enabled only when
+  there is a selection and a model-backed agent is configured.
+  - The selection reaches the model as part of the session's context, so it
+    knows what you were looking at without a round trip to ask. A plain **Run
+    Agent…** benefits too — any session with text selected now tells the
+    model where the user is looking.
+  - Hunks outside the selection are still proposed, never refused, but start
+    **unkept** and labelled *outside your selection* — a companion edit
+    elsewhere in the file is often the right one, and this only changes which
+    box starts checked. A plain **Run Agent…** session is unaffected: every
+    hunk there still starts kept.
+  - **Expect a partial edit.** Asked to do two things in one instruction, a
+    local model will often do only one and stop — confirmed walking the
+    feature against a real one, which rewrote the selected code correctly and
+    left a second, explicitly requested change untouched. Read the diff
+    rather than assuming the instruction was carried out in full.
+
 ### Fixed
 
 - **A project-wide replace marked whole files as changed, not just the lines
