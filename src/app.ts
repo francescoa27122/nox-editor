@@ -37,7 +37,14 @@ import { createPlatform } from '@platform/index';
 import type { Platform } from '@platform/types';
 import { CommandRegistry, type Command } from '@services/commands';
 import { ConfigService, type SettingKey } from '@services/config';
-import { AgentConfigService, AGENTS_FILE, isProcessAgent, type ProcessAgentConfig } from '@services/agent/config';
+import {
+  AgentConfigService,
+  AGENTS_FILE,
+  isProcessAgent,
+  type OllamaAgentConfig,
+  type ProcessAgentConfig,
+} from '@services/agent/config';
+import { OllamaProvider } from '@services/agent/ollama';
 import { AgentRuntime } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
@@ -312,6 +319,18 @@ export class NoxApp {
     // land means the text exists only in memory, so it is worth saying.
     this.notes.error.subscribe((message) => {
       if (message) this.notifications.error('Could not save notes', message);
+    });
+
+    // Each configured local model becomes a provider the agent panel can start
+    // a session with. Re-registered wholesale when agents.json changes, which
+    // is rare and much simpler than diffing the list.
+    let disposeProviders: (() => void)[] = [];
+    this.agentConfig.agents.subscribe((agents) => {
+      for (const dispose of disposeProviders) dispose();
+      disposeProviders = agents
+        .filter((agent): agent is OllamaAgentConfig => agent.kind === 'ollama')
+        .filter(() => this.platform.capabilities.localModels)
+        .map((agent) => this.agents.registerProvider(new OllamaProvider(this.platform, agent)));
     });
   }
 
