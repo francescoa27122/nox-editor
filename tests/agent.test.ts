@@ -5,7 +5,7 @@ import { AgentRuntime, ProviderTransport, type AgentSession } from '../src/servi
 import type { ModelChunk } from '../src/services/agent/provider';
 import { ScriptedProvider } from '../src/services/agent/provider';
 import { CommandRegistry } from '../src/services/commands';
-import { ContextService } from '../src/services/context';
+import { ContextService, type BufferSummary, type SelectionInfo } from '../src/services/context';
 import { FileTreeService } from '../src/services/filetree';
 import { JobRunner } from '../src/services/jobs';
 import { PermissionService, type Policy } from '../src/services/permissions';
@@ -572,5 +572,489 @@ describe('what a session says about itself afterwards', () => {
     await settle(session);
 
     expect(session.status.get()).toBe('done');
+  });
+});
+
+describe('an agent that read only part of a buffer', () => {
+  /**
+   * The guard added with the stale-read fix records a revision only for a
+   * plain *whole* read, so a range read left no entry and the stage skipped
+   * the check entirely. That is the shape `examples/uppercase-agent.mjs`
+   * ships in: read line 1, compute offsets from 0, stage.
+   *
+   * Prevents: a user keystroke between the read and the stage silently
+   * rewriting the wrong span, which is the same corruption the whole-read
+   * guard exists to refuse.
+   */
+  it('is refused when the buffer moved after its range read', async () => {
+    const { runtime, workspace, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const text = yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1 } },
+            },
+          };
+          const firstLine = (text?.ok ? text.result : '') as string;
+
+          // The user types while the agent is deciding.
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the first line',
+                edits: [
+                  { bufferId: a, changes: { from: 0, to: firstLine.length, insert: firstLine.toUpperCase() } },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'uppercase line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(true);
+  });
+
+  /**
+   * The inversion the whole-read guard's comment warns about: a later narrow
+   * read must not re-bless offsets computed against text that has since
+   * moved. A range read may establish a baseline, never raise one.
+   *
+   * Prevents: whole-read at r5, user types, range-read at r6, stage against
+   * the r5 text sailing through because the entry caught up.
+   */
+  it('does not let a later range read re-bless an older whole read', async () => {
+    const { runtime, workspace, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const whole = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+          const original = (whole?.ok ? whole.result : '') as string;
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          // A narrow read after the change: it sees new text, but the offsets
+          // below were computed from `original`.
+          yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1 } },
+            },
+          };
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Rewrite from stale offsets',
+                edits: [{ bufferId: a, changes: { from: 0, to: original.length, insert: 'REPLACED' } }],
+              },
+            },
+          };
+        }),
+      ),
+      'rewrite',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(true);
+  });
+});
+
+describe('an agent that read a selection', () => {
+  /** Put a range under the user's cursor. Selection alone does not move the revision. */
+  const select = (
+    workspace: Awaited<ReturnType<typeof setup>>['workspace'],
+    id: string,
+    anchor: number,
+    head: number,
+  ) =>
+    workspace.applyTransaction(id, workspace.stateOf(id)!.update({ selection: { anchor, head } }));
+
+  /**
+   * `context.selection` hands back real document offsets and the text at
+   * them — everything needed to compute an edit — but recorded no baseline,
+   * so a session that read only the selection skipped the check entirely.
+   * That is the most natural shape of "uppercase my selection".
+   *
+   * Prevents: a user keystroke between the selection read and the stage
+   * writing `ONEheader` over a `// header` the agent never saw.
+   */
+  it('is refused when the buffer moved after its selection read', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    select(workspace, a, 0, 3);
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const read = yield {
+            type: 'action',
+            request: { method: 'context.selection', params: { bufferId: a } },
+          };
+          const info = (read?.ok ? read.result : null) as SelectionInfo;
+          const main = info.ranges[info.main]!;
+
+          // The user types above the selection while the agent is deciding.
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the selection',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: main.from, to: main.to, insert: main.text.toUpperCase() },
+                  },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'uppercase my selection',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(true);
+    expect(workspace.textOf(a)).toBe(`// header\n${A}`);
+  });
+
+  /**
+   * The same asymmetry a range read keeps: a selection read shows where the
+   * cursor is, not that the offsets about to be staged came from the current
+   * text.
+   *
+   * Prevents: whole read at r5, user types, selection read at r6, stage
+   * against the r5 text sailing through because the entry caught up.
+   */
+  it('does not let a later selection read re-bless an older whole read', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    select(workspace, a, 0, 3);
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const whole = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+          const original = (whole?.ok ? whole.result : '') as string;
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          yield {
+            type: 'action',
+            request: { method: 'context.selection', params: { bufferId: a } },
+          };
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Rewrite from stale offsets',
+                edits: [
+                  { bufferId: a, changes: { from: 0, to: original.length, insert: 'REPLACED' } },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'rewrite',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(true);
+  });
+});
+
+describe('reads that locate no text', () => {
+  /**
+   * A buffer summary, a scroll position, a path tree and a change-set list
+   * say nothing about where any text sits, so none of them establishes a
+   * baseline. Listing the buffers is how most sessions open, and a baseline a
+   * narrow read may not raise would then refuse the honest sequence below.
+   *
+   * Prevents: widening the guard to every `context.*` method and turning the
+   * ordinary list → user types → read the range → stage into a refusal.
+   *
+   * Also pins what `BufferSummary.revision` is: something to compare across
+   * reads, not a base revision anything checks. The listing reports one, the
+   * buffer moves past it, and the stage lands anyway — `proposal.stage` has
+   * no field to pass it back through.
+   */
+  it('lets a range read after a listing still stage', async () => {
+    const { runtime, workspace, context, review, a } = await setup();
+    context.setViewportProvider(() => ({ from: 1, to: 3 }));
+    let listed = -1;
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summaries = (buffers?.ok ? buffers.result : []) as BufferSummary[];
+          listed = summaries.find((buffer) => buffer.id === a)!.revision;
+          yield {
+            type: 'action',
+            request: { method: 'context.viewport', params: { bufferId: a } },
+          };
+
+          // The user types after the listing but before the read the agent
+          // actually computes from.
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          const read = yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1 } },
+            },
+          };
+          const firstLine = (read?.ok ? read.result : '') as string;
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the first line',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: 0, to: firstLine.length, insert: firstLine.toUpperCase() },
+                  },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'uppercase line one',
+    );
+    await settle(session);
+
+    expect(listed).not.toBe(workspace.revisionOf(a));
+    expect(review.staged.get()).not.toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(false);
+  });
+});
+
+describe('the stale refusal', () => {
+  /**
+   * The message used to say "read it again", which for the range-reading
+   * agent this guard newly refuses is not a recovery: re-reading the same
+   * narrow way leaves the baseline untouched and the next stage is refused
+   * again. Only a plain whole read refreshes it.
+   *
+   * Prevents: an agent looping on the advice it was given.
+   */
+  it('names a re-read that clears it, and that re-read clears it', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const refusals: string[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const first = yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1 } },
+            },
+          };
+          const stale = (first?.ok ? first.result : '') as string;
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          const refused = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the first line',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: 0, to: stale.length, insert: stale.toUpperCase() },
+                  },
+                ],
+              },
+            },
+          };
+          if (refused && !refused.ok) refusals.push(refused.error.message);
+
+          // Do exactly what the message says.
+          const again = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+          const fresh = (again?.ok ? again.result : '') as string;
+          const firstLine = fresh.slice(0, fresh.indexOf('\n'));
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the first line',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: 0, to: firstLine.length, insert: firstLine.toUpperCase() },
+                  },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'uppercase line one',
+    );
+    await settle(session);
+
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain('context.bufferText');
+    expect(refusals[0]).toContain('no other params');
+    // The advice works: the whole read cleared it and the second stage landed.
+    expect(review.staged.get()).not.toBeNull();
+    expect(session.status.get()).toBe('awaiting-review');
+  });
+});
+
+describe('what the runtime counts as a plain whole read', () => {
+  /**
+   * The reader resolves the range with `?.from ?? 1` / `?.to ?? doc.lines`
+   * and clamps it, so a span past the end returns the whole document while
+   * the runtime's `lines === undefined` test filed it as narrow. The two
+   * disagreeing means a read that genuinely handed over the current text
+   * could not refresh the baseline it had established.
+   *
+   * Prevents: an agent that always sends an over-wide range being refused
+   * forever after the first user keystroke.
+   */
+  it('refreshes the baseline for a range that spans the document', async () => {
+    const { runtime, workspace, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1000 } },
+            },
+          };
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          const again = yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1000 } },
+            },
+          };
+          const fresh = (again?.ok ? again.result : '') as string;
+          const firstLine = fresh.slice(0, fresh.indexOf('\n'));
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the first line',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: 0, to: firstLine.length, insert: firstLine.toUpperCase() },
+                  },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'uppercase line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).not.toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(false);
+  });
+
+  /**
+   * `parseInbound` validates only `id` and `method`, so an out-of-process
+   * agent can send `lines: null` — which the reader answers with the whole
+   * document and the runtime's `=== undefined` test called narrow.
+   *
+   * Prevents: the same permanent refusal, reached from a JSON encoder that
+   * writes an absent field as null.
+   */
+  it('refreshes the baseline when lines is null', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const nulled = { bufferId: a, lines: null as unknown as { from: number; to: number } };
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          yield { type: 'action', request: { method: 'context.bufferText', params: nulled } };
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          const again = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: nulled },
+          };
+          const fresh = (again?.ok ? again.result : '') as string;
+          const firstLine = fresh.slice(0, fresh.indexOf('\n'));
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the first line',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: 0, to: firstLine.length, insert: firstLine.toUpperCase() },
+                  },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'uppercase line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).not.toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(false);
   });
 });

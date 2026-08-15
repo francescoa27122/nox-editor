@@ -38,7 +38,14 @@ export interface BufferSummary {
   languageName: string;
   isUntitled: boolean;
   isDirty: boolean;
-  /** Pass back as a base revision to have a stale edit rejected. */
+  /**
+   * The buffer's monotonic document revision, for comparing across reads to
+   * see that it moved. There is nowhere for an agent to pass it back:
+   * `proposal.stage` takes a description and edits and nothing else, and
+   * `workspace.apply`'s `baseRevisions` is reachable only from in-process
+   * callers. Staleness for an agent is enforced from the revisions
+   * `AgentRuntime` recorded at its own reads.
+   */
   revision: number;
   lineCount: number;
   /** Characters, not bytes. */
