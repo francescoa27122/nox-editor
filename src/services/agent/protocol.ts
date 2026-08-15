@@ -44,7 +44,39 @@ export type AgentRequest =
    * effect and this has none. The moment it becomes a write is Apply, which is
    * the user's own action, taken in their own UI.
    */
-  | { id: number; method: 'proposal.stage'; params: { description: string; edits: Edit[] } }
+  | {
+      id: number;
+      method: 'proposal.stage';
+      params: {
+        description: string;
+        edits: Edit[];
+        /**
+         * The revision each buffer was at when these offsets were computed.
+         *
+         * A plain object rather than a `Map` because the wire is
+         * line-delimited JSON and a `Map` serialises to `{}`. The runtime
+         * converts it at the boundary, where it meets
+         * `ChangeSetSpec.baseRevisions` in the shape that already exists.
+         * Keyed by buffer rather than per edit, because several edits to one
+         * buffer share one revision and `ChangeSetSpec` is already keyed that
+         * way.
+         *
+         * Optional, and the guarantee it buys is therefore opt-in: requiring
+         * it would break every agent already written, including the reference
+         * one. An agent that omits it gets the runtime's read tracking and
+         * nothing more — which does not cover a buffer the session only
+         * listed, or offsets kept across a re-read.
+         *
+         * `BufferSummary.revision` from `context.openBuffers` is where the
+         * number comes from. Declare the revision the offsets were actually
+         * computed against, not the freshest one available: a declaration is
+         * checked *in addition to* the read tracking, never instead of it, so
+         * naming a revision the agent has not re-derived its offsets from buys
+         * nothing and describes a check it did not do.
+         */
+        baseRevisions?: Record<BufferId, number>;
+      };
+    }
   /** Narration for the user, shown alongside the reads that justify it. */
   | { id: number; method: 'session.note'; params: { text: string } }
   /** End the session with a sentence about what was done. */
@@ -160,6 +192,88 @@ export function parseInbound(line: string): { ok: true; message: Inbound } | { o
     default:
       return { ok: false, reason: `unknown message type "${(message as { type: string }).type}"` };
   }
+}
+
+/**
+ * Read `proposal.stage`'s `baseRevisions` as a map, or say why it is not one.
+ *
+ * Lives here beside `parseInbound` because the shape of a message is the
+ * protocol's business, and is called from the runtime rather than from
+ * `parseInbound` itself because the two failures are not the same failure.
+ * `parseInbound` answers "is this line usable at all", and its only caller
+ * treats a `false` as fatal — `StdioTransport.run` throws and the session
+ * dies. A malformed declaration is a well-formed request carrying a bad
+ * argument: the agent should be *told*, in a response it can read, and it
+ * should be told whether it arrived over a pipe or from an in-process
+ * provider, which never passes through `parseInbound` at all. One mistake,
+ * one behaviour.
+ *
+ * A malformed declaration refuses the stage rather than being ignored. That is
+ * the whole decision: an agent that sent one believes it is protected, and
+ * staging anyway hands it a guarantee it does not have — worse than never
+ * having offered the field. `parseInbound` validates only `id` and `method`,
+ * so every shape below can and will arrive from another process.
+ */
+export function parseBaseRevisions(
+  value: unknown,
+): { ok: true; declared: ReadonlyMap<BufferId, number> } | { ok: false; reason: string } {
+  if (value === undefined) return { ok: true, declared: new Map() };
+  // `null` is refused rather than read as "no declaration", unlike
+  // `context.bufferText`'s `lines`. A null `lines` degrades to a whole read,
+  // which costs nothing; a null declaration read as absent silently drops the
+  // entire promise the agent asked for.
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {
+      ok: false,
+      reason:
+        `baseRevisions must be an object mapping buffer ids to revision numbers, ` +
+        `not ${shown(value)}`,
+    };
+  }
+
+  const declared = new Map<BufferId, number>();
+  for (const [bufferId, revision] of Object.entries(value)) {
+    // A non-negative safe integer, because that is the only shape a real
+    // revision can ever take: a buffer's revision starts at 0 and climbs one
+    // whole step at a time. `NaN` and `Infinity` were already refused on this
+    // reasoning — accepting them would turn a declaration into a permanent,
+    // unexplained refusal at the next step — and it applies just as much to
+    // `-7`, `3.5`, `1e308` and `2**53`: none of them can ever equal a
+    // monotonic integer revision either, so letting them through the door
+    // only delays the same unfollowable refusal to the next step. `-0` is not
+    // one of these: `-0 === 0`, so a declaration of `-0` is not claiming
+    // anything false, and `Number.isSafeInteger(-0)` is `true`.
+    if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
+      return {
+        ok: false,
+        reason: `baseRevisions["${bufferId}"] must be a non-negative safe integer revision number, not ${shown(revision)}`,
+      };
+    }
+    declared.set(bufferId, revision);
+  }
+  return { ok: true, declared };
+}
+
+/**
+ * What arrived, for a message an agent author can act on.
+ *
+ * `undefined` and `object` are named directly rather than falling through to
+ * `a ${typeof value}`, which read as "not a undefined" and "not a object" —
+ * a wire-visible audit string with the wrong article for exactly those two
+ * types. Every other fallback (`a boolean`, `a function`, `a bigint`, `a
+ * symbol`) already reads correctly with "a", so only these two are
+ * special-cased.
+ */
+function shown(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  // Named rather than typed: `JSON.stringify(NaN)` is `"null"`, which would
+  // describe the one case as the other.
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'string') return `the string ${JSON.stringify(value)}`;
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'object') return 'an object';
+  return `a ${typeof value}`;
 }
 
 /** Convenience for building a failure response without repeating the shape. */
