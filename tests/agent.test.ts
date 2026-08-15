@@ -1815,8 +1815,21 @@ describe('the brief', () => {
     workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
 
     const brief = runtime.brief();
-    expect(brief).toContain('Selected in a.txt, lines 2–3:');
+    expect(brief).toContain(`Selected in a.txt [${a}], lines 2–3:`);
     expect(brief).toContain('two\nthree');
+  });
+
+  // Measured against qwen2.5-coder:7b: shown "shapes.js" with no id, it called
+  // context.bufferText with the file name as bufferId, got "Buffer shapes.js
+  // not found." eleven times, and hit the turn cap without staging anything.
+  // The selection is the one line most likely to be acted on immediately, so
+  // it above all must carry an id the model can actually call back with.
+  it('carries the buffer id of the buffer the selection is in', async () => {
+    const { runtime, workspace, a } = await setup();
+    workspace.setActive(a);
+    workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
+
+    expect(runtime.brief()).toContain(`[${a}]`);
   });
 
   // A bare cursor is not a selection. Quoting the empty string would tell the
@@ -1835,12 +1848,22 @@ describe('the brief', () => {
   // to the string an ordinary session opens with — the common case, since
   // most sessions start with no selection — could regress unnoticed.
   it('produces exactly this brief for a session with no selection', async () => {
-    const { runtime, workspace, a } = await setup();
+    const { runtime, workspace, a, b } = await setup();
     workspace.setActive(a);
 
     expect(runtime.brief()).toBe(
-      'Open files: a.txt, b.txt\nActive file: a.txt (Plain Text, 6 lines)',
+      `Open files: a.txt [${a}], b.txt [${b}]\nActive file: a.txt [${a}] (Plain Text, 6 lines)`,
     );
+  });
+
+  // The active-file line is what most instructions act against ("update the
+  // comment on line 1"), so it must carry an id on its own — a model must not
+  // have to cross-reference the "Open files" line to find it.
+  it("carries the active file's buffer id", async () => {
+    const { runtime, workspace, a } = await setup();
+    workspace.setActive(a);
+
+    expect(runtime.brief()).toContain(`Active file: a.txt [${a}]`);
   });
 
   // Silent truncation lets a model answer as though it had the whole
@@ -1866,7 +1889,7 @@ describe('the brief', () => {
 
     const brief = runtime.brief();
     expect(brief).toContain('two\nthree');
-    expect(brief).not.toContain('Selected in a.txt, lines 1–1');
+    expect(brief).not.toContain(`Selected in a.txt [${a}], lines 1–1`);
   });
 });
 

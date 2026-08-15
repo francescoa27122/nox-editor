@@ -430,13 +430,28 @@ export class AgentRuntime {
     return { undone, skipped };
   }
 
-  /** A short description of where the user is, to open a session with. */
+  /**
+   * A short description of where the user is, to open a session with.
+   *
+   * Every `context.*` method addresses a buffer by `bufferId`, never by name,
+   * so each file this names also carries `[id]` — the token a model can
+   * actually call back with. Measured against `qwen2.5-coder:7b`: shown only
+   * "shapes.js", it called `context.bufferText` with the file name as the id,
+   * got "not found", and retried that name eleven times until the turn cap.
+   * Square brackets are reserved for ids alone, never reused for the
+   * descriptive parens beside them, so the id is never one of several tokens
+   * a model has to guess between.
+   */
   brief(): string {
     const buffers = this.#context.openBuffers();
     const active = buffers.find((buffer) => buffer.isActive);
-    const lines = [`Open files: ${buffers.map((buffer) => buffer.name).join(', ') || 'none'}`];
+    const lines = [
+      `Open files: ${buffers.map((buffer) => `${buffer.name} [${buffer.id}]`).join(', ') || 'none'}`,
+    ];
     if (active) {
-      lines.push(`Active file: ${active.name} (${active.languageName}, ${active.lineCount} lines)`);
+      lines.push(
+        `Active file: ${active.name} [${active.id}] (${active.languageName}, ${active.lineCount} lines)`,
+      );
       const viewport = this.#context.viewport(active.id);
       if (viewport) lines.push(`On screen: lines ${viewport.from}–${viewport.to}`);
 
@@ -444,7 +459,7 @@ export class AgentRuntime {
       const range = selection && !selection.isEmpty ? selection.ranges[selection.main] : undefined;
       if (range) {
         lines.push(
-          `Selected in ${active.name}, lines ${range.fromLine}–${range.toLine}:`,
+          `Selected in ${active.name} [${active.id}], lines ${range.fromLine}–${range.toLine}:`,
           clipSelection(range.text),
         );
       }
