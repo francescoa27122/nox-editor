@@ -1,4 +1,9 @@
-import type { RequestBody } from './protocol';
+import type { Platform } from '@platform/types';
+import type { Edit } from '../transactions';
+import type { BufferId } from '../workspace';
+import type { OllamaAgentConfig } from './config';
+import type { CoreResponse, RequestBody } from './protocol';
+import type { ModelProvider, ModelRequest, ModelStream } from './provider';
 
 /**
  * A local model, over Ollama's HTTP API.
@@ -316,4 +321,279 @@ export function resolveEdit(
   }
 
   return { from: first, to: first + find.length, insert: replace };
+}
+
+/** How many times the model may act before the session ends itself. */
+const DEFAULT_MAX_TURNS = 12;
+
+/**
+ * What the model is told it may do.
+ *
+ * Written as the protocol's own vocabulary rather than as tool schemas: the
+ * model has no tool-calling path, so this prompt *is* the interface. `find`
+ * is quoted rather than positional for the reason `resolveEdit` documents.
+ */
+function systemPrompt(): string {
+  return [
+    'You are a coding agent inside the Nox editor.',
+    'Reply with ONE JSON object and nothing else. Do not use code fences.',
+    '',
+    'Methods:',
+    '{"method":"context.openBuffers"}',
+    '{"method":"context.bufferText","params":{"bufferId":"<id>"}}',
+    '{"method":"context.selection","params":{"bufferId":"<id>"}}',
+    '{"method":"context.viewport","params":{"bufferId":"<id>"}}',
+    '{"method":"context.workspaceTree"}',
+    '{"method":"context.recentTransactions"}',
+    '{"method":"session.note","params":{"text":"<what you are doing>"}}',
+    '{"method":"proposal.stage","params":{"description":"<what>","edits":[{"bufferId":"<id>","find":"<exact existing text>","replace":"<new text>"}]}}',
+    '{"method":"session.summary","params":{"text":"<what you did>"}}',
+    '',
+    'For proposal.stage, "find" MUST be copied exactly from the buffer and must',
+    'appear exactly once in it. Quote whole lines including indentation. Never',
+    'use character offsets. Read a buffer with context.bufferText, plainly and',
+    'in full, before staging any edit against it.',
+    '',
+    'You receive each result as the next user message. Finish with session.summary.',
+  ].join('\n');
+}
+
+interface ChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * The text of each buffer the model has read, as it read it.
+ *
+ * Lives inside one `complete` call rather than on the provider. Two sessions
+ * against the same agent must not read each other's buffers, and text left
+ * over from a previous instruction is older than anything the current one can
+ * reason about — the model quotes from what it was shown *this* session, so
+ * that is the only text a quote may be resolved against. Staging does not
+ * write, so an entry stays true until the user applies a proposal, which ends
+ * the session anyway.
+ */
+type BufferTexts = Map<string, string>;
+
+/**
+ * Keep the text of a buffer the model just read.
+ *
+ * Only a plain whole-document read is worth keeping. Offsets are measured from
+ * position 0 of the buffer, so text taken from a line range starts in the
+ * wrong place, and text with a line-number gutter is not the buffer's text at
+ * all — resolving a quote against either produces offsets that land somewhere
+ * else entirely, which is the one failure `resolveEdit` exists to prevent.
+ */
+function rememberRead(
+  request: RequestBody,
+  response: CoreResponse | undefined,
+  texts: BufferTexts,
+): void {
+  if (request.method !== 'context.bufferText') return;
+  const { bufferId, lines, withLineNumbers } = request.params;
+  if (lines !== undefined || withLineNumbers === true) return;
+  if (!response?.ok || typeof response.result !== 'string') return;
+  texts.set(bufferId, response.result);
+}
+
+/**
+ * Rewrite a staged edit's quoted text into the offsets `proposal.stage` takes.
+ *
+ * The conversion has to happen here because this is the only place that holds
+ * both the quote and the text it was quoted from: below is the protocol, which
+ * takes offsets and asks no questions, and above is the model, which cannot
+ * count. That asymmetry is also why every doubt is refused rather than
+ * guessed. `proposal.stage` will faithfully stage a change set built from
+ * nonsense, and the result is not an error the user sees — it is a diff that
+ * looks deliberate, with the agent's name on it, offered for one keystroke of
+ * approval.
+ */
+function withOffsets(
+  params: unknown,
+  texts: BufferTexts,
+): { method: 'proposal.stage'; params: { description: string; edits: Edit[] } } | { error: string } {
+  const record = params as { description?: unknown; edits?: unknown };
+  if (!Array.isArray(record.edits) || record.edits.length === 0) {
+    return { error: 'proposal.stage needs a non-empty "edits" array' };
+  }
+
+  const edits: Edit[] = [];
+  for (const entry of record.edits as unknown[]) {
+    const edit = entry as { bufferId?: unknown; find?: unknown; replace?: unknown };
+    if (
+      typeof edit.bufferId !== 'string' ||
+      typeof edit.find !== 'string' ||
+      typeof edit.replace !== 'string'
+    ) {
+      return { error: 'every edit needs string "bufferId", "find" and "replace" fields' };
+    }
+
+    const text = texts.get(edit.bufferId);
+    if (text === undefined) {
+      return {
+        error: `you have not read ${edit.bufferId} this session — call context.bufferText for it, with no other params, before staging an edit against it`,
+      };
+    }
+
+    const resolved = resolveEdit(text, edit.find, edit.replace);
+    if ('error' in resolved) return { error: resolved.error };
+    edits.push({ bufferId: edit.bufferId as BufferId, changes: resolved });
+  }
+
+  const description = typeof record.description === 'string' ? record.description : 'Agent proposal';
+  return { method: 'proposal.stage', params: { description, edits } };
+}
+
+export class OllamaProvider implements ModelProvider {
+  readonly id: string;
+  readonly label: string;
+
+  #platform: Platform;
+  #config: OllamaAgentConfig;
+
+  constructor(platform: Platform, config: OllamaAgentConfig) {
+    this.#platform = platform;
+    this.#config = config;
+    this.id = config.id;
+    this.label = config.label;
+  }
+
+  async *complete(request: ModelRequest): ModelStream {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt() },
+      {
+        role: 'user',
+        content: `Instruction: ${request.instruction}\n\n${request.context}\n\nBegin.`,
+      },
+    ];
+
+    const maxTurns = this.#config.maxTurns ?? DEFAULT_MAX_TURNS;
+    const texts: BufferTexts = new Map();
+    let consecutiveFailures = 0;
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+      if (request.signal?.aborted) return;
+
+      const content = await this.#ask(messages, request.signal);
+      if (content === null) return;
+
+      messages.push({ role: 'assistant', content });
+      const parsed = parseTurn(content);
+
+      if (parsed.text.length > 0) yield { type: 'text', text: parsed.text };
+
+      let action = parsed.action;
+      let refusal = action ? null : `${parsed.error}. Reply with one JSON object.`;
+
+      // The only action that cannot be passed on as it arrives: what the model
+      // emits is quoted text and what the protocol takes is offsets.
+      if (action?.method === 'proposal.stage') {
+        const staged = withOffsets(action.params, texts);
+        if ('error' in staged) {
+          action = null;
+          refusal = staged.error;
+        } else {
+          action = staged;
+        }
+      }
+
+      if (action === null) {
+        consecutiveFailures++;
+        // Twice is enough to know it is not a slip. A model that cannot emit
+        // the format will not manage it on the third attempt, and the session
+        // is more useful ended than looping. A refused stage counts the same:
+        // it is equally a turn that produced nothing Nox can act on, and a
+        // model misquoting the same buffer twice is not about to get it right.
+        if (consecutiveFailures >= 2) return;
+        messages.push({ role: 'user', content: `Error: ${refusal}` });
+        continue;
+      }
+
+      consecutiveFailures = 0;
+      const response = yield { type: 'action', request: action };
+      if (action.method === 'session.summary') return;
+      rememberRead(action, response, texts);
+      messages.push({ role: 'user', content: `Result: ${describeResponse(response)}` });
+    }
+  }
+
+  /**
+   * One round trip. Returns the assembled `message.content`, or null when the
+   * stream failed or was aborted — either way there is nothing to parse.
+   */
+  async #ask(messages: ChatMessage[], signal: AbortSignal | undefined): Promise<string | null> {
+    const url = `${this.#config.host.replace(/\/+$/, '')}/api/chat`;
+    let content = '';
+    let failure: string | null = null;
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      let onAbort: (() => void) | null = null;
+      const finish = () => {
+        if (onAbort) {
+          signal?.removeEventListener('abort', onAbort);
+          onAbort = null;
+        }
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      void this.#platform
+        .streamJsonLines(
+          {
+            url,
+            body: {
+              model: this.#config.model,
+              stream: true,
+              // A structured-output task, not a creative one. Determinism also
+              // makes a bad turn reproducible instead of a ghost.
+              options: { temperature: 0 },
+              messages,
+            },
+          },
+          (line) => {
+            try {
+              const frame = JSON.parse(line) as { message?: { content?: string } };
+              content += frame.message?.content ?? '';
+            } catch {
+              // A frame that is not JSON is not fatal: the reply so far still
+              // stands, and the parse of the whole turn is what decides.
+            }
+          },
+          (error) => {
+            failure = error;
+            finish();
+          },
+        )
+        .then((stream) => {
+          // A fast server ends the request before this resolves, and then
+          // there is nothing left to cancel — registering anyway would leave a
+          // listener on the session's signal for every turn of the
+          // conversation. Cancelling mid-generation is what this is for.
+          if (!signal || settled) return;
+          if (signal.aborted) {
+            void stream.close().then(finish);
+            return;
+          }
+          onAbort = () => void stream.close().then(finish);
+          signal.addEventListener('abort', onAbort, { once: true });
+        })
+        .catch((error: unknown) => {
+          failure = error instanceof Error ? error.message : String(error);
+          finish();
+        });
+    });
+
+    if (failure !== null || signal?.aborted) return null;
+    return content;
+  }
+}
+
+/** What the model is told came back. */
+function describeResponse(response: CoreResponse | undefined): string {
+  if (!response) return 'ok';
+  if (response.ok) return JSON.stringify(response.result);
+  return `error ${response.error.code}: ${response.error.message}`;
 }

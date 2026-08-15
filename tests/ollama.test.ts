@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
-import { parseTurn, resolveEdit } from '../src/services/agent/ollama';
+import type { Platform } from '../src/platform/types';
+import { OllamaProvider, parseTurn, resolveEdit } from '../src/services/agent/ollama';
+import type { OllamaAgentConfig } from '../src/services/agent/config';
+import type { CoreResponse, RequestBody } from '../src/services/agent/protocol';
+import type { ModelChunk } from '../src/services/agent/provider';
 
 /**
  * The Ollama provider and the platform seam beneath it.
@@ -401,5 +405,311 @@ describe('resolving an edit', () => {
   it('allows a replacement that deletes', () => {
     const resolved = resolveEdit(doc, '  return a + b;\n', '');
     expect(resolved).toEqual({ from: 44, to: 60, insert: '' });
+  });
+});
+
+const CONFIG: OllamaAgentConfig = {
+  id: 'local', label: 'Qwen', kind: 'ollama',
+  host: 'http://127.0.0.1:11434', model: 'qwen2.5-coder:7b',
+};
+
+/** Split a reply the way Ollama does: a few characters per frame. */
+function framesFor(content: string): string[] {
+  const frames = [...content].map((char) =>
+    JSON.stringify({ model: 'qwen2.5-coder:7b', message: { role: 'assistant', content: char }, done: false }),
+  );
+  frames.push(JSON.stringify({ model: 'qwen2.5-coder:7b', message: { role: 'assistant', content: '' }, done: true, done_reason: 'stop' }));
+  return frames;
+}
+
+/** A platform whose stream replays one scripted reply per request. */
+function fakePlatform(replies: string[]) {
+  const bodies: unknown[] = [];
+  let turn = 0;
+  const platform = {
+    capabilities: { localModels: true },
+    async streamJsonLines(spec: { body: unknown }, onLine: (line: string) => void, onEnd: (e: string | null) => void) {
+      bodies.push(spec.body);
+      const reply = replies[turn++] ?? '{"method":"session.summary","params":{"text":"done"}}';
+      for (const frame of framesFor(reply)) onLine(frame);
+      onEnd(null);
+      return { async close() {} };
+    },
+  } as unknown as Platform;
+  return { platform, bodies };
+}
+
+/** Drive a stream to completion, feeding a fixed response back each time. */
+async function drain(provider: OllamaProvider, instruction = 'do a thing') {
+  const chunks = [];
+  const stream = provider.complete({ instruction, context: '' });
+  let response: never | undefined = undefined;
+  for (;;) {
+    const step = await stream.next(response as never);
+    if (step.done) break;
+    chunks.push(step.value);
+  }
+  return chunks;
+}
+
+/**
+ * Drive a stream, answering each action with whatever `respond` says.
+ *
+ * The plain `drain` above answers everything with `undefined`, which is enough
+ * for a loop test but not for anything that turns on what came back — a read
+ * the provider has to remember, above all.
+ */
+async function driveWith(
+  provider: OllamaProvider,
+  respond: (request: RequestBody) => CoreResponse | undefined,
+) {
+  const chunks: ModelChunk[] = [];
+  const stream = provider.complete({ instruction: 'do a thing', context: '' });
+  let response: CoreResponse | undefined = undefined;
+  for (;;) {
+    const step = await stream.next(response);
+    if (step.done) break;
+    chunks.push(step.value);
+    response = step.value.type === 'action' ? respond(step.value.request) : undefined;
+  }
+  return chunks;
+}
+
+/** The one action of a given method the provider yielded, if it yielded one. */
+function actionFor(chunks: ModelChunk[], method: string): RequestBody | undefined {
+  const chunk = chunks.find((c) => c.type === 'action' && c.request.method === method);
+  return chunk?.type === 'action' ? chunk.request : undefined;
+}
+
+/** Everything the provider has said to the model, across every round trip. */
+function saidTo(bodies: unknown[]): string {
+  return JSON.stringify(bodies.map((body) => (body as { messages: unknown }).messages));
+}
+
+describe('the provider', () => {
+  it('yields the action a model emitted', async () => {
+    const { platform } = fakePlatform(['{"method":"context.openBuffers"}']);
+    const chunks = await drain(new OllamaProvider(platform, CONFIG));
+
+    expect(chunks[0]).toEqual({ type: 'action', request: { method: 'context.openBuffers' } });
+  });
+
+  /**
+   * The failure this prevents: a parser that assumes one frame is one
+   * message. Ollama streams content a few characters at a time, so no single
+   * frame holds a parseable object.
+   */
+  it('accumulates an object split across frames', async () => {
+    const { platform } = fakePlatform(['{"method":"session.note","params":{"text":"hello"}}']);
+    const chunks = await drain(new OllamaProvider(platform, CONFIG));
+
+    expect(chunks[0]).toMatchObject({ type: 'action', request: { method: 'session.note' } });
+  });
+
+  /**
+   * The failure this prevents: a malformed turn ending the session, where the
+   * model would have recovered given the error back.
+   */
+  it('feeds a parse error back and continues', async () => {
+    const { platform, bodies } = fakePlatform([
+      'I think the answer is 42.',
+      '{"method":"session.summary","params":{"text":"done"}}',
+    ]);
+    await drain(new OllamaProvider(platform, CONFIG));
+
+    const second = bodies[1] as { messages: { role: string; content: string }[] };
+    expect(JSON.stringify(second.messages)).toMatch(/no JSON object/);
+  });
+
+  /**
+   * The failure this prevents: an infinite retry loop against a model that
+   * cannot produce the format at all.
+   */
+  it('gives up after two unparseable turns in a row', async () => {
+    const { platform, bodies } = fakePlatform(['nonsense one', 'nonsense two', 'nonsense three']);
+    await drain(new OllamaProvider(platform, CONFIG));
+
+    expect(bodies.length).toBeLessThanOrEqual(2);
+  });
+
+  /**
+   * The failure this prevents: a small model re-reading the same buffer
+   * forever, which it will do given the chance.
+   */
+  it('stops at the turn cap', async () => {
+    const { platform, bodies } = fakePlatform(new Array(50).fill('{"method":"context.openBuffers"}'));
+    await drain(new OllamaProvider(platform, { ...CONFIG, maxTurns: 3 }));
+
+    expect(bodies).toHaveLength(3);
+  });
+
+  /**
+   * The failure this prevents: an unreachable server hanging the session.
+   * `#ask` gets an end event carrying an error and no content, and a loop that
+   * treated that as an empty turn would retry against a server that is not
+   * there until it hit the turn cap.
+   */
+  it('ends the session when the stream reports a failure', async () => {
+    const platform = {
+      capabilities: { localModels: true },
+      async streamJsonLines(_spec: unknown, _onLine: unknown, onEnd: (e: string | null) => void) {
+        onEnd('error sending request for url (http://127.0.0.1:11434/api/chat)');
+        return { async close() {} };
+      },
+    } as unknown as Platform;
+
+    const chunks = await drain(new OllamaProvider(platform, CONFIG));
+
+    expect(chunks).toEqual([]);
+  });
+
+  it('stops when the model emits a summary', async () => {
+    const { platform, bodies } = fakePlatform(['{"method":"session.summary","params":{"text":"all done"}}']);
+    const chunks = await drain(new OllamaProvider(platform, CONFIG));
+
+    expect(bodies).toHaveLength(1);
+    expect(chunks.at(-1)).toMatchObject({ request: { method: 'session.summary' } });
+  });
+
+  /**
+   * The failure this prevents: a cancelled session leaving the request open
+   * and the model still generating.
+   */
+  it('stops when the signal aborts', async () => {
+    const controller = new AbortController();
+    const { platform } = fakePlatform(new Array(20).fill('{"method":"context.openBuffers"}'));
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const stream = provider.complete({ instruction: 'x', context: '', signal: controller.signal });
+    await stream.next();
+    controller.abort();
+    const after = await stream.next(undefined as never);
+
+    expect(after.done).toBe(true);
+  });
+});
+
+describe('staging an edit the model quoted', () => {
+  const DOC = 'const a = 1;\nconst b = 2;\n';
+
+  /** A stage of `find`/`replace`, as the model actually emits one. */
+  function stageReply(bufferId: string, find: string, replace = 'const b = 3;'): string {
+    return JSON.stringify({
+      method: 'proposal.stage',
+      params: { description: 'bump b', edits: [{ bufferId, find, replace }] },
+    });
+  }
+
+  /** Answer a whole-buffer read with `DOC`, and everything else with `null`. */
+  const answerReads = (request: RequestBody): CoreResponse =>
+    request.method === 'context.bufferText'
+      ? { id: 1, ok: true, result: DOC }
+      : { id: 1, ok: true, result: null };
+
+  /**
+   * The failure this prevents: `find`/`replace` reaching `proposal.stage`,
+   * which takes `{from,to,insert}` and has no idea what a quote is. It would
+   * stage a change set built from `undefined` offsets — a diff the user is
+   * invited to apply.
+   */
+  it('rewrites quoted text into offsets against the buffer the model read', async () => {
+    const { platform } = fakePlatform([
+      '{"method":"context.bufferText","params":{"bufferId":"b1"}}',
+      stageReply('b1', 'const b = 2;'),
+      '{"method":"session.summary","params":{"text":"done"}}',
+    ]);
+
+    const chunks = await driveWith(new OllamaProvider(platform, CONFIG), answerReads);
+
+    expect(actionFor(chunks, 'proposal.stage')).toEqual({
+      method: 'proposal.stage',
+      params: {
+        description: 'bump b',
+        edits: [{ bufferId: 'b1', changes: { from: 13, to: 25, insert: 'const b = 3;' } }],
+      },
+    });
+  });
+
+  /**
+   * The failure this prevents: an edit staged against text the provider never
+   * saw. There is nothing to resolve the quote against, so the only honest
+   * options are refusing it or inventing offsets — and inventing them puts a
+   * corrupting diff in front of the user with the agent's name on it.
+   */
+  it('refuses a stage against a buffer the model never read', async () => {
+    const { platform, bodies } = fakePlatform([
+      stageReply('b1', 'const b = 2;'),
+      '{"method":"session.summary","params":{"text":"done"}}',
+    ]);
+
+    const chunks = await driveWith(new OllamaProvider(platform, CONFIG), answerReads);
+
+    expect(actionFor(chunks, 'proposal.stage')).toBeUndefined();
+    expect(saidTo(bodies)).toMatch(/context\.bufferText/);
+    // The session continues: the model is told what to do and does it.
+    expect(actionFor(chunks, 'session.summary')).toBeDefined();
+  });
+
+  /**
+   * The failure this prevents: a bad quote ending the turn silently. The model
+   * can requote given `resolveEdit`'s reason — it cannot given "that failed".
+   */
+  it('refuses an unresolvable quote and hands back the reason', async () => {
+    const repeated = 'x = 1;\nx = 1;\n';
+    const { platform, bodies } = fakePlatform([
+      '{"method":"context.bufferText","params":{"bufferId":"b1"}}',
+      stageReply('b1', 'x = 1;', 'x = 2;'),
+      '{"method":"session.summary","params":{"text":"done"}}',
+    ]);
+
+    const chunks = await driveWith(new OllamaProvider(platform, CONFIG), (request) =>
+      request.method === 'context.bufferText'
+        ? { id: 1, ok: true, result: repeated }
+        : { id: 1, ok: true, result: null },
+    );
+
+    expect(actionFor(chunks, 'proposal.stage')).toBeUndefined();
+    expect(saidTo(bodies)).toMatch(/2 matches/);
+  });
+
+  /**
+   * The failure this prevents: caching a partial read as if it were the
+   * document. `find` offsets are measured from position 0, so text taken from
+   * a line range starts in the wrong place and text with a number gutter is
+   * not the document at all — either one resolves to offsets that land
+   * somewhere else entirely in the real buffer.
+   */
+  it('does not resolve against a numbered or partial read', async () => {
+    const { platform, bodies } = fakePlatform([
+      '{"method":"context.bufferText","params":{"bufferId":"b1","withLineNumbers":true}}',
+      stageReply('b1', 'const b = 2;'),
+      '{"method":"session.summary","params":{"text":"done"}}',
+    ]);
+
+    const chunks = await driveWith(new OllamaProvider(platform, CONFIG), (request) =>
+      request.method === 'context.bufferText'
+        ? { id: 1, ok: true, result: '1\tconst a = 1;\n2\tconst b = 2;' }
+        : { id: 1, ok: true, result: null },
+    );
+
+    expect(actionFor(chunks, 'proposal.stage')).toBeUndefined();
+    expect(saidTo(bodies)).toMatch(/context\.bufferText/);
+  });
+
+  /**
+   * The failure this prevents: a model that cannot quote correctly staging
+   * forever. A refusal is a turn that produced nothing usable, exactly like an
+   * unparseable one, and it ends the session on the same terms.
+   */
+  it('ends the session after two refused stages in a row', async () => {
+    const { platform, bodies } = fakePlatform([
+      stageReply('b1', 'const b = 2;'),
+      stageReply('b2', 'const b = 2;'),
+      stageReply('b3', 'const b = 2;'),
+    ]);
+
+    await driveWith(new OllamaProvider(platform, CONFIG), answerReads);
+
+    expect(bodies.length).toBeLessThanOrEqual(2);
   });
 });
