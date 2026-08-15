@@ -847,6 +847,19 @@ brief, so the identifier every `context.*` call needs sits next to the name a
 person would use. No unit test caught this — every scripted provider in the
 suite passes ids by construction — which is what the walk was for.
 
+`brief()` also reads outside the recorded reader. It calls
+`this.#context.selection(...)` directly on `ContextService` rather than through
+the `context.reader(principal)` proxy every other read goes through: the brief
+is assembled before a request exists, and `#handle` binds that proxy per
+request. The selection text it embeds, up to `SELECTION_MAX_CHARS` (8,000)
+characters, never lands in `reads`. This is not a selection-edit gap —
+`brief()` opens every session, so a plain `Run Agent…` on a buffer with an
+active selection carries the same unrecorded text. It is not a security hole:
+the text leaves the machine only once `net.request` is granted, and a model
+could read the same buffer through the recorded API regardless. But `reads` is
+meant to be the whole account of what a session saw, and for what `brief()`
+sends, it currently is not.
+
 ### A review narrows the change set; it does not apply hunks
 
 `ReviewService.stage(spec)` computes what each buffer *would* say and diffs it

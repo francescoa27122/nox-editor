@@ -78,7 +78,7 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Edit Selection with a Model…** A command for a two-line change: select
   text, say what to do with it in your own words, and the answer comes back
   through the same review panel a full agent session uses. Enabled only when
-  there is a selection and a model-backed agent is configured.
+  there is a selection and a runnable agent is configured.
   - The selection reaches the model as part of the session's context, so it
     knows what you were looking at without a round trip to ask. A plain **Run
     Agent…** benefits too — any session with text selected now tells the
