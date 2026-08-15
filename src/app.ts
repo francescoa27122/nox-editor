@@ -41,11 +41,13 @@ import {
   AgentConfigService,
   AGENTS_FILE,
   isProcessAgent,
+  type AgentConfig,
   type OllamaAgentConfig,
-  type ProcessAgentConfig,
 } from '@services/agent/config';
 import { OllamaProvider } from '@services/agent/ollama';
-import { AgentRuntime } from '@services/agent/runtime';
+import type { AgentTransport } from '@services/agent/protocol';
+import type { ModelProvider } from '@services/agent/provider';
+import { AgentRuntime, ProviderTransport } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
 import { FileTreeService } from '@services/filetree';
@@ -521,37 +523,32 @@ export class NoxApp {
    * until the instruction is given.
    */
   async runAgent(agentId?: string): Promise<void> {
-    if (!this.platform.capabilities.agentProcesses) {
-      this.notifications.warn('Agents need the desktop app', 'The browser build cannot start a process.');
+    const configured = this.agentConfig.agents.get();
+    const choices = this.#runnableAgents();
+
+    if (choices.length === 0) {
+      if (configured.length === 0) {
+        this.notifications.info('No agents are configured', 'Run "Configure Agents" to add one.');
+      } else {
+        this.notifications.warn(
+          'None of the configured agents can run here',
+          'The browser build can neither start a process nor reach a local model.',
+        );
+      }
       return;
     }
 
-    // This command spawns a subprocess over stdio. An Ollama agent is not a
-    // process Nox starts — it is an HTTP endpoint started through the
-    // runtime's registered providers instead — so it is filtered out of the
-    // choices here rather than offered and then refused.
-    const getProcessAgent = (id: string): ProcessAgentConfig | undefined => {
-      const agent = this.agentConfig.get(id);
-      return agent && isProcessAgent(agent) ? agent : undefined;
-    };
-
-    const configured = this.agentConfig.agents.get().filter(isProcessAgent);
-    if (configured.length === 0) {
-      this.notifications.info('No agents are configured', 'Run "Configure Agents" to add one.');
-      return;
-    }
-
-    let chosen = agentId ? getProcessAgent(agentId) : undefined;
+    let chosen = agentId ? choices.find((agent) => agent.id === agentId) : undefined;
     if (!chosen) {
-      if (configured.length === 1) chosen = configured[0];
+      if (choices.length === 1) chosen = choices[0];
       else {
         const picked = await this.ui.askToConfirm({
           title: 'Which agent?',
           message: 'Pick the agent to run this instruction.',
-          choices: configured.map((agent) => ({ id: agent.id, label: agent.label })),
+          choices: choices.map((agent) => ({ id: agent.id, label: agent.label })),
         });
         if (!picked) return;
-        chosen = getProcessAgent(picked);
+        chosen = choices.find((agent) => agent.id === picked);
       }
     }
     if (!chosen) return;
@@ -566,15 +563,56 @@ export class NoxApp {
     });
     if (!instruction) return;
 
-    const spec = {
-      command: chosen.command,
-      ...(chosen.args ? { args: chosen.args } : {}),
-      ...(chosen.cwd ? { cwd: chosen.cwd } : {}),
-    };
+    let transport: AgentTransport;
+    if (isProcessAgent(chosen)) {
+      const spec = {
+        command: chosen.command,
+        ...(chosen.args ? { args: chosen.args } : {}),
+        ...(chosen.cwd ? { cwd: chosen.cwd } : {}),
+      };
+      transport = StdioTransport.spawnedBy(this.platform, spec, { label: chosen.label });
+    } else {
+      // Looked up now rather than when it was picked: agents.json can be
+      // reloaded while the instruction is being typed, and that drops every
+      // provider. Starting a session against a deregistered one would run a
+      // model the user can no longer see configured.
+      const provider = this.#providerFor(chosen.id);
+      if (!provider) {
+        this.notifications.warn(
+          `${chosen.label} is no longer configured`,
+          'agents.json was reloaded while you were typing.',
+        );
+        return;
+      }
+      transport = new ProviderTransport(provider);
+    }
 
-    const transport = StdioTransport.spawnedBy(this.platform, spec, { label: chosen.label });
     this.agents.start(transport, instruction.trim(), { label: chosen.label });
     this.ui.showAgents();
+  }
+
+  /** The provider registered for an agent record, by its id. */
+  #providerFor(id: string): ModelProvider | undefined {
+    return this.agents.providers.get().find((provider) => provider.id === id);
+  }
+
+  /**
+   * The configured agents this build can actually start, in configured order.
+   *
+   * A record's `kind` decides how it is reached, not whether it is offered:
+   * both a spawned process and a registered local model end up at the same
+   * runtime, and to the person choosing one they are the same act. What does
+   * decide is whether the route exists — a process needs a platform that can
+   * spawn, and a model needs the provider `#wireServices` registers for it,
+   * which it only does where the platform can reach one. An entry with no
+   * route is left out rather than offered and then refused.
+   */
+  #runnableAgents(): AgentConfig[] {
+    return this.agentConfig.agents.get().filter((agent) =>
+      isProcessAgent(agent)
+        ? this.platform.capabilities.agentProcesses
+        : this.#providerFor(agent.id) !== undefined,
+    );
   }
 
   /** Open `agents.json` for editing, creating it with an example if absent. */
@@ -1613,8 +1651,7 @@ export class NoxApp {
         keywords: ['ai', 'session', 'start', 'ask'],
         // Starting a process is the most powerful thing Nox does for someone,
         // so it is a command they run, never something that happens for them.
-        enabled: () =>
-          this.platform.capabilities.agentProcesses && this.agentConfig.agents.get().length > 0,
+        enabled: () => this.#runnableAgents().length > 0,
         run: (arg) => this.runAgent(typeof arg === 'string' ? arg : undefined),
       },
       {
