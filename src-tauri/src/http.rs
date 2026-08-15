@@ -9,7 +9,7 @@
 //! is a suggestion.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -36,7 +36,9 @@ pub struct HttpState {
 /// True when `url` is plain HTTP to a loopback host.
 ///
 /// Parses the host rather than matching a prefix: `localhost.evil.com` starts
-/// with `localhost` and is not loopback.
+/// with `localhost` and is not loopback. Only `[::1]` is listed for IPv6 —
+/// `url`'s `host_str()` always brackets an IPv6 host, so a bare `::1` never
+/// occurs and a branch for it would be dead code.
 pub fn is_loopback(url: &str) -> bool {
     let Ok(parsed) = reqwest::Url::parse(url) else {
         return false;
@@ -45,9 +47,36 @@ pub fn is_loopback(url: &str) -> bool {
         return false;
     }
     match parsed.host_str() {
-        Some("localhost") | Some("127.0.0.1") | Some("::1") | Some("[::1]") => true,
+        Some("localhost") | Some("127.0.0.1") | Some("[::1]") => true,
         _ => false,
     }
+}
+
+/// The client used for every request, built once rather than per call.
+///
+/// The configuration is the reason this exists as a shared function at all —
+/// not connection reuse, though that comes along for free. `is_loopback`
+/// only proves the *first* hop stays on the machine:
+///
+/// - A server at the checked URL can still reply `3xx` and point anywhere.
+///   The default policy follows up to 10 redirects with no host check, and
+///   on `307`/`308` it replays the request body — the prompt, i.e. whatever
+///   of the user's files went into it — to wherever that is. A loopback
+///   client has no legitimate reason to follow a redirect at all, so the
+///   policy is "never", not "check each hop and hope nothing is missed".
+/// - `reqwest` also inherits `http_proxy`/`https_proxy` from the environment
+///   by default, and the proxy matcher has no loopback exclusion. With a
+///   proxy set, a "loopback-only" request would ship off machine anyway.
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .build()
+            // No TLS, no proxy, no redirects: nothing here can fail to build.
+            .expect("the loopback http client is always constructible")
+    })
 }
 
 /// Start the request and return at once.
@@ -80,80 +109,96 @@ pub fn nox_http_stream(
     Ok(())
 }
 
+/// Drives the request to completion and reports the outcome.
+///
+/// The one `nox://http-end` emit and the one cancel-map cleanup both live
+/// here, after `run_stream` returns, rather than at each of its exit points.
+/// `run_stream` used to inline both of those and clean up only at the bottom
+/// of its loop — which left every return *before* the loop (a connection
+/// refused, a non-2xx response) skipping cleanup entirely. Connection refused
+/// is not a rare edge case here; it is what every attempt looks like before
+/// the model server is running, so that leak was on the common path.
 async fn stream_into_events(
     app: AppHandle,
     id: String,
     url: String,
     body: serde_json::Value,
-    mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
+    cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
-    let finish = |app: &AppHandle, id: &str, error: Option<String>| {
-        let _ = app.emit(
-            "nox://http-end",
-            EndPayload { id: id.to_string(), error },
-        );
-    };
+    let error = run_stream(&app, &id, &url, &body, cancel_rx).await;
 
-    let response = match reqwest::Client::new().post(&url).json(&body).send().await {
-        Ok(response) => response,
-        Err(error) => {
-            finish(&app, &id, Some(error.to_string()));
-            return;
+    // `try_state` rather than indexing: the app can be tearing down by the
+    // time a spawned task gets here, and a missing registry is nothing to
+    // panic over — there is nothing left to cancel either way.
+    if let Some(state) = app.try_state::<HttpState>() {
+        if let Ok(mut cancels) = state.cancels.lock() {
+            cancels.remove(&id);
         }
+    }
+
+    let _ = app.emit("nox://http-end", EndPayload { id, error });
+}
+
+/// Runs one request/stream to its end and returns the error to report, if
+/// any. `None` covers both a clean finish and a cancellation — the renderer
+/// does not need to tell them apart, since either way nothing more is coming.
+async fn run_stream(
+    app: &AppHandle,
+    id: &str,
+    url: &str,
+    body: &serde_json::Value,
+    mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
+) -> Option<String> {
+    let response = match http_client().post(url).json(body).send().await {
+        Ok(response) => response,
+        Err(error) => return Some(error.to_string()),
     };
 
     if !response.status().is_success() {
         let status = response.status();
-        // The body carries the useful part — Ollama says `model "x" not found,
-        // try pulling it first` — so surface it rather than a bare status.
+        // The body carries the useful part of a failure — surface it rather
+        // than a bare status.
         let detail = response.text().await.unwrap_or_default();
-        finish(&app, &id, Some(format!("{status}: {detail}")));
-        return;
+        return Some(format!("{status}: {detail}"));
     }
 
     let mut stream = response.bytes_stream();
-    // Frames do not align to line boundaries; hold the tail until a newline.
-    let mut pending = String::new();
+    // Frames do not align to line boundaries, so the tail is held as raw
+    // bytes rather than decoded per chunk. A multi-byte UTF-8 character split
+    // across two chunks would otherwise be decoded as two invalid halves —
+    // `from_utf8_lossy` per chunk turns it into two replacement characters,
+    // silently and unrecoverably. Holding bytes and decoding only once a full
+    // line has arrived means every decode sees a complete character.
+    let mut pending: Vec<u8> = Vec::new();
 
     loop {
         tokio::select! {
-            _ = &mut cancel_rx => {
-                finish(&app, &id, None);
-                break;
-            }
+            _ = &mut cancel_rx => return None,
             chunk = stream.next() => {
                 let Some(chunk) = chunk else {
                     // A trailing line with no newline is still a line.
-                    if !pending.trim().is_empty() {
-                        let _ = app.emit("nox://http-line", LinePayload { id: id.clone(), line: pending.clone() });
+                    if !pending.is_empty() {
+                        let line = String::from_utf8_lossy(&pending).into_owned();
+                        if !line.trim().is_empty() {
+                            let _ = app.emit("nox://http-line", LinePayload { id: id.to_string(), line });
+                        }
                     }
-                    finish(&app, &id, None);
-                    break;
+                    return None;
                 };
                 match chunk {
                     Ok(bytes) => {
-                        pending.push_str(&String::from_utf8_lossy(&bytes));
-                        while let Some(index) = pending.find('\n') {
-                            let line: String = pending.drain(..=index).collect();
-                            let line = line.trim_end().to_string();
+                        pending.extend_from_slice(&bytes);
+                        while let Some(index) = pending.iter().position(|&b| b == b'\n') {
+                            let raw: Vec<u8> = pending.drain(..=index).collect();
+                            let line = String::from_utf8_lossy(&raw).trim_end().to_string();
                             if line.is_empty() { continue; }
-                            let _ = app.emit("nox://http-line", LinePayload { id: id.clone(), line });
+                            let _ = app.emit("nox://http-line", LinePayload { id: id.to_string(), line });
                         }
                     }
-                    Err(error) => {
-                        finish(&app, &id, Some(error.to_string()));
-                        break;
-                    }
+                    Err(error) => return Some(error.to_string()),
                 }
             }
         }
-    }
-
-    // The handle is dropped by `nox_http_cancel` on the cancel path; on the
-    // normal path nothing removes it, so the map would grow one entry per
-    // request. Clear it here via the app's managed state.
-    if let Ok(mut cancels) = app.state::<HttpState>().cancels.lock() {
-        cancels.remove(&id);
     }
 }
 
@@ -197,5 +242,65 @@ mod tests {
     fn only_http_schemes_are_allowed() {
         assert!(!is_loopback("file:///etc/passwd"));
         assert!(!is_loopback("ftp://127.0.0.1/x"));
+    }
+
+    /// The failure this prevents: `is_loopback` only checks the URL the
+    /// caller supplied — the *first* hop. Reqwest's default redirect policy
+    /// follows up to 10 more with no host check at all, so a server sitting
+    /// at that first, legitimately-loopback URL could 302 anywhere and this
+    /// module would happily fetch it. A second, "attacker" server proves the
+    /// point empirically: if it is ever contacted, the redirect was followed
+    /// and the whole loopback guarantee is void.
+    #[tokio::test]
+    async fn redirects_are_never_followed() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let attacker = TcpListener::bind("127.0.0.1:0").expect("bind attacker");
+        let attacker_addr = attacker.local_addr().expect("attacker addr");
+        let attacker_hit = Arc::new(AtomicBool::new(false));
+        {
+            let hit = Arc::clone(&attacker_hit);
+            std::thread::spawn(move || {
+                if let Ok((mut stream, _)) = attacker.accept() {
+                    hit.store(true, Ordering::SeqCst);
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+                }
+            });
+        }
+
+        let redirecting = TcpListener::bind("127.0.0.1:0").expect("bind redirecting");
+        let redirecting_addr = redirecting.local_addr().expect("redirecting addr");
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = redirecting.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: http://{attacker_addr}/\r\nContent-Length: 0\r\n\r\n"
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        let response = http_client()
+            .post(format!("http://{redirecting_addr}/"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("request to the redirecting server should succeed");
+
+        assert_eq!(
+            response.status(),
+            302,
+            "the 302 must come back to the caller, not be followed"
+        );
+        assert!(
+            !attacker_hit.load(Ordering::SeqCst),
+            "the attacker server must never be contacted"
+        );
     }
 }
