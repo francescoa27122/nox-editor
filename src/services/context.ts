@@ -39,12 +39,14 @@ export interface BufferSummary {
   isUntitled: boolean;
   isDirty: boolean;
   /**
-   * The buffer's monotonic document revision, for comparing across reads to
-   * see that it moved. There is nowhere for an agent to pass it back:
-   * `proposal.stage` takes a description and edits and nothing else, and
-   * `workspace.apply`'s `baseRevisions` is reachable only from in-process
-   * callers. Staleness for an agent is enforced from the revisions
-   * `AgentRuntime` recorded at its own reads.
+   * The buffer's monotonic document revision — for comparing across reads to
+   * see that it moved, and for passing back as `proposal.stage`'s
+   * `baseRevisions` to say which revision an edit's offsets were computed
+   * against. A declared revision the buffer is no longer at refuses the stage.
+   *
+   * Declaring it is optional, so an agent that does not is left with what
+   * `AgentRuntime` recorded at its own reads, which does not cover a buffer
+   * this listing is the only thing the session ever looked at.
    */
   revision: number;
   lineCount: number;
