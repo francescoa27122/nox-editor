@@ -17,16 +17,40 @@ import type { Platform } from '@platform/types';
 
 export const AGENTS_FILE = 'agents.json';
 
-export interface AgentConfig {
+interface AgentBase {
   /** Stable key, used for the session label and for policy lookup. */
   id: string;
   /** Shown in the palette and the panel. */
   label: string;
+}
+
+/** An agent Nox starts as a child process, speaking the protocol over stdio. */
+export interface ProcessAgentConfig extends AgentBase {
+  /**
+   * Absent means `process`. Records written before local models existed have
+   * no `kind`, and an upgrade that stopped loading them would be a poor
+   * trade for a tidier type.
+   */
+  kind?: 'process';
   command: string;
   args?: string[];
   /** Defaults to the workspace root. */
   cwd?: string;
 }
+
+/** A local model served over loopback HTTP. */
+export interface OllamaAgentConfig extends AgentBase {
+  kind: 'ollama';
+  host: string;
+  model: string;
+  /**
+   * How many times the model may act before the session ends itself. A small
+   * model will re-read the same buffer indefinitely given the chance.
+   */
+  maxTurns?: number;
+}
+
+export type AgentConfig = ProcessAgentConfig | OllamaAgentConfig;
 
 interface AgentsFile {
   agents?: unknown;
@@ -35,6 +59,13 @@ interface AgentsFile {
 /** What a fresh `agents.json` says, so the format is self-explaining. */
 export const AGENTS_TEMPLATE = `{
   "agents": [
+    {
+      "id": "local",
+      "label": "Local model",
+      "kind": "ollama",
+      "host": "http://127.0.0.1:11434",
+      "model": "qwen2.5-coder:7b"
+    },
     {
       "id": "example",
       "label": "Example agent",
@@ -114,24 +145,33 @@ export class AgentConfigService {
   }
 }
 
-/** Accept a record only if it has the two fields that cannot be defaulted. */
+/** Accept a record only if it has the fields its `kind` cannot default. */
 function normalise(entry: unknown): AgentConfig | null {
   if (typeof entry !== 'object' || entry === null) return null;
   const record = entry as Record<string, unknown>;
 
   const id = typeof record.id === 'string' ? record.id.trim() : '';
+  if (!id) return null;
+  const label = typeof record.label === 'string' && record.label.trim() ? record.label.trim() : id;
+
+  if (record.kind === 'ollama') {
+    const host = typeof record.host === 'string' ? record.host.trim() : '';
+    const model = typeof record.model === 'string' ? record.model.trim() : '';
+    if (!host || !model) return null;
+
+    const agent: OllamaAgentConfig = { id, label, kind: 'ollama', host, model };
+    if (typeof record.maxTurns === 'number') agent.maxTurns = record.maxTurns;
+    return agent;
+  }
+
   const command = typeof record.command === 'string' ? record.command.trim() : '';
-  if (!id || !command) return null;
+  if (!command) return null;
 
   const args = Array.isArray(record.args)
     ? record.args.filter((arg): arg is string => typeof arg === 'string')
     : undefined;
 
-  const agent: AgentConfig = {
-    id,
-    label: typeof record.label === 'string' && record.label.trim() ? record.label.trim() : id,
-    command,
-  };
+  const agent: ProcessAgentConfig = { id, label, command };
   if (args && args.length > 0) agent.args = args;
   if (typeof record.cwd === 'string' && record.cwd.trim()) agent.cwd = record.cwd.trim();
   return agent;

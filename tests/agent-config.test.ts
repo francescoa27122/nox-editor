@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
-import { AgentConfigService, AGENTS_FILE, AGENTS_TEMPLATE } from '../src/services/agent/config';
+import {
+  AgentConfigService,
+  AGENTS_FILE,
+  AGENTS_TEMPLATE,
+  type ProcessAgentConfig,
+} from '../src/services/agent/config';
 
 async function withFile(contents: string | null) {
   const platform = new MemoryPlatform();
@@ -87,7 +92,7 @@ describe('reading agents.json', () => {
     const { config } = await withFile(
       JSON.stringify({ agents: [{ id: 'a', command: 'node', args: ['ok', 7, null] }] }),
     );
-    expect(config.agents.get()[0]?.args).toEqual(['ok']);
+    expect((config.agents.get()[0] as ProcessAgentConfig | undefined)?.args).toEqual(['ok']);
   });
 });
 
@@ -113,15 +118,73 @@ describe('creating agents.json', () => {
     expect(await platform.readConfigFile(AGENTS_FILE)).toBe(AGENTS_TEMPLATE);
   });
 
-  it('produces a template that parses back into one agent', async () => {
+  it('produces a template that parses back into both example agents', async () => {
     const { platform, config } = await withFile(null);
     await config.ensureFile();
     await config.load();
 
-    // The example has to be valid, or the first thing a new user sees is an
+    // The examples have to be valid, or the first thing a new user sees is an
     // error about the file Nox just wrote for them.
     expect(config.error.get()).toBeNull();
-    expect(config.agents.get()).toHaveLength(1);
+    expect(config.agents.get()).toHaveLength(2);
     expect(platform).toBeDefined();
+  });
+});
+
+describe('ollama agents', () => {
+  /**
+   * The failure this prevents: requiring `kind` on every record, which would
+   * make every existing agents.json in the wild stop loading on upgrade.
+   */
+  it('treats a record with no kind as a process agent', async () => {
+    const platform = new MemoryPlatform();
+    await platform.writeConfigFile(
+      'agents.json',
+      JSON.stringify({ agents: [{ id: 'a', label: 'A', command: 'node' }] }),
+    );
+
+    const config = new AgentConfigService(platform);
+    await config.load();
+
+    expect(config.agents.get()).toHaveLength(1);
+    expect(config.agents.get()[0]!.kind ?? 'process').toBe('process');
+  });
+
+  it('parses an ollama record', async () => {
+    const platform = new MemoryPlatform();
+    await platform.writeConfigFile(
+      'agents.json',
+      JSON.stringify({
+        agents: [
+          { id: 'local', label: 'Qwen', kind: 'ollama',
+            host: 'http://127.0.0.1:11434', model: 'qwen2.5-coder:7b' },
+        ],
+      }),
+    );
+
+    const config = new AgentConfigService(platform);
+    await config.load();
+
+    const agent = config.agents.get()[0]!;
+    expect(agent.kind).toBe('ollama');
+    expect(agent).toMatchObject({ host: 'http://127.0.0.1:11434', model: 'qwen2.5-coder:7b' });
+  });
+
+  /**
+   * The failure this prevents: an ollama record missing its model loading as
+   * a valid agent, so the failure surfaces as a confusing HTTP error at
+   * session start rather than as a bad config file.
+   */
+  it('rejects an ollama record with no model', async () => {
+    const platform = new MemoryPlatform();
+    await platform.writeConfigFile(
+      'agents.json',
+      JSON.stringify({ agents: [{ id: 'x', label: 'X', kind: 'ollama', host: 'http://127.0.0.1:11434' }] }),
+    );
+
+    const config = new AgentConfigService(platform);
+    await config.load();
+
+    expect(config.agents.get()).toEqual([]);
   });
 });
