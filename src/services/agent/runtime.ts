@@ -572,15 +572,44 @@ export class AgentRuntime {
           // file needs no edit has a conclusion that is stale once it moves.
           // A declaration can therefore only ever add a refusal, which is why
           // the field can be optional without being a trap.
+          //
+          // Checked before the revision comparison below, and under a
+          // different code: `workspace.revisionOf` answers `-1` for a buffer
+          // it does not have, and comparing that sentinel against a declared
+          // revision the ordinary way would let `{ 'no-such-buffer': -1 }`
+          // through as if `-1` were a real revision, while every other
+          // declared revision for the same buffer was correctly refused.
+          // `workspace.apply` already calls this case `missing`
+          // (`workspace.ts:958-961`) rather than folding it into `stale`; this
+          // does the same under `not-found`, the code this runtime already
+          // uses for "no such buffer" (`context.bufferText`'s unknown-buffer
+          // case) — `ErrorCode` has no `missing` of its own to borrow.
+          const declaredMissing = [...declaration.declared.keys()].find(
+            (bufferId) => this.#workspace.revisionOf(bufferId) === -1,
+          );
+          if (declaredMissing) {
+            const message = `No buffer ${this.#nameOf(declaredMissing)} — a revision was declared for it, but it is not open.`;
+            record({ kind: 'error', message });
+            return failure(request.id, 'not-found', message);
+          }
+
           const declaredStale = [...declaration.declared].find(
             ([bufferId, revision]) => this.#workspace.revisionOf(bufferId) !== revision,
           );
           if (declaredStale) {
             const [bufferId, revision] = declaredStale;
+            const name = this.#nameOf(bufferId);
+            // "Read it again" reads as "look up the fresher number" — which
+            // is exactly what stages the corruption back in: list again,
+            // declare the fresh revision, keep the offsets computed against
+            // the old text. Naming the read that actually recomputes offsets
+            // is what the sibling read-guard message below does; this says
+            // the same thing, plainly, about what a declaration is for.
             const message =
-              `${this.#nameOf(bufferId)} is at revision ${this.#workspace.revisionOf(bufferId)}, ` +
-              `not the revision ${revision} you declared. Read it again and declare the ` +
-              `revision you computed the offsets against.`;
+              `${name} is at revision ${this.#workspace.revisionOf(bufferId)}, ` +
+              `not the revision ${revision} you declared. The offsets you staged were computed ` +
+              `against older text — recompute them against ${name}'s current text (a fresh ` +
+              `context.bufferText read), then declare the revision that read returns.`;
             record({ kind: 'error', message });
             return failure(request.id, 'stale', message);
           }

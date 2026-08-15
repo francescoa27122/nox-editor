@@ -233,13 +233,20 @@ export function parseBaseRevisions(
 
   const declared = new Map<BufferId, number>();
   for (const [bufferId, revision] of Object.entries(value)) {
-    // Finite, so `NaN` and `Infinity` are refused: both compare unequal or
-    // never-equal to a real revision, so accepting them would turn a
-    // declaration into a permanent, unexplained refusal at the next step.
-    if (typeof revision !== 'number' || !Number.isFinite(revision)) {
+    // A non-negative safe integer, because that is the only shape a real
+    // revision can ever take: a buffer's revision starts at 0 and climbs one
+    // whole step at a time. `NaN` and `Infinity` were already refused on this
+    // reasoning — accepting them would turn a declaration into a permanent,
+    // unexplained refusal at the next step — and it applies just as much to
+    // `-7`, `3.5`, `1e308` and `2**53`: none of them can ever equal a
+    // monotonic integer revision either, so letting them through the door
+    // only delays the same unfollowable refusal to the next step. `-0` is not
+    // one of these: `-0 === 0`, so a declaration of `-0` is not claiming
+    // anything false, and `Number.isSafeInteger(-0)` is `true`.
+    if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
       return {
         ok: false,
-        reason: `baseRevisions["${bufferId}"] must be a finite revision number, not ${shown(revision)}`,
+        reason: `baseRevisions["${bufferId}"] must be a non-negative integer revision number, not ${shown(revision)}`,
       };
     }
     declared.set(bufferId, revision);
@@ -247,7 +254,16 @@ export function parseBaseRevisions(
   return { ok: true, declared };
 }
 
-/** What arrived, for a message an agent author can act on. */
+/**
+ * What arrived, for a message an agent author can act on.
+ *
+ * `undefined` and `object` are named directly rather than falling through to
+ * `a ${typeof value}`, which read as "not a undefined" and "not a object" —
+ * a wire-visible audit string with the wrong article for exactly those two
+ * types. Every other fallback (`a boolean`, `a function`, `a bigint`, `a
+ * symbol`) already reads correctly with "a", so only these two are
+ * special-cased.
+ */
 function shown(value: unknown): string {
   if (value === null) return 'null';
   if (Array.isArray(value)) return 'an array';
@@ -255,6 +271,8 @@ function shown(value: unknown): string {
   // describe the one case as the other.
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return `the string ${JSON.stringify(value)}`;
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'object') return 'an object';
   return `a ${typeof value}`;
 }
 

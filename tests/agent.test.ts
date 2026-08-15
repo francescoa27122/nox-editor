@@ -1103,6 +1103,44 @@ describe('a declared base revision', () => {
   });
 
   /**
+   * `-0` is not a shape worth refusing: `-0 === 0` in JavaScript, so a
+   * declaration of `-0` for a buffer at revision 0 is not claiming anything
+   * false. Tightening finding 3's validation to a non-negative integer must
+   * not catch it — `Number.isSafeInteger(-0)` is `true` and `-0 >= 0` is
+   * `true`, so it stays accepted.
+   *
+   * Prevents: a `revision > 0` (rather than `>= 0`) boundary, or a `Object.is`
+   * check, either of which would refuse the one negative-looking value that
+   * is not actually a lie.
+   */
+  it('stages a declaration of -0 against a buffer at revision 0', async () => {
+    const { runtime, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                baseRevisions: { [a]: -0 },
+              },
+            },
+          };
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).not.toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(false);
+  });
+
+  /**
    * The declaration is the whole point: an agent that says which revision its
    * offsets came from is refused when the buffer is no longer at it, under the
    * same `stale` code `workspace.apply` already uses for the same mismatch.
@@ -1144,6 +1182,58 @@ describe('a declared base revision', () => {
     expect(review.staged.get()).toBeNull();
     expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
     expect(workspace.textOf(a)).toBe(`// header\n${A}`);
+  });
+
+  /**
+   * `workspace.revisionOf` answers `-1` for a buffer it does not have, and
+   * before this fix the mismatch check compared that sentinel directly
+   * against whatever the agent declared, so `-1 !== -1` was false and
+   * `{ 'no-such-buffer': -1 }` passed — while every other revision for the
+   * same missing buffer was correctly refused `stale`. `workspace.apply`
+   * already treats an unknown buffer as `missing` regardless of the declared
+   * revision (`workspace.ts:958-961`); this refuses it here too, under
+   * `not-found`, the code this runtime already uses for "no such buffer"
+   * (`context.bufferText`'s unknown-buffer case) since `ErrorCode` has no
+   * `missing` of its own to borrow.
+   *
+   * Prevents: a declaration naming a buffer that was never open, or has
+   * since been closed, sailing through because `-1 === -1`.
+   */
+  it('refuses a declaration naming a buffer that is not open', async () => {
+    const { runtime, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+    const noSuchBuffer = 'buffer-does-not-exist';
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                // A plausible, well-formed revision — not the `-1` sentinel
+                // itself. Finding 3's non-negative validation now rejects
+                // `-1` on its own before this check ever runs, which closes
+                // the reviewer's exact `{ 'no-such-buffer': -1 }` payload as
+                // a side effect; this pins the general bug that remains for
+                // any declared revision naming a buffer that isn't open.
+                baseRevisions: { [noSuchBuffer]: 0 },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['not-found']);
+    expect(refusals[0]?.message).toContain(noSuchBuffer);
   });
 
   /**
@@ -1369,6 +1459,140 @@ describe('a declared base revision', () => {
   });
 
   /**
+   * The reviewer's loop: list, let the buffer move, stage stale offsets
+   * declaring the listed revision, get refused, then re-list and declare the
+   * *fresh* revision while sending the *same* stale offsets. The old message
+   * — "Read it again and declare the revision you computed the offsets
+   * against" — reads as "look up a fresher number", which is exactly what
+   * that loop does, and it staged the corruption back in.
+   *
+   * This pins the honest reading of the corrected message: recompute the
+   * offsets against the buffer's current text (a real `context.bufferText`
+   * read), then declare the revision that read came back at. That must
+   * actually succeed — a message whose advice does not work is worse than no
+   * message.
+   *
+   * Prevents: advice that reads as "refresh the number" and reopens the hole
+   * a declaration exists to close.
+   */
+  it('stages once the agent recomputes offsets against current text before declaring', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summary = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a);
+
+          // The user types at the end of the document, past where the
+          // listing said it finished.
+          workspace.applyEdits(a, [{ from: summary.length, to: summary.length, insert: 'six' }]);
+
+          // The naive move: stage against the listed length, declaring the
+          // listed revision. Refused, which is what triggers the advice this
+          // test is about.
+          const first = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Add a footer',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: summary.length, to: summary.length, insert: '// footer\n' },
+                  },
+                ],
+                baseRevisions: { [a]: summary.revision },
+              },
+            },
+          };
+          if (first && !first.ok) refusals.push(first.error);
+
+          // The honest reading of the advice: a whole read, to recompute
+          // offsets against the text as it now stands, not a re-list to
+          // fetch a fresher number for the offsets already in hand.
+          const whole = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+          const current = (whole?.ok ? whole.result : '') as string;
+
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Add a footer',
+                edits: [
+                  {
+                    bufferId: a,
+                    changes: { from: current.length, to: current.length, insert: '// footer\n' },
+                  },
+                ],
+                baseRevisions: { [a]: workspace.revisionOf(a) },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'add a footer',
+    );
+    await settle(session);
+
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
+    expect(review.staged.get()).not.toBeNull();
+  });
+
+  /**
+   * The old wording — "Read it again and declare the revision you computed
+   * the offsets against" — reads as "go fetch a fresher number", which is
+   * the reviewer's loop from the test above. Pins that the replacement talks
+   * about recomputing offsets against current text rather than just
+   * rereading for a number.
+   *
+   * Prevents: regressing the wording back to something that invites the
+   * fresh-number-stale-offsets loop.
+   */
+  it('tells the agent to recompute offsets, not just reread for a fresher number', async () => {
+    const { runtime, workspace, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const buffers = yield { type: 'action', request: { method: 'context.openBuffers' } };
+          const summary = listed((buffers?.ok ? buffers.result : []) as BufferSummary[], a);
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                baseRevisions: { [a]: summary.revision },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['stale']);
+    expect(refusals[0]?.message).toContain('recompute');
+    expect(refusals[0]?.message).not.toContain('Read it again');
+  });
+
+  /**
    * The guarantee is opt-in. Every shipped agent — the reference agent, every
    * provider, everything in `tests/stdio.test.ts` — stages without this field,
    * and a required declaration would break all of them at once.
@@ -1476,6 +1700,21 @@ describe('a malformed base-revision declaration', () => {
     ['a null revision', { 'buffer-1': null }],
     ['NaN', { 'buffer-1': Number.NaN }],
     ['Infinity', { 'buffer-1': Number.POSITIVE_INFINITY }],
+    // Finite but still impossible: a revision is a counter that starts at 0
+    // and only ever increases by whole numbers, so none of these can ever
+    // equal one. Accepting them at the door — as the old `Number.isFinite`
+    // check did — would only turn the declaration into a permanent,
+    // unexplained `stale` refusal at the next step, which is the exact
+    // failure `NaN`/`Infinity` are already refused to avoid.
+    ['a negative revision', { 'buffer-1': -7 }],
+    ['a fractional revision', { 'buffer-1': 3.5 }],
+    ['a revision too large to represent safely', { 'buffer-1': 1e308 }],
+    ['a revision at the edge of safe-integer range', { 'buffer-1': 2 ** 53 }],
+    // A nested object and an explicit `undefined` both reach `shown()`'s
+    // fallback branch — the two shapes that produced "not a undefined" and
+    // "not a object" before the article fix, covered precisely below.
+    ['an object revision', { 'buffer-1': {} }],
+    ['an undefined revision', { 'buffer-1': undefined }],
   ];
 
   for (const [name, value] of malformed) {
@@ -1487,4 +1726,32 @@ describe('a malformed base-revision declaration', () => {
       expect(refusals[0]?.message).toContain('baseRevisions');
     });
   }
+
+  /**
+   * `shown()`'s fallback used to read `a ${typeof value}` for every type it
+   * did not special-case, which is correct for "a boolean" or "a function"
+   * but wrong for "undefined" and "object" — a wire-visible audit string
+   * should not say "not a undefined" or "not a object". Pins both cases the
+   * reviewer measured, by name rather than by the generic `toContain
+   * ('baseRevisions')` assertion the shared loop above uses.
+   *
+   * Prevents: regressing to the bare `a ${typeof value}` fallback for these
+   * two types.
+   */
+  it('describes an undefined revision without a wrong article', async () => {
+    const { refusals, staged } = await stageDeclaring({ 'buffer-1': undefined });
+
+    expect(staged).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['invalid-request']);
+    expect(refusals[0]?.message).not.toContain('a undefined');
+  });
+
+  it('describes an object revision without a wrong article', async () => {
+    const { refusals, staged } = await stageDeclaring({ 'buffer-1': {} });
+
+    expect(staged).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['invalid-request']);
+    expect(refusals[0]?.message).not.toContain('a object');
+    expect(refusals[0]?.message).toContain('an object');
+  });
 });

@@ -404,10 +404,12 @@ addition to** the read tracking above, never instead of it, so declaring the
 freshest revision available while holding offsets from an older read is a check
 the agent did not do, and the read tracking still refuses it.
 
-A malformed declaration — anything that is not an object of finite numbers —
-refuses the stage with `invalid-request` rather than being ignored. An agent
-that sent one believes it is protected, and staging anyway would hand it a
-guarantee it does not have.
+A malformed declaration — anything that is not an object of non-negative
+integers — refuses the stage with `invalid-request` rather than being
+ignored. An agent that sent one believes it is protected, and staging anyway
+would hand it a guarantee it does not have. A declaration naming a buffer
+that is not open refuses the same way, with `not-found`: there is no
+revision to compare against.
 
 **It is optional, so it is a guarantee an agent opts into, not one Nox now
 provides.** Requiring it would break every agent already written. An agent that
