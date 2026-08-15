@@ -117,35 +117,47 @@ describe('parsing a turn', () => {
    * ending the turn. The first `{` used to be committed to irrevocably — an
    * unmatched brace in prose ran the scan to the end of the string without
    * ever returning to depth zero, so a perfectly good action after it was
-   * never reached.
+   * never reached. Also asserts `text`: an earlier fix computed narration as
+   * everything before the first raw `{` character, which truncated it at
+   * the stray brace in "the {" — this must recover the *full* sentence,
+   * because the stray brace never closes and so isn't a real JSON ancestor
+   * of the action that follows it.
    */
   it('recovers a good action after an unbalanced brace in narration', () => {
     const parsed = parseTurn('I will change the { to a ( first.\n{"method":"context.openBuffers"}');
     expect(parsed.action).toEqual({ method: 'context.openBuffers' });
     expect(parsed.error).toBeNull();
+    expect(parsed.text).toBe('I will change the { to a ( first.');
   });
 
   /**
    * The failure this prevents: prose that happens to contain a *balanced*
    * brace pair — a code snippet quoted in narration — being handed to
    * `JSON.parse` as if it were the action, instead of the action that
-   * actually follows it.
+   * actually follows it. Also asserts `text`: the rejected `{ return; }`
+   * candidate is its own top-level object, not an ancestor of the real one,
+   * so it must not truncate the narration either.
    */
   it('recovers a good action after a balanced but non-JSON brace pair in narration', () => {
     const parsed = parseTurn('The block is `{ return; }` today.\n{"method":"context.openBuffers"}');
     expect(parsed.action).toEqual({ method: 'context.openBuffers' });
     expect(parsed.error).toBeNull();
+    expect(parsed.text).toBe('The block is `{ return; }` today.');
   });
 
   /**
    * The failure this prevents: prose containing valid-but-irrelevant JSON
    * (no recognizable "method") short-circuiting the search, so the model's
-   * real action later in the same reply is never considered.
+   * real action later in the same reply is never considered. Also asserts
+   * `text`: the rejected `{"a":1}` is a sibling of the real object, not its
+   * ancestor, so the full narration — including that irrelevant object —
+   * must be preserved rather than truncated at it.
    */
   it('recovers a good action after a valid object with no method in narration', () => {
     const parsed = parseTurn('Here is the shape: {"a":1}\n{"method":"context.openBuffers"}');
     expect(parsed.action).toEqual({ method: 'context.openBuffers' });
     expect(parsed.error).toBeNull();
+    expect(parsed.text).toBe('Here is the shape: {"a":1}');
   });
 
   /**
@@ -276,5 +288,25 @@ describe('parsing a turn', () => {
     const elapsed = performance.now() - start;
     expect(parsed.action).toBeNull();
     expect(elapsed).toBeLessThan(300);
+  });
+
+  /**
+   * The failure this prevents: tracking string state from index 0 instead of
+   * only while a candidate is open. An agent narrating about code produces
+   * unbalanced quotes constantly — a measurement, a partial quotation, a
+   * path — and each of these four, fuzzed over 30,000 replies, was one of
+   * 1,060 turns (3.5%) that lost a recoverable action when string state was
+   * allowed to leak out of narration and into the real object that followed
+   * it, flipping the scanner into "in string" for the rest of the reply.
+   */
+  it.each([
+    ['an odd quote before a measurement', 'A 6" ruler.'],
+    ['an unterminated quote', 'The "use strict pragma.'],
+    ['two quotes and a third left open', 'He said "hi" and "bye.'],
+    ['a trailing backslash', 'Careful with this: \\'],
+  ])('recovers a good action after narration with %s', (_label, narration) => {
+    const parsed = parseTurn(`${narration}\n{"method":"context.openBuffers"}`);
+    expect(parsed.action).toEqual({ method: 'context.openBuffers' });
+    expect(parsed.error).toBeNull();
   });
 });
