@@ -584,10 +584,17 @@ export class AgentRuntime {
           // does the same under `not-found`, the code this runtime already
           // uses for "no such buffer" (`context.bufferText`'s unknown-buffer
           // case) — `ErrorCode` has no `missing` of its own to borrow.
+          // `.find` is undefined when nothing matches, but truthy or falsy
+          // for a *found* element depending on what the element is — and the
+          // element here is the buffer id itself. Every id but one reads as
+          // truthy, so testing the result directly is indistinguishable from
+          // testing "found" for all of them except `''`, the one buffer id
+          // that is falsy. Comparing to `undefined` is exact regardless of
+          // which id matched.
           const declaredMissing = [...declaration.declared.keys()].find(
             (bufferId) => this.#workspace.revisionOf(bufferId) === -1,
           );
-          if (declaredMissing) {
+          if (declaredMissing !== undefined) {
             const message = `No buffer ${this.#nameOf(declaredMissing)} — a revision was declared for it, but it is not open.`;
             record({ kind: 'error', message });
             return failure(request.id, 'not-found', message);

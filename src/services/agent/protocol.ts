@@ -246,7 +246,7 @@ export function parseBaseRevisions(
     if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) {
       return {
         ok: false,
-        reason: `baseRevisions["${bufferId}"] must be a non-negative integer revision number, not ${shown(revision)}`,
+        reason: `baseRevisions["${bufferId}"] must be a non-negative safe integer revision number, not ${shown(revision)}`,
       };
     }
     declared.set(bufferId, revision);

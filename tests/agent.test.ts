@@ -1237,6 +1237,49 @@ describe('a declared base revision', () => {
   });
 
   /**
+   * `Array.prototype.find` hands back the found *element*, not a found/absent
+   * flag — the caller has to test the result itself, and here the element is
+   * the buffer id. For every other id that reads as truthy, so `if
+   * (declaredMissing)` works; for the empty string it does not, because `''`
+   * is falsy. A declaration keyed `{"": 0}` for a buffer that was never open
+   * would find `''`, read `if ('')` as "nothing missing", and fall straight
+   * through into the revision-mismatch check below — which compares against
+   * `workspace.revisionOf('')`'s `-1` sentinel and refuses `stale`, naming no
+   * buffer and putting `-1` in an agent-facing message instead.
+   *
+   * Prevents: the one buffer id namely `''` — falsy, unlike every other
+   * string — bypassing the not-open check the rest of this map is refused by.
+   */
+  it('refuses a declaration keyed by the empty string for a buffer that is not open', async () => {
+    const { runtime, review, a } = await setup();
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const response = yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Shout the first line',
+                edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }],
+                baseRevisions: { '': 0 },
+              },
+            },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'shout at line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['not-found']);
+  });
+
+  /**
    * Hole 1, measured on 9882d92: `BufferSummary.length` is the
    * end-of-document offset, so a session that lists a buffer and appends at
    * that length stages against a position the user may have moved — and

@@ -766,7 +766,9 @@ always had, in the plain-JSON shape the wire can carry. Any declared entry the
 buffer is no longer at refuses the stage, under the same `stale` code, and that
 includes an entry for a buffer no edit names — `workspace.apply` reads the
 field that way, and an agent that read a file and concluded it needed no edit
-has a conclusion that goes stale when the file moves.
+has a conclusion that goes stale when the file moves. A declared entry for a
+buffer that is not open at all refuses too, under `not-found` rather than
+`stale`, since there is no revision on record to compare against.
 
 It is checked **in addition to** the read tracking, never instead of it: an
 agent that declares the current revision while holding offsets from an older
