@@ -37,8 +37,18 @@ import { createPlatform } from '@platform/index';
 import type { Platform } from '@platform/types';
 import { CommandRegistry, type Command } from '@services/commands';
 import { ConfigService, type SettingKey } from '@services/config';
-import { AgentConfigService, AGENTS_FILE } from '@services/agent/config';
-import { AgentRuntime } from '@services/agent/runtime';
+import {
+  AgentConfigService,
+  AGENTS_FILE,
+  isProcessAgent,
+  runnableAgents,
+  type AgentConfig,
+  type OllamaAgentConfig,
+} from '@services/agent/config';
+import { OllamaProvider } from '@services/agent/ollama';
+import type { AgentTransport } from '@services/agent/protocol';
+import type { ModelProvider } from '@services/agent/provider';
+import { AgentRuntime, ProviderTransport } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
 import { FileTreeService } from '@services/filetree';
@@ -313,6 +323,18 @@ export class NoxApp {
     this.notes.error.subscribe((message) => {
       if (message) this.notifications.error('Could not save notes', message);
     });
+
+    // Each configured local model becomes a provider the agent panel can start
+    // a session with. Re-registered wholesale when agents.json changes, which
+    // is rare and much simpler than diffing the list.
+    let disposeProviders: (() => void)[] = [];
+    this.agentConfig.agents.subscribe((agents) => {
+      for (const dispose of disposeProviders) dispose();
+      disposeProviders = agents
+        .filter((agent): agent is OllamaAgentConfig => agent.kind === 'ollama')
+        .filter(() => this.platform.capabilities.localModels)
+        .map((agent) => this.agents.registerProvider(new OllamaProvider(this.platform, agent)));
+    });
   }
 
   #applyTheme(): void {
@@ -502,28 +524,32 @@ export class NoxApp {
    * until the instruction is given.
    */
   async runAgent(agentId?: string): Promise<void> {
-    if (!this.platform.capabilities.agentProcesses) {
-      this.notifications.warn('Agents need the desktop app', 'The browser build cannot start a process.');
-      return;
-    }
-
     const configured = this.agentConfig.agents.get();
-    if (configured.length === 0) {
-      this.notifications.info('No agents are configured', 'Run "Configure Agents" to add one.');
+    const choices = this.#runnableAgents();
+
+    if (choices.length === 0) {
+      if (configured.length === 0) {
+        this.notifications.info('No agents are configured', 'Run "Configure Agents" to add one.');
+      } else {
+        this.notifications.warn(
+          'None of the configured agents can run here',
+          'The browser build can neither start a process nor reach a local model.',
+        );
+      }
       return;
     }
 
-    let chosen = agentId ? this.agentConfig.get(agentId) : undefined;
+    let chosen = agentId ? choices.find((agent) => agent.id === agentId) : undefined;
     if (!chosen) {
-      if (configured.length === 1) chosen = configured[0];
+      if (choices.length === 1) chosen = choices[0];
       else {
         const picked = await this.ui.askToConfirm({
           title: 'Which agent?',
           message: 'Pick the agent to run this instruction.',
-          choices: configured.map((agent) => ({ id: agent.id, label: agent.label })),
+          choices: choices.map((agent) => ({ id: agent.id, label: agent.label })),
         });
         if (!picked) return;
-        chosen = this.agentConfig.get(picked);
+        chosen = choices.find((agent) => agent.id === picked);
       }
     }
     if (!chosen) return;
@@ -538,15 +564,61 @@ export class NoxApp {
     });
     if (!instruction) return;
 
-    const spec = {
-      command: chosen.command,
-      ...(chosen.args ? { args: chosen.args } : {}),
-      ...(chosen.cwd ? { cwd: chosen.cwd } : {}),
-    };
+    let transport: AgentTransport;
+    // Defaults to the record picked from the list; the ollama branch below
+    // overrides it with the label of the provider actually looked up, so a
+    // rename that lands mid-typing is reflected rather than papered over.
+    let label = chosen.label;
+    if (isProcessAgent(chosen)) {
+      const spec = {
+        command: chosen.command,
+        ...(chosen.args ? { args: chosen.args } : {}),
+        ...(chosen.cwd ? { cwd: chosen.cwd } : {}),
+      };
+      transport = StdioTransport.spawnedBy(this.platform, spec, { label: chosen.label });
+    } else {
+      // Looked up now rather than when it was picked: agents.json can be
+      // reloaded while the instruction is being typed, and that drops every
+      // provider. Starting a session against a deregistered one would run a
+      // model the user can no longer see configured.
+      const provider = this.#providerFor(chosen.id);
+      if (!provider) {
+        this.notifications.warn(
+          `${chosen.label} is no longer configured`,
+          'agents.json was reloaded while you were typing.',
+        );
+        return;
+      }
+      transport = new ProviderTransport(provider);
+      // The same id can survive a reload under a different label (a typing
+      // edit to agents.json, not just removal) — that yields a *new*
+      // provider under the old id, so the session must be named after the
+      // provider that will actually run it, not the record picked before it.
+      label = provider.label;
+    }
 
-    const transport = StdioTransport.spawnedBy(this.platform, spec, { label: chosen.label });
-    this.agents.start(transport, instruction.trim(), { label: chosen.label });
+    this.agents.start(transport, instruction.trim(), { label });
     this.ui.showAgents();
+  }
+
+  /** The provider registered for an agent record, by its id. */
+  #providerFor(id: string): ModelProvider | undefined {
+    return this.agents.providers.get().find((provider) => provider.id === id);
+  }
+
+  /**
+   * The configured agents this build can actually start, in configured order.
+   *
+   * Thin wrapper around the pure `runnableAgents`: the policy itself lives in
+   * `services/agent/config.ts` so it is testable without an `App`, and so
+   * `AgentPanel.svelte` — which cannot reach this private method — can call
+   * the same function instead of re-deriving its own copy.
+   */
+  #runnableAgents(): AgentConfig[] {
+    return runnableAgents(this.agentConfig.agents.get(), {
+      canSpawn: this.platform.capabilities.agentProcesses,
+      providerIds: new Set(this.agents.providers.get().map((provider) => provider.id)),
+    });
   }
 
   /** Open `agents.json` for editing, creating it with an example if absent. */
@@ -1585,8 +1657,7 @@ export class NoxApp {
         keywords: ['ai', 'session', 'start', 'ask'],
         // Starting a process is the most powerful thing Nox does for someone,
         // so it is a command they run, never something that happens for them.
-        enabled: () =>
-          this.platform.capabilities.agentProcesses && this.agentConfig.agents.get().length > 0,
+        enabled: () => this.#runnableAgents().length > 0,
         run: (arg) => this.runAgent(typeof arg === 'string' ? arg : undefined),
       },
       {

@@ -365,9 +365,16 @@ UI.
 
 **Concurrency is resolved by rejection, not by locking.** Sessions run
 concurrently and are not serialised. Two agents on one buffer is settled where
-it is actually decidable — `workspace.apply` refuses whichever is working from
-a revision that has moved. A lock would block the user's own typing; a queue
-would hide the staleness until after the edit landed.
+it is actually decidable, and there are two such places now. The earlier one
+is `proposal.stage`: if a buffer this session read whole has since moved,
+staging is refused before the proposal exists, with
+`{"code":"stale", "message":"<file> changed after you read it — read it
+again before staging an edit against it"}`. This applies to every agent, not
+just to any one provider — read the buffer again and stage from that. What
+gets past that still has to clear `workspace.apply`, which refuses whichever
+session is working from a revision that has moved by the time it lands. A
+lock would block the user's own typing; a queue would hide the staleness
+until after the edit landed.
 
 **The provider stream is two-way.** `complete()` returns an async generator,
 and each `yield` returns the response Nox produced for that chunk. A one-way

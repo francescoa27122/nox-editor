@@ -49,7 +49,8 @@ The MVP: a real editor you can work in.
 | **Crash-safe writes** | Saves go to a temp file and are renamed into place, so a failure mid-save cannot truncate your work. Permissions preserved, symlinks followed. |
 | **Out-of-process agents** | An agent is any program that speaks one JSON object per line on stdin and stdout. Nox supervises it; a reference agent ships in `examples/agents/`. |
 | **Staged changes and hunk review** | A proposal is shown as a diff and accepted or rejected hunk by hunk before anything is written. What you keep lands as one undoable change. The diff engine is the one v0.5's Git view needs. |
-| **The agent runtime** | Protocol, provider interface, session audit trail, one-button session undo. Agents act only through commands under the permission model. No model provider ships — the interface is vendor-neutral and a provider plugs into it. |
+| **The agent runtime** | Protocol, provider interface, session audit trail, one-button session undo. Agents act only through commands under the permission model. The interface is vendor-neutral; the first provider plugs into it without the runtime learning a vendor's name. |
+| **A local model** | Point `agents.json` at an Ollama server and an agent can read your workspace and stage a change set. Entirely on your machine — the HTTP client is loopback-only, enforced in Rust. Edits are quoted rather than positional, because the model can pick the right text and cannot count characters. Read and propose only; no commands. |
 | **Nothing unsaved is lost on quit** | Unsaved edits to a file are recorded in the session and restored dirty, with ⌘Z reaching the on-disk content. No quit dialog: it can be answered wrong, and persisting cannot be. |
 | **A real quit hook** | The window now waits for the final session write and settings flush. `dispose()` was previously never called by anything. |
 | **Cursor positions survive a restart** | Every selection range per tab, clamped to the document on restore and scrolled into view. |
@@ -133,7 +134,7 @@ enumerate buffers and project files.
 
 - Explain selection, generate code, refactor, fix diagnostics
 - Workspace-aware chat with an explicit, visible context set
-- Local model support (Ollama) alongside remote
+- Remote model support alongside the local one
 - Agentic edits — gated behind a diff review, never applied blind
 
 **Principle:** AI is a panel and a set of commands, not a rewrite of the

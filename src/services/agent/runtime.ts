@@ -189,10 +189,13 @@ export class AgentRuntime {
    * Start a session. Returns as soon as it is running.
    *
    * Concurrent sessions are allowed and deliberately not serialised. Two
-   * agents editing the same buffer is resolved where it is actually decidable
-   * — `workspace.apply` rejects whichever one is working from a revision that
-   * has moved. Locking would block the user's own typing, and queueing would
-   * hide the staleness until after the edit landed.
+   * agents editing the same buffer is resolved where it is actually
+   * decidable, in two places: `proposal.stage` below rejects an edit against
+   * a buffer that moved since this session read it whole, and whatever gets
+   * past that still has to clear `workspace.apply`, which rejects whichever
+   * one is working from a revision that has moved. Locking would block the
+   * user's own typing, and queueing would hide the staleness until after the
+   * edit landed.
    */
   start(
     transport: AgentTransport,
@@ -210,6 +213,25 @@ export class AgentRuntime {
     };
 
     record({ kind: 'instruction', text: instruction });
+
+    /**
+     * The revision each buffer was at when this session last read it whole.
+     *
+     * An agent that reads a buffer and then proposes an edit against it is
+     * working from a snapshot, and between the two the *user* is still typing.
+     * Nothing else catches that: the offsets are arithmetically valid, the
+     * quote that produced them was unique in the text the agent was shown, and
+     * `ReviewFile.baseRevision` is captured at stage time — after the drift, so
+     * it certifies the corrupt result rather than refusing it. Measured on this
+     * branch: one space typed at line 1 between a read and a stage turned a
+     * rename into `export function product(a, b) {{`, offered as a clean
+     * one-hunk diff with the agent's name on it.
+     *
+     * So the revision is remembered here, where both the read and the stage
+     * pass through, and `proposal.stage` refuses a buffer whose revision has
+     * moved. A provider cannot enforce this alone — it only ever sees text.
+     */
+    const readAt = new Map<BufferId, number>();
 
     const session: AgentSession & { principal: Principal } = {
       id,
@@ -250,7 +272,7 @@ export class AgentRuntime {
         let staged = false;
         await transport.run(run, async (request) => {
           if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
-          const response = await this.#handle(session.principal, request, record);
+          const response = await this.#handle(session.principal, request, record, readAt);
           if (request.method === 'proposal.stage' && response.ok) staged = true;
           if (request.method === 'session.summary') {
             summary.set(request.params.text);
@@ -365,6 +387,7 @@ export class AgentRuntime {
     principal: Principal,
     request: AgentRequest,
     record: (action: NewAction) => void,
+    readAt: Map<BufferId, number>,
   ): Promise<CoreResponse> {
     const reader = this.#context.reader(principal);
 
@@ -382,9 +405,16 @@ export class AgentRuntime {
           });
           const { bufferId, ...options } = request.params;
           const text = reader.bufferText(bufferId, options);
-          return text === null
-            ? failure(request.id, 'not-found', `No buffer ${bufferId}`)
-            : success(request.id, text);
+          if (text === null) return failure(request.id, 'not-found', `No buffer ${bufferId}`);
+          // Only a plain whole-document read counts as having seen the buffer.
+          // A line range starts at the wrong offset and a numbered read is not
+          // the document's text at all, so neither is something a later edit
+          // can be resolved against — recording one would let a stage that
+          // used *older* text through on a revision that had since caught up.
+          if (options.lines === undefined && !options.withLineNumbers) {
+            readAt.set(bufferId, this.#workspace.revisionOf(bufferId));
+          }
+          return success(request.id, text);
         }
 
         case 'context.selection':
@@ -448,6 +478,25 @@ export class AgentRuntime {
         }
 
         case 'proposal.stage': {
+          // Refused, not narrowed to a smaller window: these offsets were
+          // computed against text that is no longer what the buffer says, and
+          // applying them writes somewhere other than where the agent looked.
+          // A buffer this session never read whole is left alone — those
+          // offsets came from somewhere the runtime cannot see, and guessing
+          // about them is not better than the agent's own guard.
+          const stale = request.params.edits.find((edit) => {
+            const at = readAt.get(edit.bufferId);
+            return at !== undefined && at !== this.#workspace.revisionOf(edit.bufferId);
+          });
+          if (stale) {
+            const name =
+              this.#workspace.buffers.get().find((buffer) => buffer.id === stale.bufferId)?.name ??
+              stale.bufferId;
+            const message = `${name} changed after you read it — read it again before staging an edit against it`;
+            record({ kind: 'error', message });
+            return failure(request.id, 'stale', message);
+          }
+
           const staged = this.#review.stage({
             description: request.params.description,
             author: principal,
@@ -496,11 +545,11 @@ export class AgentRuntime {
 /**
  * Runs an agent in this process, driven by a `ModelProvider`.
  *
- * The other implementation of `AgentTransport` — a supervised child process
- * speaking the same messages as JSON over stdio — is designed but not built.
- * That is the honest state: everything above this line already treats the
- * agent as remote, so adding it is a codec and a process supervisor rather
- * than a change to the runtime.
+ * The other implementation of `AgentTransport` is a supervised child process
+ * speaking the same messages as JSON over stdio, in `stdio.ts`. It exists
+ * because everything above this line already treats the agent as remote, so
+ * building it was a codec and a process supervisor rather than a change to
+ * the runtime.
  */
 export class ProviderTransport implements AgentTransport {
   readonly id: string;

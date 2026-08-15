@@ -4,6 +4,7 @@ import {
   PlatformError,
   type DirEntry,
   type FileStat,
+  type JsonLinesSpec,
   type Platform,
   type PlatformCapabilities,
   type SaveDialogOptions,
@@ -37,6 +38,7 @@ export class MemoryPlatform implements Platform {
     agentProcesses: false,
     projectSearch: true,
     terminals: false,
+    localModels: false,
   };
 
   /** path -> contents. Directories are stored with a null value. */
@@ -439,6 +441,22 @@ export class MemoryPlatform implements Platform {
 
   async closeAllTerminals(): Promise<void> {
     /* No terminals in memory; nothing to close. */
+  }
+
+  /**
+   * No network in memory. Rejecting is the honest answer: a stream that
+   * never emits looks like a slow model rather than a missing one.
+   *
+   * Parameters are declared (unlike `spawnAgent`'s bare `()`) so a caller
+   * holding the concrete `MemoryPlatform` type — as the platform-seam tests
+   * do — can still call this with the real argument list under `strict`.
+   */
+  async streamJsonLines(
+    _spec: JsonLinesSpec,
+    _onLine: (line: string) => void,
+    _onEnd: (error: string | null) => void,
+  ): Promise<never> {
+    throw new PlatformError('this build cannot reach a local model', 'unsupported');
   }
 
   async configDir(): Promise<string | null> {

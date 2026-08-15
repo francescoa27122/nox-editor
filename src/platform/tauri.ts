@@ -13,6 +13,8 @@ import {
   type AgentProcess,
   type AgentProcessSpec,
   type ExternalDropEvent,
+  type JsonLinesSpec,
+  type JsonLinesStream,
   type SaveDialogOptions,
   type SearchFileResult,
   type SearchHandle,
@@ -34,6 +36,8 @@ export class TauriPlatform implements Platform {
   static #nextAgent = 0;
   /** The same, for terminals, which share the bus but not the id space. */
   static #nextTerminal = 0;
+  /** The same, for JSON-lines streams. */
+  static #nextStream = 0;
   /** Distinguishes one load of the window from the next. */
   static #instance = Math.random().toString(36).slice(2, 8);
 
@@ -49,6 +53,7 @@ export class TauriPlatform implements Platform {
     projectSearch: true,
     agentProcesses: true,
     terminals: true,
+    localModels: true,
   };
 
   async homeDir(): Promise<string | null> {
@@ -348,6 +353,49 @@ export class TauriPlatform implements Platform {
 
   async closeAllTerminals(): Promise<void> {
     await invoke('nox_pty_close_all');
+  }
+
+  async streamJsonLines(
+    spec: JsonLinesSpec,
+    onLine: (line: string) => void,
+    onEnd: (error: string | null) => void,
+  ): Promise<JsonLinesStream> {
+    // Same reasoning as `openTerminal`: the instance token keeps ids unique
+    // across a reload, which the Rust side survives.
+    const id = `http-${TauriPlatform.#instance}-${++TauriPlatform.#nextStream}`;
+    let alive = true;
+
+    const unlisten = await Promise.all([
+      listen<{ id: string; line: string }>('nox://http-line', (event) => {
+        if (event.payload.id !== id || !alive) return;
+        onLine(event.payload.line);
+      }),
+      listen<{ id: string; error: string | null }>('nox://http-end', (event) => {
+        if (event.payload.id !== id || !alive) return;
+        alive = false;
+        release();
+        onEnd(event.payload.error);
+      }),
+    ]);
+
+    const release = () => unlisten.forEach((off) => off());
+
+    try {
+      await call<void>('nox_http_stream', { id, url: spec.url, body: spec.body });
+    } catch (error) {
+      alive = false;
+      release();
+      throw error;
+    }
+
+    return {
+      async close() {
+        if (!alive) return;
+        alive = false;
+        release();
+        await call<void>('nox_http_cancel', { id });
+      },
+    };
   }
 
   /**
