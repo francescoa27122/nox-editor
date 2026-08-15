@@ -1,9 +1,9 @@
 import { Signal } from '@core/signal';
 import type { CommandRegistry } from '../commands';
-import type { ContextService } from '../context';
+import type { ContextService, SelectionInfo } from '../context';
 import type { JobRunner } from '../jobs';
 import { PermissionError, type PermissionService, type Principal } from '../permissions';
-import type { ReviewService, StagedChangeSet } from '../review';
+import type { ReviewScope, ReviewService, StagedChangeSet } from '../review';
 import type { ChangeSetId } from '../transactions';
 import type { BufferId, WorkspaceService } from '../workspace';
 import type { ModelProvider } from './provider';
@@ -143,9 +143,32 @@ export interface AgentSessionSnapshot {
   changes: number;
 }
 
+/**
+ * The scope a selection implies, or null when there is no selection.
+ *
+ * `context.selection` reports 1-based line numbers because it is also read by
+ * humans; `Hunk.fromLine` is a 0-based index into the before-document.
+ * Converting once, here, is the difference between an off-by-one that is
+ * obvious and one that is spread across every comparison.
+ */
+export function scopeFromSelection(
+  bufferId: BufferId,
+  selection: SelectionInfo | null,
+): ReviewScope | null {
+  if (!selection || selection.isEmpty) return null;
+  const range = selection.ranges[selection.main] ?? selection.ranges[0];
+  if (!range) return null;
+  return { bufferId, fromLine: range.fromLine - 1, toLine: range.toLine - 1 };
+}
+
 export interface SessionOptions {
   /** Shown as the agent's name. Defaults to the transport's handshake. */
   label?: string;
+  /**
+   * The range the user asked about, when the session was started from one.
+   * Only ever defaults a hunk; never refuses an edit.
+   */
+  scope?: ReviewScope;
 }
 
 export class AgentRuntime {
@@ -270,6 +293,8 @@ export class AgentRuntime {
      */
     const readAt = new Map<BufferId, number>();
 
+    const scope = options.scope;
+
     const session: AgentSession & { principal: Principal } = {
       id,
       label: options.label ?? transport.id,
@@ -309,7 +334,7 @@ export class AgentRuntime {
         let staged = false;
         await transport.run(run, async (request) => {
           if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
-          const response = await this.#handle(session.principal, request, record, readAt);
+          const response = await this.#handle(session.principal, request, record, readAt, scope);
           if (request.method === 'proposal.stage' && response.ok) staged = true;
           if (request.method === 'session.summary') {
             summary.set(request.params.text);
@@ -444,6 +469,7 @@ export class AgentRuntime {
     request: AgentRequest,
     record: (action: NewAction) => void,
     readAt: Map<BufferId, number>,
+    scope: ReviewScope | undefined,
   ): Promise<CoreResponse> {
     const reader = this.#context.reader(principal);
 
@@ -693,11 +719,14 @@ export class AgentRuntime {
             return failure(request.id, 'stale', message);
           }
 
-          const staged = this.#review.stage({
-            description: request.params.description,
-            author: principal,
-            edits: request.params.edits,
-          });
+          const staged = this.#review.stage(
+            {
+              description: request.params.description,
+              author: principal,
+              edits: request.params.edits,
+            },
+            scope,
+          );
           if (!staged) {
             record({ kind: 'error', message: 'Proposal would change nothing' });
             return failure(request.id, 'invalid-request', 'That would change nothing');

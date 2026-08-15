@@ -1,7 +1,12 @@
 import { history } from '@codemirror/commands';
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
-import { AgentRuntime, ProviderTransport, type AgentSession } from '../src/services/agent/runtime';
+import {
+  AgentRuntime,
+  ProviderTransport,
+  scopeFromSelection,
+  type AgentSession,
+} from '../src/services/agent/runtime';
 import type { ModelChunk } from '../src/services/agent/provider';
 import { ScriptedProvider } from '../src/services/agent/provider';
 import { CommandRegistry } from '../src/services/commands';
@@ -1862,5 +1867,55 @@ describe('the brief', () => {
     const brief = runtime.brief();
     expect(brief).toContain('two\nthree');
     expect(brief).not.toContain('Selected in a.txt, lines 1–1');
+  });
+});
+
+describe('a scoped session', () => {
+  // The conversion nobody notices until it is wrong: context.selection counts
+  // lines from 1 for humans, Hunk.fromLine counts from 0.
+  it('converts a 1-based selection into a 0-based scope', async () => {
+    const { workspace, context, a } = await setup();
+    workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
+
+    expect(scopeFromSelection(a, context.selection(a))).toEqual({
+      bufferId: a,
+      fromLine: 1,
+      toLine: 2,
+    });
+  });
+
+  // A bare cursor scopes nothing; returning a zero-width scope would default
+  // every real hunk to unkept.
+  it('answers null for an empty selection', async () => {
+    const { workspace, context, a } = await setup();
+    workspace.setSelection(a, { ranges: [[4, 4]], main: 0 });
+
+    expect(scopeFromSelection(a, context.selection(a))).toBeNull();
+    expect(scopeFromSelection(a, null)).toBeNull();
+  });
+
+  // The scope has to survive the whole session, not just the call that made
+  // it — a proposal staged three turns later is still scoped.
+  it('defaults an out-of-scope hunk to unkept when the session carries a scope', async () => {
+    const { runtime, review, a: id } = await setup();
+    const chunks: ModelChunk[] = [
+      { type: 'action', request: { method: 'proposal.stage', params: {
+        description: 'two edits',
+        edits: [
+          { bufferId: id, changes: { from: 0, to: 3, insert: 'ONE' } },
+          { bufferId: id, changes: { from: 19, to: 23, insert: 'FIVE' } },
+        ],
+      } } },
+    ];
+    // `scripted` is the file's own helper at tests/agent.test.ts:76 —
+    // `ScriptedProvider` takes a Script *function*, not an array.
+    const session = runtime.start(scripted(chunks), 'edit it', {
+      label: 'Scripted',
+      scope: { bufferId: id, fromLine: 0, toLine: 0 },
+    });
+    await settle(session);
+
+    const hunks = review.staged.get()!.files[0]!.hunks;
+    expect(hunks.map((h) => h.accepted)).toEqual([true, false]);
   });
 });
