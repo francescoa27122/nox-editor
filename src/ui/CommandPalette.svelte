@@ -416,7 +416,7 @@
     <span class="hint-group"><kbd class="nox-kbd">esc</kbd> dismiss</span>
     <span class="spacer"></span>
     <span class="hint-group prefix"><kbd class="nox-kbd">&gt;</kbd> commands</span>
-    <span class="hint-group prefix"><kbd class="nox-kbd">~</kbd> open files</span>
+    <span class="hint-group prefix"><kbd class="nox-kbd">~</kbd> switch file</span>
     <span class="hint-group prefix"><kbd class="nox-kbd">:</kbd> line</span>
   </div>
 </div>
