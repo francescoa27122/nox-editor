@@ -21,7 +21,7 @@
 - Verify commands: `npm run check`, `npm test` (703 today), `cargo test --manifest-path src-tauri/Cargo.toml` (38 today).
 - Commit after every task. Do not push.
 
-**Merge hazard, read before Task 3.** PR #4 (`agent-stale-read` → `main`) changes the `proposal.stage` handler in `src/services/agent/runtime.ts` — the same handler Task 3 modifies, including the refusal message on the lines just above. If #4 merges while this is in flight, rebase and re-read that handler before editing; do not resolve the conflict by taking one side wholesale.
+**Merge hazard: resolved.** PR #4 merged and this branch was rebased onto it, so the `baseRevisions` declaration check now sits immediately above the code Task 3 edits. Line references below were re-checked after that rebase. Gates at the rebased base: check clean 367 files, `npm test` 703, `cargo test` 38.
 
 ---
 
@@ -318,7 +318,7 @@ function touchesScope(hunk: Hunk, bufferId: BufferId, scope: ReviewScope): boole
 }
 ```
 
-Change the signature to `stage(spec: ChangeSetSpec, scope?: ReviewScope): StagedChangeSet | null`, and replace the whole `hunks:` mapping (`:96-105`) with a body, so the answer is computed once rather than twice for two fields that must never disagree:
+Change the signature to `stage(spec: ChangeSetSpec, scope?: ReviewScope): StagedChangeSet | null`, and replace the whole `hunks:` mapping (`:95-105`) with a body, so the answer is computed once rather than twice for two fields that must never disagree:
 
 ```ts
         hunks: hunks.map((hunk) => {
@@ -378,7 +378,7 @@ git commit -m "Default a hunk outside the asked-for range to unkept"
 ### Task 3: Thread a scope through the session
 
 **Files:**
-- Modify: `src/services/agent/runtime.ts` (`SessionOptions` at `:113-116`, `start()` at `:201`, the `proposal.stage` handler at `:480-517`, `#handle`'s signature)
+- Modify: `src/services/agent/runtime.ts` (`SessionOptions` at `:113-116`, `start()` at `:201`, the `proposal.stage` handler at `:544`, whose `stage()` call is at `:654`, `#handle`'s signature)
 - Test: `tests/agent.test.ts`
 
 **Interfaces:**
