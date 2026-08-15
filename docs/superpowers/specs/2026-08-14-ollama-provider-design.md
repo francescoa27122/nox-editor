@@ -241,7 +241,7 @@ whole interface exists to avoid.
 | Situation | Behaviour |
 |---|---|
 | No server on the configured host | The session fails to start, saying the host is unreachable. Not a crash, and it names the host so the fix is obvious. |
-| The model is not pulled | Ollama's own error is surfaced verbatim. It already says `model "x" not found, try pulling it first`. |
+| The model is not pulled | Ollama's own error is surfaced verbatim. On 0.32.13 it says `model 'x' not found` — HTTP 404, no trailing advice. (Corrected after the walk: this row previously predicted `model "x" not found, try pulling it first`, which that version does not say.) |
 | Stream ends mid-object | Treated as an unparseable turn. |
 | The user cancels | The session's `AbortSignal` closes the stream; Rust drops the request. |
 | Turn cap reached | The session ends with a summary saying so, rather than silently stopping. |

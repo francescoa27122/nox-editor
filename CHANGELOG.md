@@ -8,6 +8,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Local models.** Point Nox at an Ollama server in `agents.json` and an
+  agent can read your workspace and propose a change set, reviewed hunk by
+  hunk before anything is written.
+  - It runs entirely on your machine. No account, no telemetry, and the HTTP
+    client refuses anything that is not loopback.
+  - The agent can read and propose. It cannot run commands.
+  - Edits are quoted, not positional: the model names the text to replace and
+    Nox finds it, refusing anything ambiguous rather than guessing.
+  - When the server is unreachable or rejects the request, the session ends
+    failed and says which — naming the host, or repeating the server's own
+    message. A model you have not pulled says so.
+
 - **A terminal.** A real pty rather than piped stdio, so programs see a
   terminal and behave like it: colour, line editing, job control, and `vim` or
   `less` actually run. <kbd>⌃`</kbd> toggles it, or **Toggle Terminal** in the

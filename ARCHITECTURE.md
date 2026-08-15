@@ -131,6 +131,7 @@ src/
 │  ├─ jobs.ts            Long-running work: progress, cancellation
 │  ├─ agent/protocol.ts  The agent wire contract and transport seam
 │  ├─ agent/provider.ts  Vendor-neutral model interface
+│  ├─ agent/ollama.ts    A local model: prompt, parser, edit resolution
 │  ├─ agent/runtime.ts   Sessions, audit trail, session-level undo
 │  ├─ agent/stdio.ts     Agents in another process, over line-delimited JSON
 │  ├─ filetree.ts        Explorer model + quick-open index
@@ -161,6 +162,9 @@ src-tauri/src/
 ├─ main.rs               Entry point
 ├─ lib.rs                Builder, plugin + command registration
 ├─ fs.rs                 Filesystem commands. No logic.
+├─ http.rs               Streaming HTTP to loopback. No logic.
+├─ agent.rs              Supervises agent subprocesses over line-delimited JSON
+├─ pty.rs                Terminal sessions on a real pty
 ├─ search.rs             Parallel, gitignore-aware project search
 └─ watcher.rs            Recursive notify watcher; filters and forwards events
 ```
@@ -679,6 +683,48 @@ Marks live for the session and no longer, for the same reason the transaction
 log does: persisting them would decouple provenance from undoability, and a
 `git checkout` or an external formatter would leave attribution that is
 confidently wrong. A mark that lies is worse than no mark.
+
+### The first provider is local, and parses prose
+
+`ModelProvider` shipped in v0.2 with no implementation, deliberately. This is
+the first one, and what it had to become says something about local models.
+
+Network access lives in Rust behind `Platform.streamJsonLines`, loopback-only.
+The webview could not do it anyway — the CSP is `default-src 'self'` with no
+`connect-src` — and widening that to reach one port would open the app's
+network surface permanently.
+
+Two findings shaped the provider, both measured before it was written rather
+than assumed. **There is no `tool_calls` field.** `qwen2.5-coder` advertises
+`tools` in `ollama show` and never produces one, so actions arrive as JSON
+inside the message content and the provider parses them — including stripping
+code fences the model applies inconsistently between turns of one
+conversation. Building on native tool calls would have worked with an
+unknowable subset of models and failed opaquely for the rest.
+
+**And the model cannot compute character offsets.** Given `proposal.stage`'s
+real interface it produced a zero-width insertion of a whole function body:
+the intent right, the arithmetic nonsense. That is the dangerous shape —
+`proposal.stage` would accept it and the review panel would render a
+convincing corrupt diff. So the model quotes text instead, and the provider
+converts the quote to offsets, refusing anything it cannot find or that
+matches twice. The protocol is untouched; everything below the provider still
+receives real offsets and never learns a model was involved.
+
+Failures surface as failures, and that too is the provider's job rather than
+the seam's. A refused connection and a server that rejects the request are
+both ordinary first-run experiences — the model name has a typo, or nothing is
+listening — and a session that reported success for either would be worse than
+one that crashed. So the provider throws, naming the configured host or
+quoting the server's own words, and the session ends `Failed` with the message
+in its audit trail. `http.rs` stays ignorant of what an error body looks like:
+it forwards a status and an opaque string, and the knowledge of which field
+carries the message lives with the vendor-specific code that already knows the
+request shape.
+
+The cost is a parser where a schema would have done, and a vocabulary the
+model is told about in prose rather than declared. That is the price of local
+models as they are, not as their APIs describe them.
 
 ### A review narrows the change set; it does not apply hunks
 
