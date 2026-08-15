@@ -189,10 +189,13 @@ export class AgentRuntime {
    * Start a session. Returns as soon as it is running.
    *
    * Concurrent sessions are allowed and deliberately not serialised. Two
-   * agents editing the same buffer is resolved where it is actually decidable
-   * — `workspace.apply` rejects whichever one is working from a revision that
-   * has moved. Locking would block the user's own typing, and queueing would
-   * hide the staleness until after the edit landed.
+   * agents editing the same buffer is resolved where it is actually
+   * decidable, in two places: `proposal.stage` below rejects an edit against
+   * a buffer that moved since this session read it whole, and whatever gets
+   * past that still has to clear `workspace.apply`, which rejects whichever
+   * one is working from a revision that has moved. Locking would block the
+   * user's own typing, and queueing would hide the staleness until after the
+   * edit landed.
    */
   start(
     transport: AgentTransport,
@@ -542,11 +545,11 @@ export class AgentRuntime {
 /**
  * Runs an agent in this process, driven by a `ModelProvider`.
  *
- * The other implementation of `AgentTransport` — a supervised child process
- * speaking the same messages as JSON over stdio — is designed but not built.
- * That is the honest state: everything above this line already treats the
- * agent as remote, so adding it is a codec and a process supervisor rather
- * than a change to the runtime.
+ * The other implementation of `AgentTransport` is a supervised child process
+ * speaking the same messages as JSON over stdio, in `stdio.ts`. It exists
+ * because everything above this line already treats the agent as remote, so
+ * building it was a codec and a process supervisor rather than a change to
+ * the runtime.
  */
 export class ProviderTransport implements AgentTransport {
   readonly id: string;

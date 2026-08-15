@@ -301,7 +301,12 @@ carrying an agent-authored provenance mark.
 
 `src/services/agent/runtime.ts` and `protocol.ts` are **not** in this list.
 The interface they define is exactly what was needed; that is what a seam
-built ahead of its first user is supposed to feel like.
+built ahead of its first user is supposed to feel like. (Corrected after the
+walk: this prediction did not hold. The stale-read guard had to live in
+`runtime.ts`, because no check on the provider side of the seam can be
+atomic with the stage — by the time a provider learned a buffer had moved,
+another session could already be staging against it. `runtime.ts` was
+touched after all.)
 
 ## 11. Out of scope, named so they are deferred rather than forgotten
 

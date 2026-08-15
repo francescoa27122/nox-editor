@@ -524,12 +524,12 @@ export class OllamaProvider implements ModelProvider {
       // The only action that cannot be passed on as it arrives: what the model
       // emits is quoted text and what the protocol takes is offsets.
       if (action?.method === 'proposal.stage') {
-        const staged = withOffsets(action.params, texts);
-        if ('error' in staged) {
+        const resolved = withOffsets(action.params, texts);
+        if ('error' in resolved) {
           action = null;
-          refusal = staged.error;
+          refusal = resolved.error;
         } else {
-          action = staged;
+          action = resolved;
         }
       }
 
