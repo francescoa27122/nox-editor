@@ -33,6 +33,39 @@ import {
  * See AGENT-PLATFORM.md §3.
  */
 
+/**
+ * How much selected text the brief will carry.
+ *
+ * Past this a "selection" is a file, and sending it spends context window and
+ * local inference time on text nobody asked about. Not a setting: a
+ * preference whose wrong value silently degrades model output is a preference
+ * that should not exist.
+ */
+const SELECTION_MAX_LINES = 200;
+const SELECTION_MAX_CHARS = 8_000;
+
+/**
+ * Clip selected text to the cap, saying so when it clips.
+ *
+ * The marker is not decoration. A model handed a fragment with no sign that
+ * it is a fragment answers as though it had the whole thing.
+ */
+function clipSelection(text: string): string {
+  const lines = text.split('\n');
+  let out = text;
+  let truncated = false;
+
+  if (lines.length > SELECTION_MAX_LINES) {
+    out = lines.slice(0, SELECTION_MAX_LINES).join('\n');
+    truncated = true;
+  }
+  if (out.length > SELECTION_MAX_CHARS) {
+    out = out.slice(0, SELECTION_MAX_CHARS);
+    truncated = true;
+  }
+  return truncated ? `${out}\n…truncated: this is only the start of the selection.` : out;
+}
+
 export type SessionStatus =
   | 'running'
   /** Finished, and its proposal is waiting for a human to decide. */
@@ -381,6 +414,15 @@ export class AgentRuntime {
       lines.push(`Active file: ${active.name} (${active.languageName}, ${active.lineCount} lines)`);
       const viewport = this.#context.viewport(active.id);
       if (viewport) lines.push(`On screen: lines ${viewport.from}–${viewport.to}`);
+
+      const selection = this.#context.selection(active.id);
+      const range = selection && !selection.isEmpty ? selection.ranges[selection.main] : undefined;
+      if (range) {
+        lines.push(
+          `Selected in ${active.name}, lines ${range.fromLine}–${range.toLine}:`,
+          clipSelection(range.text),
+        );
+      }
     }
     return lines.join('\n');
   }

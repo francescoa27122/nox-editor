@@ -56,7 +56,7 @@ async function setup() {
   const a = (await workspace.open('/w/a.txt'))!;
   const b = (await workspace.open('/w/b.txt'))!;
 
-  return { workspace, context, commands, permissions, review, jobs, runtime, a, b };
+  return { workspace, context, commands, permissions, review, jobs, runtime, a, b, platform };
 }
 
 /** Wait for a session to leave `running`. */
@@ -1796,5 +1796,56 @@ describe('a malformed base-revision declaration', () => {
     expect(refusals.map((refusal) => refusal.code)).toEqual(['invalid-request']);
     expect(refusals[0]?.message).not.toContain('a object');
     expect(refusals[0]?.message).toContain('an object');
+  });
+});
+
+describe('the brief', () => {
+  // A model told only "a.txt, 5 lines" cannot act on "make this shorter" —
+  // the selection is the whole subject of a selection-scoped edit.
+  it('names the selected range and quotes its text', async () => {
+    const { runtime, workspace, a } = await setup();
+    // setup() opens b.txt after a.txt, which leaves b.txt active — brief()
+    // reports the selection of whichever file is active, so make it a.txt.
+    workspace.setActive(a);
+    workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
+
+    const brief = runtime.brief();
+    expect(brief).toContain('Selected in a.txt, lines 2–3:');
+    expect(brief).toContain('two\nthree');
+  });
+
+  // A bare cursor is not a selection. Quoting the empty string would tell the
+  // model it had been given something when it had not.
+  it('says nothing about a selection when the cursor is empty', async () => {
+    const { runtime, workspace, a } = await setup();
+    workspace.setSelection(a, { ranges: [[4, 4]], main: 0 });
+
+    expect(runtime.brief()).not.toContain('Selected in');
+  });
+
+  // Silent truncation lets a model answer as though it had the whole
+  // selection, and be confidently wrong about the part it never saw.
+  it('truncates a selection past the cap and says that it did', async () => {
+    const { runtime, workspace, platform } = await setup();
+    platform.seedFile('/w/big.txt', 'x\n'.repeat(500));
+    const id = (await workspace.open('/w/big.txt'))!;
+    workspace.setSelection(id, { ranges: [[0, 1000]], main: 0 });
+
+    const brief = runtime.brief();
+    expect(brief).toContain('truncated');
+    expect(brief.split('\n').length).toBeLessThan(260);
+  });
+
+  // Multi-range semantics are out of scope; sending every range would let the
+  // model edit somewhere the primary cursor never was.
+  it('carries only the primary range when several are selected', async () => {
+    const { runtime, workspace, a } = await setup();
+    // Same as above: a.txt must be made active for brief() to report its selection.
+    workspace.setActive(a);
+    workspace.setSelection(a, { ranges: [[0, 3], [4, 13]], main: 1 });
+
+    const brief = runtime.brief();
+    expect(brief).toContain('two\nthree');
+    expect(brief).not.toContain('Selected in a.txt, lines 1–1');
   });
 });
