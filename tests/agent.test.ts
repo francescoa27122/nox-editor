@@ -1818,9 +1818,24 @@ describe('the brief', () => {
   // model it had been given something when it had not.
   it('says nothing about a selection when the cursor is empty', async () => {
     const { runtime, workspace, a } = await setup();
+    // Same as above: without this, the assertion below checks b.txt's
+    // (always-empty) selection, and the setSelection call is dead code.
+    workspace.setActive(a);
     workspace.setSelection(a, { ranges: [[4, 4]], main: 0 });
 
     expect(runtime.brief()).not.toContain('Selected in');
+  });
+
+  // Nothing else in this file asserts brief()'s literal content, so a change
+  // to the string an ordinary session opens with — the common case, since
+  // most sessions start with no selection — could regress unnoticed.
+  it('produces exactly this brief for a session with no selection', async () => {
+    const { runtime, workspace, a } = await setup();
+    workspace.setActive(a);
+
+    expect(runtime.brief()).toBe(
+      'Open files: a.txt, b.txt\nActive file: a.txt (Plain Text, 6 lines)',
+    );
   });
 
   // Silent truncation lets a model answer as though it had the whole
