@@ -823,10 +823,10 @@ out of the stale-read guard's way, which does refuse: the guard compares the
 revision a session read against the revision the buffer is now at and rejects
 a stage that has fallen behind. A scope captured against a selection that has
 since moved costs nothing sharper than a checkbox defaulted the wrong way —
-confirmed in the walk, where the same command run twice against the same
-buffer, once as a scoped selection edit and once as a plain `Run Agent…`,
-staged the identical hunk and differed only in which side the checkbox
-started on.
+confirmed in the walk, where the identical request against the identical
+buffer, once through **Edit Selection with a Model…** and once through a
+plain `Run Agent…`, staged the same hunk and differed only in which side the
+checkbox started on.
 
 The alternative was to refuse a hunk outside the scope outright rather than
 merely default it unkept. Rejected: a companion edit is often the correct
@@ -838,9 +838,9 @@ that judgment with the person reading the diff instead of pre-empting it.
 `brief()` was the one place this needed a real finding rather than plumbing.
 Every `context.*` method addresses a buffer by `bufferId`, never by name; the
 brief, before this branch, named files and never gave their ids. Driving the
-feature against a real model surfaced exactly that gap: asked to rewrite a
-selection and touch a second reference to it, the model addressed the buffer
-by the only name it had been shown, got "Buffer shapes.js not found." back
+feature against a real model surfaced exactly that gap: asked to rewrite the
+selection and update a comment on line 1, the model addressed the buffer by
+the only name it had been shown, got "Buffer shapes.js not found." back
 eleven times, and stopped at the turn cap having done nothing. Fixed by
 rendering each file as `name [id]`, brackets used for nothing else in the
 brief, so the identifier every `context.*` call needs sits next to the name a

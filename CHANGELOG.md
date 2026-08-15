@@ -108,6 +108,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   path that did not exist and had been failing since the release commit.
 - Config files are written atomically, so a crash part-way through a save can
   no longer truncate your settings, session or notes.
+- **A session's brief named a buffer but never gave its id.** Every
+  `context.*` method addresses a buffer by `bufferId`, and the brief showed
+  only a file's name — so a model that used the name it was shown got
+  *"Buffer shapes.js not found."* back, and kept retrying it. Walking **Edit
+  Selection with a Model…** against a real one, it did that eleven times and
+  stopped at the turn cap having staged nothing. The brief now renders
+  `name [id]` everywhere it names a file.
 
 ### Changed
 

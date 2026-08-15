@@ -133,8 +133,8 @@ access, commands expose actions uniformly, and the workspace can already
 enumerate buffers and project files.
 
 - Explain selection — prose, not a diff, so it needs a result surface Nox
-  doesn't have yet. The edit half of this shipped in v0.2 as **Edit Selection
-  with a Model…**
+  doesn't have yet. The edit half of this is built, as **Edit Selection with
+  a Model…**
 - Workspace-aware chat with an explicit, visible context set
 - Remote model support alongside the local one
 - Agentic edits — gated behind a diff review, never applied blind
