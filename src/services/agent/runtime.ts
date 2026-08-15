@@ -191,11 +191,11 @@ export class AgentRuntime {
    * Concurrent sessions are allowed and deliberately not serialised. Two
    * agents editing the same buffer is resolved where it is actually
    * decidable, in two places: `proposal.stage` below rejects an edit against
-   * a buffer that moved since this session read it whole, and whatever gets
-   * past that still has to clear `workspace.apply`, which rejects whichever
-   * one is working from a revision that has moved. Locking would block the
-   * user's own typing, and queueing would hide the staleness until after the
-   * edit landed.
+   * a buffer that moved since this session read its text or its selection,
+   * and whatever gets past that still has to clear `workspace.apply`, which
+   * rejects whichever one is working from a revision that has moved. Locking
+   * would block the user's own typing, and queueing would hide the staleness
+   * until after the edit landed.
    */
   start(
     transport: AgentTransport,
@@ -215,7 +215,10 @@ export class AgentRuntime {
     record({ kind: 'instruction', text: instruction });
 
     /**
-     * The revision each buffer was at when this session last read it whole.
+     * The revision each buffer was at when this session last had a trustworthy
+     * view of where its text sits: refreshed by a read that hands back the
+     * whole document, and otherwise established by the first read that hands
+     * back any position in it.
      *
      * An agent that reads a buffer and then proposes an edit against it is
      * working from a snapshot, and between the two the *user* is still typing.
@@ -393,6 +396,14 @@ export class AgentRuntime {
 
     try {
       switch (request.method) {
+        // `openBuffers`, `viewport`, `workspaceTree` and `recentTransactions`
+        // establish no baseline. A summary, a scroll position, a path tree and
+        // a change-set list locate no text: an edit cannot be computed from one
+        // without a `bufferText` or `selection` read, and those establish it.
+        // `openBuffers` would also file every open buffer at once, on the
+        // listing most sessions open with — and since a narrow read may not
+        // raise a baseline, that would refuse the honest sequence of listing,
+        // the user typing, reading the range, and staging from it.
         case 'context.openBuffers':
           record({ kind: 'read', method: request.method });
           return success(request.id, reader.openBuffers());
@@ -416,22 +427,48 @@ export class AgentRuntime {
           // that looked at a range and then edited is no less exposed to the
           // user typing underneath it, and a baseline can only ever add a
           // refusal — an absent entry is not checked at all.
+          //
+          // Which read that was is settled by asking the reader what a plain
+          // read returns, rather than re-deriving it from `options`. The reader
+          // resolves the range with `?.from ?? 1` / `?.to ?? doc.lines` and
+          // clamps it, so `lines: null`, `lines: {}` and any span past the end
+          // all hand back the whole document while `options.lines === undefined`
+          // called them narrow — and `parseInbound` validates only `id` and
+          // `method`, so an out-of-process agent can send any of them. A
+          // numbered read can never match, because the gutter is not in the
+          // buffer's text. The cost is materialising a document that was just
+          // materialised for the answer; the gain is that the two definitions
+          // cannot drift apart, which is the only condition under which this
+          // guard is worth anything. `ContextService` and not the reader,
+          // because this is the runtime's own bookkeeping rather than a read
+          // the audit trail should show.
           const revision = this.#workspace.revisionOf(bufferId);
-          if (options.lines === undefined && !options.withLineNumbers) {
-            readAt.set(bufferId, revision);
-          } else if (!readAt.has(bufferId)) {
-            readAt.set(bufferId, revision);
-          }
+          const whole = text === this.#context.bufferText(bufferId);
+          if (whole || !readAt.has(bufferId)) readAt.set(bufferId, revision);
           return success(request.id, text);
         }
 
-        case 'context.selection':
+        case 'context.selection': {
           record({
             kind: 'read',
             method: request.method,
             target: request.params.bufferId,
           });
-          return success(request.id, reader.selection(request.params.bufferId));
+          const { bufferId } = request.params;
+          const selection = reader.selection(bufferId);
+          // A selection read hands back real document offsets and the text at
+          // them — everything needed to compute an edit — so it is exposed to
+          // the user typing underneath it exactly as a range read is. It may
+          // only establish a baseline, never raise one: it says where the
+          // cursor is, not that the offsets about to be staged came from the
+          // current text. Only established on an answer, because a `null` came
+          // from a buffer that is not open and there is nothing to be stale
+          // against.
+          if (selection !== null && !readAt.has(bufferId)) {
+            readAt.set(bufferId, this.#workspace.revisionOf(bufferId));
+          }
+          return success(request.id, selection);
+        }
 
         case 'context.viewport':
           record({
@@ -489,11 +526,15 @@ export class AgentRuntime {
           // Refused, not narrowed to a smaller window: these offsets were
           // computed against text that is no longer what the buffer says, and
           // applying them writes somewhere other than where the agent looked.
-          // A buffer this session never read at all is left alone — those
-          // offsets came from somewhere the runtime cannot see, and guessing
-          // about them is not better than the agent's own guard. Closing that
-          // last case needs the agent to declare what it computed against,
-          // which `proposal.stage` has no field for.
+          //
+          // What is left alone is a buffer for which this session called
+          // neither `context.bufferText` nor `context.selection` — the two
+          // reads that hand back a position in the text. Listing it through
+          // `context.openBuffers` or asking for its viewport does not count.
+          // Those offsets came from somewhere the runtime cannot see, and
+          // guessing about them is not better than the agent's own guard.
+          // Closing that case needs the agent to declare what it computed
+          // against, which `proposal.stage` has no field for.
           const stale = request.params.edits.find((edit) => {
             const at = readAt.get(edit.bufferId);
             return at !== undefined && at !== this.#workspace.revisionOf(edit.bufferId);
@@ -502,7 +543,15 @@ export class AgentRuntime {
             const name =
               this.#workspace.buffers.get().find((buffer) => buffer.id === stale.bufferId)?.name ??
               stale.bufferId;
-            const message = `${name} changed after you read it — read it again before staging an edit against it`;
+            // Names the read that actually clears it. "Read it again" was
+            // advice a range- or numbered-reading agent could follow forever
+            // without progress: only a read that hands back the whole document
+            // refreshes the baseline, so re-reading the same narrow way is
+            // refused again on the next stage.
+            const message =
+              `${name} changed after you read it — call context.bufferText for it, with no ` +
+              `other params, before staging an edit against it. A line range or a numbered ` +
+              `read will not clear this.`;
             record({ kind: 'error', message });
             return failure(request.id, 'stale', message);
           }

@@ -366,11 +366,14 @@ UI.
 **Concurrency is resolved by rejection, not by locking.** Sessions run
 concurrently and are not serialised. Two agents on one buffer is settled where
 it is actually decidable, and there are two such places now. The earlier one
-is `proposal.stage`: if a buffer this session has read — whole or in part —
-has since moved, staging is refused before the proposal exists, with
-`{"code":"stale", "message":"<file> changed after you read it — read it
-again before staging an edit against it"}`. This applies to every agent, not
-just to any one provider — read the buffer again and stage from that. What
+is `proposal.stage`: if a buffer this session has read — whole, in part, or
+through its selection — has since moved, staging is refused before the
+proposal exists, with `{"code":"stale", "message":"<file> changed after you
+read it — call context.bufferText for it, with no other params, before staging
+an edit against it. A line range or a numbered read will not clear this."}`.
+This applies to every agent, not just to any one provider, and the message
+names the only read that clears it: a narrow re-read leaves the baseline
+exactly where it was, so the next stage is refused again. What
 gets past that still has to clear `workspace.apply`, which refuses whichever
 session is working from a revision that has moved by the time it lands. A
 lock would block the user's own typing; a queue would hide the staleness

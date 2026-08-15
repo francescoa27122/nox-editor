@@ -721,19 +721,32 @@ space typed at line 1 between a read and a stage turned a rename into
 agent's name on it. So freshness is enforced in the runtime, which sees both
 halves: it remembers the revision a buffer was at when the session first read
 it, and refuses `proposal.stage` for a buffer that has moved since, as a
-`stale` error the agent is told about and can re-read after.
+`stale` error the agent is told about and can clear with a fresh whole read.
 `ReviewFile.baseRevision` does not cover this — it is captured at stage time,
 which is after the drift.
 
-Only a plain whole-document read may *refresh* that baseline; a line range or
-a numbered read may establish one but never raise it. The asymmetry is the
-point: a narrow read proves the agent looked at part of the buffer, not that
-the offsets it is about to stage came from the current text, so letting one
-raise the baseline would re-bless stale offsets on a revision that had caught
-up. What remains uncovered is a buffer the session never read at all — those
-offsets came from somewhere the runtime cannot see, and closing that needs the
-agent to declare what it computed against, which `proposal.stage` has no field
-for.
+Two reads establish that baseline, because two hand back a position in the
+text: `context.bufferText`, and `context.selection`, which returns each range's
+offsets and the text at them — everything "uppercase my selection" needs. The
+rest establish nothing, because they locate no text: a buffer summary, a
+viewport, a path tree and a change-set list. `context.openBuffers` would also
+file every open buffer at once, on the listing most sessions start with.
+
+Only a read that hands back the whole document may *refresh* the baseline; a
+line range, a numbered read or a selection may establish one but never raise
+it. The asymmetry is the point: a narrow read proves the agent looked at part
+of the buffer, not that the offsets it is about to stage came from the current
+text, so letting one raise the baseline would re-bless stale offsets on a
+revision that had caught up. Whether a read was whole is settled by comparing
+its answer to what a plain read returns rather than by inspecting the
+parameters, because the reader clamps the range and reads a missing `lines` as
+the whole document — so `lines: null` and a span past the end are whole reads
+that a parameter test files as narrow, and only a comparison cannot drift.
+
+What remains uncovered is a buffer for which the session called neither of
+those two reads; listing it does not count. Those offsets came from somewhere
+the runtime cannot see, and closing that needs the agent to declare what it
+computed against, which `proposal.stage` has no field for.
 
 Failures surface as failures, and that too is the provider's job rather than
 the seam's. A refused connection and a server that rejects the request are
