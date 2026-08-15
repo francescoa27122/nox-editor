@@ -52,6 +52,15 @@ export interface OllamaAgentConfig extends AgentBase {
 
 export type AgentConfig = ProcessAgentConfig | OllamaAgentConfig;
 
+/**
+ * Narrows to the subprocess variant. Checks `kind !== 'ollama'` rather than
+ * `kind === 'process'`, because absent `kind` must still pass — that is the
+ * whole compatibility guarantee this union exists to keep.
+ */
+export function isProcessAgent(agent: AgentConfig): agent is ProcessAgentConfig {
+  return agent.kind !== 'ollama';
+}
+
 interface AgentsFile {
   agents?: unknown;
 }

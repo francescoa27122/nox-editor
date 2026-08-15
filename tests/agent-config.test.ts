@@ -4,6 +4,8 @@ import {
   AgentConfigService,
   AGENTS_FILE,
   AGENTS_TEMPLATE,
+  isProcessAgent,
+  type OllamaAgentConfig,
   type ProcessAgentConfig,
 } from '../src/services/agent/config';
 
@@ -186,5 +188,34 @@ describe('ollama agents', () => {
     await config.load();
 
     expect(config.agents.get()).toEqual([]);
+  });
+});
+
+describe('isProcessAgent', () => {
+  // `runAgent` in app.ts uses this to filter the chooser down to agents it
+  // can spawn as a subprocess. It is not unit-tested there — `runAgent` needs
+  // a fully wired App (ui, platform, notifications, agent runtime) that is
+  // out of scope for this file — so the predicate it depends on is pinned
+  // directly here instead.
+
+  /**
+   * The failure this prevents: filtering on `kind === 'process'` instead of
+   * `kind !== 'ollama'`, which would silently drop every agents.json written
+   * before local models existed — none of them carry a `kind` at all.
+   */
+  it('still accepts a legacy record with no kind', () => {
+    const legacy: ProcessAgentConfig = { id: 'a', label: 'A', command: 'node' };
+    expect(isProcessAgent(legacy)).toBe(true);
+  });
+
+  it('rejects an ollama record', () => {
+    const ollama: OllamaAgentConfig = {
+      id: 'local',
+      label: 'Qwen',
+      kind: 'ollama',
+      host: 'http://127.0.0.1:11434',
+      model: 'qwen2.5-coder:7b',
+    };
+    expect(isProcessAgent(ollama)).toBe(false);
   });
 });

@@ -37,7 +37,7 @@ import { createPlatform } from '@platform/index';
 import type { Platform } from '@platform/types';
 import { CommandRegistry, type Command } from '@services/commands';
 import { ConfigService, type SettingKey } from '@services/config';
-import { AgentConfigService, AGENTS_FILE } from '@services/agent/config';
+import { AgentConfigService, AGENTS_FILE, isProcessAgent, type ProcessAgentConfig } from '@services/agent/config';
 import { AgentRuntime } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
@@ -507,13 +507,22 @@ export class NoxApp {
       return;
     }
 
-    const configured = this.agentConfig.agents.get();
+    // This command spawns a subprocess over stdio. An Ollama agent is not a
+    // process Nox starts — it is an HTTP endpoint started through the
+    // runtime's registered providers instead — so it is filtered out of the
+    // choices here rather than offered and then refused.
+    const getProcessAgent = (id: string): ProcessAgentConfig | undefined => {
+      const agent = this.agentConfig.get(id);
+      return agent && isProcessAgent(agent) ? agent : undefined;
+    };
+
+    const configured = this.agentConfig.agents.get().filter(isProcessAgent);
     if (configured.length === 0) {
       this.notifications.info('No agents are configured', 'Run "Configure Agents" to add one.');
       return;
     }
 
-    let chosen = agentId ? this.agentConfig.get(agentId) : undefined;
+    let chosen = agentId ? getProcessAgent(agentId) : undefined;
     if (!chosen) {
       if (configured.length === 1) chosen = configured[0];
       else {
@@ -523,7 +532,7 @@ export class NoxApp {
           choices: configured.map((agent) => ({ id: agent.id, label: agent.label })),
         });
         if (!picked) return;
-        chosen = this.agentConfig.get(picked);
+        chosen = getProcessAgent(picked);
       }
     }
     if (!chosen) return;
