@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { runnableAgents } from '@services/agent/config';
   import type { AgentAction, AgentSessionSnapshot, SessionStatus } from '@services/agent/runtime';
   import { useApp } from './context';
   import Icon, { type IconName } from './Icon.svelte';
@@ -20,6 +21,16 @@
   const configured = agentConfig.agents;
   const configError = agentConfig.error;
   const canSpawn = platform.capabilities.agentProcesses;
+
+  // Same policy `NoxApp.#runnableAgents()` uses to build the run-agent
+  // chooser, so this button and empty state can never disagree with what
+  // running the command would actually do.
+  const runnable = $derived(
+    runnableAgents($configured, {
+      canSpawn,
+      providerIds: new Set($providers.map((provider) => provider.id)),
+    }),
+  );
 
   let expanded = $state<string | null>(null);
 
@@ -114,7 +125,7 @@
       </button>
       <button
         class="primary"
-        disabled={!canSpawn || $configured.length === 0}
+        disabled={runnable.length === 0}
         onclick={() => void commands.execute('agents.run')}
       >
         Run agent…
@@ -128,12 +139,7 @@
 
   {#if $sessions.length === 0}
     <div class="empty">
-      {#if !canSpawn}
-        <p>
-          This is the browser build, which has no processes to start. Agents run in the desktop
-          app.
-        </p>
-      {:else if $configured.length === 0}
+      {#if $configured.length === 0}
         <p>
           No agents are configured yet. <strong>Configure</strong> writes an example
           <code>agents.json</code> — an id, a command, and the arguments to start it with.
@@ -141,6 +147,11 @@
         <p class="aside">
           An agent is any program that speaks Nox's protocol on stdin and stdout. It reads through
           the context API, proposes edits you review, and can be undone in one step.
+        </p>
+      {:else if runnable.length === 0}
+        <p>
+          None of the configured agents can start here. Each needs either a process this build can
+          spawn or a local model it can reach, and none of them has one.
         </p>
       {:else}
         <p>Nothing has run yet. <strong>Run agent…</strong> starts a session.</p>

@@ -61,6 +61,26 @@ export function isProcessAgent(agent: AgentConfig): agent is ProcessAgentConfig 
   return agent.kind !== 'ollama';
 }
 
+/**
+ * The configured agents a build can actually start, in configured order.
+ *
+ * A record's `kind` decides how it is reached, not whether it is offered: a
+ * process needs a platform that can spawn one, and a model needs a provider
+ * already registered for its id — read off the registry via `providerIds`
+ * rather than re-derived from capabilities, so this and the registration
+ * that populates it cannot drift apart. Pure, so both the composition root
+ * (`NoxApp`) and a component that only has the registered ids and the spawn
+ * capability can call it without constructing an `AgentRuntime`.
+ */
+export function runnableAgents(
+  agents: AgentConfig[],
+  options: { canSpawn: boolean; providerIds: ReadonlySet<string> },
+): AgentConfig[] {
+  return agents.filter((agent) =>
+    isProcessAgent(agent) ? options.canSpawn : options.providerIds.has(agent.id),
+  );
+}
+
 interface AgentsFile {
   agents?: unknown;
 }

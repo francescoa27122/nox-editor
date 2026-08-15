@@ -5,6 +5,8 @@ import {
   AGENTS_FILE,
   AGENTS_TEMPLATE,
   isProcessAgent,
+  runnableAgents,
+  type AgentConfig,
   type OllamaAgentConfig,
   type ProcessAgentConfig,
 } from '../src/services/agent/config';
@@ -217,5 +219,88 @@ describe('isProcessAgent', () => {
       model: 'qwen2.5-coder:7b',
     };
     expect(isProcessAgent(ollama)).toBe(false);
+  });
+});
+
+describe('runnableAgents', () => {
+  // `NoxApp.#runnableAgents()` and `AgentPanel.svelte` both call this instead
+  // of re-deriving their own copy of the policy. Pinned here so the policy is
+  // exercised without constructing a `NoxApp` — the thing the diff under
+  // review left untested.
+
+  const legacy: ProcessAgentConfig = { id: 'a', label: 'Legacy', command: 'node' };
+  const ollamaWithProvider: OllamaAgentConfig = {
+    id: 'local',
+    label: 'Qwen',
+    kind: 'ollama',
+    host: 'http://127.0.0.1:11434',
+    model: 'qwen2.5-coder:7b',
+  };
+  const ollamaWithoutProvider: OllamaAgentConfig = {
+    id: 'unregistered',
+    label: 'No provider',
+    kind: 'ollama',
+    host: 'http://127.0.0.1:11434',
+    model: 'qwen2.5-coder:7b',
+  };
+
+  /**
+   * The failure this prevents: re-deriving startability from `kind` instead
+   * of reading `canSpawn`, which would silently offer every agents.json
+   * written before local models existed even on a build that cannot spawn a
+   * process — Task 3's compatibility guarantee, still load-bearing here.
+   */
+  it('runs a legacy record with no kind when canSpawn is true', () => {
+    const result = runnableAgents([legacy], { canSpawn: true, providerIds: new Set() });
+    expect(result).toEqual([legacy]);
+  });
+
+  /**
+   * The failure this prevents: offering a process agent on a build that
+   * cannot spawn one, which is exactly the bug this task exists to close —
+   * a command offered and then refused.
+   */
+  it('excludes a legacy record with no kind when canSpawn is false', () => {
+    const result = runnableAgents([legacy], { canSpawn: false, providerIds: new Set() });
+    expect(result).toEqual([]);
+  });
+
+  /**
+   * The failure this prevents: gating an ollama record on `canSpawn` (or on
+   * `kind === 'ollama'` directly, naming the vendor at the boundary) instead
+   * of on whether a provider was actually registered for its id.
+   */
+  it('runs an ollama record when a provider is registered for its id', () => {
+    const result = runnableAgents([ollamaWithProvider], {
+      canSpawn: false,
+      providerIds: new Set(['local']),
+    });
+    expect(result).toEqual([ollamaWithProvider]);
+  });
+
+  /**
+   * The failure this prevents: treating `canSpawn` as sufficient for an
+   * ollama record too, which would offer a session against a model whose
+   * provider was never registered (or was dropped by a reload) and fail at
+   * start instead of never being offered.
+   */
+  it('excludes an ollama record with no registered provider, even when canSpawn is true', () => {
+    const result = runnableAgents([ollamaWithoutProvider], {
+      canSpawn: true,
+      providerIds: new Set(),
+    });
+    expect(result).toEqual([]);
+  });
+
+  /**
+   * The failure this prevents: building the result by iterating the provider
+   * registry (or otherwise) instead of filtering the configured list in
+   * place, which would reorder the chooser away from the order the user
+   * wrote in agents.json.
+   */
+  it('preserves configured order', () => {
+    const agents: AgentConfig[] = [ollamaWithProvider, legacy, ollamaWithoutProvider];
+    const result = runnableAgents(agents, { canSpawn: true, providerIds: new Set(['local']) });
+    expect(result).toEqual([ollamaWithProvider, legacy]);
   });
 });

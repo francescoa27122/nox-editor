@@ -41,6 +41,7 @@ import {
   AgentConfigService,
   AGENTS_FILE,
   isProcessAgent,
+  runnableAgents,
   type AgentConfig,
   type OllamaAgentConfig,
 } from '@services/agent/config';
@@ -564,6 +565,10 @@ export class NoxApp {
     if (!instruction) return;
 
     let transport: AgentTransport;
+    // Defaults to the record picked from the list; the ollama branch below
+    // overrides it with the label of the provider actually looked up, so a
+    // rename that lands mid-typing is reflected rather than papered over.
+    let label = chosen.label;
     if (isProcessAgent(chosen)) {
       const spec = {
         command: chosen.command,
@@ -585,9 +590,14 @@ export class NoxApp {
         return;
       }
       transport = new ProviderTransport(provider);
+      // The same id can survive a reload under a different label (a typing
+      // edit to agents.json, not just removal) — that yields a *new*
+      // provider under the old id, so the session must be named after the
+      // provider that will actually run it, not the record picked before it.
+      label = provider.label;
     }
 
-    this.agents.start(transport, instruction.trim(), { label: chosen.label });
+    this.agents.start(transport, instruction.trim(), { label });
     this.ui.showAgents();
   }
 
@@ -599,20 +609,16 @@ export class NoxApp {
   /**
    * The configured agents this build can actually start, in configured order.
    *
-   * A record's `kind` decides how it is reached, not whether it is offered:
-   * both a spawned process and a registered local model end up at the same
-   * runtime, and to the person choosing one they are the same act. What does
-   * decide is whether the route exists — a process needs a platform that can
-   * spawn, and a model needs the provider `#wireServices` registers for it,
-   * which it only does where the platform can reach one. An entry with no
-   * route is left out rather than offered and then refused.
+   * Thin wrapper around the pure `runnableAgents`: the policy itself lives in
+   * `services/agent/config.ts` so it is testable without an `App`, and so
+   * `AgentPanel.svelte` — which cannot reach this private method — can call
+   * the same function instead of re-deriving its own copy.
    */
   #runnableAgents(): AgentConfig[] {
-    return this.agentConfig.agents.get().filter((agent) =>
-      isProcessAgent(agent)
-        ? this.platform.capabilities.agentProcesses
-        : this.#providerFor(agent.id) !== undefined,
-    );
+    return runnableAgents(this.agentConfig.agents.get(), {
+      canSpawn: this.platform.capabilities.agentProcesses,
+      providerIds: new Set(this.agents.providers.get().map((provider) => provider.id)),
+    });
   }
 
   /** Open `agents.json` for editing, creating it with an example if absent. */
