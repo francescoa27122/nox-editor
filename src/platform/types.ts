@@ -47,6 +47,8 @@ export interface PlatformCapabilities {
   agentProcesses: boolean;
   /** True when `openTerminal` can give a shell a real pty. */
   terminals: boolean;
+  /** True when `streamJsonLines` can reach a local model server. */
+  localModels: boolean;
 }
 
 /** What to start, for `Platform.spawnAgent`. */
@@ -111,6 +113,20 @@ export interface TerminalSession {
   /** Output, in whatever sized chunks it arrives. Buffered until subscribed. */
   onData(handler: (data: string) => void): void;
   onExit(handler: (code: number | null) => void): void;
+  close(): Promise<void>;
+}
+
+export interface JsonLinesSpec {
+  /**
+   * Loopback only. Enforced in Rust, where the request is actually made — a
+   * check on this side of the IPC boundary is a suggestion.
+   */
+  url: string;
+  body: unknown;
+}
+
+export interface JsonLinesStream {
+  /** Stop the request and drop the connection. Safe to call twice. */
   close(): Promise<void>;
 }
 
@@ -272,6 +288,21 @@ export interface Platform {
    * would otherwise strand a shell with nothing attached to it.
    */
   closeAllTerminals(): Promise<void>;
+
+  /**
+   * POST JSON to a loopback endpoint and stream newline-delimited JSON back.
+   *
+   * Deliberately not named for a vendor: nothing at this boundary knows what
+   * a model is, let alone whose. The path, the request shape and the frame
+   * shape all live in `services/agent/ollama.ts`.
+   *
+   * Rejects where `capabilities.localModels` is false.
+   */
+  streamJsonLines(
+    spec: JsonLinesSpec,
+    onLine: (line: string) => void,
+    onEnd: (error: string | null) => void,
+  ): Promise<JsonLinesStream>;
 
   /**
    * Search every file under `root`, streaming results as they are found.

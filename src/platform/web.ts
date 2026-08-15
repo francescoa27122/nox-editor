@@ -27,6 +27,9 @@ export class WebPlatform extends MemoryPlatform {
     agentProcesses: false,
     // …and no pty. The panel says so rather than showing a dead terminal.
     terminals: false,
+    // No model server reachable from a browser tab either; see
+    // `MemoryPlatform.streamJsonLines`.
+    localModels: false,
   };
 
   constructor() {
