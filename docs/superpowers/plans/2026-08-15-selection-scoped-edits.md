@@ -351,13 +351,13 @@ and a rule beside the other hunk styles:
 
 ```css
   .scope-note {
-    color: var(--nox-fg-muted);
-    font-size: var(--nox-font-size-xs);
-    margin-left: var(--nox-space-2);
+    color: var(--nox-text-faint);
+    font-size: var(--nox-fs-xs);
+    margin-left: var(--nox-sp-2);
   }
 ```
 
-Check those token names against the neighbouring rules in the same file and use whatever that file already uses — do not invent tokens.
+Those three token names were checked against `ReviewPanel.svelte`'s existing rules, which use `--nox-text-faint`, `--nox-fs-xs` and the `--nox-sp-N` spacing scale. Do not introduce a token the file does not already use.
 
 - [ ] **Step 4: Run them and watch them pass**
 
