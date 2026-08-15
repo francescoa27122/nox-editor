@@ -19,18 +19,19 @@ import { WorkspaceService } from '../src/services/workspace';
 /**
  * The provenance field against hand-built transactions.
  *
- * No DOM and no workspace: the field is pure state, and driving it directly
- * is the only way to test recording, decay and mapping in isolation. Covers:
- * what a change set marks; that a mark carries the author resolved at record
- * time; that a mark survives an edit elsewhere in the document; the decay
- * rule that shrinks or splits a mark under an edit that overlaps it, and its
- * `clearProvenanceEffect` counterpart that drops a buffer's marks outright;
- * `provenanceAt`'s boundary handling; the tooltip's text formatting; the
- * setting's Compartment wiring; and next/previous/has-any navigation. What it
- * does not cover: the gutter and tooltip `Extension`s themselves, and the
- * workspace- and command-level plumbing (clearing every buffer, palette
- * `enabled` gating) — both need a view or a `WorkspaceService` and live in
- * their own suites.
+ * No DOM: the field is pure state, and driving it directly is the only way to
+ * test recording, decay and mapping in isolation; the one block that needs
+ * more than a single buffer's state drives a real `WorkspaceService` against
+ * `MemoryPlatform` instead, still with no DOM. Covers: what a change set
+ * marks; that a mark carries the author resolved at record time; that a mark
+ * survives an edit elsewhere in the document; the decay rule that shrinks or
+ * splits a mark under an edit that overlaps it, and its `clearProvenanceEffect`
+ * counterpart that drops a buffer's marks outright, including across every
+ * buffer in a workspace; `provenanceAt`'s boundary handling; the tooltip's
+ * text formatting; the setting's Compartment wiring; and next/previous/has-any
+ * navigation. What it does not cover: the gutter and tooltip `Extension`s
+ * themselves and the palette's `enabled` gating — both need a mounted view and
+ * live in their own suites.
  */
 
 function record(overrides: Partial<Provenance> = {}): Provenance {

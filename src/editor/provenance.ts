@@ -292,7 +292,24 @@ export function provenanceTooltip(): Extension {
     const hit = provenanceAt(view.state, pos);
     if (!hit) return null;
     return {
-      pos: hit.from,
+      // CodeMirror places the tooltip from `pos` alone — `end` only extends
+      // how long it survives a moving pointer, never where it's drawn — and
+      // hides it outright (`dom.style.top = "-10000px"`) when `coordsAtPos(pos)`
+      // falls outside the *visible*, scrolled-into-view rect. A mark taller
+      // than the viewport can have `hit.from` scrolled off the top while the
+      // hovered position is still on screen; anchoring at the unclamped
+      // `hit.from` then hides the tooltip for the whole visible lower half of
+      // the mark. `view.viewport` is *not* the fix: it is the wider,
+      // DOM-rendered line range (with overscan beyond what's actually
+      // visible), not the clipped visible rect the placement check uses — for
+      // a document that fits in the DOM without virtualization,
+      // `view.viewport.from` is 0 regardless of scroll position, so clamping
+      // to it is a no-op and the tooltip stays hidden. `lineBlockAtHeight`
+      // against the scroller's actual `scrollTop` is CodeMirror's own way of
+      // turning "how far scrolled" into a doc position (see its internal
+      // `scrollAnchorAt`), so it lands on a position that is genuinely
+      // on-screen.
+      pos: Math.max(hit.from, view.lineBlockAtHeight(view.scrollDOM.scrollTop).from),
       // Without `end`, `HoverPlugin.mousemove` treats the tooltip as a single
       // point and dismisses the moment the pointer's mapped position differs
       // from it — i.e. as soon as the cursor moves at all, even within the
