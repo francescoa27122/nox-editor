@@ -646,10 +646,16 @@ describe('the provider', () => {
   /**
    * The failure this prevents: an infinite retry loop against a model that
    * cannot produce the format at all.
+   *
+   * It throws rather than returning, because returning is what the runtime
+   * reads as a finished session — see "a session that ended for a reason of
+   * its own" below for what the user is shown. The reason is carried in the
+   * message: "gave up" without saying at what is not much better than `Done`.
    */
   it('gives up after two unparseable turns in a row', async () => {
     const { platform, bodies } = fakePlatform(['nonsense one', 'nonsense two', 'nonsense three']);
-    await drain(new OllamaProvider(platform, CONFIG));
+
+    await expect(drain(new OllamaProvider(platform, CONFIG))).rejects.toThrow(/no JSON object/);
 
     expect(bodies.length).toBeLessThanOrEqual(2);
   });
@@ -908,9 +914,37 @@ describe('staging an edit the model quoted', () => {
       stageReply('b3', 'const b = 2;'),
     ]);
 
-    await driveWith(new OllamaProvider(platform, CONFIG), answerReads);
+    // Thrown, not returned: a returned give-up is a `Done` session with no
+    // record that an edit was ever attempted. The refusal itself travels in
+    // the message so the user sees what the model got wrong.
+    await expect(
+      driveWith(new OllamaProvider(platform, CONFIG), answerReads),
+    ).rejects.toThrow(/have not read b2/);
 
     expect(bodies.length).toBeLessThanOrEqual(2);
+  });
+
+  /**
+   * The failure this prevents: a give-up throwing away a proposal the user
+   * could still keep. A model that stages successfully and then falls apart is
+   * ordinary for a 7B, and `Failed` beside a change set waiting in the review
+   * panel reads as "nothing to see here" — so this one exit ends with a
+   * summary and leaves the session awaiting review.
+   */
+  it('keeps a session awaiting review when it gives up after staging', async () => {
+    const { platform } = fakePlatform([
+      '{"method":"context.bufferText","params":{"bufferId":"b1"}}',
+      stageReply('b1', 'const b = 2;'),
+      'nonsense one',
+      'nonsense two',
+    ]);
+
+    const chunks = await driveWith(new OllamaProvider(platform, CONFIG), answerReads);
+
+    expect(actionFor(chunks, 'proposal.stage')).toBeDefined();
+    expect(actionFor(chunks, 'session.summary')).toMatchObject({
+      params: { text: expect.stringMatching(/Gave up after two turns/) },
+    });
   });
 });
 
@@ -1137,3 +1171,81 @@ describe('an edit staged against a buffer that moved', () => {
   });
 });
 
+describe('a session that ended for a reason of its own', () => {
+  /**
+   * The failure this prevents: the turn cap reporting the same word as a
+   * finished session. Measured in the running app — asked to rename
+   * `multiply`, the model issued `context.bufferText` fifteen-plus times in a
+   * row, staged nothing, and the panel said `Local model Done` with an empty
+   * summary. Running out of turns and finishing are different outcomes.
+   */
+  it('says so when the turn cap is reached', async () => {
+    const { platform } = fakePlatform(new Array(10).fill('{"method":"context.openBuffers"}'));
+
+    const session = await runSession(platform, { ...CONFIG, maxTurns: 3 });
+
+    expect(session.status.get()).toBe('done');
+    // `summary=null` is the measured defect, so say so before matching on it.
+    expect(session.summary.get()).not.toBeNull();
+    expect(session.summary.get()).toMatch(/Stopped after 3 turns/);
+    // The number is in the message because `maxTurns` is the thing the user
+    // can change, and `agents.json` is not on screen.
+    expect(session.summary.get()).toMatch(/maxTurns/);
+  });
+
+  /**
+   * The failure this prevents: two unparseable turns reported as `Done` with
+   * `summary=null` and a trail of `[instruction, note, note]` — the model's
+   * own confused prose recorded as narration, so the session reads as though
+   * the agent said something sensible and stopped.
+   */
+  it('fails the session when the model cannot produce the format twice', async () => {
+    const { platform } = fakePlatform(['I think the answer is 42.', 'Still 42.']);
+
+    const session = await runSession(platform, CONFIG);
+
+    expect(session.status.get()).toBe('failed');
+    expect(errorsOf(session)).toMatch(/Gave up after two turns/);
+    expect(errorsOf(session)).toMatch(/no JSON object/);
+  });
+
+  /**
+   * The failure this prevents, and the worst of the three: a session that
+   * tried twice to stage an edit and was refused both times showed the user
+   * `status=done summary=null trail=[instruction, read]`. No record that an
+   * edit was ever attempted — the refusal went into the model's next user
+   * message and nowhere else.
+   *
+   * The reply is recorded, not invented. Driving Ollama 0.32.13 /
+   * qwen2.5-coder:7b with this branch's own system prompt and the walk's own
+   * instruction and fixture, the model quoted `find` with **literal
+   * backslash-n** where the buffer has newlines, which `resolveEdit` refuses
+   * with "text not found in the buffer". That is the common case, not an edge
+   * one.
+   */
+  it('fails the session when two staged edits in a row are refused', async () => {
+    const world = await sessionWorld({
+      'math.js':
+        '// math helpers\n\nexport function add(a, b) {\n  return a + b;\n}\n\nexport function multiply(a, b) {\n  return a * b;\n}\n',
+    });
+    const bufferId = world.opened['math.js']!;
+    // Verbatim, including the fence and the spacing, apart from the buffer id.
+    const recorded = (id: BufferId) =>
+      '```json\n{"method":"proposal.stage","params":{"description":"Rename the function \'add\' to \'sum\'", "edits":[{"bufferId":"' +
+      id +
+      '","find":"export function add(a, b) {\\\\n  return a + b;\\\\n}","replace":"export function sum(a, b) {\\\\n  return a + b;\\\\n}"}]}}\n```';
+
+    const { platform } = fakePlatform([
+      `\`\`\`json\n{\n  "method": "context.bufferText",\n  "params": {\n    "bufferId": "${bufferId}"\n  }\n}\n\`\`\``,
+      recorded(bufferId),
+      recorded(bufferId),
+    ]);
+
+    const session = await runSession(platform, CONFIG, world);
+
+    expect(session.status.get()).toBe('failed');
+    expect(errorsOf(session)).toMatch(/text not found in the buffer/);
+    // The quote itself, so the user can see the literal `\n` the model wrote.
+    expect(errorsOf(session)).toMatch(/export function add/);
+  });
+});

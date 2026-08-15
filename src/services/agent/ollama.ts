@@ -458,6 +458,18 @@ function withOffsets(
   return { method: 'proposal.stage', params: { description, edits } };
 }
 
+/**
+ * The last word of a session that ended for a reason of its own.
+ *
+ * `session.summary` rather than `session.note`: a note is narration, rendered
+ * beside whatever the model chose to say, and an ending recorded as one is
+ * indistinguishable from the model musing and stopping. A summary is the
+ * session's own account of itself, and the panel shows it as such.
+ */
+function summaryOf(text: string): RequestBody {
+  return { method: 'session.summary', params: { text } };
+}
+
 export class OllamaProvider implements ModelProvider {
   readonly id: string;
   readonly label: string;
@@ -492,6 +504,8 @@ export class OllamaProvider implements ModelProvider {
       : DEFAULT_MAX_TURNS;
     const texts: BufferTexts = new Map();
     let consecutiveFailures = 0;
+    /** Whether a proposal of this session's is waiting for the user. */
+    let staged = false;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (request.signal?.aborted) return;
@@ -526,7 +540,31 @@ export class OllamaProvider implements ModelProvider {
         // is more useful ended than looping. A refused stage counts the same:
         // it is equally a turn that produced nothing Nox can act on, and a
         // model misquoting the same buffer twice is not about to get it right.
-        if (consecutiveFailures >= 2) return;
+        if (consecutiveFailures >= 2) {
+          /**
+           * Giving up used to be a bare `return`, which the runtime reads as
+           * "nothing staged" and reports as `Done` — the same word a session
+           * that did the job shows. Measured at session level: two refused
+           * stages left `status=done summary=null` and a trail of
+           * `[instruction, read]`, with no sign an edit had ever been
+           * attempted. It is the common case, not an edge one: qwen2.5-coder
+           * quotes `find` with literal `\n` in it often enough that a rename
+           * ends here on the first try.
+           *
+           * So it fails, the way an unreachable server already does — the
+           * runtime turns a throw into a `failed` session with the message in
+           * the trail, and the reason names the last refusal so the user can
+           * see what the model tried. Unless a proposal is already waiting:
+           * `Failed` beside a change set the user could still keep would read
+           * as "nothing to see here", so that ends with a summary instead.
+           */
+          const message = `Gave up after two turns Nox could not use. The last: ${refusal}`;
+          if (staged) {
+            yield { type: 'action', request: summaryOf(message) };
+            return;
+          }
+          throw new Error(message);
+        }
         messages.push({ role: 'user', content: `Error: ${refusal}` });
         continue;
       }
@@ -534,9 +572,23 @@ export class OllamaProvider implements ModelProvider {
       consecutiveFailures = 0;
       const response = yield { type: 'action', request: action };
       if (action.method === 'session.summary') return;
+      if (action.method === 'proposal.stage' && response?.ok) staged = true;
       rememberRead(action, response, texts);
       messages.push({ role: 'user', content: `Result: ${describeResponse(response)}` });
     }
+
+    // The turn cap. Falling out of the loop is also a `return`, and a session
+    // that read one buffer fifteen times and stopped reported `Done` with no
+    // summary at all — observed in the running app, twice, on an instruction
+    // this model happens to loop on. Running out of turns and finishing are
+    // different outcomes and the panel had one word for both, so this says
+    // which, and names the number the user can change.
+    yield {
+      type: 'action',
+      request: summaryOf(
+        `Stopped after ${maxTurns} turns without finishing. Ask again more specifically, or raise "maxTurns" for this agent in agents.json.`,
+      ),
+    };
   }
 
   /**

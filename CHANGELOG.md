@@ -21,6 +21,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - When the server is unreachable or rejects the request, the session ends
     failed and says which — naming the host, or repeating the server's own
     message. A model you have not pulled says so.
+  - A session that runs out of turns says so; one whose model cannot follow
+    the format, or whose edits are refused twice over, ends failed with the
+    reason. None of them report success.
 
 - **A terminal.** A real pty rather than piped stdio, so programs see a
   terminal and behave like it: colour, line editing, job control, and `vim` or
