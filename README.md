@@ -102,13 +102,51 @@ one button takes a whole session back.
 Everything it read, everything it ran, and everything it was refused is on the
 record in the Agents panel.
 
-An agent is any program that speaks a small JSON protocol over stdin and
-stdout — there's a [~130-line example](examples/uppercase-agent.mjs) you can
-copy. Nox ships no AI provider and talks to no service by default; you bring
-your own, or none at all.
+**A model that runs on your machine.** Point Nox at an
+[Ollama](https://ollama.com) server in `agents.json` and that is the whole
+setup — no account, no API key, no telemetry. The HTTP client is loopback-only
+and refuses anything that isn't, enforced in Rust rather than in the part of
+the app a web page could reach.
+
+**It reads and proposes. It cannot run commands.** Not a setting you left off
+— the ability is not in the agent's vocabulary yet.
+
+**Edits are quoted, not positional.** The model names the text it wants
+replaced and Nox finds it, refusing anything ambiguous rather than guessing.
+That exists because a 7B model gets the intent right and the arithmetic wrong:
+handed raw character offsets it produced a zero-width insertion of an entire
+function body — which the review panel would have rendered as a perfectly
+convincing corrupt diff. And if you type in the file while the model is
+thinking, the proposal is refused rather than landing at offsets that have
+moved.
+
+**Or bring your own.** An agent is any program that speaks a small JSON
+protocol over stdin and stdout — there's a
+[140-line example](examples/uppercase-agent.mjs) you can copy.
 
 **If you never turn any of this on, Nox is not a worse editor for it.** That was
 the rule the whole time.
+
+#### Where this goes next
+
+The groundwork is the part that's done: authored transactions, a permission
+model, a context API, staged change sets and a job runner all shipped before
+any model did, and each one is an editor improvement on its own. What they
+unlock, in roughly this order:
+
+- **Explain, generate, refactor, fix** — everyday commands over a selection,
+  rather than a whole agent session for a two-line change.
+- **Workspace-aware chat**, with the context set shown and editable instead of
+  guessed at behind your back.
+- **Remote models** alongside the local one. A deliberate widening with its own
+  argument to make — not something that falls out of the loopback rule.
+- **Running commands**, gated by the permission model that already exists for
+  it. Deliberately last: the first thing an unproven model integration does
+  should not be taking real actions.
+
+**The principle doesn't move:** AI is a panel and a set of commands, not a
+rewrite of the editor. A feature that makes Nox worse for someone who never
+turns it on does not ship.
 
 ### Dark only, on purpose
 
@@ -144,8 +182,12 @@ drift from what's actually configurable.
 ## Status
 
 **v0.2.** It's young, and it's a personal project rather than a product — but
-it's real software with 518 tests and I use it. Expect rough edges; open an
+it's real software with 669 tests and I use it. Expect rough edges; open an
 issue if you hit one.
+
+**Local models landed after v0.2 was tagged**, so they are on `main` and in the
+next release rather than in the download above. Build from source if you want
+them now.
 
 Not there yet: no LSP, no Git integration, no plugins. Those are next, in
 roughly that order — see [ROADMAP.md](ROADMAP.md).
@@ -167,7 +209,7 @@ Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 filesystem and project search; the editor lives in the renderer.
 
 ```bash
-npm test          # 518 unit tests
+npm test          # 669 unit tests
 npm run check     # TypeScript + Svelte
 npm run app:build # a distributable, ~4 MB on macOS
 ```
