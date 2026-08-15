@@ -406,13 +406,21 @@ export class AgentRuntime {
           const { bufferId, ...options } = request.params;
           const text = reader.bufferText(bufferId, options);
           if (text === null) return failure(request.id, 'not-found', `No buffer ${bufferId}`);
-          // Only a plain whole-document read counts as having seen the buffer.
-          // A line range starts at the wrong offset and a numbered read is not
-          // the document's text at all, so neither is something a later edit
-          // can be resolved against — recording one would let a stage that
-          // used *older* text through on a revision that had since caught up.
+          // A plain whole-document read is the only one that may *refresh* the
+          // baseline, because it is the only read whose text a later edit can
+          // be resolved against in full. Letting a range or numbered read
+          // raise an existing entry would re-bless offsets computed from
+          // older text on a revision that had since caught up.
+          //
+          // Any read still *establishes* one where there is none: an agent
+          // that looked at a range and then edited is no less exposed to the
+          // user typing underneath it, and a baseline can only ever add a
+          // refusal — an absent entry is not checked at all.
+          const revision = this.#workspace.revisionOf(bufferId);
           if (options.lines === undefined && !options.withLineNumbers) {
-            readAt.set(bufferId, this.#workspace.revisionOf(bufferId));
+            readAt.set(bufferId, revision);
+          } else if (!readAt.has(bufferId)) {
+            readAt.set(bufferId, revision);
           }
           return success(request.id, text);
         }
@@ -481,9 +489,11 @@ export class AgentRuntime {
           // Refused, not narrowed to a smaller window: these offsets were
           // computed against text that is no longer what the buffer says, and
           // applying them writes somewhere other than where the agent looked.
-          // A buffer this session never read whole is left alone — those
+          // A buffer this session never read at all is left alone — those
           // offsets came from somewhere the runtime cannot see, and guessing
-          // about them is not better than the agent's own guard.
+          // about them is not better than the agent's own guard. Closing that
+          // last case needs the agent to declare what it computed against,
+          // which `proposal.stage` has no field for.
           const stale = request.params.edits.find((edit) => {
             const at = readAt.get(edit.bufferId);
             return at !== undefined && at !== this.#workspace.revisionOf(edit.bufferId);

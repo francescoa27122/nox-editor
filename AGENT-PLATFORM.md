@@ -366,8 +366,8 @@ UI.
 **Concurrency is resolved by rejection, not by locking.** Sessions run
 concurrently and are not serialised. Two agents on one buffer is settled where
 it is actually decidable, and there are two such places now. The earlier one
-is `proposal.stage`: if a buffer this session read whole has since moved,
-staging is refused before the proposal exists, with
+is `proposal.stage`: if a buffer this session has read — whole or in part —
+has since moved, staging is refused before the proposal exists, with
 `{"code":"stale", "message":"<file> changed after you read it — read it
 again before staging an edit against it"}`. This applies to every agent, not
 just to any one provider — read the buffer again and stage from that. What

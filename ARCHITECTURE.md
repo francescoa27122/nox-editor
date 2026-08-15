@@ -719,10 +719,21 @@ before a keystroke are arithmetically fine and land in the wrong place: one
 space typed at line 1 between a read and a stage turned a rename into
 `export function product(a, b) {{`, rendered as a clean one-hunk diff with the
 agent's name on it. So freshness is enforced in the runtime, which sees both
-halves: it remembers the revision each whole-buffer read was taken at and
-refuses `proposal.stage` for a buffer that has moved since, as a `stale` error
-the agent is told about and can re-read after. `ReviewFile.baseRevision` does
-not cover this — it is captured at stage time, which is after the drift.
+halves: it remembers the revision a buffer was at when the session first read
+it, and refuses `proposal.stage` for a buffer that has moved since, as a
+`stale` error the agent is told about and can re-read after.
+`ReviewFile.baseRevision` does not cover this — it is captured at stage time,
+which is after the drift.
+
+Only a plain whole-document read may *refresh* that baseline; a line range or
+a numbered read may establish one but never raise it. The asymmetry is the
+point: a narrow read proves the agent looked at part of the buffer, not that
+the offsets it is about to stage came from the current text, so letting one
+raise the baseline would re-bless stale offsets on a revision that had caught
+up. What remains uncovered is a buffer the session never read at all — those
+offsets came from somewhere the runtime cannot see, and closing that needs the
+agent to declare what it computed against, which `proposal.stage` has no field
+for.
 
 Failures surface as failures, and that too is the provider's job rather than
 the seam's. A refused connection and a server that rejects the request are

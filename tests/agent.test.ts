@@ -574,3 +574,107 @@ describe('what a session says about itself afterwards', () => {
     expect(session.status.get()).toBe('done');
   });
 });
+
+describe('an agent that read only part of a buffer', () => {
+  /**
+   * The guard added with the stale-read fix records a revision only for a
+   * plain *whole* read, so a range read left no entry and the stage skipped
+   * the check entirely. That is the shape `examples/uppercase-agent.mjs`
+   * ships in: read line 1, compute offsets from 0, stage.
+   *
+   * Prevents: a user keystroke between the read and the stage silently
+   * rewriting the wrong span, which is the same corruption the whole-read
+   * guard exists to refuse.
+   */
+  it('is refused when the buffer moved after its range read', async () => {
+    const { runtime, workspace, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const text = yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1 } },
+            },
+          };
+          const firstLine = (text?.ok ? text.result : '') as string;
+
+          // The user types while the agent is deciding.
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Uppercase the first line',
+                edits: [
+                  { bufferId: a, changes: { from: 0, to: firstLine.length, insert: firstLine.toUpperCase() } },
+                ],
+              },
+            },
+          };
+        }),
+      ),
+      'uppercase line one',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(true);
+  });
+
+  /**
+   * The inversion the whole-read guard's comment warns about: a later narrow
+   * read must not re-bless offsets computed against text that has since
+   * moved. A range read may establish a baseline, never raise one.
+   *
+   * Prevents: whole-read at r5, user types, range-read at r6, stage against
+   * the r5 text sailing through because the entry caught up.
+   */
+  it('does not let a later range read re-bless an older whole read', async () => {
+    const { runtime, workspace, review, a } = await setup();
+
+    const session = runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const whole = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: a } },
+          };
+          const original = (whole?.ok ? whole.result : '') as string;
+
+          workspace.applyEdits(a, [{ from: 0, to: 0, insert: '// header\n' }]);
+
+          // A narrow read after the change: it sees new text, but the offsets
+          // below were computed from `original`.
+          yield {
+            type: 'action',
+            request: {
+              method: 'context.bufferText',
+              params: { bufferId: a, lines: { from: 1, to: 1 } },
+            },
+          };
+
+          yield {
+            type: 'action',
+            request: {
+              method: 'proposal.stage',
+              params: {
+                description: 'Rewrite from stale offsets',
+                edits: [{ bufferId: a, changes: { from: 0, to: original.length, insert: 'REPLACED' } }],
+              },
+            },
+          };
+        }),
+      ),
+      'rewrite',
+    );
+    await settle(session);
+
+    expect(review.staged.get()).toBeNull();
+    expect(session.actions.get().some((entry) => entry.kind === 'error')).toBe(true);
+  });
+});
