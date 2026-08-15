@@ -727,19 +727,31 @@ which is after the drift.
 
 Two reads establish that baseline, because two hand back a position in the
 text: `context.bufferText`, and `context.selection`, which returns each range's
-offsets and the text at them — everything "uppercase my selection" needs. The
-rest establish nothing, because they locate no text: a buffer summary, a
-viewport, a path tree and a change-set list. `context.openBuffers` would also
-file every open buffer at once, on the listing most sessions start with.
+offsets and the text at them — everything "uppercase my selection" needs.
+
+The rest establish nothing. A viewport, a path tree and a change-set list
+locate no text at all. `context.openBuffers` is a deliberate trade rather than
+a claim that a listing is harmless: filing every open buffer at once, on the
+listing most sessions start with, would refuse the honest sequence of listing,
+the user typing, reading a range and staging from it — and a false refusal
+breaks working agents silently, which is worse than the hole it closes. The
+hole is real and worth naming: `BufferSummary.length` *is* the end-of-document
+offset, so a session that lists a buffer and appends to it stages against a
+position that may have moved, with nothing to refuse it.
 
 Only a read that hands back the whole document may *refresh* the baseline; a
-line range, a numbered read or a selection may establish one but never raise
-it. The asymmetry is the point: a narrow read proves the agent looked at part
-of the buffer, not that the offsets it is about to stage came from the current
-text, so letting one raise the baseline would re-bless stale offsets on a
-revision that had caught up. Whether a read was whole is settled by comparing
-its answer to what a plain read returns rather than by inspecting the
-parameters, because the reader clamps the range and reads a missing `lines` as
+narrower one establishes it without raising it. The asymmetry is the point: a
+narrow read proves the agent looked at part of the buffer, not that the offsets
+it is about to stage came from the current text, so letting one raise the
+baseline would re-bless stale offsets on a revision that had caught up. Whole
+is settled by comparing the read's answer to what a plain read returns rather
+than by inspecting the parameters — so a range that happens to span the
+document counts as whole however the parameters spell it, and does refresh.
+Refresh itself trusts the agent to stage from its most recent read: a session
+that reads, lets the buffer move, reads again and then stages offsets from the
+*first* read is not refused, which predates this guard and is not closed by it.
+The comparison is used because the reader clamps the range and reads a missing
+`lines` as
 the whole document — so `lines: null` and a span past the end are whole reads
 that a parameter test files as narrow, and only a comparison cannot drift.
 

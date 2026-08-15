@@ -397,13 +397,18 @@ export class AgentRuntime {
     try {
       switch (request.method) {
         // `openBuffers`, `viewport`, `workspaceTree` and `recentTransactions`
-        // establish no baseline. A summary, a scroll position, a path tree and
-        // a change-set list locate no text: an edit cannot be computed from one
-        // without a `bufferText` or `selection` read, and those establish it.
-        // `openBuffers` would also file every open buffer at once, on the
-        // listing most sessions open with — and since a narrow read may not
-        // raise a baseline, that would refuse the honest sequence of listing,
-        // the user typing, reading the range, and staging from it.
+        // establish no baseline. A scroll position, a path tree and a
+        // change-set list locate no text at all.
+        //
+        // `openBuffers` is a trade, not a claim that a listing is harmless.
+        // `BufferSummary.length` IS the end-of-document offset, so a session
+        // that lists a buffer and appends to it can stage against a position
+        // that has moved — measured, and not refused. Filing every listed
+        // buffer would close that and cost more than it saves: it would file
+        // them all at once on the listing most sessions open with, and since a
+        // narrow read may not raise a baseline, the honest sequence of
+        // listing, the user typing, reading a range and staging from it would
+        // be refused. A false refusal breaks working agents silently.
         case 'context.openBuffers':
           record({ kind: 'read', method: request.method });
           return success(request.id, reader.openBuffers());
@@ -435,8 +440,11 @@ export class AgentRuntime {
           // all hand back the whole document while `options.lines === undefined`
           // called them narrow — and `parseInbound` validates only `id` and
           // `method`, so an out-of-process agent can send any of them. A
-          // numbered read can never match, because the gutter is not in the
-          // buffer's text. The cost is materialising a document that was just
+          // numbered read cannot match on any document with a line in it,
+          // because the gutter is not in the buffer's text; on an empty one
+          // both sides are `''` and it matches, which costs nothing since
+          // there are no offsets to be stale about. The cost is materialising
+          // a document that was just
           // materialised for the answer; the gain is that the two definitions
           // cannot drift apart, which is the only condition under which this
           // guard is worth anything. `ContextService` and not the reader,
