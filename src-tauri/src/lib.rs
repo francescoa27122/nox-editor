@@ -7,6 +7,7 @@
 
 mod agent;
 mod fs;
+mod http;
 mod pty;
 mod search;
 mod watcher;
@@ -19,6 +20,7 @@ pub fn run() {
         .manage(watcher::WatcherState::default())
         .manage(search::SearchState::default())
         .manage(pty::PtyState::default())
+        .manage(http::HttpState::default())
         .invoke_handler(tauri::generate_handler![
             fs::nox_home_dir,
             fs::nox_read_text_file,
@@ -35,6 +37,8 @@ pub fn run() {
             fs::nox_config_dir,
             fs::nox_read_config,
             fs::nox_write_config,
+            http::nox_http_stream,
+            http::nox_http_cancel,
             watcher::nox_watch,
             watcher::nox_unwatch,
             search::nox_search_start,

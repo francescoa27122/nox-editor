@@ -34,6 +34,14 @@ regex = "1"
 # and even a shell prompt do not work. WezTerm's crate, for the platform
 # differences — a Windows pty is ConPTY, not a file descriptor.
 portable-pty = "0.9"
+# Streaming HTTP for local model servers. No TLS features: this client only
+# ever talks to loopback over plain HTTP, and pulling in native-tls or rustls
+# for a connection to 127.0.0.1 would be a large dependency bought for nothing.
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+futures-util = "0.3"
+# Used by name for the oneshot cancel channel and `select!`. Tauri depends on
+# tokio, but a transitive dependency is not in scope for `tokio::` paths.
+tokio = { version = "1", features = ["sync", "macros"] }
 
 [profile.release]
 # The binary is the product; optimise it like one.
