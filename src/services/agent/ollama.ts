@@ -93,203 +93,189 @@ function unfence(content: string): string {
   return trimmed.slice(headerEnd + 1, closeStart).trimEnd();
 }
 
+/** A balanced-brace span: `[start, end)`, `start` on `{` and `end` past `}`. */
 interface Candidate {
   start: number;
-  json: string;
-}
-
-interface Scan {
-  candidates: Candidate[];
-  /** `{`'s start → the nearest enclosing open brace's start at push time, or -1 for top-level. */
-  parentOf: Map<number, number>;
-  /** Starts that were actually closed — the only braces that count as real JSON structure. */
-  closedStarts: Set<number>;
+  end: number;
 }
 
 /**
- * Every balanced-brace object span in `content`, found in a single
- * left-to-right pass with a stack rather than by re-scanning from each
- * candidate `{` in turn.
+ * Every `{`-to-matching-`}` span in `content`, in the order a left-to-right
+ * reader meets their opening brace.
  *
- * Re-scanning was the previous approach: on a failed candidate, retry at
- * `start + 1` and run a fresh scan to end-of-string looking for the next
- * balance point. That is quadratic — a model stuck repeating a character, or
- * a reply truncated mid-emission, produces long runs of non-balancing `{`,
- * and cost is (number of those) × (remaining length). 256K of bare `{`
- * measured at 75s; the same input here is sub-millisecond.
+ * The semantics this has to deliver are the obvious ones: for *every* `{` in
+ * the reply, the object a correct string-aware scan started at that `{` would
+ * find. Correct because a `find` string in a staged edit can hold a `{`, a
+ * `}` or a `\"` and none of those are structure; for *every* `{` because
+ * prose is not JSON and the model puts braces in it — "change the { to a (",
+ * a quoted `{ return; }`, an irrelevant `{"a":1}` — and the real action comes
+ * after.
  *
- * String/escape tracking only runs while at least one candidate is open
- * (`opens.length > 0`). Walking it continuously from index 0 was the next
- * bug: prose has unbalanced quotes constantly ("a 6\" ruler", "the \"use
- * strict\" pragma", a Windows path), and an odd quote count or a trailing
- * backslash in narration flipped the scanner into "in string" for the rest
- * of the reply, silently dropping every action after it — fuzzed over 30,000
- * replies, that direction was one-way: 1,060 turns (3.5%) lost an action the
- * pre-stack scanner recovered, zero were gained. Outside any candidate, a
- * `"` or `\` is just prose and means nothing structurally.
+ * Doing that literally (rescan from each `{`) is quadratic, and a reply that
+ * is a long run of `{` is exactly what a looping or truncated 7B model emits:
+ * 256K braces measured at 75s. Every attempt to get it in one stack pass
+ * instead traded one input class for another, because a single pass has one
+ * string state and has to guess which text it belongs to:
  *
- * Nested objects are recorded alongside their enclosing one and tagged with
- * their raw stack parent, so a later step can promote an inner object when
- * an outer one is syntactically valid JSON but semantically wrong (the
- * `command.execute` test: its outer object parses fine, it's just not a
- * method this parser accepts). That parent link is *raw* stack adjacency,
- * not "genuinely enclosing JSON" — an unmatched `{` left dangling in
- * narration is still on the stack when a real object opens after it, so the
- * real object's raw parent can be prose that never closes. `closedStarts`
- * is what lets a later step tell the difference.
+ * - tracking `inString` continuously from index 0 let an odd `"` or a `\` in
+ *   narration flip the scanner into "in string" for the rest of the reply,
+ *   losing 3.5% of actions in a fuzz;
+ * - scoping the tracking to "inside a candidate" moved the loss rather than
+ *   removing it, because a `{` inside a quoted span in prose (`He said "the {
+ *   brace" out loud.`) opens a candidate and re-arms exactly the same trap —
+ *   3.8% lost.
+ *
+ * There is no third scoping rule to find, because the premise is wrong: the
+ * scan does not have to guess. Whether a scan started at `{` at position `s`
+ * considers position `p` to be inside a string depends only on the *parity*
+ * of the unescaped `"` between them. So across a whole document there are
+ * only ever **two** string interpretations, indexed by the parity of the
+ * running quote count at a scan's own start — not one per candidate. Track
+ * both, with a brace stack each. A brace at a position whose running parity
+ * is `k` is structure for interpretation `k` and string content for the
+ * other, so exactly one stack acts on it: still a single pass, still linear,
+ * and every `{` lands in the interpretation that is correct *for it*.
+ *
+ * A prose `{` and a JSON `{` separated by an odd number of prose quotes
+ * simply end up in different stacks and stop interfering. Braces inside a
+ * JSON string sit at the opposite parity from the object containing them, so
+ * they cannot perturb its span either. The four shapes that broke earlier
+ * rounds — brace in a JSON string, brace in prose, unbalanced quote in prose,
+ * and both together — are all this same fact seen from different sides.
+ *
+ * Nested spans are reported alongside their enclosing one, so a later step
+ * can promote an inner object when an outer one is valid JSON but
+ * semantically wrong (`{"tool_call": {...}}`, or the `command.execute` test).
  */
-function balancedObjects(content: string): Scan {
-  const candidates: Candidate[] = [];
-  const opens: number[] = [];
-  const parentOf = new Map<number, number>();
-  let inString = false;
-  let escaped = false;
+function objectSpans(content: string): Candidate[] {
+  /** Matched opens, keyed by start. A `{` that never closes is simply absent. */
+  const endOf = new Map<number, number>();
+  /** Open braces per interpretation: index 0 for even quote parity, 1 for odd. */
+  const stacks: [number[], number[]] = [[], []];
+  let quotesOdd = false;
+  /** Whether the run of `\` immediately behind us has odd length. */
+  let pendingEscape = false;
 
   for (let index = 0; index < content.length; index++) {
     const char = content[index]!;
 
-    if (opens.length === 0) {
-      if (char === '{') {
-        parentOf.set(index, -1);
-        opens.push(index);
-      }
-      continue;
-    }
-
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
+    // A backslash only ever suppresses a following quote. It must not swallow
+    // a following brace: `Careful with this: \` immediately before a real
+    // action is prose, and consuming the `{` after it lost the whole turn.
     if (char === '\\') {
-      escaped = true;
+      pendingEscape = !pendingEscape;
       continue;
     }
     if (char === '"') {
-      inString = !inString;
+      if (!pendingEscape) quotesOdd = !quotesOdd;
+      pendingEscape = false;
       continue;
     }
-    if (inString) continue;
-    if (char === '{') {
-      parentOf.set(index, opens[opens.length - 1]!);
-      opens.push(index);
-    } else if (char === '}') {
-      const start = opens.pop()!;
-      candidates.push({ start, json: content.slice(start, index + 1) });
-    }
+    pendingEscape = false;
+    if (char !== '{' && char !== '}') continue;
+
+    const stack = stacks[quotesOdd ? 1 : 0]!;
+    if (char === '{') stack.push(index);
+    else if (stack.length > 0) endOf.set(stack.pop()!, index + 1);
   }
 
-  // Closing order nests innermost-first (LIFO); candidates are tried in the
-  // order a left-to-right reader meets their opening brace, so outer objects
-  // are attempted before the inner objects nested inside them.
-  candidates.sort((a, b) => a.start - b.start);
-  const closedStarts = new Set(candidates.map((c) => c.start));
-  return { candidates, parentOf, closedStarts };
+  if (endOf.size === 0) return [];
+
+  // A second walk rather than sorting what the first produced: closes arrive
+  // innermost-first and interleaved between the two stacks, and the reply
+  // must be read left to right. Walking the string again is linear and
+  // allocates nothing for the degenerate inputs (a long run of bare `{`)
+  // that motivated all of this.
+  const spans: Candidate[] = [];
+  for (let index = 0; index < content.length; index++) {
+    if (content[index] !== '{') continue;
+    const end = endOf.get(index);
+    if (end !== undefined) spans.push({ start: index, end });
+  }
+  return spans;
 }
 
-/**
- * The start of the outermost *genuine* JSON ancestor of the object at
- * `start` — climbing through raw stack parents only while each one was
- * itself properly closed, and stopping at the first one that wasn't.
- *
- * This is why narration reads right in both directions: a stray `{` in
- * prose ("the { to a (") is never closed, so the real object "inside" it
- * (in raw stack terms) is its own outermost — narration isn't truncated at
- * the stray brace. A genuine wrapper (`{"tool_call": {...}}`) *is* closed,
- * so an inner object promoted out of it still reports the wrapper's start —
- * narration isn't truncated at the wrapper's own contents either. Slicing to
- * "the first brace in the body" (this file's previous approach) could only
- * get one of those two cases right at a time; this gets both.
- *
- * Path-compressed so repeated calls during one `parseTurn` stay linear
- * regardless of how deep any one candidate is nested.
- */
-function outermostStart(start: number, scan: Scan, memo: Map<number, number>): number {
-  const path: number[] = [];
-  let current = start;
-  while (!memo.has(current)) {
-    const parent = scan.parentOf.get(current)!;
-    if (parent === -1 || !scan.closedStarts.has(parent)) {
-      memo.set(current, current);
-      break;
-    }
-    path.push(current);
-    current = parent;
+/** Why this object cannot be an action, or `null` if it can. */
+function rejectionOf(parsed: unknown): string | null {
+  const record = parsed as { method?: unknown; params?: unknown };
+  if (typeof record.method !== 'string') return 'object has no "method" string';
+  if (!VOCABULARY.has(record.method)) return `${record.method} is not a method you may call`;
+
+  const shape = PARAMS_SHAPE[record.method]!;
+  if (shape === 'required' && !isPlainObject(record.params)) {
+    return `${record.method} requires a "params" object`;
   }
-  const result = memo.get(current)!;
-  for (const node of path) memo.set(node, result);
-  return result;
+  if (shape === 'optional' && record.params !== undefined && !isPlainObject(record.params)) {
+    return `${record.method} "params" must be an object`;
+  }
+  if (shape === 'none' && record.params !== undefined) {
+    return `${record.method} does not take "params"`;
+  }
+  return null;
 }
 
 export function parseTurn(content: string): ParsedTurn {
   const body = unfence(content);
-  const scan = balancedObjects(body);
+  const candidates = objectSpans(body);
 
-  if (scan.candidates.length === 0) {
+  if (candidates.length === 0) {
     return { text: body.trim(), action: null, error: 'no JSON object in the reply' };
   }
 
-  const outermostMemo = new Map<number, number>();
-  const textBefore = (start: number) => body.slice(0, outermostStart(start, scan, outermostMemo)).trim();
+  /**
+   * Spans already tried and rejected that were nonetheless *parseable* JSON.
+   * Only those count as real structure around a later winner; a brace pair
+   * in prose (`` `{ return; }` ``) is not an object that a promoted inner
+   * object was nested in, and neither is a span a mis-parity scan happened
+   * to balance across narration.
+   */
+  const rejectedButParseable: Candidate[] = [];
+
+  /**
+   * Narration is the prose before any JSON — not before whichever candidate
+   * won. When an outer object is valid JSON but not a valid action and an
+   * inner one is promoted (`Explanation.\n{"tool_call": {...}}`), the text
+   * must stop at the wrapper, or a broken `{"tool_call":` fragment is
+   * surfaced to the user as if the model had said it. When the earlier braces
+   * are prose instead, they belong to the narration and must survive in it.
+   * Called at most twice per turn — once for the winner, once for the first
+   * failure — so the scan over rejects stays linear overall.
+   */
+  const textBefore = (candidate: Candidate): string => {
+    let outermost = candidate.start;
+    for (const earlier of rejectedButParseable) {
+      if (earlier.start < outermost && earlier.end >= candidate.end) outermost = earlier.start;
+    }
+    return body.slice(0, outermost).trim();
+  };
 
   let fallback: ParsedTurn | null = null;
 
-  for (const candidate of scan.candidates) {
+  for (const candidate of candidates) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(candidate.json);
+      parsed = JSON.parse(body.slice(candidate.start, candidate.end));
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
-      fallback ??= { text: textBefore(candidate.start), action: null, error: `malformed JSON: ${message}` };
+      fallback ??= { text: textBefore(candidate), action: null, error: `malformed JSON: ${message}` };
       continue;
     }
 
-    const record = parsed as { method?: unknown; params?: unknown };
-    if (typeof record.method !== 'string') {
-      fallback ??= { text: textBefore(candidate.start), action: null, error: 'object has no "method" string' };
-      continue;
-    }
-    if (!VOCABULARY.has(record.method)) {
-      fallback ??= {
-        text: textBefore(candidate.start),
-        action: null,
-        error: `${record.method} is not a method you may call`,
-      };
+    const rejection = rejectionOf(parsed);
+    if (rejection !== null) {
+      fallback ??= { text: textBefore(candidate), action: null, error: rejection };
+      rejectedButParseable.push(candidate);
       continue;
     }
 
-    const shape = PARAMS_SHAPE[record.method]!;
-    if (shape === 'required' && !isPlainObject(record.params)) {
-      fallback ??= {
-        text: textBefore(candidate.start),
-        action: null,
-        error: `${record.method} requires a "params" object`,
-      };
-      continue;
-    }
-    if (shape === 'optional' && record.params !== undefined && !isPlainObject(record.params)) {
-      fallback ??= {
-        text: textBefore(candidate.start),
-        action: null,
-        error: `${record.method} "params" must be an object`,
-      };
-      continue;
-    }
-    if (shape === 'none' && record.params !== undefined) {
-      fallback ??= {
-        text: textBefore(candidate.start),
-        action: null,
-        error: `${record.method} does not take "params"`,
-      };
-      continue;
-    }
-
+    const record = parsed as { method: string; params?: unknown };
     const action = (
       record.params === undefined
         ? { method: record.method }
         : { method: record.method, params: record.params }
     ) as RequestBody;
 
-    return { text: textBefore(candidate.start), action, error: null };
+    return { text: textBefore(candidate), action, error: null };
   }
 
   return fallback!;

@@ -291,22 +291,71 @@ describe('parsing a turn', () => {
   });
 
   /**
-   * The failure this prevents: tracking string state from index 0 instead of
-   * only while a candidate is open. An agent narrating about code produces
-   * unbalanced quotes constantly — a measurement, a partial quotation, a
-   * path — and each of these four, fuzzed over 30,000 replies, was one of
-   * 1,060 turns (3.5%) that lost a recoverable action when string state was
-   * allowed to leak out of narration and into the real object that followed
-   * it, flipping the scanner into "in string" for the rest of the reply.
+   * The failure this prevents: prose deciding what the scanner believes about
+   * strings. An agent narrating about code produces unbalanced quotes
+   * constantly — a measurement, a partial quotation, a path — and braces just
+   * as often, and every previous attempt to scope one string state to the
+   * "right" region traded one of these shapes for another:
+   *
+   * - tracking from index 0 lost the first three (an odd `"` in narration
+   *   flipped the scanner into "in string" for the rest of the reply): 3.5%
+   *   of actions in a 30,000-reply fuzz;
+   * - scoping the tracking to "inside an open candidate" recovered those and
+   *   lost the last two instead, because a `{` inside a quoted span in prose
+   *   opens a candidate and re-arms the identical trap: 3.8%.
+   *
+   * The last two are the discriminating pair — they fail on both of those
+   * earlier heads, and the fourth is the one whose absence from round 3's own
+   * fuzz corpus let the regression through. Each asserts `text` as well, so a
+   * scanner that finds the action by truncating the narration at a prose
+   * brace cannot pass.
    */
   it.each([
     ['an odd quote before a measurement', 'A 6" ruler.'],
     ['an unterminated quote', 'The "use strict pragma.'],
     ['two quotes and a third left open', 'He said "hi" and "bye.'],
-    ['a trailing backslash', 'Careful with this: \\'],
+    ['a brace inside a quoted span', 'He said "the { brace" out loud.'],
+    ['a brace and an unbalanced quote after it', 'I will change the { to a ( and a 6" gap.'],
   ])('recovers a good action after narration with %s', (_label, narration) => {
     const parsed = parseTurn(`${narration}\n{"method":"context.openBuffers"}`);
     expect(parsed.action).toEqual({ method: 'context.openBuffers' });
     expect(parsed.error).toBeNull();
+    expect(parsed.text).toBe(narration);
+  });
+
+  /**
+   * The failure this prevents: a `\` being treated as escaping the character
+   * after it everywhere rather than only suppressing a following quote. The
+   * backslash has to sit immediately before the `{` with nothing between —
+   * the earlier version of this test put a newline there, so the newline was
+   * consumed as the escaped character and the brace was reached intact, which
+   * meant the test passed against the very bug it was written to catch.
+   */
+  it('recovers a good action after narration ending in a backslash', () => {
+    const parsed = parseTurn('Careful with this: \\{"method":"context.openBuffers"}');
+    expect(parsed.action).toEqual({ method: 'context.openBuffers' });
+    expect(parsed.error).toBeNull();
+    expect(parsed.text).toBe('Careful with this: \\');
+  });
+
+  /**
+   * The failure this prevents: fixing braces-in-prose and braces-in-JSON-
+   * strings with two scanners that each cover the other's blind spot, which
+   * works until one reply contains both. A string-unaware scan miscounts the
+   * `{` inside the `find` string; a string-aware scan that inherits its quote
+   * state from the narration never sees the action's own braces. This reply
+   * needs one scanner that is right about both at once.
+   */
+  it('recovers a staged edit with braces in its strings after a brace inside a quoted span', () => {
+    const parsed = parseTurn(
+      'He said "the { brace" out loud.\n' +
+        '{"method":"proposal.stage","params":{"description":"d","edits":[{"find":"if (x) {","replace":"y"}]}}',
+    );
+    expect(parsed.action).toEqual({
+      method: 'proposal.stage',
+      params: { description: 'd', edits: [{ find: 'if (x) {', replace: 'y' }] },
+    });
+    expect(parsed.error).toBeNull();
+    expect(parsed.text).toBe('He said "the { brace" out loud.');
   });
 });
