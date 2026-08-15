@@ -50,16 +50,17 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/agent.test.ts`. `workspace.setSelection(id, { ranges: [[from, to]], main: 0 })` is how the existing suite makes a selection (see `tests/context.test.ts:90`).
+Add to `tests/agent.test.ts`. `workspace.setSelection(id, { ranges: [[from, to]], main: 0 })` is how the existing suite makes a selection (see `tests/context.test.ts:90`), and `setup()` already opens `a.txt`, returning its id as `a`.
+
+**First, one harness change:** `setup()` does not currently return `platform`, and the truncation test needs it to seed a large file. Add `platform` to its returned object — it is already a local in that function, so this is one word, and adding a key breaks no existing caller.
 
 ```ts
 describe('the brief', () => {
   // A model told only "a.txt, 5 lines" cannot act on "make this shorter" —
   // the selection is the whole subject of a selection-scoped edit.
   it('names the selected range and quotes its text', async () => {
-    const { runtime, workspace } = await setup();
-    const id = (await workspace.open('/w/a.txt'))!;
-    workspace.setSelection(id, { ranges: [[4, 11]], main: 0 });
+    const { runtime, workspace, a } = await setup();
+    workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
 
     const brief = runtime.brief();
     expect(brief).toContain('Selected in a.txt, lines 2–3:');
@@ -69,9 +70,8 @@ describe('the brief', () => {
   // A bare cursor is not a selection. Quoting the empty string would tell the
   // model it had been given something when it had not.
   it('says nothing about a selection when the cursor is empty', async () => {
-    const { runtime, workspace } = await setup();
-    const id = (await workspace.open('/w/a.txt'))!;
-    workspace.setSelection(id, { ranges: [[4, 4]], main: 0 });
+    const { runtime, workspace, a } = await setup();
+    workspace.setSelection(a, { ranges: [[4, 4]], main: 0 });
 
     expect(runtime.brief()).not.toContain('Selected in');
   });
@@ -92,9 +92,8 @@ describe('the brief', () => {
   // Multi-range semantics are out of scope; sending every range would let the
   // model edit somewhere the primary cursor never was.
   it('carries only the primary range when several are selected', async () => {
-    const { runtime, workspace } = await setup();
-    const id = (await workspace.open('/w/a.txt'))!;
-    workspace.setSelection(id, { ranges: [[0, 3], [4, 11]], main: 1 });
+    const { runtime, workspace, a } = await setup();
+    workspace.setSelection(a, { ranges: [[0, 3], [4, 13]], main: 1 });
 
     const brief = runtime.brief();
     expect(brief).toContain('two\nthree');
@@ -394,12 +393,11 @@ describe('a scoped session', () => {
   // The conversion nobody notices until it is wrong: context.selection counts
   // lines from 1 for humans, Hunk.fromLine counts from 0.
   it('converts a 1-based selection into a 0-based scope', async () => {
-    const { workspace, context } = await setup();
-    const id = (await workspace.open('/w/a.txt'))!;
-    workspace.setSelection(id, { ranges: [[4, 11]], main: 0 });
+    const { workspace, context, a } = await setup();
+    workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
 
-    expect(scopeFromSelection(id, context.selection(id))).toEqual({
-      bufferId: id,
+    expect(scopeFromSelection(a, context.selection(a))).toEqual({
+      bufferId: a,
       fromLine: 1,
       toLine: 2,
     });
@@ -408,19 +406,17 @@ describe('a scoped session', () => {
   // A bare cursor scopes nothing; returning a zero-width scope would default
   // every real hunk to unkept.
   it('answers null for an empty selection', async () => {
-    const { workspace, context } = await setup();
-    const id = (await workspace.open('/w/a.txt'))!;
-    workspace.setSelection(id, { ranges: [[4, 4]], main: 0 });
+    const { workspace, context, a } = await setup();
+    workspace.setSelection(a, { ranges: [[4, 4]], main: 0 });
 
-    expect(scopeFromSelection(id, context.selection(id))).toBeNull();
-    expect(scopeFromSelection(id, null)).toBeNull();
+    expect(scopeFromSelection(a, context.selection(a))).toBeNull();
+    expect(scopeFromSelection(a, null)).toBeNull();
   });
 
   // The scope has to survive the whole session, not just the call that made
   // it — a proposal staged three turns later is still scoped.
   it('defaults an out-of-scope hunk to unkept when the session carries a scope', async () => {
-    const { runtime, workspace, review } = await setup();
-    const id = (await workspace.open('/w/a.txt'))!;
+    const { runtime, review, a: id } = await setup();
     const chunks: ModelChunk[] = [
       { type: 'action', request: { method: 'proposal.stage', params: {
         description: 'two edits',
