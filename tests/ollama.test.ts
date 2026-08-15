@@ -13,7 +13,7 @@ import { FileTreeService } from '../src/services/filetree';
 import { JobRunner } from '../src/services/jobs';
 import { PermissionService } from '../src/services/permissions';
 import { ReviewService } from '../src/services/review';
-import { WorkspaceService } from '../src/services/workspace';
+import { WorkspaceService, type BufferId } from '../src/services/workspace';
 
 /**
  * The Ollama provider and the platform seam beneath it.
@@ -431,13 +431,20 @@ function framesFor(content: string): string[] {
   return frames;
 }
 
-/** A platform whose stream replays one scripted reply per request. */
-function fakePlatform(replies: string[]) {
+/**
+ * A platform whose stream replays one scripted reply per request.
+ *
+ * `before` runs at the top of each request, which is the only moment a test
+ * can act *between* the model's last result and its next reply — the window a
+ * user's keystroke lands in.
+ */
+function fakePlatform(replies: string[], before?: (turn: number) => void) {
   const bodies: unknown[] = [];
   let turn = 0;
   const platform = {
     capabilities: { localModels: true },
     async streamJsonLines(spec: { body: unknown }, onLine: (line: string) => void, onEnd: (e: string | null) => void) {
+      before?.(turn);
       // Snapshotted, not aliased: `complete` appends to one `messages` array
       // for the whole conversation, so keeping the reference would make every
       // recorded body the *final* transcript. Assertions meant as "this was
@@ -908,6 +915,40 @@ describe('staging an edit the model quoted', () => {
 });
 
 /**
+ * The real services a session runs against, with `files` opened as buffers.
+ *
+ * Handed back so a test can do to the workspace what the user does to it —
+ * type in a buffer the agent is halfway through reasoning about — and read the
+ * review panel afterwards.
+ */
+async function sessionWorld(files: Record<string, string> = {}) {
+  const memory = new MemoryPlatform();
+  const workspace = new WorkspaceService(memory, () => history());
+  const tree = new FileTreeService(memory);
+  const review = new ReviewService(workspace);
+  const runtime = new AgentRuntime({
+    workspace,
+    context: new ContextService(workspace, tree),
+    commands: new CommandRegistry(),
+    permissions: new PermissionService(() => workspace.rootPath.get()),
+    review,
+    jobs: new JobRunner(),
+  });
+
+  const opened: Record<string, BufferId> = {};
+  const names = Object.keys(files);
+  if (names.length > 0) {
+    memory.mkdirp('/w');
+    for (const name of names) memory.seedFile(`/w/${name}`, files[name]!);
+    await workspace.openFolder('/w');
+    await tree.setRoot('/w');
+    for (const name of names) opened[name] = (await workspace.open(`/w/${name}`))!;
+  }
+
+  return { workspace, review, runtime, opened };
+}
+
+/**
  * Start a real session against `platform` and wait for it to finish.
  *
  * Nothing below the provider is substituted. The defect these tests exist for
@@ -915,17 +956,12 @@ describe('staging an edit the model quoted', () => {
  * but the echoed instruction — and a provider-level assertion could not have
  * seen it, because the provider returning quietly is precisely the bug.
  */
-async function runSession(platform: Platform, config: OllamaAgentConfig) {
-  const memory = new MemoryPlatform();
-  const workspace = new WorkspaceService(memory, () => history());
-  const runtime = new AgentRuntime({
-    workspace,
-    context: new ContextService(workspace, new FileTreeService(memory)),
-    commands: new CommandRegistry(),
-    permissions: new PermissionService(() => workspace.rootPath.get()),
-    review: new ReviewService(workspace),
-    jobs: new JobRunner(),
-  });
+async function runSession(
+  platform: Platform,
+  config: OllamaAgentConfig,
+  world?: Awaited<ReturnType<typeof sessionWorld>>,
+) {
+  const { runtime } = world ?? (await sessionWorld());
 
   const session = runtime.start(
     new ProviderTransport(new OllamaProvider(platform, config)),
@@ -1009,3 +1045,95 @@ describe('a failure the user must see', () => {
     expect(errorsOf(session)).toMatch(/pull model manifest: file does not exist/);
   });
 });
+
+describe('an edit staged against a buffer that moved', () => {
+  /**
+   * Two functions, so a rename on the second line resolves to an offset the
+   * first line's length is part of. One character typed at the top is then
+   * enough to make those offsets land a character early.
+   */
+  const MATH = '// math helpers\nexport function multiply(a, b) {\n  return a * b;\n}\n';
+
+  const readReply = (bufferId: BufferId) =>
+    JSON.stringify({ method: 'context.bufferText', params: { bufferId } });
+
+  const renameReply = (bufferId: BufferId) =>
+    JSON.stringify({
+      method: 'proposal.stage',
+      params: {
+        description: 'Rename multiply to product',
+        edits: [
+          {
+            bufferId,
+            find: 'export function multiply(a, b) {',
+            replace: 'export function product(a, b) {',
+          },
+        ],
+      },
+    });
+
+  /**
+   * The failure this prevents, measured at session level against the real
+   * workspace, review service and runtime: the user types one space at line 1
+   * between the model's read and its `proposal.stage`, and the offsets
+   * resolved against the text the model was shown land one character early.
+   * The staged hunk was
+   * `- ["\n","export function multiply(a, b) {\n"]` /
+   * `+ ["export function product(a, b) {{\n"]` — a doubled brace, broken
+   * JavaScript, rendered as a clean one-hunk rename attributed to the model
+   * and one keystroke from applied.
+   *
+   * `resolveEdit` cannot catch it: the quote *was* unique in the text the
+   * model read. Nor can `ReviewFile.baseRevision`, which is captured at stage
+   * time — after the drift.
+   */
+  it('refuses it, rather than staging a diff computed before the user typed', async () => {
+    const world = await sessionWorld({ 'math.js': MATH });
+    const bufferId = world.opened['math.js']!;
+    const { platform, bodies } = fakePlatform(
+      [
+        readReply(bufferId),
+        renameReply(bufferId),
+        '{"method":"session.summary","params":{"text":"done"}}',
+      ],
+      (turn) => {
+        // The user types, in the window between the read coming back and the
+        // model deciding what to stage. One space is enough.
+        if (turn === 1) world.workspace.applyEdits(bufferId, [{ from: 0, to: 0, insert: ' ' }]);
+      },
+    );
+
+    const session = await runSession(platform, CONFIG, world);
+
+    expect(world.review.staged.get()).toBeNull();
+    expect(session.actions.get().some((action) => action.kind === 'proposal')).toBe(false);
+    expect(session.status.get()).not.toBe('awaiting-review');
+    // Named for the user, in the trail, rather than dropped.
+    expect(errorsOf(session)).toMatch(/math\.js changed after you read it/);
+    // And handed back to the model as its next input, so it can re-read
+    // instead of staging the same stale offsets again.
+    expect(sentOn(bodies, 2)).toMatch(/changed after you read it/);
+  });
+
+  /**
+   * The other half, without which the guard above could be a blanket refusal
+   * of every staged edit and nothing here would notice. Same script, same
+   * buffer, nobody typing.
+   */
+  it('stages it when the buffer is still what the model read', async () => {
+    const world = await sessionWorld({ 'math.js': MATH });
+    const bufferId = world.opened['math.js']!;
+    const { platform } = fakePlatform([
+      readReply(bufferId),
+      renameReply(bufferId),
+      '{"method":"session.summary","params":{"text":"done"}}',
+    ]);
+
+    const session = await runSession(platform, CONFIG, world);
+
+    expect(session.status.get()).toBe('awaiting-review');
+    expect(world.review.staged.get()?.files[0]?.hunks).toHaveLength(1);
+    expect(errorsOf(session)).toBe('');
+  });
+});
+

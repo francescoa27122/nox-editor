@@ -15,7 +15,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     client refuses anything that is not loopback.
   - The agent can read and propose. It cannot run commands.
   - Edits are quoted, not positional: the model names the text to replace and
-    Nox finds it, refusing anything ambiguous rather than guessing.
+    Nox finds it in what the model read, refusing anything ambiguous rather
+    than guessing. If you edit the file after the agent read it, the proposal
+    is refused rather than applied at offsets that have moved.
   - When the server is unreachable or rejects the request, the session ends
     failed and says which — naming the host, or repeating the server's own
     message. A model you have not pulled says so.

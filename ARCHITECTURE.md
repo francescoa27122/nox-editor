@@ -707,9 +707,22 @@ real interface it produced a zero-width insertion of a whole function body:
 the intent right, the arithmetic nonsense. That is the dangerous shape —
 `proposal.stage` would accept it and the review panel would render a
 convincing corrupt diff. So the model quotes text instead, and the provider
-converts the quote to offsets, refusing anything it cannot find or that
-matches twice. The protocol is untouched; everything below the provider still
-receives real offsets and never learns a model was involved.
+converts the quote to offsets against the text the model was shown when it
+read the buffer, refusing anything it cannot find there or that matches twice.
+The protocol is untouched; everything below the provider still receives real
+offsets and never learns a model was involved.
+
+Resolving against what the model read is the only thing the provider *can* do
+— text is its whole window on the buffer — and it is not sufficient on its
+own, because the user goes on typing while the model thinks. Offsets computed
+before a keystroke are arithmetically fine and land in the wrong place: one
+space typed at line 1 between a read and a stage turned a rename into
+`export function product(a, b) {{`, rendered as a clean one-hunk diff with the
+agent's name on it. So freshness is enforced in the runtime, which sees both
+halves: it remembers the revision each whole-buffer read was taken at and
+refuses `proposal.stage` for a buffer that has moved since, as a `stale` error
+the agent is told about and can re-read after. `ReviewFile.baseRevision` does
+not cover this — it is captured at stage time, which is after the drift.
 
 Failures surface as failures, and that too is the provider's job rather than
 the seam's. A refused connection and a server that rejects the request are

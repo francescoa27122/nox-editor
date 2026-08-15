@@ -370,9 +370,14 @@ interface ChatMessage {
  * against the same agent must not read each other's buffers, and text left
  * over from a previous instruction is older than anything the current one can
  * reason about — the model quotes from what it was shown *this* session, so
- * that is the only text a quote may be resolved against. Staging does not
- * write, so an entry stays true until the user applies a proposal, which ends
- * the session anyway.
+ * that is the only text a quote may be resolved against.
+ *
+ * An entry can nonetheless go stale while the session is still running, and
+ * nothing here can tell: the user types, and the provider's only window on the
+ * buffer is the text it was handed at read time. That is why freshness is
+ * enforced where both the read and the stage pass through — `AgentRuntime`
+ * remembers the revision each read was taken at and refuses a `proposal.stage`
+ * whose buffer has moved since, with a `stale` error this loop feeds back.
  */
 type BufferTexts = Map<string, string>;
 
