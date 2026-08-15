@@ -23,6 +23,40 @@ export interface ReviewHunk extends Hunk {
   /** 1-based first line in the buffer, for display. */
   displayLine: number;
   accepted: boolean;
+  inScope: boolean;
+}
+
+/**
+ * The line range an edit was asked for.
+ *
+ * Only ever decides a hunk's default. It never refuses an edit, so a scope
+ * that has gone stale can cost a wrong checkbox and nothing else — what
+ * protects the text is the runtime's stale-read guard.
+ */
+export interface ReviewScope {
+  bufferId: BufferId;
+  /** 0-based and inclusive, matching `Hunk.fromLine`, not `displayLine`. */
+  fromLine: number;
+  toLine: number;
+}
+
+/**
+ * Does this hunk touch the lines the user selected?
+ *
+ * Lines rather than character offsets: a hunk that overlaps the selection at
+ * all counts as inside, which is the forgiving direction.
+ */
+function touchesScope(hunk: Hunk, bufferId: BufferId, scope: ReviewScope): boolean {
+  if (bufferId !== scope.bufferId) return false;
+  if (hunk.removed.length === 0) {
+    // A pure insertion removes nothing and so spans no lines. Treat it as the
+    // line it starts at, and allow one past the end: text inserted right after
+    // the last selected line is what "add to the end of this" produces, and
+    // defaulting that to unkept would fight the most ordinary request.
+    return hunk.fromLine >= scope.fromLine && hunk.fromLine <= scope.toLine + 1;
+  }
+  const lastRemoved = hunk.fromLine + hunk.removed.length - 1;
+  return hunk.fromLine <= scope.toLine && lastRemoved >= scope.fromLine;
 }
 
 export interface ReviewFile {
@@ -67,7 +101,7 @@ export class ReviewService {
    * Returns null when the proposal would change nothing, which is worth
    * distinguishing from an empty review the user has to dismiss.
    */
-  stage(spec: ChangeSetSpec): StagedChangeSet | null {
+  stage(spec: ChangeSetSpec, scope?: ReviewScope): StagedChangeSet | null {
     const byBuffer = new Map<BufferId, ChangeSetSpec['edits']>();
     for (const edit of spec.edits) {
       const list = byBuffer.get(edit.bufferId);
@@ -92,15 +126,21 @@ export class ReviewService {
         path: snapshot.path,
         languageId: snapshot.languageId,
         baseRevision: this.#workspace.revisionOf(bufferId),
-        hunks: hunks.map((hunk) => ({
-          ...hunk,
-          id: `hunk-${this.#nextHunkId++}`,
-          displayLine: hunk.fromLine + 1,
-          // Accepted by default: review is for catching the wrong ones, and
-          // making someone tick every box to get the thing they asked for is
-          // how review panels end up being clicked through blind.
-          accepted: true,
-        })),
+        hunks: hunks.map((hunk) => {
+          const inScope = scope ? touchesScope(hunk, bufferId, scope) : true;
+          return {
+            ...hunk,
+            id: `hunk-${this.#nextHunkId++}`,
+            displayLine: hunk.fromLine + 1,
+            // Accepted by default: review is for catching the wrong ones, and
+            // making someone tick every box to get the thing they asked for is
+            // how review panels end up being clicked through blind. A scoped
+            // proposal inverts that only outside the scope, which is exactly
+            // where an unnoticed change would be a surprise.
+            inScope,
+            accepted: inScope,
+          };
+        }),
       });
     }
 
