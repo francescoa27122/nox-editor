@@ -1,6 +1,6 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
-import { buildExtensions } from '../src/editor/extensions';
+import { buildExtensions, reconfigureEffects } from '../src/editor/extensions';
 import {
   clearProvenanceEffect,
   describeProvenance,
@@ -11,19 +11,26 @@ import {
   provenanceField,
   type ProvenanceValue,
 } from '../src/editor/provenance';
+import { MemoryPlatform } from '../src/platform/memory';
 import { defaultSettings } from '../src/services/config/schema';
 import { changeSetAnnotation, type Provenance } from '../src/services/transactions';
+import { WorkspaceService } from '../src/services/workspace';
 
 /**
  * The provenance field against hand-built transactions.
  *
  * No DOM and no workspace: the field is pure state, and driving it directly
- * is the only way to test recording and mapping in isolation. At this commit
- * that means: what a change set marks, that the mark carries the author
- * resolved at record time, and that a mark survives an edit elsewhere in the
- * document. The clearing rule — a mark shrinking or vanishing under an edit
- * that overlaps it — arrives with the update rule in a later task, and its
- * tests belong there, not here.
+ * is the only way to test recording, decay and mapping in isolation. Covers:
+ * what a change set marks; that a mark carries the author resolved at record
+ * time; that a mark survives an edit elsewhere in the document; the decay
+ * rule that shrinks or splits a mark under an edit that overlaps it, and its
+ * `clearProvenanceEffect` counterpart that drops a buffer's marks outright;
+ * `provenanceAt`'s boundary handling; the tooltip's text formatting; the
+ * setting's Compartment wiring; and next/previous/has-any navigation. What it
+ * does not cover: the gutter and tooltip `Extension`s themselves, and the
+ * workspace- and command-level plumbing (clearing every buffer, palette
+ * `enabled` gating) — both need a view or a `WorkspaceService` and live in
+ * their own suites.
  */
 
 function record(overrides: Partial<Provenance> = {}): Provenance {
@@ -323,7 +330,7 @@ describe('provenanceAt at a boundary', () => {
       [4, 10, 'cs-2'],
     ]);
 
-    expect(provenanceAt(second, 4)?.changeSetId).toBe('cs-2');
+    expect(provenanceAt(second, 4)?.provenance.changeSetId).toBe('cs-2');
   });
 });
 
@@ -409,6 +416,36 @@ describe('the setting', () => {
     }).state;
 
     expect(marks(marked)).toEqual([[0, 7, 'cs-1']]);
+  });
+
+  /**
+   * The failure this prevents: `provenanceField` living inside the
+   * `provenance` Compartment instead of the static extension list.
+   * Reconfiguring a Compartment to nothing removes its extensions, and
+   * removing a StateField discards the state it held — so a field placed
+   * inside the compartment would silently lose every mark the moment the
+   * setting was switched off, and reconfiguring back on would show an empty
+   * gutter over marks that were quietly destroyed rather than merely
+   * hidden. Exercises the actual round trip: on, mark recorded, off, back
+   * on, mark still there — headless, since `state.update` with
+   * `reconfigureEffects` needs no view and the field is a `StateField`.
+   */
+  it('shows marks recorded while the setting was off once it is turned back on', () => {
+    const on = defaultSettings();
+    const off = { ...on, 'workbench.showChangeMarks': false };
+    const changed = new Set(['workbench.showChangeMarks']);
+
+    let state = EditorState.create({ doc: 'hello', extensions: buildExtensions(on) });
+    state = state.update({
+      changes: { from: 0, to: 5, insert: 'goodbye' },
+      annotations: changeSetAnnotation.of(record()),
+    }).state;
+    expect(marks(state)).toEqual([[0, 7, 'cs-1']]);
+
+    state = state.update({ effects: reconfigureEffects(off, changed) }).state;
+    state = state.update({ effects: reconfigureEffects(on, changed) }).state;
+
+    expect(marks(state)).toEqual([[0, 7, 'cs-1']]);
   });
 });
 
@@ -503,5 +540,40 @@ describe('navigation', () => {
     // The failure this prevents: clearing only the marks the cursor is in,
     // leaving the rest to look like they were missed rather than dismissed.
     expect(marks(cleared)).toEqual([]);
+  });
+});
+
+describe('clearing every buffer', () => {
+  /**
+   * The failure this prevents: "Clear Change Marks" reaching only the
+   * buffer with a mounted view. The design promises it drops marks in
+   * every buffer — exactly what a project-wide replace across several open
+   * files needs — and `WorkspaceService.broadcastEffect` is the mechanism
+   * the command now runs through instead of dispatching to a single view.
+   * A regression here would mean the command clears whichever tab is on
+   * screen and silently leaves every other open file marked.
+   */
+  it('drops marks from every open buffer, not just the active one', () => {
+    const workspace = new WorkspaceService(new MemoryPlatform(), () => [provenanceField]);
+    const a = workspace.newUntitled({ content: 'aaaa' });
+    const b = workspace.newUntitled({ content: 'bbbb' });
+
+    // Mirrors what a project replace does: one change set, edits in two
+    // buffers neither of which has a mounted view in this headless test.
+    workspace.apply({
+      description: 'Replace',
+      author: { kind: 'user' },
+      edits: [
+        { bufferId: a, changes: { from: 0, to: 4, insert: 'AAAA' } },
+        { bufferId: b, changes: { from: 0, to: 4, insert: 'BBBB' } },
+      ],
+    });
+    expect(hasProvenance(workspace.stateOf(a)!)).toBe(true);
+    expect(hasProvenance(workspace.stateOf(b)!)).toBe(true);
+
+    workspace.broadcastEffect(clearProvenanceEffect.of(null));
+
+    expect(hasProvenance(workspace.stateOf(a)!)).toBe(false);
+    expect(hasProvenance(workspace.stateOf(b)!)).toBe(false);
   });
 });

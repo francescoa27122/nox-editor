@@ -388,7 +388,7 @@ work away. `#sourceTextFor` returns the buffer's text when the file is open,
 and the replacement is *recomputed* from it rather than trusting the stored
 result rows — which may be stale for a file edited since the search ran.
 
-**Open files change through a transaction**, not a write. `workspace.applyEdits`
+**Open files change through a transaction**, not a write. `workspace.apply`
 routes through the live view where possible, so a project replace lands in the
 editor's own undo history and ⌘Z works on it like any other edit. A file that
 was clean is saved afterwards so disk and editor agree; a dirty one keeps its

@@ -230,6 +230,18 @@ export function noxTheme(options: ThemeOptions): Extension {
       '.cm-tooltip .cm-tooltip-arrow:before': { borderTopColor: 'var(--nox-border-strong)' },
       '.cm-tooltip .cm-tooltip-arrow:after': { borderTopColor: 'var(--nox-bg-raised)' },
 
+      // `.cm-tooltip` sets background/border/colour/font but no padding —
+      // autocomplete only reads as padded because CM styles its own
+      // `ul li` rows, which a plain `<div>` here does not inherit. Left
+      // bare, this text sits flush against the 1px border with no width
+      // limit, so a long description (e.g. `Replace "<long query>"`) grows
+      // the tooltip to match.
+      '.cm-tooltip-provenance': {
+        padding: 'var(--nox-sp-3) var(--nox-sp-4)',
+        maxWidth: '320px',
+        lineHeight: 'var(--nox-lh-ui)',
+      },
+
       // CodeMirror's own panels are unused — Nox draws its own find UI — but
       // hide them defensively so a stray extension cannot inject a light bar.
       '.cm-panels': { display: 'none' },

@@ -386,6 +386,21 @@ export class NoxApp {
   }
 
   /**
+   * Whether any open buffer — not just the active one — has marks.
+   *
+   * Gates "Clear Change Marks", which the design promises drops marks
+   * everywhere: the only live producer of change sets is a project-wide
+   * replace across several open files, so the command must stay enabled
+   * whenever any of them still carries a mark, not just the tab on screen.
+   */
+  #anyBufferHasProvenance(): boolean {
+    return this.workspace.buffers.get().some((buffer) => {
+      const state = this.workspace.stateOf(buffer.id);
+      return state ? hasProvenance(state) : false;
+    });
+  }
+
+  /**
    * Move the cursor to the next or previous marked region.
    *
    * Says so when there is nothing further rather than wrapping: a review that
@@ -414,10 +429,14 @@ export class NoxApp {
     view.focus();
   }
 
+  /**
+   * "Clear Change Marks": drops every mark in every buffer, live or
+   * background — not just the active one. `WorkspaceService.broadcastEffect`
+   * carries the effect to a background buffer's state directly, the same
+   * fallback `apply()` uses for a buffer with no mounted view.
+   */
   #clearProvenance(): void {
-    const view = this.view.get();
-    if (!view) return;
-    view.dispatch({ effects: clearProvenanceEffect.of(null) });
+    this.workspace.broadcastEffect(clearProvenanceEffect.of(null));
   }
 
   /**
@@ -2202,7 +2221,7 @@ export class NoxApp {
         title: 'Clear Change Marks',
         category: 'Change Marks',
         keywords: ['provenance', 'dismiss', 'reset'],
-        enabled: () => this.#activeHasProvenance(),
+        enabled: () => this.#anyBufferHasProvenance(),
         run: () => this.#clearProvenance(),
       },
 

@@ -5,6 +5,7 @@ import {
   EditorState,
   type Extension,
   type StateCommand,
+  type StateEffect,
   type Text,
   type Transaction,
   type TransactionSpec,
@@ -1057,6 +1058,31 @@ export class WorkspaceService {
       at,
     });
     return { ok: true, id, bufferIds };
+  }
+
+  /**
+   * Dispatch a state effect to every buffer, live or background.
+   *
+   * The same view-or-state fallback as `apply()`: a buffer with a mounted
+   * view takes the effect through `#dispatchToView`, and one with no view
+   * showing it gets `buffer.state` updated directly. Kept generic — the
+   * caller supplies the effect — so this file stays free of any dependency
+   * on what the effect means; `@editor/provenance` (and its
+   * `@codemirror/view` import) has no reason to appear here. Exists for
+   * "Clear Change Marks", whose design promise is dropping every mark in
+   * every buffer, not just the one on screen.
+   */
+  broadcastEffect(effect: StateEffect<unknown>): void {
+    const spec: TransactionSpec = { effects: effect };
+    for (const [id, buffer] of this.#map) {
+      if (!this.#dispatchToView(id, spec)) {
+        buffer.state = buffer.state.update(spec).state;
+      }
+    }
+    // `apply()` republishes unconditionally after its loop too — cheap, and
+    // simpler than tracking whether any buffer actually took the background
+    // path.
+    this.#sync();
   }
 
   /**

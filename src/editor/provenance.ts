@@ -152,6 +152,13 @@ function subtractChanged(
   return RangeSet.of(subtractSpans(set, cuts), true);
 }
 
+/** The provenance covering a position, plus the range it covers. */
+export interface ProvenanceHit {
+  from: number;
+  to: number;
+  provenance: Provenance;
+}
+
 /**
  * The provenance covering `pos`, or null. Used by the tooltip.
  *
@@ -166,19 +173,23 @@ function subtractChanged(
  * character of `pos` is still inside it — over one where `to === pos` fixes
  * that without changing anything away from a boundary, where only one mark
  * ever touches `pos` in the first place.
+ *
+ * Returns the matched range alongside the `Provenance` so the tooltip can
+ * anchor itself to the whole marked span rather than the single point that
+ * was hovered — see `provenanceTooltip`.
  */
-export function provenanceAt(state: EditorState, pos: number): Provenance | null {
-  let found: Provenance | null = null;
-  state.field(provenanceField).between(pos, pos, (_from, to, value) => {
+export function provenanceAt(state: EditorState, pos: number): ProvenanceHit | null {
+  let found: ProvenanceHit | null = null;
+  state.field(provenanceField).between(pos, pos, (from, to, value) => {
     if (to > pos) {
       // Actually contains `pos` — take it and stop; nothing later in
       // `from` order can contain `pos` too without overlapping this one.
-      found = value.provenance;
+      found = { from, to, provenance: value.provenance };
       return false;
     }
     // Merely ends at `pos`. Keep it only as a fallback, in case no
     // containing mark ever turns up (e.g. `pos` is the end of the document).
-    found ??= value.provenance;
+    found ??= { from, to, provenance: value.provenance };
   });
   return found;
 }
@@ -254,6 +265,16 @@ export function provenanceGutter(): Extension {
       });
       return hit ? marker : null;
     },
+    // This gutter never populates a `markers` RangeSet — it derives each
+    // line's marker from `lineMarker` alone — so without telling it
+    // explicitly when to repaint, `SingleGutterView.update` has nothing to
+    // compare and never asks `lineMarker` again. "Clear Change Marks"
+    // dispatches a transaction with no document change, so it also fails
+    // `GutterView.updateGutters`'s other repaint checks (docChanged,
+    // heightChanged, viewportChanged), and the bars would stay on screen
+    // until the next edit, scroll or tab switch.
+    lineMarkerChange: (update) =>
+      update.startState.field(provenanceField) !== update.state.field(provenanceField),
   });
 }
 
@@ -268,15 +289,21 @@ export function describeProvenance(provenance: Provenance, now: number): string 
 
 export function provenanceTooltip(): Extension {
   return hoverTooltip((view, pos) => {
-    const provenance = provenanceAt(view.state, pos);
-    if (!provenance) return null;
+    const hit = provenanceAt(view.state, pos);
+    if (!hit) return null;
     return {
-      pos,
+      pos: hit.from,
+      // Without `end`, `HoverPlugin.mousemove` treats the tooltip as a single
+      // point and dismisses the moment the pointer's mapped position differs
+      // from it — i.e. as soon as the cursor moves at all, even within the
+      // same marked word. Spanning the whole hit keeps the tooltip up for as
+      // long as the pointer is anywhere over the text it describes.
+      end: hit.to,
       above: true,
       create() {
         const dom = document.createElement('div');
         dom.className = 'cm-tooltip-provenance';
-        dom.textContent = describeProvenance(provenance, Date.now());
+        dom.textContent = describeProvenance(hit.provenance, Date.now());
         return { dom };
       },
     };
