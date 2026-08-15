@@ -111,4 +111,138 @@ describe('parsing a turn', () => {
     expect(parsed.action).toBeNull();
     expect(parsed.error).toMatch(/command\.execute/);
   });
+
+  /**
+   * The failure this prevents: a brace anywhere in narration about code
+   * ending the turn. The first `{` used to be committed to irrevocably — an
+   * unmatched brace in prose ran the scan to the end of the string without
+   * ever returning to depth zero, so a perfectly good action after it was
+   * never reached.
+   */
+  it('recovers a good action after an unbalanced brace in narration', () => {
+    const parsed = parseTurn('I will change the { to a ( first.\n{"method":"context.openBuffers"}');
+    expect(parsed.action).toEqual({ method: 'context.openBuffers' });
+    expect(parsed.error).toBeNull();
+  });
+
+  /**
+   * The failure this prevents: prose that happens to contain a *balanced*
+   * brace pair — a code snippet quoted in narration — being handed to
+   * `JSON.parse` as if it were the action, instead of the action that
+   * actually follows it.
+   */
+  it('recovers a good action after a balanced but non-JSON brace pair in narration', () => {
+    const parsed = parseTurn('The block is `{ return; }` today.\n{"method":"context.openBuffers"}');
+    expect(parsed.action).toEqual({ method: 'context.openBuffers' });
+    expect(parsed.error).toBeNull();
+  });
+
+  /**
+   * The failure this prevents: prose containing valid-but-irrelevant JSON
+   * (no recognizable "method") short-circuiting the search, so the model's
+   * real action later in the same reply is never considered.
+   */
+  it('recovers a good action after a valid object with no method in narration', () => {
+    const parsed = parseTurn('Here is the shape: {"a":1}\n{"method":"context.openBuffers"}');
+    expect(parsed.action).toEqual({ method: 'context.openBuffers' });
+    expect(parsed.error).toBeNull();
+  });
+
+  /**
+   * The failure this prevents: when nothing in the reply ever parses, the
+   * single-candidate failure message (e.g. "no method") must still surface —
+   * retrying at later braces should not paper over the one real complaint
+   * with a generic "no JSON object" once every candidate is exhausted.
+   */
+  it('reports the first failure when no candidate succeeds', () => {
+    const parsed = parseTurn('{"a":1} and also {"b":2}');
+    expect(parsed.action).toBeNull();
+    expect(parsed.error).toMatch(/method/i);
+  });
+
+  /**
+   * The failure this prevents: `as RequestBody` asserting a shape that was
+   * never checked. `session.note` requires a `params.text`; without
+   * validation this silently returns an action whose `params` is undefined,
+   * and a consumer typed against `RequestBody` doing `action.params.text`
+   * gets a runtime TypeError on a value the type system promised was safe.
+   */
+  it('rejects a method whose required params are missing', () => {
+    const parsed = parseTurn('{"method":"session.note"}');
+    expect(parsed.action).toBeNull();
+    expect(parsed.error).toMatch(/params/i);
+  });
+
+  /**
+   * The failure this prevents: `params` passed through unchecked when it is
+   * present but the wrong type — `proposal.stage` requires an object with
+   * `description`/`edits`, and a bare number would reach a consumer as if it
+   * were that object.
+   */
+  it('rejects a method whose params are the wrong type', () => {
+    const parsed = parseTurn('{"method":"proposal.stage","params":42}');
+    expect(parsed.action).toBeNull();
+    expect(parsed.error).toMatch(/params/i);
+  });
+
+  /**
+   * The failure this prevents: a method that takes no params silently
+   * accepting one anyway, so the built action's shape no longer matches what
+   * `RequestBody` promises for `context.openBuffers`.
+   */
+  it('rejects context.openBuffers when given params it does not take', () => {
+    const parsed = parseTurn('{"method":"context.openBuffers","params":{}}');
+    expect(parsed.action).toBeNull();
+    expect(parsed.error).toMatch(/params/i);
+  });
+
+  /**
+   * The failure this prevents: a scanner that counts every `{`/`}` character
+   * regardless of whether it's inside a string. A `find` string quoting an
+   * unbalanced brace — an ordinary substring of real code — pushes such a
+   * scanner's depth counter past what the real JSON structure ever closes,
+   * so it never returns to zero and the whole action is lost. All nine tests
+   * above passed against a scanner with this bug ablated in; this is the
+   * test that catches it.
+   */
+  it('parses an action whose params contain an unbalanced brace inside a string', () => {
+    const parsed = parseTurn(
+      '{"method":"proposal.stage","params":{"description":"d","edits":[{"find":"if (x) {","replace":"y"}]}}',
+    );
+    expect(parsed.action).toEqual({
+      method: 'proposal.stage',
+      params: { description: 'd', edits: [{ find: 'if (x) {', replace: 'y' }] },
+    });
+    expect(parsed.error).toBeNull();
+  });
+
+  /**
+   * The failure this prevents: a scanner that tracks strings by toggling on
+   * every `"` without understanding `\"` as an escaped quote inside one. That
+   * exits the string early, so a later structural brace inside what is still
+   * really string content gets miscounted as real JSON structure.
+   */
+  it('parses an action whose params contain an escaped quote inside a string', () => {
+    const parsed = parseTurn('{"method":"session.note","params":{"text":"quote \\" then } brace"}}');
+    expect(parsed.action).toEqual({
+      method: 'session.note',
+      params: { text: 'quote " then } brace' },
+    });
+    expect(parsed.error).toBeNull();
+  });
+
+  /**
+   * The failure this prevents: a lazy non-greedy regex (`/\{[\s\S]*?\}/`)
+   * stopping at the first `}` anywhere in the content — including one inside
+   * a string value — and handing `JSON.parse` a truncated, invalid fragment
+   * instead of the whole object.
+   */
+  it('parses an action whose params contain a closing brace inside a string', () => {
+    const parsed = parseTurn('{"method":"session.note","params":{"text":"done: x}"}}');
+    expect(parsed.action).toEqual({
+      method: 'session.note',
+      params: { text: 'done: x}' },
+    });
+    expect(parsed.error).toBeNull();
+  });
 });
