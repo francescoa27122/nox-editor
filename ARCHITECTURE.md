@@ -867,6 +867,112 @@ a selection was carried — open-file names and line counts were always in the
 brief, and a line on every session for those would bury the case the record
 exists for.
 
+### A prose answer is a different question, not a different agent
+
+**Ask About Selection…** and **Explain Selection** reuse what the edit path
+reuses — the session, the job, cancellation, the audit trail, the permission
+model, the brief and the selection inside it — and change exactly one thing:
+what Nox asks for back. The one place that could not be composition was the
+provider, and the reason is a defect rather than a design.
+
+`OllamaProvider`'s loop is action-mandatory. `parseTurn` splits each reply
+into narration and one JSON action, and a reply that is pure prose returns no
+action and the error *no JSON object in the reply*. An actionless turn
+increments `consecutiveFailures`, pushes `Reply with one JSON object` back at
+the model, and **on the second one throws** — which the runtime turns into a
+`failed` session. So a model asked to explain something did the obvious right
+thing, was corrected twice for it, and Nox reported its own feature as a
+broken model. The explanation was not even lost: it was yielded as narration
+and filed in the trail as a `note`, where nobody is looking for an essay.
+
+No prompt fixes that, and the shape of the failure is why. The loop cannot
+terminate on a turn that produced no action, so an instruction that persuades
+the model to answer in prose is an instruction that makes the failure certain
+rather than merely likely. It was also invisible to the suite for a structural
+reason: every scripted provider yields the actions its test wrote, so no test
+can reach a turn that produced none. Same class as the `name [id]` defect
+above, found the same way, and the argument for walking this line of features
+against a real model rather than a fake one.
+
+So `complete` branches once, at the top, on `expects === 'prose'`: one round
+trip, the assembled reply as a single `text` chunk, no `parseTurn`, no turn
+cap, no JSON anywhere. The failure stops existing by construction rather than
+by instruction, and the model is asked for the one thing every model does
+well. The cost is that the answer arrives whole rather than progressively —
+`#ask` accumulates the streamed frames and resolves with the content, and
+exposing partial text means rebuilding it as a channel the generator pumps.
+Real complexity, for a one-shot answer that a local model finishes in tens of
+seconds; the session simply reads as working until it lands.
+
+**The field says what Nox wants back, never who is answering.** That is what
+keeps the seam vendor-neutral: `expects?: 'actions' | 'prose'` is a statement
+about the reply, so a provider with no notion of a prose mode can ignore it,
+and no vendor's name reaches the interface. Absent means actions, so an agent
+written before the field is exactly where it was and `ScriptedProvider` needed
+no change at all. It threads onto the wire too, in `Outbound`'s `run`, rather
+than stopping at the in-process transport — telling a child process the
+session is one thing while the runtime treats it as another is a lie that
+surfaces later as an unexplained refusal.
+
+Two alternatives cost more. Asking the model to put its answer in a
+`session.summary` string needs no interface change at all, and asks a small
+local model to fit multi-paragraph prose — newlines, quotes, backticks,
+fences — inside a JSON string. That is the surface the provider section
+above already records as unreliable, where the model strips code fences
+inconsistently between turns of one conversation; an explanation of code is
+the prose *most* likely to contain a fence, and the failure mode is a failed
+session rather than a worse answer. A second provider method costs what
+`provider.ts` argued in advance that it costs: a second code path exercised
+only by the slow providers, and two implementations owed by every provider
+written after it.
+
+**A prose session refuses every request but `session.note` and
+`session.summary`**, with `invalid-request`, and it refuses in
+`AgentRuntime.#handle` rather than in the prompt. A prompt only constrains a
+model that reads it; `#handle` is where an out-of-process agent's requests
+arrive as well, so refusing there is what makes *"explain this" cannot edit
+anything* a property of the runtime instead of an intention of the provider's.
+It is worth a branch precisely because the command sounds harmless: someone
+auditing what they let a model do would not think to check the session that
+only asked a question.
+
+**The answer is published, not recorded.** Text chunks in a prose session
+accumulate into the session's `answer` and are deliberately not also filed as
+`note` actions. The trail means *what the agent did*, and an essay in it would
+bury the reads the trail exists to show — the same distinction the `brief`
+variant above draws, made the same way and for the same reason. The panel
+reads `answer` off the snapshot the runtime already publishes; a separate
+`AnswersService` mirroring that state would be a second history to keep in
+step forever, which is the shape rejected for grouped undo.
+
+**Answers live for the session and no longer**, which is provenance's rule and
+provenance's reason. A mark that lies is worse than no mark, and an
+explanation of code that has since changed is exactly such a mark; persisting
+answers would mean a `git checkout` quietly turning a shelf of them into
+confident nonsense. They already live in the runtime's session list, whose
+lifetime is precisely this, so nothing new persists and nothing new has to be
+cleaned up. Within a session,
+where the answer is still worth reading and only *might* have gone stale, the
+panel labels rather than refuses: the revision recorded when the brief was
+built against the buffer's revision now, with `-1` reported as *file is
+closed* rather than folded into *changed*, because a file you closed is not a
+file you edited. That comparison is why `BufferSnapshot` gained `revision`.
+`revisionOf(id)` answers the same question, but a component cannot subscribe
+to a method call, so a panel calling it would have gone on claiming an answer
+was current through every edit that did not happen to re-render it.
+
+**Rendering stops at fenced code**, and stopping is the decision rather than
+the shortfall. A markdown renderer is a dependency and a sanitisation surface
+aimed at model output, bought for a feature whose entire value is a paragraph
+of text. So the answer is split on triple backticks, every run is rendered as
+text through Svelte interpolation, `innerHTML` appears nowhere, and emphasis
+and headings arrive as the characters the model typed. The bound was drawn so
+that every way the splitter can be wrong shows content in the wrong style
+rather than showing none — which is what an earlier version did, matching a
+fence's info string whether or not a block had opened, so an inline fence
+tagged `json` ate the word after it. A deliberately bounded renderer may
+render prose plainly; it may never swallow it.
+
 ### A review narrows the change set; it does not apply hunks
 
 `ReviewService.stage(spec)` computes what each buffer *would* say and diffs it
