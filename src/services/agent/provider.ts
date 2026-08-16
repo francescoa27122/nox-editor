@@ -9,12 +9,23 @@ import type { CoreResponse, RequestBody } from './protocol';
  * either is a constructor argument, not a refactor.
  */
 
+/**
+ * What Nox wants back from this request.
+ *
+ * Describes the *reply Nox is asking for*, never who is answering — the seam
+ * stays vendor-neutral. Absent means actions, which is what every agent
+ * written before this field expects, so omitting it is not a degraded mode.
+ */
+export type AnswerExpectation = 'actions' | 'prose';
+
 export interface ModelRequest {
   instruction: string;
   /** Whatever the session chose to show the model, already rendered. */
   context: string;
   /** Aborts mid-stream. Wired to the session's job. */
   signal?: AbortSignal;
+  /** What Nox wants back. Absent means actions. */
+  expects?: AnswerExpectation;
 }
 
 /**

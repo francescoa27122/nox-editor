@@ -6,7 +6,7 @@ import { PermissionError, type PermissionService, type Principal } from '../perm
 import type { ReviewScope, ReviewService, StagedChangeSet } from '../review';
 import type { ChangeSetId } from '../transactions';
 import type { BufferId, WorkspaceService } from '../workspace';
-import type { ModelProvider } from './provider';
+import type { AnswerExpectation, ModelProvider } from './provider';
 import {
   failure,
   parseBaseRevisions,
@@ -171,6 +171,13 @@ export interface SessionOptions {
    * Only ever defaults a hunk; never refuses an edit.
    */
   scope?: ReviewScope;
+  /**
+   * What this session wants back. Absent means actions.
+   *
+   * A prose session refuses every request but `session.note` and
+   * `session.summary`, so "explain this" cannot edit anything.
+   */
+  expects?: AnswerExpectation;
 }
 
 export class AgentRuntime {
@@ -296,6 +303,7 @@ export class AgentRuntime {
     const readAt = new Map<BufferId, number>();
 
     const scope = options.scope;
+    const expects = options.expects;
 
     const session: AgentSession & { principal: Principal } = {
       id,
@@ -336,6 +344,7 @@ export class AgentRuntime {
           instruction,
           context: briefed.text,
           signal: context.signal,
+          ...(expects ? { expects } : {}),
         };
 
         let staged = false;
@@ -838,6 +847,7 @@ export class ProviderTransport implements AgentTransport {
       instruction: run.instruction,
       context: run.context,
       signal: run.signal,
+      ...(run.expects ? { expects: run.expects } : {}),
     });
 
     // Each response is fed back into the generator, so an agent can read a

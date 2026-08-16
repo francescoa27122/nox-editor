@@ -1,5 +1,6 @@
 import type { Edit } from '../transactions';
 import type { BufferId } from '../workspace';
+import type { AnswerExpectation } from './provider';
 
 /**
  * The wire contract between Nox and an agent.
@@ -125,6 +126,8 @@ export interface AgentRun {
    */
   context: string;
   signal: AbortSignal;
+  /** What Nox wants back. Absent means actions. */
+  expects?: AnswerExpectation;
 }
 
 export interface AgentTransport {
@@ -152,7 +155,7 @@ export interface AgentTransport {
 
 /** Nox → agent. */
 export type Outbound =
-  | { type: 'run'; instruction: string; context: string }
+  | { type: 'run'; instruction: string; context: string; expects?: AnswerExpectation }
   | { type: 'response'; response: CoreResponse }
   | { type: 'cancel' };
 
