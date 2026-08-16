@@ -368,7 +368,7 @@
         );
       }
       return partial
-        ? hintRow('Still parsing this file', 'More symbols may appear once parsing catches up')
+        ? hintRow('Still parsing this file', 'More symbols may appear')
         : hintRow('No functions or classes in this file', 'Only structure is listed, not variables');
     }
 
