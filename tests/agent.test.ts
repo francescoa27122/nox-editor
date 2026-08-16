@@ -1992,3 +1992,25 @@ describe('what the opening brief hands over', () => {
     expect(session.actions.get().some((action) => action.kind === 'brief')).toBe(false);
   });
 });
+
+describe('the size the brief reports', () => {
+  // The detail was built from the raw selection while the brief embeds a
+  // clipped copy, so a truncated selection told the audit the model had seen
+  // 1000 characters when it had seen 452. A record that overstates what was
+  // handed over is the exact failure this action exists to prevent.
+  it('reports what it sent, not what it read, when the selection is clipped', async () => {
+    const { runtime, workspace, platform } = await setup();
+    platform.seedFile('/w/big.txt', 'x\n'.repeat(500));
+    const big = (await workspace.open('/w/big.txt'))!;
+    workspace.setActive(big);
+    workspace.setSelection(big, { ranges: [[0, 1000]], main: 0 });
+
+    const session = runtime.start(scripted([]), 'do nothing', { label: 'Scripted' });
+    await settle(session);
+
+    const brief = session.actions.get().find((action) => action.kind === 'brief');
+    const reported = Number(/(\d+) characters/.exec((brief as { detail: string }).detail)![1]);
+    expect(reported).toBeLessThan(1000);
+    expect(runtime.brief(PRINCIPAL)).toContain('truncated');
+  });
+});

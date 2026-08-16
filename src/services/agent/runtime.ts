@@ -481,11 +481,14 @@ export class AgentRuntime {
       const selection = reader.selection(active.id);
       const range = selection && !selection.isEmpty ? selection.ranges[selection.main] : undefined;
       if (range) {
+        // Clipped once and measured from the result: reporting the raw
+        // selection would tell the audit the model saw text the cap kept back.
+        const embedded = clipSelection(range.text);
         lines.push(
           `Selected in ${active.name} [${active.id}], lines ${range.fromLine}–${range.toLine}:`,
-          clipSelection(range.text),
+          embedded,
         );
-        carried = `selection from ${active.name} [${active.id}], ${range.text.length} characters`;
+        carried = `selection from ${active.name} [${active.id}], ${embedded.length} characters`;
       }
     }
     return { text: lines.join('\n'), carried };
