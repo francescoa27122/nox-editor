@@ -901,8 +901,8 @@ by instruction, and the model is asked for the one thing every model does
 well. The cost is that the answer arrives whole rather than progressively —
 `#ask` accumulates the streamed frames and resolves with the content, and
 exposing partial text means rebuilding it as a channel the generator pumps.
-Real complexity, for a one-shot answer that a local model finishes in tens of
-seconds; the session simply reads as working until it lands.
+Real complexity, for an answer the user waits out either way; the session
+simply reads as working until it lands.
 
 **The field says what Nox wants back, never who is answering.** That is what
 keeps the seam vendor-neutral: `expects?: 'actions' | 'prose'` is a statement

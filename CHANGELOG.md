@@ -112,9 +112,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Answers last for the session and are not written anywhere, for the reason
     change marks are not: an explanation kept past the code it described is
     attribution that has quietly gone wrong.
-  - **The answer arrives all at once**, not word by word. A local model on an
-    M-series Mac took roughly 20–30 seconds per answer, and for that whole
-    time the entry says only that it is working.
+  - **The answer arrives all at once**, not word by word. There is no partial
+    text to watch: for however long the model takes, the entry says only that
+    it is working, and the whole answer appears when it lands.
   - **Expect a partial answer**, for the reason to expect a partial edit.
     Asked to explain some code *and anything surprising about how it does it*,
     qwen2.5-coder:7b gave a correct account of what the function does and
