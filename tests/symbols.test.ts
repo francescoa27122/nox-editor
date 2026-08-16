@@ -1,10 +1,12 @@
 import { htmlLanguage } from '@codemirror/lang-html';
+import { javascript } from '@codemirror/lang-javascript';
 import { markdownLanguage } from '@codemirror/lang-markdown';
 import { parser as cssParser } from '@lezer/css';
 import { parser as jsParser } from '@lezer/javascript';
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
-import { Text } from '@codemirror/state';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+import { EditorState, Text } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { describe, expect, it } from 'vitest';
 import { fileSymbols } from '../src/core/symbols';
@@ -140,5 +142,68 @@ describe('the symbols in a file', () => {
     const doc = Text.of(['function f() {}']);
     const [symbol] = fileSymbols(ts.parse('function f() {}'), doc);
     expect([symbol?.from, symbol?.to]).toEqual([0, 15]);
+  });
+});
+
+/**
+ * `syntaxTree(state)` returns only what CodeMirror has parsed so far, not the
+ * whole document. `fileSymbols` above is tested against a `Tree` built by
+ * `parser.parse(source)`, which is always complete and so never exercises
+ * that gap. These tests use a real `EditorState` — the only thing that has a
+ * parse frontier — to pin the size at which the gap opens, and to confirm
+ * `ensureSyntaxTree` closes it (or honestly gives up) exactly as
+ * `symbolRows` in CommandPalette.svelte relies on it doing.
+ */
+describe('the parse budget for large files', () => {
+  /** `n` top-level functions, source enough to push a document past the parse frontier. */
+  function manyFunctions(n: number): string {
+    let source = '';
+    for (let i = 0; i < n; i++) {
+      source += `function f${i}(x) {\n  return x + ${i};\n}\n\n`;
+    }
+    return source;
+  }
+
+  /**
+   * A freshly created `EditorState` has had no idle time to keep parsing in
+   * the background — the same state the palette sees the instant it opens.
+   * 200 functions (~11.5KB) is comfortably past the ~3KB a fresh state parses
+   * synchronously, so this is not a boundary case: on any file with real
+   * structure, a plain `syntaxTree` read is provably incomplete.
+   */
+  it('leaves a fresh EditorState only partially parsed', () => {
+    const state = EditorState.create({ doc: manyFunctions(200), extensions: [javascript()] });
+    expect(syntaxTree(state).length).toBeLessThan(state.doc.length);
+  });
+
+  /**
+   * Given the time to finish, `ensureSyntaxTree` does — the same document
+   * that defeats a plain `syntaxTree` read parses fully once forced, and the
+   * symbols found through it are the complete set rather than whatever fell
+   * inside the frontier.
+   */
+  it('ensureSyntaxTree finds every symbol once forced, not just the ones inside the frontier', () => {
+    const state = EditorState.create({ doc: manyFunctions(200), extensions: [javascript()] });
+    const partialCount = fileSymbols(syntaxTree(state), state.doc).length;
+
+    const tree = ensureSyntaxTree(state, state.doc.length, 5000);
+    expect(tree).not.toBeNull();
+    expect(tree?.length).toBe(state.doc.length);
+    expect(fileSymbols(tree as Tree, state.doc).length).toBe(200);
+    expect(partialCount).toBeLessThan(200);
+  });
+
+  /**
+   * The budget `symbolRows` actually uses (`PARSE_BUDGET_MS = 100` in
+   * CommandPalette.svelte) is a real deadline, not a formality: a document
+   * too large to finish in it makes `ensureSyntaxTree` give up and return
+   * null rather than block the palette. 20,000 functions (~1.2MB) parses at
+   * roughly 40 chars/ms in this environment, so 100ms is nowhere near enough
+   * — the margin holds even on a machine several times faster than the one
+   * this was measured on.
+   */
+  it('ensureSyntaxTree gives up within the palette budget on a document too large to finish', () => {
+    const state = EditorState.create({ doc: manyFunctions(20000), extensions: [javascript()] });
+    expect(ensureSyntaxTree(state, state.doc.length, 100)).toBeNull();
   });
 });

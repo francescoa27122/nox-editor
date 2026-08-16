@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { syntaxTree } from '@codemirror/language';
+  import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
   import { basename, dirname, relative } from '@core/path';
   import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
   import { fileSymbols, type SymbolKind } from '@core/symbols';
@@ -315,6 +315,15 @@
     ];
   }
 
+  /**
+   * How long to spend parsing before listing what we have.
+   *
+   * The palette is a keystroke-latency surface, so this is a budget rather
+   * than a wait. Past it the list is honest about being partial instead of
+   * looking complete.
+   */
+  const PARSE_BUDGET_MS = 100;
+
   /** One word per kind, shown in the row's detail. */
   const KIND_LABEL: Record<SymbolKind, string> = {
     function: 'function',
@@ -339,7 +348,13 @@
     if (!view) return hintRow('No file is open', 'Open a file to list its symbols');
 
     const buffer = workspace.active();
-    const symbols = fileSymbols(syntaxTree(view.state), view.state.doc);
+    // `syntaxTree` returns only what has been parsed so far, so on a large
+    // file a plain read silently stops partway and the list *looks* complete.
+    // `ensureSyntaxTree` forces the rest with a deadline and returns null when
+    // it cannot finish in it.
+    const tree = ensureSyntaxTree(view.state, view.state.doc.length, PARSE_BUDGET_MS);
+    const partial = tree === null;
+    const symbols = fileSymbols(tree ?? syntaxTree(view.state), view.state.doc);
 
     if (symbols.length === 0) {
       // Two different empty states, because they call for different actions:
@@ -356,7 +371,7 @@
       ? fuzzyFilter(query, symbols, (s) => s.qualified, 200)
       : symbols.slice(0, 200).map((item) => ({ item, score: 0, positions: [] as number[] }));
 
-    return scored.map(({ item, positions }) => ({
+    const built = scored.map(({ item, positions }) => ({
       key: `${item.from}:${item.qualified}`,
       title: item.qualified,
       positions,
@@ -367,6 +382,21 @@
         app.goToLine(view.state.doc.lineAt(item.from).number, 1);
       },
     }));
+
+    return partial
+      ? [
+          ...built,
+          {
+            key: 'symbol-partial',
+            title: 'Still parsing this file',
+            positions: [],
+            detail: 'More symbols may appear',
+            disabled: true,
+            icon: 'info' as const,
+            accept: () => {},
+          },
+        ]
+      : built;
   }
 
   function move(delta: number) {
