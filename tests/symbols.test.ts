@@ -1,4 +1,5 @@
 import { htmlLanguage } from '@codemirror/lang-html';
+import { markdownLanguage } from '@codemirror/lang-markdown';
 import { parser as cssParser } from '@lezer/css';
 import { parser as jsParser } from '@lezer/javascript';
 import { parser as pythonParser } from '@lezer/python';
@@ -36,9 +37,9 @@ describe('the symbols in a file', () => {
     expect(scan(ts, source)).toEqual(['real:function']);
   });
 
-  it('reads TypeScript interfaces, type aliases and enums', () => {
-    const source = 'interface I {}\ntype T = string;\nenum E { A }\n';
-    expect(scan(ts, source)).toEqual(['I:interface', 'T:type', 'E:enum']);
+  it('reads TypeScript interfaces, type aliases, enums and namespaces', () => {
+    const source = 'interface I {}\ntype T = string;\nenum E { A }\nnamespace N {}\n';
+    expect(scan(ts, source)).toEqual(['I:interface', 'T:type', 'E:enum', 'N:module']);
   });
 
   it('reads Python classes and defs', () => {
@@ -52,14 +53,30 @@ describe('the symbols in a file', () => {
    * and type aliases. Reading only one of them silently loses half of Rust.
    */
   it('reads Rust items named by either identifier node', () => {
-    const source = 'struct S {}\ntrait T {}\nmod m {}\nimpl S {\n    fn f() {}\n}\n';
+    const source =
+      'struct S {}\ntrait T {}\nmod m {}\nenum E { A }\ntype Id = u32;\nimpl S {\n    fn f() {}\n}\n';
     expect(scan(rustParser, source)).toEqual([
       'S:class',
       'T:interface',
       'm:module',
+      'E:enum',
+      'Id:type',
       'S:class',
       'S.f:function',
     ]);
+  });
+
+  /**
+   * `ImplItem` has two `TypeIdentifier` children for a trait impl — the trait
+   * first, then the target type — and only the second is what the impl's
+   * methods belong to. `impl S` has a single `TypeIdentifier`, so taking the
+   * last one leaves it unaffected; `impl Display for Foo` would wrongly
+   * qualify its methods as `Display.fmt` if the rule took the first one
+   * instead.
+   */
+  it('names a trait impl by the type, not the trait', () => {
+    const source = 'impl S {}\nimpl Display for Foo {\n    fn fmt() {}\n}\n';
+    expect(scan(rustParser, source)).toEqual(['S:class', 'Foo:class', 'Foo.fmt:function']);
   });
 
   /**
@@ -84,6 +101,18 @@ describe('the symbols in a file', () => {
 
   it('returns nothing for a file with no structure', () => {
     expect(scan(ts, 'const a = 1;\nconst b = 2;\n')).toEqual([]);
+  });
+
+  /**
+   * Markdown headings nest by *level*, not by tree containment: an `##` is a
+   * sibling of the `#` above it, not a child of it. A rule that qualified
+   * headings the way classes qualify methods would give `Title.Subtitle`
+   * here; `flat` keeps both names bare, which is the whole point of it — a
+   * test that only checked the headings were found would pass either way.
+   */
+  it('names Markdown headings flat, not nested by level', () => {
+    const source = '# Title\n\n## Subtitle\n\ntext\n';
+    expect(scan(markdownLanguage.parser, source)).toEqual(['Title:heading', 'Subtitle:heading']);
   });
 
   /**

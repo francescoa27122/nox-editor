@@ -37,6 +37,14 @@ interface Rule {
    * structs, enums, traits, impls and type aliases.
    */
   nameFrom?: readonly string[];
+  /**
+   * Take the last matching child instead of the first, for `ImplItem`:
+   * `impl Foo` has one `TypeIdentifier` child (the type), but
+   * `impl Display for Foo` has two (the trait, then the type) and the type
+   * — what the impl's methods actually belong to — is the second one.
+   * `impl Foo` is unaffected, since first and last coincide there.
+   */
+  lastNameFrom?: boolean;
   /** Take the node's own text up to `stopAt`, for nodes with no name child. */
   ownTextUntil?: string | true;
   /** Strip this from the front of the text, for Markdown's `##`. */
@@ -79,7 +87,7 @@ const RULES: Record<string, Rule> = {
   StructItem: { kind: 'class', nameFrom: ['TypeIdentifier'] },
   EnumItem: { kind: 'enum', nameFrom: ['TypeIdentifier'] },
   TraitItem: { kind: 'interface', nameFrom: ['TypeIdentifier'] },
-  ImplItem: { kind: 'class', nameFrom: ['TypeIdentifier'] },
+  ImplItem: { kind: 'class', nameFrom: ['TypeIdentifier'], lastNameFrom: true },
   TypeItem: { kind: 'type', nameFrom: ['TypeIdentifier'] },
 
   // CSS / SCSS. The selector is the text before the block, not a child.
@@ -108,7 +116,8 @@ function nameOf(node: SyntaxNode, rule: Rule, doc: Text): string | null {
     return text.length > 0 ? text : null;
   }
   for (const type of rule.nameFrom ?? []) {
-    const child = node.getChild(type);
+    const children = node.getChildren(type);
+    const child = rule.lastNameFrom ? children[children.length - 1] : children[0];
     if (child) return doc.sliceString(child.from, child.to);
   }
   return null;
@@ -119,9 +128,10 @@ function nameOf(node: SyntaxNode, rule: Rule, doc: Text): string | null {
  *
  * One walk, keeping a stack of enclosing names for the qualified path — the
  * same shape `foldRangesAtLevel` uses to get depth without re-walking per
- * line. An anonymous match (a default-exported class, say) still pushes onto
- * the stack, because its *children* are still inside it; it just contributes
- * nothing to their path.
+ * line. A matched node whose name couldn't be read (an anonymous
+ * default-exported class, say) is skipped entirely and never goes on the
+ * stack: nothing can qualify against a name that doesn't exist, and pushing
+ * an empty string would produce `.foo` for anything nested inside it.
  */
 export function fileSymbols(tree: Tree, doc: Text): FileSymbol[] {
   const found: FileSymbol[] = [];
