@@ -1263,9 +1263,12 @@ describe('answering in prose', () => {
 
   /**
    * The failure this prevents — and the reason this feature exists. On main,
-   * a model that replies with prose and no JSON is told twice it is wrong and
-   * the session ends *failed*, with the answer discarded as narration. The
-   * loop cannot terminate on prose, so no prompt fixes it.
+   * a prose reply is swallowed into the action loop: the turn is spent parsing
+   * it, it fails as a non-action, the narration is kept but the real answer is
+   * discarded, and a spurious session.summary gets generated instead. This path
+   * bypasses all that, taking the prose as the answer on the first turn. See
+   * `tests/ollama.test.ts:1202` for the test that covers the two-turn throw when
+   * the model genuinely cannot produce the format.
    */
   it('takes a prose reply as the answer rather than as a failed turn', async () => {
     const { platform, bodies } = fakePlatform(['It adds two numbers and returns the sum.']);
@@ -1283,14 +1286,13 @@ describe('answering in prose', () => {
    * turn into a request Nox acts on.
    */
   it('never yields an action, even when the prose contains one', async () => {
-    const { platform } = fakePlatform([
-      'You could call it like this:\n{"method":"context.openBuffers"}\nand that lists the buffers.',
-    ]);
+    const prose = 'You could call it like this:\n{"method":"context.openBuffers"}\nand that lists the buffers.';
+    const { platform } = fakePlatform([prose]);
     const provider = new OllamaProvider(platform, CONFIG);
 
     const chunks = await drainProse(provider, 'how do I list buffers?');
 
-    expect(chunks.every((chunk) => chunk.type === 'text')).toBe(true);
+    expect(chunks).toEqual([{ type: 'text', text: prose }]);
   });
 
   /**
