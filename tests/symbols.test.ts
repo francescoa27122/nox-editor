@@ -388,6 +388,15 @@ describe('the parse budget for large files', () => {
    * synchronously, so this is not a boundary case: on any file with real
    * structure, a plain `syntaxTree` read is provably incomplete.
    */
+  /**
+   * **If this one fails, do not adjust the number.** It is the only signal
+   * that the gap still exists. A CodeMirror version that parses far enough
+   * ahead to cover this document would break it, and the right response is to
+   * ask whether `symbolRows` still needs `ensureSyntaxTree` and its budget at
+   * all — not to grow the document until the assertion passes again. Loosening
+   * it would delete the signal and leave the guard standing with nothing left
+   * to justify it.
+   */
   it('leaves a fresh EditorState only partially parsed', () => {
     const state = EditorState.create({ doc: manyFunctions(200), extensions: [javascript()] });
     expect(syntaxTree(state).length).toBeLessThan(state.doc.length);
