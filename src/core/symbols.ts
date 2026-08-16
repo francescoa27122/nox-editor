@@ -238,6 +238,13 @@ export function fileSymbols(tree: Tree, doc: Text): FileSymbol[] {
   // `qualify`'s rule about names that bring their own dot applies at every
   // depth rather than only the first.
   const enclosing: string[] = [];
+  // One entry per *matched* node entered, saying whether it pushed a name.
+  // `leave` needs to know that and nothing else, and asking `nameOf` again to
+  // find out ran the whole name resolution twice for every symbol in the file.
+  // Recording it is exact where re-deriving is merely usually right: a matched
+  // node whose name could not be read never went on the stack, and popping for
+  // it would unwind an ancestor and mis-qualify everything after it.
+  const contributed: boolean[] = [];
 
   tree.iterate({
     enter(nodeRef) {
@@ -245,24 +252,57 @@ export function fileSymbols(tree: Tree, doc: Text): FileSymbol[] {
       if (!rule) return true;
 
       const name = nameOf(nodeRef.node, rule, doc);
-      if (name === null) return true;
+      if (name === null) {
+        contributed.push(false);
+        return true;
+      }
 
       const qualified = qualify(enclosing[enclosing.length - 1], name);
       found.push({ name, qualified, kind: rule.kind, from: nodeRef.from, to: nodeRef.to });
       enclosing.push(qualified);
+      contributed.push(true);
       return true;
     },
     leave(nodeRef) {
-      const rule = RULES[nodeRef.name];
-      if (!rule) return;
-      // Only pop for a node that actually pushed: a matched node whose name
-      // could not be read never went on the stack, and popping for it would
-      // unwind an ancestor and mis-qualify everything after it.
-      if (nameOf(nodeRef.node, rule, doc) !== null) enclosing.pop();
+      if (!RULES[nodeRef.name]) return;
+      if (contributed.pop()) enclosing.pop();
     },
   });
 
   return found;
+}
+
+/**
+ * A `fileSymbols` that skips the walk when nothing has changed.
+ *
+ * The palette recomputes on every keystroke, but the tree only moves when the
+ * document does. The parse underneath amortises — each `ensureSyntaxTree` call
+ * resumes the cached `ParseContext` and later ones return immediately — while
+ * the walk repeats in full every time, which on a large file leaves it as the
+ * cost that never goes away.
+ *
+ * A factory rather than a module-level cache, because this module's whole
+ * claim is that it is pure and testable headlessly. State that belongs to one
+ * caller lives with that caller: the palette holds one of these, and a test
+ * can hold its own without the two interfering.
+ *
+ * One slot, not a map. The palette only ever asks about the file you are
+ * looking at, and a miss costs exactly what every call used to cost.
+ */
+export function createSymbolCache(): (tree: Tree, doc: Text) => FileSymbol[] {
+  let lastTree: Tree | null = null;
+  let lastDoc: Text | null = null;
+  let last: FileSymbol[] = [];
+
+  return (tree, doc) => {
+    // Both, because a tree outlives the document it was parsed from: holding
+    // the tree alone would hand back the right symbols against the wrong text.
+    if (tree === lastTree && doc === lastDoc) return last;
+    lastTree = tree;
+    lastDoc = doc;
+    last = fileSymbols(tree, doc);
+    return last;
+  };
 }
 
 /**

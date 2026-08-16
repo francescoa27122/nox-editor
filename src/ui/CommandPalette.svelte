@@ -2,7 +2,7 @@
   import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
   import { basename, dirname, relative } from '@core/path';
   import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
-  import { fileSymbols, symbolListState, type SymbolKind } from '@core/symbols';
+  import { createSymbolCache, symbolListState, type SymbolKind } from '@core/symbols';
   import { cachedLanguage, hasGrammar } from '@editor/languages';
   import type { Command } from '@services/commands';
   import { formatChord, normalizeChord } from '@services/keymap';
@@ -93,6 +93,13 @@
         return 'search';
     }
   });
+
+  /**
+   * Skips the walk while the tree stands still. `rows` recomputes on every
+   * keystroke and the palette is remounted per opening, so one cache per
+   * mount is exactly the lifetime the file being looked at has.
+   */
+  const symbolsFor = createSymbolCache();
 
   interface Row {
     key: string;
@@ -358,7 +365,7 @@
     // grammar has not loaded, has no parser to spend that deadline on and
     // comes straight back.
     const tree = ensureSyntaxTree(view.state, view.state.doc.length, PARSE_BUDGET_MS);
-    const symbols = fileSymbols(tree ?? syntaxTree(view.state), view.state.doc);
+    const symbols = symbolsFor(tree ?? syntaxTree(view.state), view.state.doc);
 
     // Which of the five things this list is saying — the branching lives in
     // `core/` where it can be tested, and the sentences live here, because
