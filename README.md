@@ -134,6 +134,28 @@ one and this only changes which box starts ticked. Expect a partial result:
 asked to do two things at once, a local model will often do one and stop, so
 read the diff rather than assume the rest happened.
 
+**Ask About Selection…** Select some code and ask what it does, in your own
+words — or run **Explain Selection** and skip typing the question at all. The
+answer arrives as prose in a new **Answers** section in the sidebar
+(<kbd>Mod ⇧ A</kbd>), because there is no diff to review when nothing is being
+changed.
+
+An answer records which file and lines it was about, and says so when that code
+has changed since, or when you have closed the file. Those are different
+states and Nox does not collapse them: an explanation of code that has moved on
+is worse than no explanation, and it should say which kind of wrong it might
+be. Answers live for the session and are written nowhere, for the same reason.
+
+**Asking cannot change anything.** Such a session may narrate and it may
+summarise. Every other verb is refused in the runtime rather than discouraged
+in the prompt, so the rule holds for an agent in another process that never
+reads the prompt at all.
+
+The section stays hidden until you configure an agent that can run. One
+measured caveat: asked to explain some code *and* say what was surprising about
+it, the local model summarised the code and ignored the second half of the
+question.
+
 **If you never turn any of this on, Nox is not a worse editor for it.** That was
 the rule the whole time.
 
@@ -144,13 +166,10 @@ model, a context API, staged change sets and a job runner all shipped before
 any model did, and each one is an editor improvement on its own. What they
 unlock, in roughly this order:
 
-- **Explain selection** — the prose half of "everyday commands over a
-  selection" that editing didn't cover. It has no edit to put through the
-  review panel, so it needs a result surface Nox doesn't have yet: not
-  `NotesPanel`, which is the user's own notes, not a toast, which is
-  transient, and not the agents panel, which is a session trail.
 - **Workspace-aware chat**, with the context set shown and editable instead of
-  guessed at behind your back.
+  guessed at behind your back. Asking about a selection covers the one-question
+  case; a thread that remembers what you asked before is a different feature
+  and wants its own argument.
 - **Remote models** alongside the local one. A deliberate widening with its own
   argument to make — not something that falls out of the loopback rule.
 - **Running commands**, gated by the permission model that already exists for
@@ -195,12 +214,12 @@ drift from what's actually configurable.
 ## Status
 
 **v0.2.** It's young, and it's a personal project rather than a product — but
-it's real software with 669 tests and I use it. Expect rough edges; open an
+it's real software with 759 tests and I use it. Expect rough edges; open an
 issue if you hit one.
 
-**Local models landed after v0.2 was tagged**, so they are on `main` and in the
-next release rather than in the download above. Build from source if you want
-them now.
+**Local models and asking about a selection both landed after v0.2 was
+tagged**, so they are on `main` and in the next release rather than in the
+download above. Build from source if you want them now.
 
 Not there yet: no LSP, no Git integration, no plugins. Those are next, in
 roughly that order — see [ROADMAP.md](ROADMAP.md).
@@ -222,7 +241,7 @@ Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 filesystem and project search; the editor lives in the renderer.
 
 ```bash
-npm test          # 669 unit tests
+npm test          # 759 unit tests
 npm run check     # TypeScript + Svelte
 npm run app:build # a distributable, ~4 MB on macOS
 ```
