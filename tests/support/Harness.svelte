@@ -17,10 +17,12 @@
    * the precisely-typed public signature (a generic overload), and it is
    * also the one place that widening from the caller's real prop type down
    * to this component's prop type is checked. Giving `Harness` its own
-   * generic would ask `mount()` to infer through two layers of generics at
-   * once, which `svelte-check` does not resolve — it collapses the inferred
-   * type to the constraint and then rejects the narrower prop type the
-   * caller actually passed.
+   * generic parameter `P` would not help here — `P` is opaque inside this
+   * file, so `{...(props ?? {})}` below would still be spreading a
+   * `Record<string, unknown>`-shaped value onto it, and `svelte-check`
+   * rejects that at the spread with "Type '{ [x: string]: unknown; }' is not
+   * assignable to type 'P'": you cannot manufacture a value of an unknown
+   * type parameter, generic or not.
    */
   let {
     app,

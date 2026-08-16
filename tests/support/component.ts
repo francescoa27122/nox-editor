@@ -32,12 +32,21 @@ export interface Mounted {
  * pass the option at all.
  *
  * Declared as an overload rather than one generic signature: callers see
- * only the first, checked against the real `P` of whatever component they
- * pass — `AnswersPanel`'s `{}` or `ConfirmDialog`'s `{ request:
- * ConfirmRequest }`. The implementation signature underneath is deliberately
- * wider (`Record<string, unknown>`, matching `Harness.svelte`'s own prop
- * type), which is what lets the body hand `Component` and `options.props`
- * to `Harness` without a cast.
+ * only the first. `P` is inferred from the `props` object literal the
+ * caller writes, not from the component's own prop type — `Component<P>` is
+ * then checked contravariantly against that literal. This catches a
+ * typo'd or malformed required prop, but it has real edges: excess
+ * properties in the literal are silent (no excess-property check applies to
+ * an inferred `P`), a props value that comes from an `interface`-annotated
+ * variable is rejected with the error pointing at `Component` rather than
+ * at the props, and the omitted-`props`-option case only reads as an error
+ * for a component like `ConfirmDialog` whose required prop then shows up
+ * missing against the constraint `P` collapses to — a component whose props
+ * are an inline object type (the `App.svelte`-style `{ app: NoxApp }`) can
+ * be called with no `props` at all and still compile. The implementation
+ * signature underneath is deliberately wider (`Record<string, unknown>`,
+ * matching `Harness.svelte`'s own prop type), which is what lets the body
+ * hand `Component` and `options.props` to `Harness` without a cast.
  */
 export function mountComponent<P extends Record<string, unknown>>(
   Component: Component<P>,
@@ -48,6 +57,18 @@ export function mountComponent(
   options?: { props?: Record<string, unknown>; app?: NoxApp },
 ): Mounted {
   const app = options?.app ?? new NoxApp(new MemoryPlatform());
+
+  // `Mounted.platform` promises a `MemoryPlatform` — the caller's own `app`
+  // (via `options.app`) is not guaranteed to have one. Narrow here, at the
+  // mount, rather than asserting it: an app over a different `Platform`
+  // would otherwise fail later and confusingly, e.g. `platform.seedFile is
+  // not a function`, instead of failing here with the actual reason.
+  if (!(app.platform instanceof MemoryPlatform)) {
+    throw new Error(
+      `mountComponent: app.platform is a ${app.platform.constructor.name}, not a MemoryPlatform. ` +
+        'Pass options.app with a NoxApp built over a MemoryPlatform, or omit options.app so one is constructed for you.',
+    );
+  }
 
   // A container in the document, not a detached one: `AnswersPanel` (and
   // components like it) have a focus effect, and only elements attached to
@@ -63,9 +84,7 @@ export function mountComponent(
   return {
     container,
     app,
-    // The app was just constructed above with a `MemoryPlatform`, or the
-    // caller built it that way to pass in — see the doc comment on `app`.
-    platform: app.platform as MemoryPlatform,
+    platform: app.platform,
     unmount: () => {
       // Fire-and-forget: without `{ outro: true }` there is nothing to await.
       void svelteUnmount(instance);
@@ -77,7 +96,7 @@ export function mountComponent(
       // of `document.body` for the rest of the file — `document.body` itself
       // accumulates one per test, and `document.activeElement` (or any other
       // `document`-level query) can still reach it, which matters because
-      // lines 52-56 deliberately attach it there so the focus effect works.
+      // lines 76-77 deliberately attach it there so the focus effect works.
       container.remove();
     },
   };

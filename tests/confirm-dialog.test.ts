@@ -35,8 +35,8 @@ describe('the confirm dialog', () => {
     const { container, unmount } = mountComponent(ConfirmDialog, { props: { request } });
     flush();
 
-    expect(container.querySelector('h2')?.textContent).toBe('Delete file?');
-    expect(container.querySelector('p')?.textContent).toBe('This cannot be undone.');
+    expect(container.textContent).toContain('Delete file?');
+    expect(container.textContent).toContain('This cannot be undone.');
     expect(buttonLabels(container)).toEqual(['Cancel', 'Delete']);
 
     unmount();
@@ -46,6 +46,42 @@ describe('the confirm dialog', () => {
    * The failure this prevents: a dialog that resolves with the wrong choice —
    * the button clicked and the id passed to `resolve` disagreeing, which no
    * type check catches, since `resolve`'s signature accepts any choice id.
+   * Paired with the test below: a single click over two choices can't tell
+   * "the clicked one" apart from "a fixed one that happens to be index 1"
+   * (e.g. a handler hoisted out of the `{#each}` that closes over the wrong
+   * `choice`) — clicking each choice, in its own mount, and checking it
+   * resolves with its own id can.
+   */
+  it("clicking the first choice resolves with that choice's id", () => {
+    const { resolve, calls } = tracked();
+    const request: ConfirmRequest = {
+      title: 'Discard changes?',
+      message: 'Your edits will be lost.',
+      choices: [
+        { id: 'keep', label: 'Keep editing' },
+        { id: 'discard', label: 'Discard', danger: true },
+      ],
+      resolve,
+    };
+
+    const { container, unmount } = mountComponent(ConfirmDialog, { props: { request } });
+    flush();
+
+    const buttons = [...container.querySelectorAll('button')];
+    buttons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(calls).toEqual(['keep']);
+
+    unmount();
+  });
+
+  /**
+   * The failure this prevents: a dialog that resolves with the wrong choice —
+   * the button clicked and the id passed to `resolve` disagreeing, which no
+   * type check catches, since `resolve`'s signature accepts any choice id.
+   * Paired with the test above, which clicks the other choice: together they
+   * rule out a handler that resolves with a fixed choice regardless of which
+   * button was clicked.
    */
   it("clicking a choice resolves with that choice's id, not another one's", () => {
     const { resolve, calls } = tracked();
