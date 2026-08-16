@@ -470,7 +470,24 @@ export class AgentRuntime {
           }
           const response = await this.#handle(session.principal, request, record, readAt, scope, expects);
           if (request.method === 'proposal.stage' && response.ok) staged = true;
-          if (request.method === 'session.summary') {
+          // Guarded for the same reason the note interception above is, and
+          // it is the same bug: this block runs *after* `#handle` has already
+          // answered, but on the method name alone, so it re-read
+          // `params.text` outside any try/catch. `#handle` turns a malformed
+          // summary into a clean `internal` failure; this line then threw the
+          // TypeError anyway, out through `StdioTransport.run`, which has no
+          // catch, and killed the run that had just been handled.
+          //
+          // `response.ok` is what stops the throw: a malformed request never
+          // gets one. The `typeof` is the narrower point — `#handle` records
+          // whatever it is handed, so without it a numeric summary would
+          // answer `ok`, land in a `Signal<string | null>`, and reach the
+          // panel as something that is not a summary.
+          if (
+            request.method === 'session.summary' &&
+            response.ok &&
+            typeof request.params?.text === 'string'
+          ) {
             summary.set(request.params.text);
             this.#publish();
           }
