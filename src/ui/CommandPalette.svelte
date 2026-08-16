@@ -394,17 +394,22 @@
       ? fuzzyFilter(query, symbols, (s) => s.qualified, 200)
       : symbols.slice(0, 200).map((item) => ({ item, score: 0, positions: [] as number[] }));
 
-    const built = scored.map(({ item, positions }) => ({
-      key: `${item.from}:${item.qualified}`,
-      title: item.qualified,
-      positions,
-      detail: KIND_LABEL[item.kind],
-      icon: 'dot' as const,
-      accept: () => {
-        ui.closeOverlay();
-        app.goToLine(view.state.doc.lineAt(item.from).number, 1);
-      },
-    }));
+    const built = scored.map(({ item, positions }) => {
+      // The symbol's start, not the start of its line: §7 says accepting puts
+      // the cursor on the symbol, and `goToLine` already takes the column.
+      const line = view.state.doc.lineAt(item.from);
+      return {
+        key: `${item.from}:${item.qualified}`,
+        title: item.qualified,
+        positions,
+        detail: KIND_LABEL[item.kind],
+        icon: 'dot' as const,
+        accept: () => {
+          ui.closeOverlay();
+          app.goToLine(line.number, item.from - line.from + 1);
+        },
+      };
+    });
 
     return state.partial
       ? [
