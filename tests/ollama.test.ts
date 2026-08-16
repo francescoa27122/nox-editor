@@ -1325,18 +1325,32 @@ describe('answering in prose', () => {
   /**
    * The regression test this whole feature exists for, at the level the defect
    * was measured — a real `OllamaProvider` driving a real `AgentRuntime`,
-   * nothing below the platform substituted.
+   * nothing below the platform substituted. Every other prose test here stops
+   * at the provider or starts at a `ScriptedProvider`; the two halves meet
+   * inside `ProviderTransport`, and a seam neither side covers is exactly
+   * where this bug lived.
    *
-   * On main this ends `failed`: the action loop spends the turn parsing the
-   * prose for JSON, counts it as a non-action, and the second attempt throws,
-   * so the answer is discarded as narration and the user is told the agent
-   * broke. Every other prose test here stops at the provider or starts at a
-   * `ScriptedProvider`; the two halves meet inside `ProviderTransport`, and a
-   * seam neither side covers is exactly where this bug lived.
+   * On main this ends `failed`. The action loop spends the first turn parsing
+   * the prose for JSON and counts it as a non-action; the second turn does the
+   * same, and two consecutive actionless turns throw. The answer is discarded
+   * as narration and the user is told the agent broke.
+   *
+   * **The fixture scripts the answer twice on purpose.** With a single entry
+   * `fakePlatform` answers turn 2 from its fallback — a valid
+   * `session.summary` action — which resets the failure count and lets main
+   * finish cleanly at `done`. Measured, not assumed: one reply ends `done` on
+   * main and this test would then fail there only on `session.answer` being
+   * undefined, which is a field that does not exist on main rather than the
+   * defect. Two replies end `failed`, which is the claim the spec makes about
+   * this test. That fixture has now made three separate tests look like they
+   * proved something they did not.
+   *
+   * On this branch the second entry is never read: the prose branch takes one
+   * round trip and stops, which the `bodies` assertion below pins.
    */
   it('ends done with the answer, not failed, when the model replies in prose', async () => {
     const answer = 'It adds the two arguments and returns the total.';
-    const { platform } = fakePlatform([answer]);
+    const { platform, bodies } = fakePlatform([answer, answer]);
 
     const session = await runSession(platform, CONFIG, undefined, {
       instruction: 'what does this do?',
@@ -1345,6 +1359,10 @@ describe('answering in prose', () => {
 
     expect(session.status.get()).toBe('done');
     expect(session.answer.get()).toBe(answer);
+    // One round trip, so the second scripted reply is never consumed. This is
+    // what makes the second fixture entry's purpose legible: it exists for the
+    // main-branch run, not for this one.
+    expect(bodies).toHaveLength(1);
     // Asserted rather than assumed: "done with an answer" would still be a
     // failure of this feature if the trail were full of refusals explaining
     // that the prose could not be parsed.
