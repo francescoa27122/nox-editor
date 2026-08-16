@@ -459,3 +459,34 @@ describe('splitting an answer into prose and code', () => {
     expect(answerParts('   \n')).toEqual([]);
   });
 });
+
+describe('the order the runtime publishes sessions in', () => {
+  const speaks = (text: string) =>
+    new ProviderTransport(new ScriptedProvider(() => [{ type: 'text' as const, text }]));
+
+  /**
+   * The failure this prevents: the answers panel listing oldest-first, so the
+   * answer you just waited for arrives below every one you have already read.
+   *
+   * The panel renders `agents.sessions` in published order and has no sort of
+   * its own, so "newest at the top" is this contract and nothing else —
+   * `AgentRuntime.start` prepending to `#live`, and `#publish` mapping in that
+   * order. Nothing asserted it, and a walk against a real model found the
+   * panel reversing a list that was already newest-first. This is the fact the
+   * panel now depends on, pinned at the only level this repo can test it.
+   */
+  it('hands them over newest-first', async () => {
+    const { runtime } = await setup();
+
+    const older = runtime.start(speaks('the older answer'), 'asked first', { expects: 'prose' });
+    await settle(older);
+    const newer = runtime.start(speaks('the newer answer'), 'asked second', { expects: 'prose' });
+    await settle(newer);
+
+    const published = runtime.sessions.get();
+    expect(published.map((entry) => entry.id)).toEqual([newer.id, older.id]);
+    // Asserted by instruction as well as id, so a future change that reuses or
+    // reorders ids cannot make this pass while the reading order is wrong.
+    expect(published.map((entry) => entry.instruction)).toEqual(['asked second', 'asked first']);
+  });
+});

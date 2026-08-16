@@ -19,6 +19,13 @@
    * Answers last for the session and no longer. An explanation of code that
    * has since changed is confidently wrong, and persisting one would be the
    * same lie provenance marks refuse to tell.
+   *
+   * Reopening a closed file does not revive an answer's target: buffer ids are
+   * a counter, not a path, so the reopened file is a different buffer and the
+   * entry goes on saying "file is closed". That is honest — the buffer the
+   * answer was measured against really is gone, and its revision with it — but
+   * it surprises people, so it is written down rather than left to be
+   * rediscovered.
    */
 
   const app = useApp();
@@ -30,9 +37,13 @@
 
   let panel = $state<HTMLElement | null>(null);
 
-  // Newest first: the answer you just asked for is the one you want to read,
-  // and it would otherwise arrive below everything you have already read.
-  const answers = $derived($sessions.filter((session) => session.expects === 'prose').reverse());
+  // Newest first, because `agents.sessions` is already published newest-first
+  // — `AgentRuntime.start` prepends. Filtering preserves that order, so there
+  // is nothing to do here but keep it. This once carried a `.reverse()` meant
+  // to *produce* newest-first, which instead produced exactly the oldest-first
+  // list its own comment said it existed to prevent. `tests/answers.test.ts`
+  // now pins the runtime's order, since it is the whole of what this relies on.
+  const answers = $derived($sessions.filter((session) => session.expects === 'prose'));
 
   $effect(() => {
     // Track the counter so a focus command re-runs this effect. Focus lands on
