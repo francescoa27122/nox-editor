@@ -592,7 +592,7 @@ In `CONTRIBUTING.md`:
 
 1. `:100` says "Tests run in Node with no DOM." That is no longer true. It must say that Node with no DOM is the default, and that a suite opts into a DOM with `// @vitest-environment jsdom` on its first line.
 2. `:106` says what not to test: "component markup, CSS, or anything whose test would just restate the implementation." **Keep this policy — do not relax it.** Add the distinction the harness needs and no more: rendered behaviour and branch selection, yes; markup and styling, no. Asserting that the newest answer renders first is ordering, not markup. Asserting a `font-weight` is still worthless.
-3. Add the grouping convention with its reason: component suites are named after the component and grouped by component, not split per behaviour, because each jsdom file costs ~260–300 ms of environment setup against a suite that currently runs in 1.04s in total.
+3. Add the grouping convention with its reason: component suites are named after the component and grouped by component, not split per behaviour, because each jsdom file costs ~260–300 ms of environment setup against a suite that currently runs in 1.04s in total. (Superseded: the controlled A/B in the spec's §8 put the real in-suite cost at ~460–600 ms per file. This step's figure was the pre-measurement estimate; it stays as a record of what was believed at the time.)
 4. The existing two habits at `:112` and `:115` stay as they are. The `MemoryPlatform` habit is what the harness is built on.
 
 - [ ] **Step 3: Correct the sentence this work makes false**

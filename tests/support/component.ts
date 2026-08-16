@@ -21,6 +21,17 @@ export interface Mounted {
  * and one is built as `new NoxApp(new MemoryPlatform())` — constructed, not
  * booted, so there is no demo workspace and no platform detection to fight
  * under jsdom. See the spec's §5.
+ *
+ * Calling `unmount()` is the caller's responsibility; it does not run on
+ * its own. A test whose assertions can throw before reaching a bare
+ * `unmount()` at the end should call it from a `finally` or an `afterEach`
+ * instead.
+ *
+ * `Component` takes no props — `Harness.svelte` renders `<Rendered />` with
+ * nothing passed, so a component that requires them cannot be mounted here.
+ * Supporting props means a generic parameter on this function, a widened
+ * prop type, and a `{...props}` spread in `Harness.svelte`: two files, not
+ * one line.
  */
 export function mountComponent(
   Component: Component<Record<string, never>>,
@@ -48,9 +59,15 @@ export function mountComponent(
     unmount: () => {
       // Fire-and-forget: without `{ outro: true }` there is nothing to await.
       void svelteUnmount(instance);
-      // jsdom's `document` persists across tests in a file. Leaving the
-      // container behind would let the next test's `container.querySelector`
-      // find this test's DOM instead of its own.
+      // Not because a leftover container would be reachable through the next
+      // test's `container.querySelector` — that only searches descendants,
+      // and a sibling container is not one. The real reasons: without
+      // `svelteUnmount` above, the component stays subscribed to whatever
+      // signals it reads. Without removing the container, it stays a child
+      // of `document.body` for the rest of the file — `document.body` itself
+      // accumulates one per test, and `document.activeElement` (or any other
+      // `document`-level query) can still reach it, which matters because
+      // lines 42-46 deliberately attach it there so the focus effect works.
       container.remove();
     },
   };

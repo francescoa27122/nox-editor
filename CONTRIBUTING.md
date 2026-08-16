@@ -114,7 +114,10 @@ worthless, in a component suite exactly as it was everywhere else.
 Component suites are named after the component and grouped by component, not
 split per behaviour: one jsdom file costs roughly half a second of environment
 setup, against a suite that otherwise runs in about a second total, so a new
-file is worth it only when it tests a different component.
+file is worth it only when it tests a different component. Mount through
+`mountComponent` in `tests/support/component.ts`, which puts a real app in
+context the way `App.svelte` does; see its doc comment for what it does and
+does not support.
 
 Two habits worth keeping:
 
