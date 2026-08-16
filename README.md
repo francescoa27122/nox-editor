@@ -4,7 +4,7 @@
 
 **A fast, dark, keyboard-first text editor.**
 
-*Nox* — Latin for *night*.
+*Nox* is Latin for *night*.
 
 [![CI](https://github.com/francescoa27122/nox-editor/actions/workflows/ci.yml/badge.svg)](https://github.com/francescoa27122/nox-editor/actions/workflows/ci.yml)
 
@@ -42,12 +42,12 @@ xattr -dr com.apple.quarantine /Applications/Nox.app
 
 You will need that command. Nox is ad-hoc signed rather than signed with an
 Apple Developer ID, so macOS quarantines it on download and claims it is
-*"damaged"* — which sounds like a corrupt download but isn't.
+*"damaged"*. That sounds like a corrupt download, but the file is fine.
 
 ### Or build it
 
 If there's no build for your platform, or you'd rather not run that command,
-build from source — it's the same thing from code you can read. You need
+build from source. It's the same thing, from code you can read. You need
 [Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your
 platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
@@ -62,99 +62,133 @@ The first run compiles the Rust side and takes a few minutes. After that it
 starts in seconds.
 
 **Just want a look?** `npm run dev` opens Nox in your browser against a small
-demo project — no Rust build, nothing touches your disk.
+demo project. No Rust build, and nothing touches your disk.
 
 ## What makes it different
 
 ### It does not lose your work. Ever.
 
 Close the window with unsaved changes and Nox does not ask you a question. It
-just keeps them, and hands them back next time you open it — still unsaved,
-still undoable back to what is on disk.
+keeps them, and hands them back next time you open it, still unsaved and still
+undoable back to what is on disk.
 
 A dialog can be answered wrong at 2am. Persistence cannot.
 
 Saving writes to a temporary file and renames it into place, so a crash or a
-full disk mid-save can't leave you with half a file. If something else changes
-a file while you have it open, Nox notices and tells you rather than quietly
-picking a winner.
+full disk part way through can't leave you with half a file. If something else
+changes a file while you have it open, Nox tells you instead of quietly picking
+a winner.
 
 ### Undo works across files
 
-Run a project-wide find-and-replace across forty files and press <kbd>⌘Z</kbd>
-**once**. The whole thing goes back, and Nox tells you what it undid. A file
-you've edited since is left alone and reported, not silently reverted with the
-rest.
+Run a project-wide find-and-replace across forty files, then press
+<kbd>⌘Z</kbd> **once**. The whole thing goes back, and Nox tells you what it
+undid. A file you've edited since is left alone and reported, rather than
+silently reverted with the rest.
 
-That works because every programmatic edit is a transaction with an author,
-applied to all of its files or none of them.
+That works because any edit Nox makes on your behalf lands as a single change
+with a name attached. It applies to all of its files or none of them, so
+there's no half-finished state to clean up by hand.
 
 ### Agents propose. You decide.
 
 <!-- SCREENSHOT: review -->
 ![Reviewing a change an agent proposed](docs/screenshots/review.png)
 
-Nox can run an AI agent — but it can't touch your files. An agent reads your
-code through a read-only API and hands back a *proposal*. You get a diff, hunk
-by hunk, and keep the parts you want. Nothing is written until you say so, and
-one button takes a whole session back.
+Nox can run an AI agent, and that agent cannot touch your files. It reads your
+code through a read-only door and hands back a *proposal*. You get a diff, hunk
+by hunk, and you keep the parts you want. Nothing is written until you say so,
+and one button takes a whole session back out again.
 
-Everything it read, everything it ran, and everything it was refused is on the
-record in the Agents panel.
+Everything it read, everything it ran, and everything it was refused shows up
+in the Agents panel, so you can check what happened rather than trust it.
 
-**A model that runs on your machine.** Point Nox at an
-[Ollama](https://ollama.com) server in `agents.json` and that is the whole
-setup — no account, no API key, no telemetry. The HTTP client is loopback-only
-and refuses anything that isn't, enforced in Rust rather than in the part of
-the app a web page could reach.
+#### Setting up a model
 
-**It reads and proposes. It cannot run commands.** Not a setting you left off
-— the ability is not in the agent's vocabulary yet.
+Run **Configure Agents** from the command palette. Nox creates the file for
+you, fills it with a working example, and opens it. Point the example at an
+[Ollama](https://ollama.com) server, save, and you're done. There's no account,
+no API key, and no telemetry.
 
-**Edits are quoted, not positional.** The model names the text it wants
-replaced and Nox finds it, refusing anything ambiguous rather than guessing.
-That exists because a 7B model gets the intent right and the arithmetic wrong:
-handed raw character offsets it produced a zero-width insertion of an entire
-function body — which the review panel would have rendered as a perfectly
-convincing corrupt diff. And if you type in the file while the model is
-thinking, the proposal is refused rather than landing at offsets that have
-moved.
+The model runs on your own machine and Nox will only talk to your own machine.
+That limit lives in the part of the app a web page has no way to reach, so it
+isn't a setting that can be flipped by accident or by a page you happened to
+open.
 
-**Or bring your own.** An agent is any program that speaks a small JSON
-protocol over stdin and stdout — there's a
+**It reads and it proposes. It cannot run commands.** That isn't a switch you
+left off. Nox has no way to express "run this" to an agent yet.
+
+**It is never allowed to guess.** The model names the text it wants replaced
+and Nox goes and finds it, refusing anything it can't match exactly or finds
+twice. Small models are good at knowing *what* to change and bad at counting
+characters, and the failure looks convincing: handed raw positions, a 7B model
+once inserted a whole function into a gap of zero width, which the review panel
+would have drawn as a perfectly tidy diff. If you type in the file while the
+model is thinking, Nox refuses the proposal rather than applying it where the
+text used to be.
+
+**Or bring your own.** An agent can be any program that reads and writes a
+small JSON format on its input and output. There's a
 [140-line example](examples/uppercase-agent.mjs) you can copy.
 
+#### Change a selection
+
 **Edit Selection with a Model…** Select some text, describe the change in your
-own words, and skip the whole-workspace session for a two-line fix. The
-selection reaches the model as part of the brief, and the answer comes back
-through the same review panel. Hunks outside what you selected are still
-proposed — never refused — but start unchecked and labelled *outside your
-selection*, because a companion edit elsewhere in the file is often the right
-one and this only changes which box starts ticked. Expect a partial result:
-asked to do two things at once, a local model will often do one and stop, so
-read the diff rather than assume the rest happened.
+own words, and skip the whole-workspace session for a two-line fix. What you
+selected goes to the model with the request, and the answer comes back through
+the same review panel.
+
+Changes outside your selection still get proposed. Nox never refuses them,
+because the right fix is often a companion edit somewhere else in the file, but
+they start unticked and labelled *outside your selection* so you notice them.
+All that changes is which box starts ticked.
+
+Expect a partial result. Asked to do two things at once, a local model will
+often do one and stop, so read the diff instead of assuming the rest happened.
+
+#### Ask about a selection
+
+**Ask About Selection…** Select some code and ask what it does, in your own
+words. Or run **Explain Selection** and skip typing the question at all.
+
+The answer arrives as prose in the **Answers** section of the sidebar
+(<kbd>Mod ⇧ A</kbd>), because there's no diff to review when nothing is being
+changed.
+
+Each answer remembers which file and lines you asked about, and tells you when
+that code has changed since, or when you've closed the file. Those are
+different kinds of out of date and Nox keeps them apart. An explanation of code
+that has moved on is worse than no explanation, so it should at least say which
+way it might be wrong. Answers last as long as the app is open and are saved
+nowhere, for the same reason.
+
+**Asking can't change anything.** A session started this way is allowed to talk
+and nothing else. Nox blocks the rest itself rather than asking the model
+nicely in a prompt, which matters because an agent running as a separate
+program never reads that prompt.
+
+The Answers section stays hidden until you've set up a model that can run. One
+caveat worth knowing: asked to explain some code *and* say what was surprising
+about it, the local model explained the code and ignored the rest of the
+question.
 
 **If you never turn any of this on, Nox is not a worse editor for it.** That was
 the rule the whole time.
 
 #### Where this goes next
 
-The groundwork is the part that's done: authored transactions, a permission
-model, a context API, staged change sets and a job runner all shipped before
-any model did, and each one is an editor improvement on its own. What they
-unlock, in roughly this order:
+The unglamorous parts came first. Undo, permissions, the read-only door and the
+review panel all shipped before any model did, and each one made the editor
+better on its own. What they open up, in roughly this order:
 
-- **Explain selection** — the prose half of "everyday commands over a
-  selection" that editing didn't cover. It has no edit to put through the
-  review panel, so it needs a result surface Nox doesn't have yet: not
-  `NotesPanel`, which is the user's own notes, not a toast, which is
-  transient, and not the agents panel, which is a session trail.
 - **Workspace-aware chat**, with the context set shown and editable instead of
-  guessed at behind your back.
-- **Remote models** alongside the local one. A deliberate widening with its own
-  argument to make — not something that falls out of the loopback rule.
+  guessed at behind your back. Asking about a selection covers the
+  one-question case. A conversation that remembers what you asked earlier is a
+  different feature and needs its own argument.
+- **Remote models** alongside the local one. That's a deliberate widening with
+  a case to make, not something that falls out of what's already here.
 - **Running commands**, gated by the permission model that already exists for
-  it. Deliberately last: the first thing an unproven model integration does
+  it. Last on purpose. The first thing an unproven model integration does
   should not be taking real actions.
 
 **The principle doesn't move:** AI is a panel and a set of commands, not a
@@ -163,12 +197,12 @@ turns it on does not ship.
 
 ### Dark only, on purpose
 
-Two dark themes: **Eclipse**, a blue-black night, and **Umbra**, true black for
-OLED. There is no light theme and there isn't going to be — that's the product,
-not an omission.
+Two dark themes. **Eclipse** is a blue-black night, and **Umbra** is true black
+for OLED screens. There is no light theme and there isn't going to be. That's
+the product, not an omission.
 
-Every colour, radius and duration comes from one token file. Umbra is a
-30-line override of Eclipse, which is the proof the design system is real.
+Every colour, corner and animation length in the app comes from one file, which
+is why Umbra takes about 30 lines to describe rather than a second stylesheet.
 
 ## The basics
 
@@ -180,30 +214,32 @@ Every colour, radius and duration comes from one token file. Umbra is a
 | <kbd>Mod P</kbd> | Jump to a file |
 | <kbd>Mod E</kbd> | Switch between open files |
 | <kbd>Mod ⇧ F</kbd> | Search the whole project |
+| <kbd>Mod ⇧ A</kbd> | Answers from a model |
 | <kbd>Mod \\</kbd> | Split the editor |
 | <kbd>Mod ,</kbd> | Settings |
 
-Press <kbd>Mod ⌥ K</kbd> for the full list — it's in the app, and it's always
-current. Every action is a command, so anything you can do is in the palette
-whether or not it has a shortcut.
+Press <kbd>Mod ⌥ K</kbd> for the full list. It lives in the app and it's always
+current. Every action in Nox is a command, so anything you can do is in the
+palette whether or not it has a shortcut.
 
 Also in the box: syntax highlighting for nine language families, multiple
-cursors, code folding, split panes, project-wide search and replace with a
-reviewable diff, and a settings panel generated from a schema so it can never
-drift from what's actually configurable.
+cursors, code folding, split panes, a terminal, your own notes, and
+project-wide search and replace that shows you a diff first. The settings panel
+is built from the same list the app reads its settings from, so it can't drift
+out of date with what you're actually able to change.
 
 ## Status
 
-**v0.2.** It's young, and it's a personal project rather than a product — but
-it's real software with 669 tests and I use it. Expect rough edges; open an
+**v0.2.** It's young, and it's a personal project rather than a product, but
+it's real software with 759 tests and I use it. Expect rough edges, and open an
 issue if you hit one.
 
-**Local models landed after v0.2 was tagged**, so they are on `main` and in the
-next release rather than in the download above. Build from source if you want
-them now.
+**Local models and asking about a selection both landed after v0.2 was
+tagged**, so they're on `main` and in the next release rather than in the
+download above. Build from source if you want them now.
 
 Not there yet: no LSP, no Git integration, no plugins. Those are next, in
-roughly that order — see [ROADMAP.md](ROADMAP.md).
+roughly that order. See [ROADMAP.md](ROADMAP.md).
 
 ## Under the hood
 
@@ -219,14 +255,14 @@ For anyone who wants the deep version:
 
 Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 [CodeMirror 6](https://codemirror.net). The Rust side owns the window, the
-filesystem and project search; the editor lives in the renderer.
+filesystem and project search. The editor itself lives in the renderer.
 
 ```bash
-npm test          # 669 unit tests
+npm test          # 759 unit tests
 npm run check     # TypeScript + Svelte
 npm run app:build # a distributable, ~4 MB on macOS
 ```
 
 ## License
 
-[MIT](LICENSE) — do what you like with it.
+[MIT](LICENSE). Do what you like with it.
