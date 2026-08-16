@@ -212,6 +212,7 @@ is why Umbra takes about 30 lines to describe rather than a second stylesheet.
 |---|---|
 | <kbd>Mod ⇧ P</kbd> | Everything. The command palette. |
 | <kbd>Mod P</kbd> | Jump to a file |
+| <kbd>Mod R</kbd> | Jump to a symbol in this file |
 | <kbd>Mod E</kbd> | Switch between open files |
 | <kbd>Mod ⇧ F</kbd> | Search the whole project |
 | <kbd>Mod ⇧ A</kbd> | Answers from a model |
@@ -223,10 +224,11 @@ current. Every action in Nox is a command, so anything you can do is in the
 palette whether or not it has a shortcut.
 
 Also in the box: syntax highlighting for nine language families, multiple
-cursors, code folding, split panes, a terminal, your own notes, and
-project-wide search and replace that shows you a diff first. The settings panel
-is built from the same list the app reads its settings from, so it can't drift
-out of date with what you're actually able to change.
+cursors, code folding, jumping to a function or class by name in the file
+you're in, split panes, a terminal, your own notes, and project-wide search and
+replace that shows you a diff first. The settings panel is built from the same
+list the app reads its settings from, so it can't drift out of date with what
+you're actually able to change.
 
 ## Status
 

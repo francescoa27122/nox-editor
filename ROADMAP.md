@@ -70,9 +70,14 @@ The MVP: a real editor you can work in.
 | **The same file in two panes** | Needs a second CodeMirror view over one document, forwarding transactions between them. The one real limit of the current split model. |
 | **Nested splits** | A column inside a row. The layout is a flat list today. |
 | **Breadcrumb navigation** | The title bar shows the trail; make segments clickable. |
-| **Go to symbol** | Lezer syntax tree scan per file — a real outline without a language server. |
 | **Sticky scroll** | Keep the enclosing function header pinned. |
 | **Terminal** *(shipped early)* | A real pty, not piped stdio, so `vim`, colour and job control work. Previously ruled out as its own project; it turned out to share process supervision with the agent transport, which is what made it affordable. |
+
+### ✅ Shipped in v0.3
+
+| | |
+|---|---|
+| **Go to symbol** | ⌘R, or `@` in the palette, lists the functions, classes, methods, rule sets and headings in the file you are on. A method reads as `Class.method`, so either half finds it. It reads the parse folding already keeps, so it is a reader rather than a second source, and a language with no parser says so instead of coming back empty. |
 
 ---
 
