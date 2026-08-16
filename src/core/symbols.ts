@@ -157,6 +157,24 @@ function ownTextEnd(node: SyntaxNode, type: string): number {
  * Foo`, `impl<T> Wrapper<T>` and `impl Trait for &Foo` all put the target type
  * last. Its head name is then the first `TypeIdentifier` inside it —
  * `Wrapper` in `Wrapper<T>`, `Foo` in `&Foo`, `Foo` in `crate::Foo`.
+ *
+ * **The search stays inside that type**, which `node.cursor()` does not do on
+ * its own: its `next()` climbs out of the subtree and carries on through the
+ * rest of the file. A target with no identifier in it at all — `impl Default
+ * for ()`, whose `UnitType` holds none, or `impl Trait for !` — then found the
+ * next `TypeIdentifier` anywhere below, so an impl for the unit type took the
+ * name of a struct declared later in another module and its methods were
+ * qualified with it. `cursor.from < type.to` bounds the walk: everything
+ * reachable after `type` in cursor order either lies inside it or starts at or
+ * after its end.
+ *
+ * **A target with no identifier returns null**, which leaves the impl
+ * unlisted and its methods unqualified. Naming it after the trait instead
+ * would be the mistake this function exists to fix, one step removed: `impl
+ * Default for ()` would list as `Default` and collide with the `trait Default`
+ * row in the same file, and `Default::default` is not where the reader would
+ * find that code. `fileSymbols` already treats an unreadable name this way,
+ * for the anonymous default-exported class.
  */
 function targetTypeOf(node: SyntaxNode, body: string): SyntaxNode | null {
   let type = node.getChild(body)?.prevSibling ?? node.lastChild;
@@ -166,7 +184,7 @@ function targetTypeOf(node: SyntaxNode, body: string): SyntaxNode | null {
   const cursor = type.cursor();
   do {
     if (cursor.name === 'TypeIdentifier') return cursor.node;
-  } while (cursor.next());
+  } while (cursor.next() && cursor.from < type.to);
   return null;
 }
 

@@ -121,6 +121,32 @@ describe('the symbols in a file', () => {
   });
 
   /**
+   * The failure this prevents, and this pass introduced it: `node.cursor()`
+   * is not confined to its own subtree, so the search for the impl's type
+   * climbed out and took the next `TypeIdentifier` anywhere below. An `impl`
+   * for the unit type has none of its own — `UnitType` holds no identifier —
+   * so it was named after a struct declared later in another module, its
+   * method was qualified `Elsewhere.default`, and two `Elsewhere` rows
+   * pointed at unrelated ranges.
+   *
+   * The declaration after the impl is the whole point of the case: without
+   * something for an unbounded walk to reach, the bug leaves no trace.
+   *
+   * A target with no identifier is left unlisted rather than named after the
+   * trait, which would put `Default` in the list twice over — once for the
+   * trait and once for a block that is not it.
+   */
+  it('does not reach past an impl whose target type has no identifier', () => {
+    const source =
+      'impl Default for () {\n    fn default() {}\n}\nmod later {\n    struct Elsewhere;\n}\n';
+    expect(scan(rustParser, source)).toEqual([
+      'default:function',
+      'later:module',
+      'later.Elsewhere:class',
+    ]);
+  });
+
+  /**
    * A CSS rule set has no name child: the selector is the text from the node
    * to its `Block`. Taking the whole node's text would put the declarations
    * in the title.
