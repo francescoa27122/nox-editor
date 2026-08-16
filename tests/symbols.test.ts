@@ -9,7 +9,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, Text } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { describe, expect, it } from 'vitest';
-import { fileSymbols } from '../src/core/symbols';
+import { fileSymbols, symbolListState, type SymbolListFacts } from '../src/core/symbols';
 
 const ts = jsParser.configure({ dialect: 'ts' });
 
@@ -227,6 +227,93 @@ describe('the symbols in a file', () => {
     const doc = Text.of(['function f() {}']);
     const [symbol] = fileSymbols(ts.parse('function f() {}'), doc);
     expect([symbol?.from, symbol?.to]).toEqual([0, 15]);
+  });
+});
+
+/**
+ * The states were §10's last untested item, and the reason is worth keeping:
+ * the decision was inline in `symbolRows`, and this repo has no Svelte
+ * component harness, so it was untestable where it lived. It is a pure
+ * function of four facts, so lifting it into `core/` is all it took.
+ */
+describe('what the symbol list has to say', () => {
+  /** A file with a loaded grammar and a finished parse, unless overridden. */
+  function facts(over: Partial<SymbolListFacts> = {}): SymbolListFacts {
+    return {
+      language: 'TypeScript',
+      hasGrammar: true,
+      grammarLoaded: true,
+      parsed: true,
+      count: 3,
+      ...over,
+    };
+  }
+
+  it('lists symbols when there are some and the parse finished', () => {
+    expect(symbolListState(facts())).toEqual({ kind: 'symbols', partial: false });
+  });
+
+  it('marks the list partial when the parse budget ran out', () => {
+    expect(symbolListState(facts({ parsed: false }))).toEqual({ kind: 'symbols', partial: true });
+  });
+
+  it('says the file has no symbols only when a finished parse found none', () => {
+    expect(symbolListState(facts({ count: 0 }))).toEqual({ kind: 'no-symbols' });
+  });
+
+  /**
+   * The distinction the sentence exists for: nothing was found *yet*. Saying
+   * "no functions or classes in this file" here tells the reader the symbol
+   * is not there, which is worse than telling them nothing.
+   */
+  it('says the file is still parsing when the budget ran out before anything was found', () => {
+    expect(symbolListState(facts({ count: 0, parsed: false }))).toEqual({ kind: 'still-parsing' });
+  });
+
+  it('names the language when no parser ships for it', () => {
+    expect(symbolListState(facts({ hasGrammar: false, language: 'Ruby', count: 0 }))).toEqual({
+      kind: 'no-grammar',
+      language: 'Ruby',
+    });
+  });
+
+  /**
+   * The one that bit in the running app: `EditorPane` attaches a grammar
+   * through a dynamic import that resolves after the buffer is on screen, so
+   * for a moment there is a language id and no parser.
+   */
+  it('says the grammar is loading rather than that the file has nothing in it', () => {
+    expect(symbolListState(facts({ grammarLoaded: false, count: 0 }))).toEqual({
+      kind: 'loading-grammar',
+    });
+  });
+
+  /**
+   * Order, not just outcome. A document with no parser attached also comes
+   * back with no symbols and an unfinished parse, so if the grammar facts
+   * were read after the parse ones, every one of these would come out as
+   * "still parsing" or "no functions or classes" — which is exactly the bug
+   * the two grammar states were added to fix.
+   */
+  it('reads the grammar facts before the parse facts', () => {
+    const unparsed = { count: 0, parsed: false } as const;
+    expect(symbolListState(facts({ ...unparsed, hasGrammar: false, language: 'Ruby' })).kind).toBe(
+      'no-grammar',
+    );
+    expect(symbolListState(facts({ ...unparsed, grammarLoaded: false })).kind).toBe(
+      'loading-grammar',
+    );
+  });
+
+  /**
+   * With no buffer to ask, there is no language to check a grammar for, and
+   * the palette still has a view whose symbols it can list — which is what
+   * the component's `buffer &&` guards did before this moved out of it.
+   */
+  it('skips the grammar questions when there is no buffer to ask about', () => {
+    expect(
+      symbolListState(facts({ language: null, hasGrammar: false, grammarLoaded: false })),
+    ).toEqual({ kind: 'symbols', partial: false });
   });
 });
 

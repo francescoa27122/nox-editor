@@ -246,3 +246,62 @@ export function fileSymbols(tree: Tree, doc: Text): FileSymbol[] {
 
   return found;
 }
+
+/**
+ * What the symbol list has to say, once every reason it might be empty is told
+ * apart from the others.
+ *
+ * `symbols` is the only one of these that lists anything; the rest are the
+ * hint row the palette shows in place of an empty list, and they exist
+ * separately because they call for different actions from the reader. A file
+ * whose grammar is still loading has not been looked at yet, and saying "no
+ * functions or classes in this file" about it is a lie the reader has no way
+ * to catch.
+ */
+export type SymbolListState =
+  | { kind: 'no-grammar'; language: string }
+  | { kind: 'loading-grammar' }
+  | { kind: 'still-parsing' }
+  | { kind: 'no-symbols' }
+  | { kind: 'symbols'; partial: boolean };
+
+/** What the palette knows when it has to choose between those. */
+export interface SymbolListFacts {
+  /** The active buffer's language name, or null when there is no buffer. */
+  language: string | null;
+  /** Whether a grammar exists for that language. */
+  hasGrammar: boolean;
+  /** Whether that grammar has finished loading. */
+  grammarLoaded: boolean;
+  /** Whether the forced parse came back inside the palette's budget. */
+  parsed: boolean;
+  /** How many symbols the scan found. */
+  count: number;
+}
+
+/**
+ * Which of those the palette is looking at.
+ *
+ * Pure, and out of the component on purpose: this is the branching the feature
+ * actually got wrong twice, and inline in a Svelte file it was untestable —
+ * this repo has no component harness, so a decision living there is a decision
+ * nothing checks.
+ *
+ * The order is the whole content of the function. A missing grammar and an
+ * unloaded one are both checked before anything the parse says, because a
+ * document with no parser attached also comes back with no symbols, and read
+ * in the wrong order that shows up as "no functions or classes in this file"
+ * — which is how the unloaded-grammar case shipped.
+ *
+ * "No file open" is not one of these. It is settled before there is anything
+ * to parse or a language to ask about, so the palette answers it where it
+ * looks for the editor.
+ */
+export function symbolListState(facts: SymbolListFacts): SymbolListState {
+  if (facts.language !== null) {
+    if (!facts.hasGrammar) return { kind: 'no-grammar', language: facts.language };
+    if (!facts.grammarLoaded) return { kind: 'loading-grammar' };
+  }
+  if (facts.count === 0) return facts.parsed ? { kind: 'no-symbols' } : { kind: 'still-parsing' };
+  return { kind: 'symbols', partial: !facts.parsed };
+}

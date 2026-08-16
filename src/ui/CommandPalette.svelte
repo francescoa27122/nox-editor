@@ -2,7 +2,7 @@
   import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
   import { basename, dirname, relative } from '@core/path';
   import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
-  import { fileSymbols, type SymbolKind } from '@core/symbols';
+  import { fileSymbols, symbolListState, type SymbolKind } from '@core/symbols';
   import { cachedLanguage, hasGrammar } from '@editor/languages';
   import type { Command } from '@services/commands';
   import { formatChord, normalizeChord } from '@services/keymap';
@@ -345,41 +345,49 @@
 
   function symbolRows(query: string): Row[] {
     const view = app.view.get();
+    // Settled before there is anything to parse or a language to ask about,
+    // which is why it is the one state `symbolListState` does not name.
     if (!view) return hintRow('No file is open', 'Open a file to list its symbols');
 
     const buffer = workspace.active();
 
-    // Two ways a language can fail to produce a tree yet, checked before any
-    // parse is attempted so neither can be shadowed by the parse-budget
-    // branch below: no grammar exists for this language at all, or a grammar
-    // exists but hasn't loaded — `EditorPane` attaches it through a dynamic
-    // import that resolves after the buffer is already showing (the same
-    // `hasGrammar(id) && !cachedLanguage(id)` pairing guards the reconfigure
-    // at EditorPane.svelte:150), so for a moment there is a language id and
-    // no parser. Neither is "no symbols found": the first can't have any,
-    // the second hasn't looked yet.
-    if (buffer && !hasGrammar(buffer.language.id)) {
-      return hintRow(
-        `Nox has no parser for ${buffer.language.name}`,
-        'Symbols come from the grammar, the same one syntax highlighting uses',
-      );
-    }
-    if (buffer && !cachedLanguage(buffer.language.id)) {
-      return hintRow('Loading the grammar for this file', 'Reopen this list once it is ready');
-    }
-
     // `syntaxTree` returns only what has been parsed so far, so on a large
     // file a plain read silently stops partway and the list *looks* complete.
     // `ensureSyntaxTree` forces the rest with a deadline and returns null when
-    // it cannot finish in it.
+    // it cannot finish in it. A language with no grammar, or one whose
+    // grammar has not loaded, has no parser to spend that deadline on and
+    // comes straight back.
     const tree = ensureSyntaxTree(view.state, view.state.doc.length, PARSE_BUDGET_MS);
-    const partial = tree === null;
     const symbols = fileSymbols(tree ?? syntaxTree(view.state), view.state.doc);
 
-    if (symbols.length === 0) {
-      return partial
-        ? hintRow('Still parsing this file', 'More symbols may appear')
-        : hintRow('No functions or classes in this file', 'Only structure is listed, not variables');
+    // Which of the five things this list is saying — the branching lives in
+    // `core/` where it can be tested, and the sentences live here, because
+    // that is all this component is deciding. `hasGrammar(id) &&
+    // !cachedLanguage(id)` is the same pairing that guards the reconfigure at
+    // EditorPane.svelte:150.
+    const state = symbolListState({
+      language: buffer ? buffer.language.name : null,
+      hasGrammar: buffer ? hasGrammar(buffer.language.id) : true,
+      grammarLoaded: buffer ? cachedLanguage(buffer.language.id) !== null : true,
+      parsed: tree !== null,
+      count: symbols.length,
+    });
+
+    switch (state.kind) {
+      case 'no-grammar':
+        return hintRow(
+          `Nox has no parser for ${state.language}`,
+          'Symbols come from the grammar, the same one syntax highlighting uses',
+        );
+      case 'loading-grammar':
+        return hintRow('Loading the grammar for this file', 'Reopen this list once it is ready');
+      case 'still-parsing':
+        return hintRow('Still parsing this file', 'More symbols may appear');
+      case 'no-symbols':
+        return hintRow(
+          'No functions or classes in this file',
+          'Only structure is listed, not variables',
+        );
     }
 
     const scored = query
@@ -398,7 +406,7 @@
       },
     }));
 
-    return partial
+    return state.partial
       ? [
           ...built,
           {
