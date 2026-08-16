@@ -80,8 +80,9 @@ The node names below were read out of the installed parsers
 |---|---|---|
 | JS / TS / JSX / TSX | `FunctionDeclaration`, `ClassDeclaration`, `MethodDeclaration`, `InterfaceDeclaration`, `TypeAliasDeclaration`, `EnumDeclaration`, `NamespaceDeclaration` | `VariableDefinition`, `PropertyName` or `TypeDefinition` child |
 | Python | `FunctionDefinition`, `ClassDefinition` | the name child |
-| Rust | `FunctionItem`, `StructItem`, `EnumItem`, `TraitItem`, `ImplItem`, `ModItem`, `TypeItem` | `BoundIdentifier` |
-| CSS / SCSS | `RuleSet` | the selector's own source text |
+| Rust | `FunctionItem`, `ModItem` | `BoundIdentifier` |
+| Rust | `StructItem`, `EnumItem`, `TraitItem`, `ImplItem`, `TypeItem` | `TypeIdentifier` |
+| CSS / SCSS | `RuleSet` | the text from the node's start to its `Block` child |
 | Markdown | `ATXHeading1`–`6`, `SetextHeading1`–`2` | the heading's text |
 
 **JSON and HTML collect nothing.** JSON has no declarations. HTML's only
@@ -97,11 +98,21 @@ That works because the grammar authors chose names that do not collide:
 `FunctionDeclaration`, `FunctionDefinition` and `FunctionItem` are three
 different strings for the same idea in three grammars.
 
-The decisive argument is **mixed-language files**. A Svelte or Vue file's tree
-contains HTML, JavaScript and CSS nodes at once. Rules keyed by the file's
-language would find symbols from one of the three and silently miss the rest,
-in exactly the files where an outline is most useful. A shared name table has
-nothing to get wrong there: it matches whatever node it meets.
+The decisive argument is **mixed-language files**, and it is not hypothetical:
+`@codemirror/lang-html` configures the HTML grammar to nest the CSS and
+JavaScript ones, so a single `.html` tree contains `RuleSet` *and*
+`FunctionDeclaration` nodes. Checked, because bare `@lezer/html` does **not**
+nest — it yields `StyleText` and raw script text — and the difference decides
+whether this argument holds at all.
+
+Rules keyed by the file's language would look up "html", find the rules for a
+grammar that deliberately collects nothing, and miss every symbol in the
+`<script>` and `<style>` blocks. A shared name table has nothing to get wrong:
+it matches whatever node it meets, whichever grammar produced it.
+
+Svelte and Vue would be the sharper example and are deliberately not cited:
+`core/languages.ts` registers them for detection, but no parser ships for
+either, so they have no tree to walk.
 
 The cost is that two grammars using one name for different things would have
 to agree. None of the five above does, and the table is one file to change if
@@ -127,9 +138,14 @@ of headings is what a reader of a Markdown file already has in their head.
 `@` selects it, the same way `~` and `:` already select theirs, and it is
 listed in the prefix hints at the foot of the palette beside them.
 
-Each row: `title` is the qualified name, `detail` is the kind, `icon`
-distinguishes a function from a class from a heading. Accepting scrolls to the
-symbol and puts the cursor at its start.
+Each row: `title` is the qualified name, `detail` is the kind, and the icon is
+`dot` for every symbol. Accepting scrolls to the symbol and puts the cursor at
+its start, through `app.goToLine`, which already does both.
+
+**One icon, not one per kind.** `IconName` has 27 members and none of them
+draws a function, a class or a heading. Adding three would mean new paths in a
+visual system that has a document of its own, for information the row already
+carries one word away in `detail`.
 
 **No viewport preview as you arrow through.** Go-to-line established the
 convention: it puts the line's *text* in the row rather than moving the
@@ -193,9 +209,11 @@ implementation, against a real large file, not a number to guess here.
   Markdown heading list, and a JSON file yielding nothing.
 - Node types that are *not* symbols stay out: a variable declaration, an
   import, a call to a function of the same name as a declaration.
-- Mixed-language: a Svelte file yields its script's functions *and* its
-  style's rule sets, which is §5's whole argument and would regress silently
-  under a per-language table.
+- Mixed-language: an HTML document parsed through `@codemirror/lang-html`
+  yields its `<script>`'s functions *and* its `<style>`'s rule sets from one
+  tree. This is §5's whole argument, and it would regress silently under a
+  per-language table — HTML's own rules collect nothing, so the file would
+  come back empty.
 - The three empty states in §7 produce the three different sentences.
 - `@` switches mode from within an open palette, and `>`, `~`, `:` still do
   what they did.
