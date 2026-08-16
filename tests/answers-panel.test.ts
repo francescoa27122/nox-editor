@@ -65,6 +65,20 @@ describe('the order the answers panel renders in', () => {
    * The reversal was in the component, which is why the contract has to be
    * asserted again at the level that consumes it. This is the test that could
    * not exist before there was a harness.
+   *
+   * Verified against 8abb2ba, the commit that shipped it: this assertion
+   * fails there with
+   *   AssertionError: expected [ 'asked first', 'asked second' ] to deeply
+   *   equal [ 'asked second', 'asked first' ]
+   *   - Expected
+   *   + Received
+   *       [
+   *   -     "asked second",
+   *           "asked first",
+   *   +     "asked second",
+   *       ]
+   * and the `.body` assertion fails the same way, with the two answer
+   * strings swapped.
    */
   it('puts the newest answer at the top', async () => {
     const { container, app, unmount } = mountComponent(AnswersPanel);
@@ -96,6 +110,18 @@ describe('what the panel says when there is no answer', () => {
    * whitespace, or when an out-of-process agent ignores `expects`. Those
    * sessions rendered "Working…" forever, claiming work was going on after it
    * had stopped.
+   *
+   * Verified against 8abb2ba, the commit that shipped it: this assertion
+   * fails there with
+   *   AssertionError: expected [] to deeply equal [ Array(1) ]
+   *   - Expected
+   *   + Received
+   *   - [
+   *   -   "The model finished without saying anything.",
+   *   - ]
+   *   + []
+   * `.state` matches nothing pre-fix, because the branch renders
+   * `<p class="working">Working…</p>` for this case instead.
    */
   it('says a finished session said nothing, rather than that it is working', async () => {
     const { container, app, unmount } = mountComponent(AnswersPanel);
@@ -112,6 +138,20 @@ describe('what the panel says when there is no answer', () => {
   /**
    * The second state behind the same branch. A cancelled session also has a
    * null answer, and telling the user it is working is the same lie.
+   *
+   * Verified against 8abb2ba, the commit that shipped it: this assertion
+   * fails there with
+   *   AssertionError: expected [] to deeply equal [ 'Cancelled before it
+   *   answered.' ]
+   *   - Expected
+   *   + Received
+   *   - [
+   *   -   "Cancelled before it answered.",
+   *   - ]
+   *   + []
+   * Same mechanism as the finished-session case above: `.state` matches
+   * nothing, because the pre-fix template still shows
+   * `<p class="working">Working…</p>` for a null answer.
    */
   it('says a cancelled session was cancelled', async () => {
     const { container, app, unmount } = mountComponent(AnswersPanel);
@@ -130,6 +170,21 @@ describe('what the panel says when there is no answer', () => {
   /**
    * The true case, kept so that the fix for the two above cannot be "delete
    * the branch". A session that really is running must still say so.
+   *
+   * Verified against 8abb2ba, the commit that shipped it: this assertion
+   * also fails there, with
+   *   AssertionError: expected [] to deeply equal [ 'Working…' ]
+   *   - Expected
+   *   + Received
+   *   - [
+   *   -   "Working…",
+   *   - ]
+   *   + []
+   * but not because of a shipped defect: the pre-fix component renders the
+   * correct text, "Working…", under `<p class="working">` rather than a
+   * `.state` element, so this failure is a class-name artifact of the old
+   * markup, not evidence of a third bug. `class="working"` only became
+   * `.state` in the fix.
    */
   it('says Working… while the session is actually running', async () => {
     const { container, app, unmount } = mountComponent(AnswersPanel);
