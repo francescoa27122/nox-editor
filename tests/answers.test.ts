@@ -84,3 +84,97 @@ describe('what a session tells its provider to expect', () => {
     expect(seen[0]?.expects).toBeUndefined();
   });
 });
+
+describe('what a prose session is allowed to do', () => {
+  /**
+   * The failure this prevents: "explain this selection" staging an edit.
+   * Enforced here rather than in the prompt, so an out-of-process agent that
+   * ignores `expects` is refused too.
+   */
+  it('refuses a proposal', async () => {
+    const { runtime, a } = await setup();
+    const responses: unknown[] = [];
+    const provider = new ScriptedProvider(async function* () {
+      const reply = yield {
+        type: 'action',
+        request: {
+          method: 'proposal.stage',
+          params: { description: 'nope', edits: [{ bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } }], baseRevisions: {} },
+        },
+      };
+      responses.push(reply);
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'explain this', {
+      expects: 'prose',
+    });
+    await settle(session);
+
+    expect(responses[0]).toMatchObject({ ok: false, error: { code: 'invalid-request' } });
+  });
+
+  /**
+   * The failure this prevents: a prose session reaching the command
+   * dispatcher at all. `command.execute` is the only verb with a side
+   * effect, so this is the whole of what "cannot edit anything" means.
+   */
+  it('refuses a command', async () => {
+    const { runtime } = await setup();
+    const responses: unknown[] = [];
+    const provider = new ScriptedProvider(async function* () {
+      const reply = yield {
+        type: 'action',
+        request: { method: 'command.execute', params: { commandId: 'file.save' } },
+      };
+      responses.push(reply);
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'explain this', {
+      expects: 'prose',
+    });
+    await settle(session);
+
+    expect(responses[0]).toMatchObject({ ok: false, error: { code: 'invalid-request' } });
+  });
+
+  /**
+   * The failure this prevents: the refusal being so broad that the session
+   * cannot say anything either, which would refuse the answer itself.
+   */
+  it('still accepts a summary', async () => {
+    const { runtime } = await setup();
+    const responses: unknown[] = [];
+    const provider = new ScriptedProvider(async function* () {
+      const reply = yield {
+        type: 'action',
+        request: { method: 'session.summary', params: { text: 'all done' } },
+      };
+      responses.push(reply);
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'explain this', {
+      expects: 'prose',
+    });
+    await settle(session);
+
+    expect(responses[0]).toMatchObject({ ok: true });
+  });
+
+  /**
+   * The failure this prevents: the refusal leaking into ordinary sessions
+   * and breaking every agent already written.
+   */
+  it('leaves an ordinary session able to read', async () => {
+    const { runtime } = await setup();
+    const responses: unknown[] = [];
+    const provider = new ScriptedProvider(async function* () {
+      const reply = yield { type: 'action', request: { method: 'context.openBuffers' } };
+      responses.push(reply);
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'look around');
+    await settle(session);
+
+    expect(responses[0]).toMatchObject({ ok: true });
+  });
+});

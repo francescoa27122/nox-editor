@@ -350,7 +350,7 @@ export class AgentRuntime {
         let staged = false;
         await transport.run(run, async (request) => {
           if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
-          const response = await this.#handle(session.principal, request, record, readAt, scope);
+          const response = await this.#handle(session.principal, request, record, readAt, scope, expects);
           if (request.method === 'proposal.stage' && response.ok) staged = true;
           if (request.method === 'session.summary') {
             summary.set(request.params.text);
@@ -521,7 +521,24 @@ export class AgentRuntime {
     record: (action: NewAction) => void,
     readAt: Map<BufferId, number>,
     scope: ReviewScope | undefined,
+    expects: AnswerExpectation | undefined,
   ): Promise<CoreResponse> {
+    // A prose session has one job and no side effects. Refused here rather
+    // than left to the prompt, because an out-of-process agent that ignores
+    // `expects` reaches this line too — which is what makes "explain this
+    // cannot edit anything" a property rather than an intention.
+    if (
+      expects === 'prose' &&
+      request.method !== 'session.note' &&
+      request.method !== 'session.summary'
+    ) {
+      return failure(
+        request.id,
+        'invalid-request',
+        'This session asked for an explanation. Reply in prose; it cannot read, run or propose.',
+      );
+    }
+
     const reader = this.#context.reader(principal);
 
     try {
