@@ -28,6 +28,9 @@ import { WorkspaceService } from '../src/services/workspace';
 const A = 'one\ntwo\nthree\nfour\nfive\n';
 const B = 'alpha\nbeta\ngamma\n';
 
+/** Any non-user principal: the brief's reads are logged against whoever asked. */
+const PRINCIPAL = { kind: 'agent', sessionId: 's-brief', label: 'Test agent' } as const;
+
 const policy = (rules: Policy['rules'], fallback: Policy['fallback'] = 'deny'): Policy => ({
   fallback,
   rules,
@@ -1814,7 +1817,7 @@ describe('the brief', () => {
     workspace.setActive(a);
     workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
 
-    const brief = runtime.brief();
+    const brief = runtime.brief(PRINCIPAL);
     expect(brief).toContain(`Selected in a.txt [${a}], lines 2–3:`);
     expect(brief).toContain('two\nthree');
   });
@@ -1829,7 +1832,7 @@ describe('the brief', () => {
     workspace.setActive(a);
     workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
 
-    expect(runtime.brief()).toContain(`[${a}]`);
+    expect(runtime.brief(PRINCIPAL)).toContain(`[${a}]`);
   });
 
   // A bare cursor is not a selection. Quoting the empty string would tell the
@@ -1841,7 +1844,7 @@ describe('the brief', () => {
     workspace.setActive(a);
     workspace.setSelection(a, { ranges: [[4, 4]], main: 0 });
 
-    expect(runtime.brief()).not.toContain('Selected in');
+    expect(runtime.brief(PRINCIPAL)).not.toContain('Selected in');
   });
 
   // Nothing else in this file asserts brief()'s literal content, so a change
@@ -1851,7 +1854,7 @@ describe('the brief', () => {
     const { runtime, workspace, a, b } = await setup();
     workspace.setActive(a);
 
-    expect(runtime.brief()).toBe(
+    expect(runtime.brief(PRINCIPAL)).toBe(
       `Open files: a.txt [${a}], b.txt [${b}]\nActive file: a.txt [${a}] (Plain Text, 6 lines)`,
     );
   });
@@ -1863,7 +1866,7 @@ describe('the brief', () => {
     const { runtime, workspace, a } = await setup();
     workspace.setActive(a);
 
-    expect(runtime.brief()).toContain(`Active file: a.txt [${a}]`);
+    expect(runtime.brief(PRINCIPAL)).toContain(`Active file: a.txt [${a}]`);
   });
 
   // Silent truncation lets a model answer as though it had the whole
@@ -1874,7 +1877,7 @@ describe('the brief', () => {
     const id = (await workspace.open('/w/big.txt'))!;
     workspace.setSelection(id, { ranges: [[0, 1000]], main: 0 });
 
-    const brief = runtime.brief();
+    const brief = runtime.brief(PRINCIPAL);
     expect(brief).toContain('truncated');
     expect(brief.split('\n').length).toBeLessThan(260);
   });
@@ -1887,7 +1890,7 @@ describe('the brief', () => {
     workspace.setActive(a);
     workspace.setSelection(a, { ranges: [[0, 3], [4, 13]], main: 1 });
 
-    const brief = runtime.brief();
+    const brief = runtime.brief(PRINCIPAL);
     expect(brief).toContain('two\nthree');
     expect(brief).not.toContain(`Selected in a.txt [${a}], lines 1–1`);
   });
@@ -1940,5 +1943,52 @@ describe('a scoped session', () => {
 
     const hunks = review.staged.get()!.files[0]!.hunks;
     expect(hunks.map((h) => h.accepted)).toEqual([true, false]);
+  });
+});
+
+describe('what the opening brief hands over', () => {
+  // The brief reached ContextService directly, so up to SELECTION_MAX_CHARS of
+  // the user's code opened every session without ever landing in `reads` —
+  // the log whose stated contract is that no non-user read escapes it.
+  it('records its reads against the session principal', async () => {
+    const { runtime, workspace, context, a } = await setup();
+    workspace.setActive(a);
+    workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
+
+    runtime.brief({ kind: 'agent', sessionId: 's1', label: 'Test agent' });
+
+    const reads = context.reads.get();
+    expect(reads.map((read) => read.method)).toEqual(
+      expect.arrayContaining(['openBuffers', 'selection']),
+    );
+    expect(reads.every((read) => read.principal.kind === 'agent')).toBe(true);
+  });
+
+  // The panel is where a user looks to see what an agent was given. A brief
+  // carrying their selected code and leaving no trace there is the gap this
+  // whole change exists to close.
+  it('records a brief action naming the buffer whose selection it carried', async () => {
+    const { runtime, workspace, a } = await setup();
+    workspace.setActive(a);
+    workspace.setSelection(a, { ranges: [[4, 13]], main: 0 });
+
+    const session = runtime.start(scripted([]), 'do nothing', { label: 'Scripted' });
+    await settle(session);
+
+    const brief = session.actions.get().find((action) => action.kind === 'brief');
+    expect(brief).toMatchObject({ kind: 'brief', detail: expect.stringContaining('a.txt') });
+  });
+
+  // Recording a brief that carried no selection would add a line to every
+  // session for something the model was always told: names and line counts.
+  it('records no brief action when there is no selection to carry', async () => {
+    const { runtime, workspace, a } = await setup();
+    workspace.setActive(a);
+    workspace.setSelection(a, { ranges: [[4, 4]], main: 0 });
+
+    const session = runtime.start(scripted([]), 'do nothing', { label: 'Scripted' });
+    await settle(session);
+
+    expect(session.actions.get().some((action) => action.kind === 'brief')).toBe(false);
   });
 });

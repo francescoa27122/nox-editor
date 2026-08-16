@@ -48,6 +48,7 @@
     instruction: 'command',
     note: 'info',
     read: 'search',
+    brief: 'info',
     command: 'command',
     proposal: 'file',
     summary: 'check',
@@ -63,6 +64,8 @@
         return action.text;
       case 'read':
         return action.target ? `${action.method} (${action.target})` : action.method;
+      case 'brief':
+        return `Opening brief carried the ${action.detail}`;
       case 'command':
         return `${action.commandId}${action.detail ? ` — ${action.detail}` : ''}`;
       case 'proposal':
