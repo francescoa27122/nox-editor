@@ -56,11 +56,18 @@
    * One pass rather than one per line of the meta row: the freshness decision
    * itself is `answerFreshness`, in the service, and calling it twice would be
    * two chances to read the buffer at two different revisions.
+   *
+   * The revision comes off `$buffers` rather than from `workspace.revisionOf`
+   * — a method call is not something this component can subscribe to, so the
+   * staleness mark would go on claiming the answer was current through every
+   * edit that did not happen to re-render the panel. A buffer that is no
+   * longer open is absent from the list, so `-1` still means "gone".
    */
   function describe(about: AnswerTarget | null): Target | null {
     if (!about) return null;
-    const freshness = answerFreshness(about, workspace.revisionOf(about.bufferId));
-    const name = $buffers.find((buffer) => buffer.id === about.bufferId)?.name;
+    const buffer = $buffers.find((entry) => entry.id === about.bufferId);
+    const freshness = answerFreshness(about, buffer?.revision ?? -1);
+    const name = buffer?.name;
     const from = about.fromLine + 1;
     const to = about.toLine + 1;
     const lines = from === to ? `line ${from}` : `lines ${from}–${to}`;
