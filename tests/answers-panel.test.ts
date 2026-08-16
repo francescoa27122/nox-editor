@@ -70,15 +70,9 @@ describe('the order the answers panel renders in', () => {
    * fails there with
    *   AssertionError: expected [ 'asked first', 'asked second' ] to deeply
    *   equal [ 'asked second', 'asked first' ]
-   *   - Expected
-   *   + Received
-   *       [
-   *   -     "asked second",
-   *           "asked first",
-   *   +     "asked second",
-   *       ]
-   * and the `.body` assertion fails the same way, with the two answer
-   * strings swapped.
+   * The `.body` assertion on the next line was never reached — `toEqual`
+   * throws on the first failure — but it would fail for the same reason,
+   * since the body order comes from the same reversed list.
    */
   it('puts the newest answer at the top', async () => {
     const { container, app, unmount } = mountComponent(AnswersPanel);
@@ -143,12 +137,6 @@ describe('what the panel says when there is no answer', () => {
    * fails there with
    *   AssertionError: expected [] to deeply equal [ 'Cancelled before it
    *   answered.' ]
-   *   - Expected
-   *   + Received
-   *   - [
-   *   -   "Cancelled before it answered.",
-   *   - ]
-   *   + []
    * Same mechanism as the finished-session case above: `.state` matches
    * nothing, because the pre-fix template still shows
    * `<p class="working">Working…</p>` for a null answer.
@@ -174,12 +162,6 @@ describe('what the panel says when there is no answer', () => {
    * Verified against 8abb2ba, the commit that shipped it: this assertion
    * also fails there, with
    *   AssertionError: expected [] to deeply equal [ 'Working…' ]
-   *   - Expected
-   *   + Received
-   *   - [
-   *   -   "Working…",
-   *   - ]
-   *   + []
    * but not because of a shipped defect: the pre-fix component renders the
    * correct text, "Working…", under `<p class="working">` rather than a
    * `.state` element, so this failure is a class-name artifact of the old
