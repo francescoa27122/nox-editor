@@ -216,6 +216,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not something a component can subscribe to, so anything that has to notice
   an edit as it happens — the staleness mark on an answer is the first — needs
   the number in a list it is already watching. Purely additive.
+- Component tests can now mount a real Svelte component. `tests/support/`
+  mounts one with a real `NoxApp` in context and tears it down through
+  Svelte's own unmount, and a suite opts into a DOM with
+  `// @vitest-environment jsdom` on its first line — Node with no DOM stays
+  the default everywhere else. `AnswersPanel` is the first component covered,
+  pinning the newest-first ordering that `tests/answers.test.ts` could not
+  reach on its own — see `ARCHITECTURE.md` §7 for what the harness still
+  cannot reach. One line in `vite.config.ts`, gated on `VITEST` and inert
+  outside tests. No user-visible change.
 
 ## [0.2.0] — 2026-08-13
 

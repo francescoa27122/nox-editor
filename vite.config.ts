@@ -7,6 +7,10 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 export default defineConfig({
   plugins: [svelte()],
   resolve: {
+    // Svelte publishes a server build, and the default conditions resolve to
+    // it — under which `mount()` throws `lifecycle_function_unavailable`.
+    // Gated on VITEST so the app's own build resolves exactly as it did.
+    conditions: process.env.VITEST ? ['browser'] : [],
     alias: {
       '@core': r('./src/core'),
       '@platform': r('./src/platform'),

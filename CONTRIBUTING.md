@@ -97,15 +97,27 @@ differs. See `Umbra` for the pattern, and [DESIGN.md](DESIGN.md) §9.
 
 ## Testing
 
-Vitest, `tests/` mirroring `src/`. Tests run in Node with no DOM.
+Vitest, `tests/` mirroring `src/`. Node with no DOM is the default; a suite
+opts into one with `// @vitest-environment jsdom` on its first line.
 
 **What to test:** file operations, document state, dirty tracking, undo
 boundaries, search, configuration coercion and persistence, command
-dispatch, keybinding resolution, path handling, fuzzy ranking.
+dispatch, keybinding resolution, path handling, fuzzy ranking. For a
+component: rendered behaviour and branch selection — that the newest answer
+renders first is ordering, not markup, and is fair game.
 
 **What not to test:** component markup, CSS, or anything whose test would just
 restate the implementation. Coverage percentage is not a goal — behaviour that
-would break someone's work is.
+would break someone's work is. A test asserting a `font-weight` is still
+worthless, in a component suite exactly as it was everywhere else.
+
+Component suites are named after the component and grouped by component, not
+split per behaviour: one jsdom file costs roughly half a second of environment
+setup, against a suite that otherwise runs in about a second total, so a new
+file is worth it only when it tests a different component. Mount through
+`mountComponent` in `tests/support/component.ts`, which puts a real app in
+context the way `App.svelte` does; see its doc comment for what it does and
+does not support.
 
 Two habits worth keeping:
 

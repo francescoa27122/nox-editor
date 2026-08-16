@@ -583,8 +583,9 @@ order is the substance of the function, because a document with no parser
 attached also comes back with no symbols: read after the parse facts, every
 grammar state shows up as "no functions or classes in this file", which is the
 bug above. That is testable and now tested, which it was not while it lived in
-a Svelte file this repo has no harness for. "No file is open" is the exception
-and stays in the component, settled before there is anything to parse.
+a Svelte file this repo had no harness for. It does now — see §7. "No file is
+open" is the exception and stays in the component, settled before there is
+anything to parse.
 
 ### The session save latch
 
@@ -1271,3 +1272,4 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | No custom native menu | The default Tauri menu supplies the system items. A Nox menu dispatching command ids is straightforward. |
 | Browser build does not persist edits | Deliberate: it is for developing the UI, not storing work. Settings and session do persist via localStorage. |
 | `notes.ts`'s `#doPersist` clears dirty state after the write, not before | Correct and tested — its termination and failure fences hold. But clearing after the write forces the whole design to prove "is this still what I wrote", which needs a revision counter for every kind of dirtiness, a `#savedIndexRevision` shadow, three per-call failure fences, and a comment-only invariant that `create()` must never bump `#indexRevision`. Clearing before the await and letting the next mutation re-arm it would need only a boolean and cut roughly 60 lines to one concept. Do this before the method is next modified, not as a speculative refactor now. |
+| Components embedding CodeMirror are untested | jsdom has no layout engine, so `EditorPane` and anything that measures the document cannot be mounted in a test. Geometry-free components can be covered — see `tests/support/`. Faking the measurements would test invented geometry, so the real fix is a browser-mode runner, which costs a browser download in CI on every push. |

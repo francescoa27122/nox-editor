@@ -43,7 +43,10 @@
   // is nothing to do here but keep it. This once carried a `.reverse()` meant
   // to *produce* newest-first, which instead produced exactly the oldest-first
   // list its own comment said it existed to prevent. `tests/answers.test.ts`
-  // now pins the runtime's order, since it is the whole of what this relies on.
+  // pins the runtime's order; `tests/answers-panel.test.ts` pins this file
+  // rendering it in that order. Both, because the runtime test passed
+  // throughout that bug — the published order was never wrong, and no test at
+  // that level could have seen what this file did with it.
   const answers = $derived($sessions.filter((session) => session.expects === 'prose'));
 
   $effect(() => {
