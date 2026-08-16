@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
   import { basename, dirname, relative } from '@core/path';
-  import { fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
+  import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
+  import { fileSymbols, symbolListState, type SymbolKind } from '@core/symbols';
+  import { cachedLanguage, hasGrammar } from '@editor/languages';
   import type { Command } from '@services/commands';
   import { formatChord, normalizeChord } from '@services/keymap';
   import type { OverlayKind } from '@services/ui';
@@ -8,12 +11,13 @@
   import Icon, { type IconName } from './Icon.svelte';
 
   /**
-   * One component serves the command palette, quick open, the buffer switcher
-   * and go-to-line.
+   * One component serves the command palette, quick open, the buffer switcher,
+   * go-to-line and go-to-symbol.
    *
    * They share an input, a result list, ranking and keyboard handling — only
-   * the item source and the accept action differ. Prefixes (`>`, `~`, `:`)
-   * switch between them mid-typing, so a single muscle memory covers all four.
+   * the item source and the accept action differ. Prefixes (`>`, `~`, `:`,
+   * `@`) switch between them mid-typing, so a single muscle memory covers all
+   * five.
    */
 
   interface Props {
@@ -43,14 +47,16 @@
     if (kind === 'palette') return '>';
     if (kind === 'buffers') return '~';
     if (kind === 'go-to-line') return ':';
+    if (kind === 'go-to-symbol') return '@';
     return '';
   }
 
   /** The active mode, which the prefix can change without reopening. */
-  const effectiveMode = $derived.by<'commands' | 'files' | 'buffers' | 'line'>(() => {
+  const effectiveMode = $derived.by<'commands' | 'files' | 'buffers' | 'line' | 'symbols'>(() => {
     if (text.startsWith('>')) return 'commands';
     if (text.startsWith('~')) return 'buffers';
     if (text.startsWith(':')) return 'line';
+    if (text.startsWith('@')) return 'symbols';
     return 'files';
   });
 
@@ -66,6 +72,8 @@
         return 'Switch to an open file…';
       case 'line':
         return 'Go to line:column…';
+      case 'symbols':
+        return 'Go to a symbol in this file…';
       default:
         return 'Search files by name…';
     }
@@ -79,6 +87,8 @@
         return 'file';
       case 'line':
         return 'arrow-down';
+      case 'symbols':
+        return 'dot';
       default:
         return 'search';
     }
@@ -102,6 +112,7 @@
     if (effectiveMode === 'commands') return commandRows(term);
     if (effectiveMode === 'buffers') return bufferRows(term);
     if (effectiveMode === 'line') return lineRows(term);
+    if (effectiveMode === 'symbols') return symbolRows(term);
     return fileRows(term);
   });
 
@@ -304,6 +315,118 @@
     ];
   }
 
+  /**
+   * How long to spend parsing before listing what we have.
+   *
+   * The palette is a keystroke-latency surface, so this is a budget rather
+   * than a wait. Past it the list is honest about being partial instead of
+   * looking complete.
+   */
+  const PARSE_BUDGET_MS = 100;
+
+  /** One word per kind, shown in the row's detail. */
+  const KIND_LABEL: Record<SymbolKind, string> = {
+    function: 'function',
+    class: 'class',
+    interface: 'interface',
+    type: 'type',
+    enum: 'enum',
+    module: 'module',
+    rule: 'rule',
+    heading: 'heading',
+  };
+
+  /** A single disabled row, the shape `lineRows` uses to explain an empty list. */
+  function hintRow(title: string, detail: string): Row[] {
+    return [
+      { key: 'symbol-hint', title, positions: [], detail, disabled: true, icon: 'info', accept: () => {} },
+    ];
+  }
+
+  function symbolRows(query: string): Row[] {
+    const view = app.view.get();
+    // Settled before there is anything to parse or a language to ask about,
+    // which is why it is the one state `symbolListState` does not name.
+    if (!view) return hintRow('No file is open', 'Open a file to list its symbols');
+
+    const buffer = workspace.active();
+
+    // `syntaxTree` returns only what has been parsed so far, so on a large
+    // file a plain read silently stops partway and the list *looks* complete.
+    // `ensureSyntaxTree` forces the rest with a deadline and returns null when
+    // it cannot finish in it. A language with no grammar, or one whose
+    // grammar has not loaded, has no parser to spend that deadline on and
+    // comes straight back.
+    const tree = ensureSyntaxTree(view.state, view.state.doc.length, PARSE_BUDGET_MS);
+    const symbols = fileSymbols(tree ?? syntaxTree(view.state), view.state.doc);
+
+    // Which of the five things this list is saying — the branching lives in
+    // `core/` where it can be tested, and the sentences live here, because
+    // that is all this component is deciding. `hasGrammar(id) &&
+    // !cachedLanguage(id)` is the same pairing that guards the reconfigure at
+    // EditorPane.svelte:150.
+    const state = symbolListState({
+      language: buffer ? buffer.language.name : null,
+      hasGrammar: buffer ? hasGrammar(buffer.language.id) : true,
+      grammarLoaded: buffer ? cachedLanguage(buffer.language.id) !== null : true,
+      parsed: tree !== null,
+      count: symbols.length,
+    });
+
+    switch (state.kind) {
+      case 'no-grammar':
+        return hintRow(
+          `Nox has no parser for ${state.language}`,
+          'Symbols come from the grammar, the same one syntax highlighting uses',
+        );
+      case 'loading-grammar':
+        return hintRow('Loading the grammar for this file', 'Reopen this list once it is ready');
+      case 'still-parsing':
+        return hintRow('Still parsing this file', 'More symbols may appear');
+      case 'no-symbols':
+        return hintRow(
+          'No functions or classes in this file',
+          'Only structure is listed, not variables',
+        );
+    }
+
+    const scored = query
+      ? fuzzyFilter(query, symbols, (s) => s.qualified, 200)
+      : symbols.slice(0, 200).map((item) => ({ item, score: 0, positions: [] as number[] }));
+
+    const built = scored.map(({ item, positions }) => {
+      // The symbol's start, not the start of its line: §7 says accepting puts
+      // the cursor on the symbol, and `goToLine` already takes the column.
+      const line = view.state.doc.lineAt(item.from);
+      return {
+        key: `${item.from}:${item.qualified}`,
+        title: item.qualified,
+        positions,
+        detail: KIND_LABEL[item.kind],
+        icon: 'dot' as const,
+        accept: () => {
+          ui.closeOverlay();
+          app.goToLine(line.number, item.from - line.from + 1);
+        },
+      };
+    });
+
+    return state.partial
+      ? [
+          ...built,
+          {
+            key: 'symbol-partial',
+            title: 'Still parsing this file',
+            positions: [],
+            detail: 'More symbols may appear',
+            disabled: true,
+            icon: 'info' as const,
+            accept: () => {},
+          },
+        ]
+      : built;
+  }
+
   function move(delta: number) {
     if (rows.length === 0) return;
     selected = (selected + delta + rows.length) % rows.length;
@@ -418,6 +541,7 @@
     <span class="hint-group prefix"><kbd class="nox-kbd">&gt;</kbd> commands</span>
     <span class="hint-group prefix"><kbd class="nox-kbd">~</kbd> switch file</span>
     <span class="hint-group prefix"><kbd class="nox-kbd">:</kbd> line</span>
+    <span class="hint-group prefix"><kbd class="nox-kbd">@</kbd> symbol</span>
   </div>
 </div>
 

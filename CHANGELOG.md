@@ -8,6 +8,25 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Go to Symbol.** <kbd>⌘R</kbd>, or `@` in the command palette, lists the
+  functions, classes, methods and headings in the file you are looking at.
+  Type to narrow, Enter to jump.
+  - A method reads as `Class.method`, so you can type either half to find it.
+    Four classes with a `render` each give four rows you can tell apart.
+  - Structure only: functions, classes, methods, interfaces, type aliases,
+    enums, modules, CSS rule sets and Markdown headings. Not variables, not
+    imports — a list you have to scroll is a list that failed.
+  - It reads the same grammar syntax highlighting uses. A file in a language
+    Nox has no parser for says so rather than coming back empty, and one
+    whose grammar is still loading — the moment just after a file opens —
+    says that instead. Neither is the same answer as "there is nothing in
+    this file".
+  - On a large file the list is only as far as the parse has reached. Nox
+    spends up to 100 ms finishing the parse first, and when that is not
+    enough it says the file is still parsing rather than presenting a short
+    list as the whole file. Ask again once it has had time and you get the
+    rest.
+
 - **Local models.** Point Nox at an Ollama server in `agents.json` and an
   agent can read your workspace and propose a change set, reviewed hunk by
   hunk before anything is written.

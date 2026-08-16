@@ -108,6 +108,7 @@ src/
 │  ├─ diff.ts            Myers line diff; hunks for review and, later, Git
 │  ├─ replace.ts         Replacement computation and expansion
 │  ├─ languages.ts       Language identity (no parsers)
+│  ├─ symbols.ts         Named structure in a file, read from a parse tree
 │  └─ emitter.ts         Typed events
 │
 ├─ platform/             The OS boundary
@@ -471,6 +472,119 @@ reference, per the "one layer owns each chord" rule in §4.
 parse headlessly. It walks lines once, keeping a stack of enclosing fold end
 positions, which gives each candidate's depth without re-walking the tree per
 line.
+
+### Symbols come from one table, not one per language
+
+Go to Symbol reads the tree folding already depends on, so it adds a reader and
+not a source. `core/symbols.ts` takes a `Tree` and a `Text` and returns the
+symbols in document order; like `foldRangesAtLevel` it is pure and view-free,
+and is tested against real parses with no DOM.
+
+**The rules are keyed by Lezer node name, with no dispatch on the file's
+language.** One table of 25 node names says what kind each is and where to read
+its name from, and the walk keeps a stack of enclosing names so a method comes
+out as `Foo.render` — fuzzy matching runs over that title, which is what lets
+either half of it find the method.
+
+The deciding case is mixed-language files. `@codemirror/lang-html` configures
+the HTML grammar to nest the CSS and JavaScript ones, so a single `.html` tree
+holds `RuleSet` *and* `FunctionDeclaration` nodes; `.svelte` and `.vue` load
+that same grammar in `editor/languages.ts`, so they are the same case. Rules
+keyed by the file's language would look up "html", find the rules for a grammar
+that deliberately collects nothing, and return an empty list for a file plainly
+full of structure — silently, because an empty list is also a legitimate
+answer. A shared name table has nothing to get wrong: it matches whatever node
+it meets, whichever grammar produced it. It has to be the *language* rather
+than the bare grammar, though — `@lezer/html` on its own does not nest, and
+gives back `StyleText` and `ScriptText` with no structure inside them.
+
+One table works because the names do not collide. `FunctionDeclaration`,
+`FunctionDefinition` and `FunctionItem` are three spellings of one idea in
+three grammars. The cost is that two grammars using
+one name for two different things would have to agree; none of the five that
+contribute rules does, and this is a single file to change if that ever stops
+being true.
+
+**Every name in the table is read off a parse of the construct it claims to
+match**, and this paragraph claimed that before it was true. It said a
+`MethodDeclaration` takes its name from a `PropertyDefinition` or
+`PropertyName` child. `PropertyName` is what the JavaScript grammar produces
+for the `b` in `a.b`, and never appears under a method; `#foo() {}` is named by
+a `PrivatePropertyDefinition`, which was in neither the table nor this page. So
+every private method in a file was dropped without a trace — 26 of `app.ts`'s
+own 63 — and the tests agreed, because they were written from the same table.
+Rust's `ImplItem` was read the same way, by taking the last direct
+`TypeIdentifier` child: that is the target type in `impl Display for Foo`, but
+in `impl Foo<T>` a `GenericType` wraps the type so there is no such child at
+all, and in `impl<T> Display for Inner<T>` the only one left is the *trait*.
+The impl's target is now taken by position — the type before the block —
+because position is what the grammar keeps stable across all four shapes.
+Guessing produces a list that is wrong rather than empty, which is the more
+expensive kind of wrong.
+
+**Markdown headings come out flat and need no exception to.** They nest by
+level, not by containment: an ATX or Setext heading node spans only its own
+line, so it is a sibling of what follows it and never an ancestor, and the
+enclosing stack is empty again before the next heading is entered. A `flat`
+flag was written for this on the strength of the opposite prediction, then
+deleted — forcing it off against a real parse produced byte-identical output.
+
+**Structure only, and JSON and HTML collect nothing themselves.** A file
+exporting thirty constants would bury its own functions, and fuzzy matching
+stops discriminating once everything is in the list, so variables, constants
+and imports are left out. JSON has no declarations to collect. HTML's only
+structural node is `Element`, so its own outline would be every `<div>` in the
+file; what it contributes instead is the nesting above.
+
+**A symbol list is only as good as the parse frontier**, and this is the part
+that decides whether the feature is honest. `syntaxTree(state)` returns what
+CodeMirror has parsed so far, not the document. On one measured run — a fresh
+`EditorState` over a 39 KB JavaScript file of 1,000 functions — it stopped at
+3,002 characters, and a plain read of it found 80 of the 1,000. Treat that as
+an observation and not a constant: it follows from `Work.InitViewport`, a 3,000
+in a `const enum` inlined into `@codemirror/language`'s build and exported
+nowhere, so a version bump can move it and no test here pins it. What the tests
+do pin is the shape of the problem — a fresh state over an ordinary document
+is incomplete, a plain read caps well below the true count, and the palette's
+budget can be exhausted.
+
+So the palette asks for the whole document with a deadline,
+`ensureSyntaxTree(state, doc.length, 100)`, and when that returns null it lists
+what was parsed *and says the file is still parsing*. Listing the frontier
+quietly was the option to avoid: a short list that looks complete tells you the
+symbol is not there, which is worse than telling you nothing. The partial list
+does not creep upward as you type, either — `syntaxTree` reads the snapshot
+frozen at the last dispatch while `ensureSyntaxTree` mutates the cached
+`ParseContext` without dispatching — so it sits at whatever the frontier held
+until one call finishes inside the budget, and then it is the whole file at
+once.
+
+**"No symbols" is not one answer, so it does not get one sentence.** Four
+things produce an empty list and they call for four different responses from
+the reader: no parser exists for this language, a parser exists but has not
+loaded yet, the budget above ran out before anything was found, or the file
+genuinely has no structure. Only the last of those may say so.
+
+The second is the one that bit. `EditorPane` attaches a grammar through a
+dynamic import that resolves after the buffer is already on screen, so for a
+moment there is a language id and no parser — and the first version of the list
+said "No functions or classes in this file" about a file nothing had read yet.
+No unit test could reach that window: they hand `fileSymbols` a parser
+directly, or build an `EditorState` with the language already attached, and
+neither goes near the dynamic import. It was found by opening a file in the
+running app and pressing ⌘R before the import landed.
+
+**Which of those four it is gets decided in `core/`, not in the component.**
+`symbolListState` takes the four facts they are told apart by — a grammar
+exists, it has loaded, the forced parse came back, how many symbols were found
+— and names the state, the fifth being an ordinary list of symbols, partial or
+not; `symbolRows` maps that to a sentence and does nothing else. The
+order is the substance of the function, because a document with no parser
+attached also comes back with no symbols: read after the parse facts, every
+grammar state shows up as "no functions or classes in this file", which is the
+bug above. That is testable and now tested, which it was not while it lived in
+a Svelte file this repo has no harness for. "No file is open" is the exception
+and stays in the component, settled before there is anything to parse.
 
 ### The session save latch
 

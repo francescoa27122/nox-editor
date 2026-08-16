@@ -1960,6 +1960,14 @@ export class NoxApp {
         },
       },
       {
+        id: 'nav.goToSymbol',
+        title: 'Go to Symbol in File…',
+        category: 'Go',
+        keyHint: 'Mod+R',
+        keywords: ['symbol', 'outline', 'function', 'class', 'method', 'definition'],
+        run: () => this.ui.openOverlay('go-to-symbol'),
+      },
+      {
         id: 'nav.documentStart',
         title: 'Go to Start of File',
         category: 'Go',
@@ -2525,6 +2533,7 @@ export class NoxApp {
       'Mod+Alt+Shift+Right': 'view.moveEditorToNextGroup',
       'Mod+Alt+Shift+Left': 'view.moveEditorToPreviousGroup',
       'Mod+Shift+E': 'nav.focusExplorer',
+      'Mod+R': 'nav.goToSymbol',
       'Mod+Shift+F': 'search.focus',
       'Mod+Shift+N': 'notes.focus',
       'Mod+Shift+A': 'answers.focus',

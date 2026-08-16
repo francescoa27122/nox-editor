@@ -212,6 +212,7 @@ is why Umbra takes about 30 lines to describe rather than a second stylesheet.
 |---|---|
 | <kbd>Mod ⇧ P</kbd> | Everything. The command palette. |
 | <kbd>Mod P</kbd> | Jump to a file |
+| <kbd>Mod R</kbd> | Jump to a symbol in this file |
 | <kbd>Mod E</kbd> | Switch between open files |
 | <kbd>Mod ⇧ F</kbd> | Search the whole project |
 | <kbd>Mod ⇧ A</kbd> | Answers from a model |
@@ -223,15 +224,16 @@ current. Every action in Nox is a command, so anything you can do is in the
 palette whether or not it has a shortcut.
 
 Also in the box: syntax highlighting for nine language families, multiple
-cursors, code folding, split panes, a terminal, your own notes, and
-project-wide search and replace that shows you a diff first. The settings panel
-is built from the same list the app reads its settings from, so it can't drift
-out of date with what you're actually able to change.
+cursors, code folding, jumping to a function or class by name in the file
+you're in, split panes, a terminal, your own notes, and project-wide search and
+replace that shows you a diff first. The settings panel is built from the same
+list the app reads its settings from, so it can't drift out of date with what
+you're actually able to change.
 
 ## Status
 
 **v0.2.** It's young, and it's a personal project rather than a product, but
-it's real software with 759 tests and I use it. Expect rough edges, and open an
+it's real software with 779 tests and I use it. Expect rough edges, and open an
 issue if you hit one.
 
 **Local models and asking about a selection both landed after v0.2 was
@@ -258,7 +260,7 @@ Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 filesystem and project search. The editor itself lives in the renderer.
 
 ```bash
-npm test          # 759 unit tests
+npm test          # 779 unit tests
 npm run check     # TypeScript + Svelte
 npm run app:build # a distributable, ~4 MB on macOS
 ```

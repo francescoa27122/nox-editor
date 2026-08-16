@@ -24,7 +24,8 @@
     $overlay === 'palette' ||
       $overlay === 'quick-open' ||
       $overlay === 'buffers' ||
-      $overlay === 'go-to-line',
+      $overlay === 'go-to-line' ||
+      $overlay === 'go-to-symbol',
   );
 
   function onScrimClick(event: MouseEvent) {
