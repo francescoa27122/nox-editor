@@ -15,6 +15,7 @@ export type OverlayKind =
   | 'quick-open'
   | 'buffers'
   | 'go-to-line'
+  | 'go-to-symbol'
   | 'settings'
   | 'keybindings';
 

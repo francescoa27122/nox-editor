@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { syntaxTree } from '@codemirror/language';
   import { basename, dirname, relative } from '@core/path';
-  import { fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
+  import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
+  import { fileSymbols, type SymbolKind } from '@core/symbols';
+  import { hasGrammar } from '@editor/languages';
   import type { Command } from '@services/commands';
   import { formatChord, normalizeChord } from '@services/keymap';
   import type { OverlayKind } from '@services/ui';
@@ -8,12 +11,13 @@
   import Icon, { type IconName } from './Icon.svelte';
 
   /**
-   * One component serves the command palette, quick open, the buffer switcher
-   * and go-to-line.
+   * One component serves the command palette, quick open, the buffer switcher,
+   * go-to-line and go-to-symbol.
    *
    * They share an input, a result list, ranking and keyboard handling — only
-   * the item source and the accept action differ. Prefixes (`>`, `~`, `:`)
-   * switch between them mid-typing, so a single muscle memory covers all four.
+   * the item source and the accept action differ. Prefixes (`>`, `~`, `:`,
+   * `@`) switch between them mid-typing, so a single muscle memory covers all
+   * five.
    */
 
   interface Props {
@@ -43,14 +47,16 @@
     if (kind === 'palette') return '>';
     if (kind === 'buffers') return '~';
     if (kind === 'go-to-line') return ':';
+    if (kind === 'go-to-symbol') return '@';
     return '';
   }
 
   /** The active mode, which the prefix can change without reopening. */
-  const effectiveMode = $derived.by<'commands' | 'files' | 'buffers' | 'line'>(() => {
+  const effectiveMode = $derived.by<'commands' | 'files' | 'buffers' | 'line' | 'symbols'>(() => {
     if (text.startsWith('>')) return 'commands';
     if (text.startsWith('~')) return 'buffers';
     if (text.startsWith(':')) return 'line';
+    if (text.startsWith('@')) return 'symbols';
     return 'files';
   });
 
@@ -66,6 +72,8 @@
         return 'Switch to an open file…';
       case 'line':
         return 'Go to line:column…';
+      case 'symbols':
+        return 'Go to a symbol in this file…';
       default:
         return 'Search files by name…';
     }
@@ -79,6 +87,8 @@
         return 'file';
       case 'line':
         return 'arrow-down';
+      case 'symbols':
+        return 'dot';
       default:
         return 'search';
     }
@@ -102,6 +112,7 @@
     if (effectiveMode === 'commands') return commandRows(term);
     if (effectiveMode === 'buffers') return bufferRows(term);
     if (effectiveMode === 'line') return lineRows(term);
+    if (effectiveMode === 'symbols') return symbolRows(term);
     return fileRows(term);
   });
 
@@ -304,6 +315,60 @@
     ];
   }
 
+  /** One word per kind, shown in the row's detail. */
+  const KIND_LABEL: Record<SymbolKind, string> = {
+    function: 'function',
+    class: 'class',
+    interface: 'interface',
+    type: 'type',
+    enum: 'enum',
+    module: 'module',
+    rule: 'rule',
+    heading: 'heading',
+  };
+
+  /** A single disabled row, the shape `lineRows` uses to explain an empty list. */
+  function hintRow(title: string, detail: string): Row[] {
+    return [
+      { key: 'symbol-hint', title, positions: [], detail, disabled: true, icon: 'info', accept: () => {} },
+    ];
+  }
+
+  function symbolRows(query: string): Row[] {
+    const view = app.view.get();
+    if (!view) return hintRow('No file is open', 'Open a file to list its symbols');
+
+    const buffer = workspace.active();
+    const symbols = fileSymbols(syntaxTree(view.state), view.state.doc);
+
+    if (symbols.length === 0) {
+      // Two different empty states, because they call for different actions:
+      // nothing to find, versus nothing that *can* be found here.
+      return buffer && !hasGrammar(buffer.language.id)
+        ? hintRow(
+            `Nox has no parser for ${buffer.language.name}`,
+            'Symbols come from the grammar, the same one syntax highlighting uses',
+          )
+        : hintRow('No functions or classes in this file', 'Only structure is listed, not variables');
+    }
+
+    const scored = query
+      ? fuzzyFilter(query, symbols, (s) => s.qualified, 200)
+      : symbols.slice(0, 200).map((item) => ({ item, score: 0, positions: [] as number[] }));
+
+    return scored.map(({ item, positions }) => ({
+      key: `${item.from}:${item.qualified}`,
+      title: item.qualified,
+      positions,
+      detail: KIND_LABEL[item.kind],
+      icon: 'dot' as const,
+      accept: () => {
+        ui.closeOverlay();
+        app.goToLine(view.state.doc.lineAt(item.from).number, 1);
+      },
+    }));
+  }
+
   function move(delta: number) {
     if (rows.length === 0) return;
     selected = (selected + delta + rows.length) % rows.length;
@@ -418,6 +483,7 @@
     <span class="hint-group prefix"><kbd class="nox-kbd">&gt;</kbd> commands</span>
     <span class="hint-group prefix"><kbd class="nox-kbd">~</kbd> switch file</span>
     <span class="hint-group prefix"><kbd class="nox-kbd">:</kbd> line</span>
+    <span class="hint-group prefix"><kbd class="nox-kbd">@</kbd> symbol</span>
   </div>
 </div>
 
