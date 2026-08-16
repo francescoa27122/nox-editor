@@ -597,3 +597,56 @@ describe('what a refused prose session leaves behind', () => {
     expect(errors[0]).toMatchObject({ message: expect.stringContaining('cannot read') });
   });
 });
+
+describe('a malformed session.summary', () => {
+  /**
+   * The failure this prevents: the twin of the `session.note` bug above, on
+   * the sibling method, in *any* session rather than only a prose one.
+   *
+   * `#handle` answers a malformed `session.summary` cleanly — its own
+   * try/catch turns the TypeError into an `internal` failure. But the block
+   * that mirrors the summary into the session ran afterwards on method name
+   * alone, re-reading `params.text` outside any try/catch, so the throw
+   * escaped through `StdioTransport.run` and killed the run that `#handle`
+   * had just handled.
+   */
+  it('is answered rather than fatal, and the session still finishes', async () => {
+    const { runtime } = await setup();
+    const replies: unknown[] = [];
+    const provider = new ScriptedProvider(async function* () {
+      // No `params` at all, which is what another process can actually send.
+      replies.push(yield { type: 'action', request: { method: 'session.summary' } } as never);
+      // Reached only if the request above did not kill the run.
+      replies.push(yield {
+        type: 'action',
+        request: { method: 'session.summary', params: { text: 'done properly' } },
+      } as never);
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'do a thing');
+    await settle(session);
+
+    expect(replies).toHaveLength(2);
+    expect(replies[0]).toMatchObject({ ok: false });
+    expect(replies[1]).toMatchObject({ ok: true });
+    expect(session.status.get()).not.toBe('failed');
+  });
+
+  /**
+   * The failure this prevents: a summary that is not a string reaching a
+   * `Signal<string | null>` and then the panel. `#handle` records whatever it
+   * is given, so without a check here the two disagree about what a summary
+   * is.
+   */
+  it('leaves the summary unset when the text is not a string', async () => {
+    const { runtime } = await setup();
+    const provider = new ScriptedProvider(async function* () {
+      yield { type: 'action', request: { method: 'session.summary', params: { text: 42 } } } as never;
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'do a thing');
+    await settle(session);
+
+    expect(session.summary.get()).toBeNull();
+  });
+});
