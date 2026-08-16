@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { basename, tildify } from '@core/path';
+  import { basename, join, tildify } from '@core/path';
   import { platformIsMac } from '@services/keymap';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
@@ -23,16 +23,41 @@
 
   const paletteHint = $derived(keymap.displayFor('nav.commandPalette') ?? '');
 
+  interface Crumb {
+    segment: string;
+    /** What this segment stands for, or null when it cannot be revealed. */
+    path: string | null;
+  }
+
   // The breadcrumb is the file's path relative to the workspace root, so the
   // title bar answers "where am I" without repeating the tab label.
-  const trail = $derived.by(() => {
-    if (!active?.path) return [];
+  //
+  // Each segment carries the absolute path it stands for, because clicking one
+  // reveals it and the text on screen has had the prefix cut off it.
+  const trail = $derived.by<Crumb[]>(() => {
+    const path = active?.path;
+    if (!path) return [];
     const root = $rootPath;
-    const display =
-      root && active.path.startsWith(root)
-        ? active.path.slice(root.length)
-        : tildify(active.path, $homeDir);
-    return display.split(/[\\/]/).filter(Boolean);
+
+    // A file outside the workspace has nothing to reveal into: `files.reveal`
+    // returns early for a path that is not under the root. These stay inert
+    // text rather than becoming buttons that would silently do nothing.
+    if (!root || !path.startsWith(root)) {
+      return tildify(path, $homeDir)
+        .split(/[\\/]/)
+        .filter(Boolean)
+        .map((segment) => ({ segment, path: null }));
+    }
+
+    let current = root;
+    return path
+      .slice(root.length)
+      .split(/[\\/]/)
+      .filter(Boolean)
+      .map((segment) => {
+        current = join(current, segment);
+        return { segment, path: current };
+      });
   });
 </script>
 
@@ -49,9 +74,21 @@
   <div class="center" data-tauri-drag-region>
     {#if trail.length > 0}
       <nav class="breadcrumb" aria-label="File path">
-        {#each trail as segment, index (index)}
+        {#each trail as crumb, index (index)}
           {#if index > 0}<span class="crumb-sep" aria-hidden="true">›</span>{/if}
-          <span class="crumb" class:leaf={index === trail.length - 1}>{segment}</span>
+          {#if crumb.path === null}
+            <span class="crumb" class:leaf={index === trail.length - 1}>{crumb.segment}</span>
+          {:else}
+            {@const target = crumb.path}
+            {@const isLeaf = index === trail.length - 1}
+            <button
+              class="crumb"
+              class:leaf={isLeaf}
+              title={target}
+              onclick={() => void app.revealInExplorer(target, { expandSelf: !isLeaf })}
+              >{crumb.segment}</button
+            >
+          {/if}
         {/each}
         {#if active?.isDirty}
           <span class="dirty" title="Unsaved changes"></span>
@@ -169,6 +206,17 @@
   .crumb {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Only the segments inside the workspace are buttons; one outside it has
+     nothing to reveal and stays a span, so it must not offer a hover it
+     cannot honour. */
+  button.crumb {
+    cursor: pointer;
+  }
+
+  button.crumb:hover {
+    color: var(--nox-text-bright);
   }
 
   .crumb.leaf {

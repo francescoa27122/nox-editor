@@ -1714,8 +1714,7 @@ export class NoxApp {
         run: async () => {
           const path = this.workspace.activeSnapshot()?.path;
           if (!path) return;
-          this.config.set('workbench.showExplorer', true);
-          await this.files.reveal(path);
+          await this.revealInExplorer(path);
         },
       },
 
@@ -2638,6 +2637,28 @@ export class NoxApp {
   goToLine(line: number, column = 1): void {
     const view = this.view.get();
     if (view) goToLine(view, line, column);
+  }
+
+  /**
+   * Show the explorer, open every directory above `path`, and select it.
+   *
+   * `expandSelf` is for a directory target. `files.reveal` stops one segment
+   * short — its argument is normally a file, and expanding a file means
+   * nothing — so revealing `src/ui` opens `src` and leaves `ui` shut. A
+   * caller naming a directory wants that directory open, not its parent.
+   *
+   * Selecting is what makes the reveal visible: the explorer scrolls its lead
+   * row into view and nothing else, so a directory opened without being
+   * selected can expand entirely off-screen. This does stomp a multi-selection,
+   * unlike the panel's follow-the-active-tab effect, which deliberately does
+   * not — that one fires on its own and must not interrupt a selection being
+   * built, while everything reaching here was asked for by name.
+   */
+  async revealInExplorer(path: string, { expandSelf = false } = {}): Promise<void> {
+    this.config.set('workbench.showExplorer', true);
+    await this.files.reveal(path);
+    if (expandSelf) await this.files.expand(path);
+    this.ui.explorer.set(path);
   }
 
   /** Settings that need a live reconfigure rather than a state rebuild. */
