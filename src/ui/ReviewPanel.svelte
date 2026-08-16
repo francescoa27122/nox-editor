@@ -94,6 +94,9 @@
                 <Icon name={hunk.accepted ? 'check' : 'close'} size={11} />
                 <span>Line {hunk.displayLine}</span>
               </button>
+              {#if !hunk.inScope}
+                <span class="scope-note">outside your selection</span>
+              {/if}
 
               <div class="lines">
                 {#each hunk.removed as line, index (index)}
@@ -252,6 +255,12 @@
 
   .toggle[aria-pressed='true'] {
     color: var(--nox-success);
+  }
+
+  .scope-note {
+    color: var(--nox-text-faint);
+    font-size: var(--nox-fs-xs);
+    margin-left: var(--nox-sp-2);
   }
 
   .lines {

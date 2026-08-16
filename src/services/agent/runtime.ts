@@ -1,9 +1,9 @@
 import { Signal } from '@core/signal';
 import type { CommandRegistry } from '../commands';
-import type { ContextService } from '../context';
+import type { ContextService, SelectionInfo } from '../context';
 import type { JobRunner } from '../jobs';
 import { PermissionError, type PermissionService, type Principal } from '../permissions';
-import type { ReviewService, StagedChangeSet } from '../review';
+import type { ReviewScope, ReviewService, StagedChangeSet } from '../review';
 import type { ChangeSetId } from '../transactions';
 import type { BufferId, WorkspaceService } from '../workspace';
 import type { ModelProvider } from './provider';
@@ -32,6 +32,39 @@ import {
  *
  * See AGENT-PLATFORM.md §3.
  */
+
+/**
+ * How much selected text the brief will carry.
+ *
+ * Past this a "selection" is a file, and sending it spends context window and
+ * local inference time on text nobody asked about. Not a setting: a
+ * preference whose wrong value silently degrades model output is a preference
+ * that should not exist.
+ */
+const SELECTION_MAX_LINES = 200;
+const SELECTION_MAX_CHARS = 8_000;
+
+/**
+ * Clip selected text to the cap, saying so when it clips.
+ *
+ * The marker is not decoration. A model handed a fragment with no sign that
+ * it is a fragment answers as though it had the whole thing.
+ */
+function clipSelection(text: string): string {
+  const lines = text.split('\n');
+  let out = text;
+  let truncated = false;
+
+  if (lines.length > SELECTION_MAX_LINES) {
+    out = lines.slice(0, SELECTION_MAX_LINES).join('\n');
+    truncated = true;
+  }
+  if (out.length > SELECTION_MAX_CHARS) {
+    out = out.slice(0, SELECTION_MAX_CHARS);
+    truncated = true;
+  }
+  return truncated ? `${out}\n…truncated: this is only the start of the selection.` : out;
+}
 
 export type SessionStatus =
   | 'running'
@@ -110,9 +143,32 @@ export interface AgentSessionSnapshot {
   changes: number;
 }
 
+/**
+ * The scope a selection implies, or null when there is no selection.
+ *
+ * `context.selection` reports 1-based line numbers because it is also read by
+ * humans; `Hunk.fromLine` is a 0-based index into the before-document.
+ * Converting once, here, is the difference between an off-by-one that is
+ * obvious and one that is spread across every comparison.
+ */
+export function scopeFromSelection(
+  bufferId: BufferId,
+  selection: SelectionInfo | null,
+): ReviewScope | null {
+  if (!selection || selection.isEmpty) return null;
+  const range = selection.ranges[selection.main] ?? selection.ranges[0];
+  if (!range) return null;
+  return { bufferId, fromLine: range.fromLine - 1, toLine: range.toLine - 1 };
+}
+
 export interface SessionOptions {
   /** Shown as the agent's name. Defaults to the transport's handshake. */
   label?: string;
+  /**
+   * The range the user asked about, when the session was started from one.
+   * Only ever defaults a hunk; never refuses an edit.
+   */
+  scope?: ReviewScope;
 }
 
 export class AgentRuntime {
@@ -237,6 +293,8 @@ export class AgentRuntime {
      */
     const readAt = new Map<BufferId, number>();
 
+    const scope = options.scope;
+
     const session: AgentSession & { principal: Principal } = {
       id,
       label: options.label ?? transport.id,
@@ -276,7 +334,7 @@ export class AgentRuntime {
         let staged = false;
         await transport.run(run, async (request) => {
           if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
-          const response = await this.#handle(session.principal, request, record, readAt);
+          const response = await this.#handle(session.principal, request, record, readAt, scope);
           if (request.method === 'proposal.stage' && response.ok) staged = true;
           if (request.method === 'session.summary') {
             summary.set(request.params.text);
@@ -372,15 +430,39 @@ export class AgentRuntime {
     return { undone, skipped };
   }
 
-  /** A short description of where the user is, to open a session with. */
+  /**
+   * A short description of where the user is, to open a session with.
+   *
+   * Every `context.*` method addresses a buffer by `bufferId`, never by name,
+   * so each file this names also carries `[id]` — the token a model can
+   * actually call back with. Measured against `qwen2.5-coder:7b`: shown only
+   * "shapes.js", it called `context.bufferText` with the file name as the id,
+   * got "not found", and retried that name eleven times until the turn cap.
+   * Square brackets are reserved for ids alone, never reused for the
+   * descriptive parens beside them, so the id is never one of several tokens
+   * a model has to guess between.
+   */
   brief(): string {
     const buffers = this.#context.openBuffers();
     const active = buffers.find((buffer) => buffer.isActive);
-    const lines = [`Open files: ${buffers.map((buffer) => buffer.name).join(', ') || 'none'}`];
+    const lines = [
+      `Open files: ${buffers.map((buffer) => `${buffer.name} [${buffer.id}]`).join(', ') || 'none'}`,
+    ];
     if (active) {
-      lines.push(`Active file: ${active.name} (${active.languageName}, ${active.lineCount} lines)`);
+      lines.push(
+        `Active file: ${active.name} [${active.id}] (${active.languageName}, ${active.lineCount} lines)`,
+      );
       const viewport = this.#context.viewport(active.id);
       if (viewport) lines.push(`On screen: lines ${viewport.from}–${viewport.to}`);
+
+      const selection = this.#context.selection(active.id);
+      const range = selection && !selection.isEmpty ? selection.ranges[selection.main] : undefined;
+      if (range) {
+        lines.push(
+          `Selected in ${active.name} [${active.id}], lines ${range.fromLine}–${range.toLine}:`,
+          clipSelection(range.text),
+        );
+      }
     }
     return lines.join('\n');
   }
@@ -402,6 +484,7 @@ export class AgentRuntime {
     request: AgentRequest,
     record: (action: NewAction) => void,
     readAt: Map<BufferId, number>,
+    scope: ReviewScope | undefined,
   ): Promise<CoreResponse> {
     const reader = this.#context.reader(principal);
 
@@ -651,11 +734,14 @@ export class AgentRuntime {
             return failure(request.id, 'stale', message);
           }
 
-          const staged = this.#review.stage({
-            description: request.params.description,
-            author: principal,
-            edits: request.params.edits,
-          });
+          const staged = this.#review.stage(
+            {
+              description: request.params.description,
+              author: principal,
+              edits: request.params.edits,
+            },
+            scope,
+          );
           if (!staged) {
             record({ kind: 'error', message: 'Proposal would change nothing' });
             return failure(request.id, 'invalid-request', 'That would change nothing');

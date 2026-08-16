@@ -799,6 +799,67 @@ The cost is a parser where a schema would have done, and a vocabulary the
 model is told about in prose rather than declared. That is the price of local
 models as they are, not as their APIs describe them.
 
+### Selection edits are composition; the scope only ever defaults a checkbox
+
+`agents.runOnSelection` — **Edit Selection with a Model…** — adds no new
+machinery. The session, the audit trail, the provenance author, the
+permission model, job cancellation and the stale-read guard all come from
+`AgentRuntime` unchanged, and the result lands in `ReviewService` exactly as
+any other proposal's does. What is new is two things: the selection reaching
+the model through `brief()`, and a scope that changes a hunk's default in
+`review.stage`.
+
+`SessionOptions` gains `scope?: ReviewScope` — `{ bufferId, fromLine, toLine }`
+— captured in `app.ts` before the instruction is even typed, so it describes
+where the user was looking when they ran the command rather than where they
+are by the time the model answers. `review.stage(spec, scope)` uses it to
+flip one thing: a hunk whose line range does not touch the scope starts
+`accepted: false` instead of the panel's usual `true`, labelled *outside your
+selection* rather than left to look unexplained.
+
+**The scope only ever decides a default.** It does not refuse a stage, does
+not block one, and does not itself read the buffer. That is what keeps it
+out of the stale-read guard's way, which does refuse: the guard compares the
+revision a session read against the revision the buffer is now at and rejects
+a stage that has fallen behind. A scope captured against a selection that has
+since moved costs nothing sharper than a checkbox defaulted the wrong way —
+confirmed in the walk, where the identical request against the identical
+buffer, once through **Edit Selection with a Model…** and once through a
+plain `Run Agent…`, staged the same hunk and differed only in which side the
+checkbox started on.
+
+The alternative was to refuse a hunk outside the scope outright rather than
+merely default it unkept. Rejected: a companion edit is often the correct
+one — a new import for a change requested in the middle of a file, the other
+half of a rename the model reached for on its own — and refusing it would
+mean refusing the model for doing the right thing. Defaulting it unkept keeps
+that judgment with the person reading the diff instead of pre-empting it.
+
+`brief()` was the one place this needed a real finding rather than plumbing.
+Every `context.*` method addresses a buffer by `bufferId`, never by name; the
+brief, before this branch, named files and never gave their ids. Driving the
+feature against a real model surfaced exactly that gap: asked to rewrite the
+selection and update a comment on line 1, the model addressed the buffer by
+the only name it had been shown, got "Buffer shapes.js not found." back
+eleven times, and stopped at the turn cap having done nothing. Fixed by
+rendering each file as `name [id]`, brackets used for nothing else in the
+brief, so the identifier every `context.*` call needs sits next to the name a
+person would use. No unit test caught this — every scripted provider in the
+suite passes ids by construction — which is what the walk was for.
+
+`brief()` also reads outside the recorded reader. It calls
+`this.#context.selection(...)` directly on `ContextService` rather than through
+the `context.reader(principal)` proxy every other read goes through: the brief
+is assembled before a request exists, and `#handle` binds that proxy per
+request. The selection text it embeds, up to `SELECTION_MAX_CHARS` (8,000)
+characters, never lands in `reads`. This is not a selection-edit gap —
+`brief()` opens every session, so a plain `Run Agent…` on a buffer with an
+active selection carries the same unrecorded text. It is not a security hole:
+the text leaves the machine only once `net.request` is granted, and a model
+could read the same buffer through the recorded API regardless. But `reads` is
+meant to be the whole account of what a session saw, and for what `brief()`
+sends, it currently is not.
+
 ### A review narrows the change set; it does not apply hunks
 
 `ReviewService.stage(spec)` computes what each buffer *would* say and diffs it

@@ -224,6 +224,80 @@ describe('a buffer that moves during review', () => {
   });
 });
 
+describe('a scoped proposal', () => {
+  // The point of the feature: an edit outside what you selected must not be
+  // pre-accepted, because "everything starts kept" means you stop it only if
+  // you happen to notice it.
+  it('starts a hunk outside the scope unkept', async () => {
+    const { review, a } = await setup();
+    const staged = review.stage(
+      { description: 'two edits', author: agent, edits: [
+        { bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } },
+        { bufferId: a, changes: { from: 14, to: 18, insert: 'FOUR' } },
+      ] },
+      { bufferId: a, fromLine: 0, toLine: 0 },
+    )!;
+
+    const hunks = staged.files[0]!.hunks;
+    expect(hunks.map((h) => [h.displayLine, h.accepted, h.inScope])).toEqual([
+      [1, true, true],
+      [4, false, false],
+    ]);
+  });
+
+  // Refusing a companion edit would refuse the model for doing the right
+  // thing; the fix is a different default, not a rejection.
+  it('still stages the out-of-scope edit rather than dropping it', async () => {
+    const { review, a } = await setup();
+    const staged = review.stage(
+      { description: 'far edit', author: agent, edits: [
+        { bufferId: a, changes: { from: 19, to: 23, insert: 'FIVE' } },
+      ] },
+      { bufferId: a, fromLine: 0, toLine: 0 },
+    )!;
+    expect(staged.files[0]!.hunks).toHaveLength(1);
+  });
+
+  // An edit in another file is outside any selection, whatever its line
+  // numbers happen to be.
+  it('treats a hunk in a different buffer as out of scope', async () => {
+    const { review, a, b } = await setup();
+    const staged = review.stage(
+      { description: 'other file', author: agent, edits: [
+        { bufferId: b, changes: { from: 0, to: 5, insert: 'ALPHA' } },
+      ] },
+      { bufferId: a, fromLine: 0, toLine: 99 },
+    )!;
+    expect(staged.files[0]!.hunks[0]!.inScope).toBe(false);
+  });
+
+  // "Add something at the end of this" is the most ordinary request there is.
+  // A pure insertion spans no lines, so without the +1 it would land just
+  // past the scope and default to unkept.
+  it('counts an insertion one line past the scope as inside it', async () => {
+    const { review, a } = await setup();
+    const staged = review.stage(
+      { description: 'append', author: agent, edits: [
+        { bufferId: a, changes: { from: 8, to: 8, insert: 'TWO-AND-A-HALF\n' } },
+      ] },
+      { bufferId: a, fromLine: 0, toLine: 1 },
+    )!;
+    expect(staged.files[0]!.hunks[0]!.inScope).toBe(true);
+  });
+
+  // Every existing caller passes no scope. If that stopped meaning "keep
+  // everything", every agent and every project replace would change
+  // behaviour silently.
+  it('keeps every hunk when no scope is given', async () => {
+    const { review, a } = await setup();
+    const staged = review.stage({ description: 'unscoped', author: agent, edits: [
+      { bufferId: a, changes: { from: 0, to: 3, insert: 'ONE' } },
+      { bufferId: a, changes: { from: 19, to: 23, insert: 'FIVE' } },
+    ] })!;
+    expect(staged.files[0]!.hunks.every((h) => h.accepted && h.inScope)).toBe(true);
+  });
+});
+
 describe('putting a review away', () => {
   it('closes to the background without deciding anything', () => {
     const ui = new UIService();

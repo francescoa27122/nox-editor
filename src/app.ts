@@ -48,7 +48,7 @@ import {
 import { OllamaProvider } from '@services/agent/ollama';
 import type { AgentTransport } from '@services/agent/protocol';
 import type { ModelProvider } from '@services/agent/provider';
-import { AgentRuntime, ProviderTransport } from '@services/agent/runtime';
+import { AgentRuntime, ProviderTransport, scopeFromSelection } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
 import { FileTreeService } from '@services/filetree';
@@ -56,7 +56,7 @@ import { KeymapService, platformIsMac } from '@services/keymap';
 import { JobRunner } from '@services/jobs';
 import { NotesService } from '@services/notes';
 import { NotificationService } from '@services/notifications';
-import { ReviewService } from '@services/review';
+import { ReviewService, type ReviewScope } from '@services/review';
 import {
   describeCapability,
   PermissionService,
@@ -524,34 +524,7 @@ export class NoxApp {
    * until the instruction is given.
    */
   async runAgent(agentId?: string): Promise<void> {
-    const configured = this.agentConfig.agents.get();
-    const choices = this.#runnableAgents();
-
-    if (choices.length === 0) {
-      if (configured.length === 0) {
-        this.notifications.info('No agents are configured', 'Run "Configure Agents" to add one.');
-      } else {
-        this.notifications.warn(
-          'None of the configured agents can run here',
-          'The browser build can neither start a process nor reach a local model.',
-        );
-      }
-      return;
-    }
-
-    let chosen = agentId ? choices.find((agent) => agent.id === agentId) : undefined;
-    if (!chosen) {
-      if (choices.length === 1) chosen = choices[0];
-      else {
-        const picked = await this.ui.askToConfirm({
-          title: 'Which agent?',
-          message: 'Pick the agent to run this instruction.',
-          choices: choices.map((agent) => ({ id: agent.id, label: agent.label })),
-        });
-        if (!picked) return;
-        chosen = choices.find((agent) => agent.id === picked);
-      }
-    }
+    const chosen = await this.#chooseAgent(agentId);
     if (!chosen) return;
 
     const instruction = await this.ui.askForText({
@@ -564,6 +537,81 @@ export class NoxApp {
     });
     if (!instruction) return;
 
+    await this.#startAgentSession(chosen, instruction);
+  }
+
+  /**
+   * Ask a model to change the selected text.
+   *
+   * The scope is captured before the instruction is typed, so it describes
+   * what the user was looking at when they ran the command. It only ever
+   * defaults a hunk in the review panel, so a scope that goes stale while
+   * they type costs a checkbox, not correctness.
+   */
+  async runAgentOnSelection(): Promise<void> {
+    const scope = this.#selectionScope();
+    if (!scope) {
+      this.notifications.info('Nothing is selected', 'Select the text you want changed, then run this again.');
+      return;
+    }
+
+    const chosen = await this.#chooseAgent();
+    if (!chosen) return;
+
+    const instruction = await this.ui.askForText({
+      title: `Ask ${chosen.label} about the selection`,
+      label: 'What should it do?',
+      initialValue: '',
+      placeholder: 'Rewrite this as a single expression',
+      confirmLabel: 'Run',
+      validate: (value) => (value.trim().length === 0 ? 'Say what you want done' : null),
+    });
+    if (!instruction) return;
+
+    await this.#startAgentSession(chosen, instruction, scope);
+  }
+
+  /** Pick a runnable agent, or explain why there is none. */
+  async #chooseAgent(agentId?: string): Promise<AgentConfig | undefined> {
+    const configured = this.agentConfig.agents.get();
+    const choices = this.#runnableAgents();
+
+    if (choices.length === 0) {
+      if (configured.length === 0) {
+        this.notifications.info('No agents are configured', 'Run "Configure Agents" to add one.');
+      } else {
+        this.notifications.warn(
+          'None of the configured agents can run here',
+          'The browser build can neither start a process nor reach a local model.',
+        );
+      }
+      return undefined;
+    }
+
+    const named = agentId ? choices.find((agent) => agent.id === agentId) : undefined;
+    if (named) return named;
+    if (choices.length === 1) return choices[0];
+
+    const picked = await this.ui.askToConfirm({
+      title: 'Which agent?',
+      message: 'Pick the agent to run this instruction.',
+      choices: choices.map((agent) => ({ id: agent.id, label: agent.label })),
+    });
+    if (!picked) return undefined;
+    return choices.find((agent) => agent.id === picked);
+  }
+
+  /**
+   * Start a session against a chosen record.
+   *
+   * Shared by both agent commands so a fix to one cannot miss the other —
+   * the reload guard below was written once and is load-bearing for both.
+   */
+  async #startAgentSession(
+    chosen: AgentConfig,
+    instruction: string,
+    scope?: ReviewScope,
+  ): Promise<void> {
     let transport: AgentTransport;
     // Defaults to the record picked from the list; the ollama branch below
     // overrides it with the label of the provider actually looked up, so a
@@ -597,8 +645,18 @@ export class NoxApp {
       label = provider.label;
     }
 
-    this.agents.start(transport, instruction.trim(), { label });
+    this.agents.start(transport, instruction.trim(), {
+      label,
+      ...(scope ? { scope } : {}),
+    });
     this.ui.showAgents();
+  }
+
+  /** The scope the active editor's selection implies, or null. */
+  #selectionScope(): ReviewScope | null {
+    const buffer = this.workspace.active();
+    if (!buffer) return null;
+    return scopeFromSelection(buffer.id, this.context.selection(buffer.id));
   }
 
   /** The provider registered for an agent record, by its id. */
@@ -1659,6 +1717,17 @@ export class NoxApp {
         // so it is a command they run, never something that happens for them.
         enabled: () => this.#runnableAgents().length > 0,
         run: (arg) => this.runAgent(typeof arg === 'string' ? arg : undefined),
+      },
+      {
+        id: 'agents.runOnSelection',
+        title: 'Edit Selection with a Model…',
+        category: 'Agents',
+        keywords: ['ai', 'refactor', 'fix', 'rewrite', 'selection'],
+        // Same predicate as agents.run, plus a selection to act on: a command
+        // offered and then refused is the drift this predicate was extracted
+        // to prevent.
+        enabled: () => this.#runnableAgents().length > 0 && this.#selectionScope() !== null,
+        run: () => this.runAgentOnSelection(),
       },
       {
         id: 'agents.configure',
