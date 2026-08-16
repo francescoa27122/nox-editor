@@ -124,8 +124,16 @@ message, so a child process is told the same thing rather than the wire
 quietly lying about what the session is.
 
 `OllamaProvider.complete` branches once, at the top. In `prose` mode it makes
-**one** round trip, yields the content as `{ type: 'text' }` chunks as it
-streams, and returns. No `parseTurn`, no action loop, no turn cap, no JSON.
+**one** round trip and yields the assembled reply as a single
+`{ type: 'text' }` chunk. No `parseTurn`, no action loop, no turn cap, no
+JSON.
+
+One chunk rather than progressive text, deliberately: `#ask` (`ollama.ts:607`)
+accumulates the streamed frames and resolves with the whole content, and
+exposing partial text would mean rebuilding it as a channel the generator can
+pump — real complexity in a 749-line file, for a one-shot answer. The session
+shows as working until the answer lands. Progressive rendering is a follow-up,
+not a requirement (§11).
 
 Three consequences, all of them wanted:
 
@@ -216,8 +224,8 @@ what the agent did; an essay filed as an action would bury the reads the trail
 exists for. This is the distinction the `brief` variant already makes and it
 is made the same way here.
 
-Because chunks stream, `answer` fills in progressively and the panel shows the
-answer arriving.
+The answer arrives in one piece (§5), so an entry is *working* until it lands
+and complete immediately afterwards. There is no half-written state to render.
 
 **An entry shows:** the question asked, the file and line range it was about,
 the agent's label, a relative time, and the body. Newest first. A failed
@@ -304,6 +312,9 @@ closed.
 - **The brief truncates at `SELECTION_MAX_CHARS`** (8,000) exactly as it does
   for the edit path. A very large selection is explained from its start, and
   the brief says so.
+- **The answer appears all at once**, not word by word. On a slow machine a
+  local model can take tens of seconds, and for that time the entry says only
+  that it is working. §5 gives the reasoning and the follow-up.
 - **An out-of-process agent may ignore `expects`.** It is told, and its
   non-prose requests are refused (§5) — but a stdio agent that simply narrates
   nothing will produce an empty answer and a `done` session.
