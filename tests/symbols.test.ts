@@ -104,13 +104,14 @@ describe('the symbols in a file', () => {
   });
 
   /**
-   * Markdown headings nest by *level*, not by tree containment: an `##` is a
-   * sibling of the `#` above it, not a child of it. A rule that qualified
-   * headings the way classes qualify methods would give `Title.Subtitle`
-   * here; `flat` keeps both names bare, which is the whole point of it — a
-   * test that only checked the headings were found would pass either way.
+   * A characterisation test, not a branch test: headings come back
+   * unqualified because an ATX or Setext heading node spans only its own
+   * line(s) and is a sibling of what follows it, never an ancestor — the
+   * generic walk already leaves the enclosing stack empty by the time the
+   * next heading is entered. Worth pinning regardless, since a change to how
+   * the grammar nests headings would silently produce `Title.Subtitle`.
    */
-  it('names Markdown headings flat, not nested by level', () => {
+  it('names Markdown headings without qualifying them to one another', () => {
     const source = '# Title\n\n## Subtitle\n\ntext\n';
     expect(scan(markdownLanguage.parser, source)).toEqual(['Title:heading', 'Subtitle:heading']);
   });

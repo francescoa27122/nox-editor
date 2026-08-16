@@ -49,8 +49,6 @@ interface Rule {
   ownTextUntil?: string | true;
   /** Strip this from the front of the text, for Markdown's `##`. */
   strip?: RegExp;
-  /** Never contributes to a descendant's qualified path. */
-  flat?: boolean;
 }
 
 /**
@@ -93,17 +91,18 @@ const RULES: Record<string, Rule> = {
   // CSS / SCSS. The selector is the text before the block, not a child.
   RuleSet: { kind: 'rule', ownTextUntil: 'Block' },
 
-  // Markdown. Flat: these nest by *level*, not by containment, so an H2 is a
-  // sibling of its H1 in the tree and inferring a hierarchy would mean a
-  // second algorithm over the numbers.
-  ATXHeading1: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/, flat: true },
-  ATXHeading2: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/, flat: true },
-  ATXHeading3: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/, flat: true },
-  ATXHeading4: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/, flat: true },
-  ATXHeading5: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/, flat: true },
-  ATXHeading6: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/, flat: true },
-  SetextHeading1: { kind: 'heading', ownTextUntil: true, flat: true },
-  SetextHeading2: { kind: 'heading', ownTextUntil: true, flat: true },
+  // Markdown. No exception needed for nesting: an ATX or Setext heading node
+  // spans only its own line(s) and is a sibling of whatever follows it, never
+  // an ancestor — so the generic walk already gives headings unqualified
+  // names, the same way a top-level function does.
+  ATXHeading1: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
+  ATXHeading2: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
+  ATXHeading3: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
+  ATXHeading4: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
+  ATXHeading5: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
+  ATXHeading6: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
+  SetextHeading1: { kind: 'heading', ownTextUntil: true },
+  SetextHeading2: { kind: 'heading', ownTextUntil: true },
 };
 
 /** The name for one matched node, or null when the grammar gave us none. */
@@ -147,12 +146,12 @@ export function fileSymbols(tree: Tree, doc: Text): FileSymbol[] {
 
       const qualified = enclosing.length > 0 ? `${enclosing.join('.')}.${name}` : name;
       found.push({ name, qualified, kind: rule.kind, from: nodeRef.from, to: nodeRef.to });
-      if (!rule.flat) enclosing.push(name);
+      enclosing.push(name);
       return true;
     },
     leave(nodeRef) {
       const rule = RULES[nodeRef.name];
-      if (!rule || rule.flat) return;
+      if (!rule) return;
       // Only pop for a node that actually pushed: a matched node whose name
       // could not be read never went on the stack, and popping for it would
       // unwind an ancestor and mis-qualify everything after it.
