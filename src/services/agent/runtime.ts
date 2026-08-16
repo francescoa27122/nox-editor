@@ -123,7 +123,40 @@ export interface AgentSession {
   readonly status: Signal<SessionStatus>;
   readonly actions: Signal<AgentAction[]>;
   readonly summary: Signal<string | null>;
+  readonly expects: AnswerExpectation | undefined;
+  readonly answer: Signal<string | null>;
+  readonly about: Signal<AnswerTarget | null>;
   cancel(): void;
+}
+
+/**
+ * What an answer was about.
+ *
+ * `revision` is the buffer's revision at the moment the brief was built —
+ * the text the model was actually shown. Comparing it against the buffer's
+ * revision now is the whole of staleness; it is a label, never a refusal.
+ */
+export interface AnswerTarget {
+  bufferId: BufferId;
+  fromLine: number;
+  toLine: number;
+  revision: number;
+}
+
+/**
+ * Whether an answer still describes the code it was about.
+ *
+ * Pure and here rather than in the panel, so the three cases are testable
+ * without a component — and because `-1` (the buffer is closed) is *also*
+ * "not equal", and collapsing it into "changed" would report a file you
+ * closed as one you edited.
+ */
+export function answerFreshness(
+  about: AnswerTarget,
+  currentRevision: number,
+): 'current' | 'changed' | 'gone' {
+  if (currentRevision === -1) return 'gone';
+  return currentRevision === about.revision ? 'current' : 'changed';
 }
 
 /**
@@ -141,6 +174,11 @@ export interface AgentSessionSnapshot {
   status: SessionStatus;
   actions: AgentAction[];
   summary: string | null;
+  expects: AnswerExpectation | undefined;
+  /** The prose a prose session produced. Null for every other session. */
+  answer: string | null;
+  /** The buffer and lines the question was about, and their revision then. */
+  about: AnswerTarget | null;
   /** How many change sets this session has landed. */
   changes: number;
 }
@@ -272,6 +310,8 @@ export class AgentRuntime {
     const actions = new Signal<AgentAction[]>([]);
     const status = new Signal<SessionStatus>('running');
     const summary = new Signal<string | null>(null);
+    const answer = new Signal<string | null>(null);
+    const about = new Signal<AnswerTarget | null>(null);
 
     const record = (action: NewAction) => {
       actions.update((current) => [...current, { ...action, at: Date.now() } as AgentAction]);
@@ -317,6 +357,9 @@ export class AgentRuntime {
       status,
       actions,
       summary,
+      expects,
+      answer,
+      about,
       cancel: () => job.cancel(),
     };
 
@@ -340,6 +383,13 @@ export class AgentRuntime {
         // always in the brief and are not what this record exists for.
         if (briefed.carried) record({ kind: 'brief', detail: briefed.carried });
 
+        // Captured here, not at stage time: this is the revision of the text
+        // the brief actually carried. Later is the wrong moment — the user
+        // goes on typing while the model thinks.
+        if (scope) {
+          about.set({ ...scope, revision: this.#workspace.revisionOf(scope.bufferId) });
+        }
+
         const run: AgentRun = {
           instruction,
           context: briefed.text,
@@ -350,6 +400,16 @@ export class AgentRuntime {
         let staged = false;
         await transport.run(run, async (request) => {
           if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
+          // The answer is what the agent *said*, not something it did to the
+          // workspace, so it is published rather than filed as an action.
+          // An essay in the trail would bury the reads the trail is for —
+          // the same distinction `brief` already makes.
+          if (expects === 'prose' && request.method === 'session.note') {
+            const text = request.params.text;
+            answer.update((current) => (current === null ? text : `${current}${text}`));
+            this.#publish();
+            return success(request.id, null);
+          }
           const response = await this.#handle(session.principal, request, record, readAt, scope, expects);
           if (request.method === 'proposal.stage' && response.ok) staged = true;
           if (request.method === 'session.summary') {
@@ -400,6 +460,9 @@ export class AgentRuntime {
         status: session.status.get(),
         actions: session.actions.get(),
         summary: session.summary.get(),
+        expects: session.expects,
+        answer: session.answer.get(),
+        about: session.about.get(),
         changes: this.changesBy(session.id).length,
       })),
     );
