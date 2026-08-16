@@ -888,15 +888,15 @@ git commit -m "Publish a prose session's answer and what it was about"
 
 **Interfaces:**
 - Consumes: `SessionOptions.expects` (Task 1), `AnswerTarget` (Task 4).
-- Produces: `export const EXPLAIN_INSTRUCTION` from `src/app.ts`; commands `agents.askAboutSelection`, `agents.explainSelection`, `answers.focus`.
+- Produces: `export const EXPLAIN_INSTRUCTION` from `src/services/agent/runtime.ts`; commands `agents.askAboutSelection` and `agents.explainSelection`. (`answers.focus` is Task 6.)
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `tests/answers.test.ts`. This asserts the shipped constant is a real instruction rather than a placeholder, which is the part a test can actually hold:
 
-```ts
-import { EXPLAIN_INSTRUCTION } from '../src/app';
+Add `EXPLAIN_INSTRUCTION` to the existing `../src/services/agent/runtime` import at the top of the file — **not** from `../src/app`, which would pull the whole application module graph into a unit test for one string.
 
+```ts
 describe('the built-in explain instruction', () => {
   /**
    * The failure this prevents: a preset that ships as an empty string or a
@@ -912,22 +912,25 @@ describe('the built-in explain instruction', () => {
 - [ ] **Step 2: Run it to make sure it fails**
 
 Run: `npx vitest run tests/answers.test.ts -t "the built-in explain instruction"`
-Expected: FAIL — `EXPLAIN_INSTRUCTION` is not exported from `src/app.ts`.
+Expected: FAIL — `EXPLAIN_INSTRUCTION` is not exported from `src/services/agent/runtime.ts`.
 
 - [ ] **Step 3: Export the instruction and widen `#startAgentSession`**
 
-Near the top of `src/app.ts`, with the other module-level constants:
+In `src/services/agent/runtime.ts`, beside `SELECTION_MAX_CHARS`:
 
 ```ts
 /**
  * The instruction **Explain Selection** sends.
  *
- * Exported so a test asserts the string that ships rather than a copy of it,
- * and so the wording lives in one place rather than inside a command literal.
+ * Here rather than in `app.ts` so a test can assert the string that actually
+ * ships without importing the whole application, and so the wording lives in
+ * one place rather than inside a command literal.
  */
 export const EXPLAIN_INSTRUCTION =
   'Explain what this code does, and anything surprising about how it does it.';
 ```
+
+Import it in `src/app.ts` from the existing `@services/agent/runtime` import.
 
 Widen the private helper's signature (`app.ts:610-614`):
 
@@ -1031,29 +1034,9 @@ Directly after the `agents.runOnSelection` entry (`app.ts:1731`):
       },
 ```
 
-And in the Answers section of the command list (add it next to the Notes block at `app.ts:2307-2315`):
-
-```ts
-      // --- Answers ------------------------------------------------------------
-      {
-        id: 'answers.focus',
-        title: 'Show Answers',
-        category: 'Answers',
-        keyHint: 'Mod+Shift+A',
-        keywords: ['explain', 'ask', 'ai', 'answer'],
-        // The agent half of the selection predicate only: this command and
-        // the sidebar rail must never disagree about whether the section
-        // exists.
-        enabled: () => this.#runnableAgents().length > 0,
-        run: () => this.ui.focusAnswers(),
-      },
-```
-
-Add to the keybinding table beside `'Mod+Shift+N': 'notes.focus'`:
-
-```ts
-      'Mod+Shift+A': 'answers.focus',
-```
+`answers.focus` and its keybinding are **not** registered here — they call
+`ui.focusAnswers()`, which Task 6 creates. Registering them now would leave
+this task unable to pass `npm run check`. They are Task 6 Step 7.
 
 - [ ] **Step 6: Run the test and the suite**
 
@@ -1328,13 +1311,37 @@ Add `{ id: 'answers', icon: 'info', label: 'Answers', command: 'answers.focus' }
 
 placed before the final `{:else}`, so an unavailable answers view falls through to the explorer rather than rendering nothing.
 
-- [ ] **Step 7: Send a prose session to the right panel**
+- [ ] **Step 7: Send a prose session to the right panel, and add the command**
 
-In `#startAgentSession`, replace the unconditional `this.ui.showAgents()` with the branch from Task 5 Step 3, now that `focusAnswers` exists:
+In `#startAgentSession`, replace the unconditional `this.ui.showAgents()` with the branch deferred from Task 5 Step 3, now that `focusAnswers` exists:
 
 ```ts
     if (expects === 'prose') this.ui.focusAnswers();
     else this.ui.showAgents();
+```
+
+Register the command, next to the Notes block at `app.ts:2307-2315`:
+
+```ts
+      // --- Answers ------------------------------------------------------------
+      {
+        id: 'answers.focus',
+        title: 'Show Answers',
+        category: 'Answers',
+        keyHint: 'Mod+Shift+A',
+        keywords: ['explain', 'ask', 'ai', 'answer'],
+        // The agent half of the selection predicate only: this command and
+        // the sidebar rail must never disagree about whether the section
+        // exists.
+        enabled: () => this.#runnableAgents().length > 0,
+        run: () => this.ui.focusAnswers(),
+      },
+```
+
+and add to the keybinding table beside `'Mod+Shift+N': 'notes.focus'`:
+
+```ts
+      'Mod+Shift+A': 'answers.focus',
 ```
 
 - [ ] **Step 8: Run everything**
