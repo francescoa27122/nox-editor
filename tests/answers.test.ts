@@ -490,3 +490,32 @@ describe('the order the runtime publishes sessions in', () => {
     expect(published.map((entry) => entry.instruction)).toEqual(['asked second', 'asked first']);
   });
 });
+
+describe('a prose session that produces no answer', () => {
+  /**
+   * The failure this prevents: the answers panel showing "Working…" forever.
+   *
+   * `answer === null` is not only the state of a session still working — it is
+   * also the resting state of one that finished and said nothing, which is
+   * reachable two ways today. The Ollama prose branch deliberately yields
+   * nothing when the model returns only whitespace (`tests/ollama.test.ts`,
+   * `yields nothing at all when the model returns only whitespace`), and an
+   * out-of-process agent that ignores `expects` never sends a `session.note`.
+   * The panel branches on the *status* because of this test; without the
+   * status settling to something terminal, it would have nothing to branch on.
+   */
+  it('settles to done with a null answer rather than staying running', async () => {
+    const { runtime } = await setup();
+    const silent = new ProviderTransport(new ScriptedProvider(() => []));
+
+    const session = runtime.start(silent, 'explain this', { expects: 'prose' });
+    await settle(session);
+
+    const snapshot = runtime.sessions.get().find((entry) => entry.id === session.id);
+    expect(snapshot?.status).toBe('done');
+    expect(snapshot?.answer).toBeNull();
+    // The distinction the panel rests on: this is not a failure, so it must
+    // not be rendered as one either.
+    expect(snapshot?.status).not.toBe('failed');
+  });
+});

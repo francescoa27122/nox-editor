@@ -5,6 +5,7 @@
     answerParts,
     type AgentSessionSnapshot,
     type AnswerTarget,
+    type SessionStatus,
   } from '@services/agent/runtime';
   import type { BufferId } from '@services/workspace';
   import { useApp } from './context';
@@ -96,6 +97,33 @@
     };
   }
 
+  /**
+   * What to say for a session that has no answer.
+   *
+   * Branching on the status rather than on `answer === null`, because null is
+   * also the *resting* state of a session that finished and said nothing —
+   * which is reachable two ways today: the Ollama prose branch yields nothing
+   * when the model returns only whitespace, and an out-of-process agent that
+   * ignores `expects` never sends a `session.note` at all. Rendering
+   * "Working…" for those claimed work was still going on after it had stopped,
+   * which is the same class of lie as a staleness mark saying code is current
+   * after it has moved.
+   *
+   * A prose session only ever reaches `running`, `done`, `cancelled` or
+   * `failed` — `failed` is handled before this is called, and the review
+   * statuses need a branch only because they are in the type.
+   */
+  function resting(status: SessionStatus): string {
+    switch (status) {
+      case 'running':
+        return 'Working…';
+      case 'cancelled':
+        return 'Cancelled before it answered.';
+      default:
+        return 'The model finished without saying anything.';
+    }
+  }
+
   /** The last thing that went wrong, which is why the session says it failed. */
   function failure(session: AgentSessionSnapshot): string {
     // `findLast` would read better, but the lib target here is ES2022.
@@ -140,9 +168,7 @@
 
           {#if session.status === 'failed'}
             <p class="failed">{failure(session)}</p>
-          {:else if session.answer === null}
-            <p class="working">Working…</p>
-          {:else}
+          {:else if session.answer !== null}
             {#each answerParts(session.answer) as piece}
               {#if piece.code}
                 <pre class="code">{piece.text}</pre>
@@ -150,6 +176,8 @@
                 <p class="body">{piece.text}</p>
               {/if}
             {/each}
+          {:else}
+            <p class="state">{resting(session.status)}</p>
           {/if}
         </li>
       {/each}
@@ -264,7 +292,10 @@
     line-height: var(--nox-lh-ui);
   }
 
-  .working {
+  /* Covers every reason there is no answer to show — still working, cancelled,
+     or finished having said nothing. Faint rather than warning-coloured: none
+     of them is an error, and the failed case has its own rule above. */
+  .state {
     margin: var(--nox-sp-3) 0 0;
     font-size: var(--nox-fs-sm);
     color: var(--nox-text-faint);
