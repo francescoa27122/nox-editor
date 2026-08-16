@@ -519,3 +519,81 @@ describe('a prose session that produces no answer', () => {
     expect(snapshot?.status).not.toBe('failed');
   });
 });
+
+describe('a malformed session.note in a prose session', () => {
+  /**
+   * The failure this prevents: one bad argument killing the whole session.
+   *
+   * The prose interception reads `params.text` *outside* `#handle`'s
+   * try/catch, and `parseInbound` validates only `id` and `method` — see the
+   * comment on `parseBaseRevisions` in `protocol.ts`, which states the rule
+   * this broke: "A malformed declaration is a well-formed request carrying a
+   * bad argument: the agent should be told, in a response it can read… One
+   * mistake, one behaviour." A `session.note` with no `params` threw a
+   * TypeError out through `StdioTransport.run`, which has no catch, and
+   * failed the session — while the identical message in a *non*-prose session
+   * was answered cleanly and the agent carried on.
+   */
+  it('is answered rather than fatal, and the session still finishes', async () => {
+    const { runtime } = await setup();
+    const replies: unknown[] = [];
+    const provider = new ScriptedProvider(async function* () {
+      // No `params` at all, which is what another process can actually send.
+      replies.push(yield { type: 'action', request: { method: 'session.note' } } as never);
+      // Reached only if the request above did not kill the run: the agent
+      // gets to carry on, which is the whole point of answering rather than
+      // throwing.
+      replies.push(yield {
+        type: 'action',
+        request: { method: 'session.note', params: { text: 'and now a real answer' } },
+      } as never);
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'explain this', {
+      expects: 'prose',
+    });
+    await settle(session);
+
+    expect(replies).toHaveLength(2);
+    expect(replies[0]).toMatchObject({ ok: false });
+    expect(replies[1]).toMatchObject({ ok: true });
+
+    const snapshot = runtime.sessions.get().find((entry) => entry.id === session.id);
+    expect(snapshot?.status).not.toBe('failed');
+    // The good note still landed, so the bad one cost the agent nothing but
+    // the one refusal it was told about.
+    expect(snapshot?.answer).toBe('and now a real answer');
+  });
+});
+
+describe('what a refused prose session leaves behind', () => {
+  /**
+   * The failure this prevents: a session that holds nothing at all.
+   *
+   * An out-of-process agent that ignores `expects` has every request refused,
+   * and the refusal returned without recording anything — so the audit trail
+   * held only the echoed instruction, and the one thing that could explain the
+   * empty answer was the one thing written down nowhere. Every other refusal
+   * in `#handle` records; this one now does too, which is also what makes
+   * CHANGELOG's "nothing except those refusals" true rather than optimistic.
+   */
+  it('records the refusal in the trail, not only in the reply', async () => {
+    const { runtime, a } = await setup();
+    const provider = new ScriptedProvider(async function* () {
+      yield {
+        type: 'action',
+        request: { method: 'context.bufferText', params: { bufferId: a } },
+      } as never;
+    });
+
+    const session = runtime.start(new ProviderTransport(provider), 'explain this', {
+      expects: 'prose',
+    });
+    await settle(session);
+
+    const snapshot = runtime.sessions.get().find((entry) => entry.id === session.id);
+    const errors = snapshot!.actions.filter((action) => action.kind === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ message: expect.stringContaining('cannot read') });
+  });
+});

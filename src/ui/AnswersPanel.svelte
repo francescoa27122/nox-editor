@@ -7,7 +7,7 @@
     type AnswerTarget,
     type SessionStatus,
   } from '@services/agent/runtime';
-  import type { BufferId } from '@services/workspace';
+  import type { BufferId, SelectionRecord } from '@services/workspace';
   import { useApp } from './context';
 
   /**
@@ -61,6 +61,25 @@
     stale: string | null;
     /** The buffer is not open, so there is nothing to reveal. */
     closed: boolean;
+    /** The lines to select on reveal, or null when selecting would mislead. */
+    select: SelectionRecord | null;
+  }
+
+  /**
+   * The lines an answer was about, as document offsets.
+   *
+   * Only ever called for a `current` answer, so the line numbers are known to
+   * address the same text the model saw. Still returns null rather than
+   * clamping if they are somehow out of range: a selection silently snapped to
+   * a different span is the failure this is trying to avoid, not a recovery
+   * from it.
+   */
+  function rangeFor(about: AnswerTarget): SelectionRecord | null {
+    const doc = workspace.stateOf(about.bufferId)?.doc;
+    if (!doc || about.fromLine < 0 || about.toLine >= doc.lines) return null;
+    const from = doc.line(about.fromLine + 1).from;
+    const to = doc.line(about.toLine + 1).to;
+    return { ranges: [[from, to]], main: 0 };
   }
 
   /**
@@ -94,6 +113,12 @@
             ? 'the code has changed since'
             : null,
       closed: freshness === 'gone',
+      // Only a `current` answer selects. Its line numbers were recorded
+      // against text that has since moved in every other case, so selecting
+      // them would highlight code the answer is not about — precisely what
+      // the staleness mark exists to prevent. A changed answer still reveals
+      // the file; the user lands there and reads it themselves.
+      select: freshness === 'current' ? rangeFor(about) : null,
     };
   }
 
@@ -134,10 +159,12 @@
     return 'Failed.';
   }
 
-  function reveal(bufferId: BufferId): void {
+  function reveal(target: Target): void {
     // `setActive`, the method the tab bar and the buffer switcher both use.
     // There is no `activate(id)`.
-    workspace.setActive(bufferId);
+    workspace.setActive(target.bufferId);
+    // `setSelection` scrolls the range into view as well as selecting it.
+    if (target.select) workspace.setSelection(target.bufferId, target.select);
     ui.focusEditor();
   }
 </script>
@@ -158,7 +185,7 @@
           <p class="question">{session.instruction}</p>
           <p class="meta">
             {#if where}
-              <button class="where" disabled={where.closed} onclick={() => reveal(where.bufferId)}>
+              <button class="where" disabled={where.closed} onclick={() => reveal(where)}>
                 {where.label}
               </button>
             {/if}

@@ -700,8 +700,14 @@ export class NoxApp {
     // A question goes where its answer will be. The agents panel is a record
     // of what a session read and ran, and takes over the editor area to show
     // it — the wrong place, and the wrong size, for a paragraph of prose.
-    if (expects === 'prose') this.ui.focusAnswers();
-    else this.ui.showAgents();
+    if (expects === 'prose') {
+      // The sidebar can be hidden, and unlike the edit path prose has no
+      // second surface to land on: the answer would arrive in a panel that is
+      // not on screen and nothing would say so. Same move `search.focus` and
+      // `nav.focusExplorer` make before focusing.
+      this.config.set('workbench.showExplorer', true);
+      this.ui.focusAnswers();
+    } else this.ui.showAgents();
   }
 
   /** The scope the active editor's selection implies, or null. */
@@ -2385,7 +2391,11 @@ export class NoxApp {
         // the sidebar rail must never disagree about whether the section
         // exists.
         enabled: () => this.#runnableAgents().length > 0,
-        run: () => this.ui.focusAnswers(),
+        run: () => {
+          // Otherwise ⌘⇧A is inert whenever the sidebar is hidden.
+          this.config.set('workbench.showExplorer', true);
+          this.ui.focusAnswers();
+        },
       },
 
       // --- Notes ------------------------------------------------------------

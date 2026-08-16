@@ -228,9 +228,14 @@ The answer arrives in one piece (§5), so an entry is *working* until it lands
 and complete immediately afterwards. There is no half-written state to render.
 
 **An entry shows:** the question asked, the file and line range it was about,
-the agent's label, a relative time, and the body. Newest first. A failed
-session shows its failure message in place of a body, so a question you asked
-never silently vanishes — consistent with "None of them report success".
+the agent's label, and the body. Newest first. A failed session shows its
+failure message in place of a body, so a question you asked never silently
+vanishes — consistent with "None of them report success".
+
+**No timestamp.** Order conveys recency for a list this short and this
+short-lived, and a relative time that does not tick is a lie of the same
+family this design refuses everywhere else — making one honest means a timer
+running for a session-scoped list that is already sorted newest-first.
 
 **Rendering is bounded on purpose.** Plain text with line breaks preserved,
 plus runs fenced in triple backticks rendered as monospace blocks. Nothing
@@ -239,8 +244,12 @@ else: no headings, no emphasis, no links, no HTML, and no `innerHTML` anywhere
 other markdown arrives as the characters the model typed. This is a limitation
 (§11) and a deliberate one.
 
-**Clicking an entry** reveals the buffer and selects the lines it was about,
-when that buffer is still open.
+**Clicking an entry** reveals the buffer and selects the lines it was about —
+but only while §8 reads the answer as *current*. Once the code has changed,
+the recorded line numbers address text that has moved, so selecting them would
+highlight code the answer is not about: exactly the failure §8 exists to
+prevent. A changed answer reveals the file without selecting anything, and a
+closed one is not clickable at all.
 
 ## 8. Staleness
 

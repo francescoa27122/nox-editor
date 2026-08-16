@@ -189,8 +189,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which is `"prose"` when Nox wants an answer rather than actions. It is
   optional and every agent written before it behaves exactly as it did. An
   agent that ignores it is not a hazard — its non-prose requests are refused
-  with `invalid-request` — but it may produce a session holding nothing except
-  those refusals, which is a limitation rather than a guarantee to rely on.
+  with `invalid-request`, and each refusal is recorded in the session's trail —
+  but it may produce a session holding nothing except those refusals, which is
+  a limitation rather than a guarantee to rely on.
 - A buffer's revision is published on its snapshot rather than only through
   `revisionOf(id)`. The method answers the same question, but a method call is
   not something a component can subscribe to, so anything that has to notice

@@ -450,7 +450,19 @@ export class AgentRuntime {
           // workspace, so it is published rather than filed as an action.
           // An essay in the trail would bury the reads the trail is for —
           // the same distinction `brief` already makes.
-          if (expects === 'prose' && request.method === 'session.note') {
+          // `typeof` rather than a truthiness check, and the malformed case
+          // falls through rather than being answered here. `parseInbound`
+          // validates only `id` and `method`, so `params.text` can be missing
+          // or any type at all from another process — reading it here, outside
+          // `#handle`'s try/catch, threw a TypeError all the way out through
+          // `StdioTransport.run` and killed the session. The identical message
+          // in a non-prose session gets a clean refusal and the agent carries
+          // on; one mistake should not have two behaviours.
+          if (
+            expects === 'prose' &&
+            request.method === 'session.note' &&
+            typeof request.params?.text === 'string'
+          ) {
             const text = request.params.text;
             answer.update((current) => (current === null ? text : `${current}${text}`));
             this.#publish();
@@ -641,11 +653,15 @@ export class AgentRuntime {
       request.method !== 'session.note' &&
       request.method !== 'session.summary'
     ) {
-      return failure(
-        request.id,
-        'invalid-request',
-        'This session asked for an explanation. Reply in prose; it cannot read, run or propose.',
-      );
+      const message =
+        'This session asked for an explanation. Reply in prose; it cannot read, run or propose.';
+      // Recorded as well as refused, like every other refusal in this method.
+      // Without it a session that ignored `expects` ended holding nothing at
+      // all, so the one thing that could explain the empty answer — that its
+      // requests were turned down, and why — was the one thing not written
+      // down anywhere.
+      record({ kind: 'error', message });
+      return failure(request.id, 'invalid-request', message);
     }
 
     const reader = this.#context.reader(principal);

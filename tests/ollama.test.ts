@@ -5,7 +5,7 @@ import type { Platform } from '../src/platform/types';
 import { OllamaProvider, parseTurn, resolveEdit } from '../src/services/agent/ollama';
 import type { OllamaAgentConfig } from '../src/services/agent/config';
 import type { CoreResponse, RequestBody } from '../src/services/agent/protocol';
-import type { ModelChunk } from '../src/services/agent/provider';
+import type { AnswerExpectation, ModelChunk } from '../src/services/agent/provider';
 import { AgentRuntime, ProviderTransport, type AgentSession } from '../src/services/agent/runtime';
 import { CommandRegistry } from '../src/services/commands';
 import { ContextService } from '../src/services/context';
@@ -994,13 +994,14 @@ async function runSession(
   platform: Platform,
   config: OllamaAgentConfig,
   world?: Awaited<ReturnType<typeof sessionWorld>>,
+  options?: { instruction?: string; expects?: AnswerExpectation },
 ) {
   const { runtime } = world ?? (await sessionWorld());
 
   const session = runtime.start(
     new ProviderTransport(new OllamaProvider(platform, config)),
-    'say hello',
-    { label: config.label },
+    options?.instruction ?? 'say hello',
+    { label: config.label, ...(options?.expects ? { expects: options.expects } : {}) },
   );
 
   // A deadline rather than a fixed number of ticks, for the reason
@@ -1319,5 +1320,34 @@ describe('answering in prose', () => {
     const provider = new OllamaProvider(platform, CONFIG);
 
     expect(await drainProse(provider, 'say nothing')).toEqual([]);
+  });
+
+  /**
+   * The regression test this whole feature exists for, at the level the defect
+   * was measured — a real `OllamaProvider` driving a real `AgentRuntime`,
+   * nothing below the platform substituted.
+   *
+   * On main this ends `failed`: the action loop spends the turn parsing the
+   * prose for JSON, counts it as a non-action, and the second attempt throws,
+   * so the answer is discarded as narration and the user is told the agent
+   * broke. Every other prose test here stops at the provider or starts at a
+   * `ScriptedProvider`; the two halves meet inside `ProviderTransport`, and a
+   * seam neither side covers is exactly where this bug lived.
+   */
+  it('ends done with the answer, not failed, when the model replies in prose', async () => {
+    const answer = 'It adds the two arguments and returns the total.';
+    const { platform } = fakePlatform([answer]);
+
+    const session = await runSession(platform, CONFIG, undefined, {
+      instruction: 'what does this do?',
+      expects: 'prose',
+    });
+
+    expect(session.status.get()).toBe('done');
+    expect(session.answer.get()).toBe(answer);
+    // Asserted rather than assumed: "done with an answer" would still be a
+    // failure of this feature if the trail were full of refusals explaining
+    // that the prose could not be parsed.
+    expect(errorsOf(session)).toBe('');
   });
 });
