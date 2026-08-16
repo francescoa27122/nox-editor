@@ -472,8 +472,12 @@ describe('the order the runtime publishes sessions in', () => {
    * its own, so "newest at the top" is this contract and nothing else —
    * `AgentRuntime.start` prepending to `#live`, and `#publish` mapping in that
    * order. Nothing asserted it, and a walk against a real model found the
-   * panel reversing a list that was already newest-first. This is the fact the
-   * panel now depends on, pinned at the only level this repo can test it.
+   * panel reversing a list that was already newest-first. The runtime
+   * contract is pinned here; the panel's honouring of it is pinned in
+   * `tests/answers-panel.test.ts`. Both are needed because this test passed
+   * throughout the `.reverse()` bug — the runtime was never wrong, the
+   * reversal was in the component, and no test at this level could have seen
+   * it.
    */
   it('hands them over newest-first', async () => {
     const { runtime } = await setup();

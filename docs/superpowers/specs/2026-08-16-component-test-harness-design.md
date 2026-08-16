@@ -269,17 +269,31 @@ Measured, not estimated.
 
 | | |
 |---|---|
-| Baseline | 797 tests, 30 files, 1.04s |
-| jsdom environment setup | ~260–300 ms per file carrying the docblock |
+| Baseline | 797 tests, 30 files, 1.03s |
+| jsdom environment setup | ~460–600 ms per file carrying the docblock |
 | New dependencies | None |
 | Lines of production code changed | One, in `vite.config.ts`, inert outside tests |
 
-The per-file environment cost is the first fixed per-file cost in this suite,
-and it is the one thing here that scales badly: twenty component files would
-cost more in setup than the entire current suite costs in total. So the
-convention is written down now rather than rediscovered at twenty — **component
-suites are grouped by component, not split per behaviour**, and a new one is
-worth a new file only when it tests a different component.
+**The jsdom row above originally said ~260–300 ms, and that figure was wrong.**
+It came from standalone probe runs taken during design — a single jsdom file,
+run in isolation — and did not survive contact with the real suite: the
+in-suite figure is roughly double. The correction is a controlled A/B taken
+once the harness had a finished suite to measure against, not a re-estimate.
+Excluding the one jsdom file (`npx vitest run --exclude
+'tests/answers-panel.test.ts'`) ran 797 tests over 30 files in 1.03s, with
+`environment 2ms`. The full 31-file, 804-test suite ran in 1.64s, 1.67s and
+1.79s across three runs, with `environment` between 457ms and 595ms each time.
+So: one jsdom file costs roughly 460–600 ms of environment setup, and about
++0.65s of wall clock on a suite that otherwise runs in ~1.03s.
+
+The conclusion below does not change — if anything the corrected number argues
+for it harder. The per-file environment cost is the first fixed per-file cost
+in this suite, and it is the one thing here that scales badly: twenty
+component files would cost more in setup than the entire current suite costs
+in total. So the convention is written down now rather than rediscovered at
+twenty — **component suites are grouped by component, not split per
+behaviour**, and a new one is worth a new file only when it tests a different
+component.
 
 ## 9. The policy this changes
 
