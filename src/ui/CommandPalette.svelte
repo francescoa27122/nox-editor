@@ -3,7 +3,7 @@
   import { basename, dirname, relative } from '@core/path';
   import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
   import { fileSymbols, type SymbolKind } from '@core/symbols';
-  import { hasGrammar } from '@editor/languages';
+  import { cachedLanguage, hasGrammar } from '@editor/languages';
   import type { Command } from '@services/commands';
   import { formatChord, normalizeChord } from '@services/keymap';
   import type { OverlayKind } from '@services/ui';
@@ -348,6 +348,26 @@
     if (!view) return hintRow('No file is open', 'Open a file to list its symbols');
 
     const buffer = workspace.active();
+
+    // Two ways a language can fail to produce a tree yet, checked before any
+    // parse is attempted so neither can be shadowed by the parse-budget
+    // branch below: no grammar exists for this language at all, or a grammar
+    // exists but hasn't loaded — `EditorPane` attaches it through a dynamic
+    // import that resolves after the buffer is already showing (the same
+    // `hasGrammar(id) && !cachedLanguage(id)` pairing guards the reconfigure
+    // at EditorPane.svelte:150), so for a moment there is a language id and
+    // no parser. Neither is "no symbols found": the first can't have any,
+    // the second hasn't looked yet.
+    if (buffer && !hasGrammar(buffer.language.id)) {
+      return hintRow(
+        `Nox has no parser for ${buffer.language.name}`,
+        'Symbols come from the grammar, the same one syntax highlighting uses',
+      );
+    }
+    if (buffer && !cachedLanguage(buffer.language.id)) {
+      return hintRow('Loading the grammar for this file', 'Reopen this list once it is ready');
+    }
+
     // `syntaxTree` returns only what has been parsed so far, so on a large
     // file a plain read silently stops partway and the list *looks* complete.
     // `ensureSyntaxTree` forces the rest with a deadline and returns null when
@@ -357,16 +377,6 @@
     const symbols = fileSymbols(tree ?? syntaxTree(view.state), view.state.doc);
 
     if (symbols.length === 0) {
-      // Three different empty states, because they call for different
-      // messages: no grammar at all, nothing found in a *complete* parse, and
-      // nothing found yet in a parse that hasn't finished. The last one must
-      // not claim the file has no symbols — it doesn't know that yet.
-      if (buffer && !hasGrammar(buffer.language.id)) {
-        return hintRow(
-          `Nox has no parser for ${buffer.language.name}`,
-          'Symbols come from the grammar, the same one syntax highlighting uses',
-        );
-      }
       return partial
         ? hintRow('Still parsing this file', 'More symbols may appear')
         : hintRow('No functions or classes in this file', 'Only structure is listed, not variables');
