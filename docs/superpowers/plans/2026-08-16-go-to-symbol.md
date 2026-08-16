@@ -68,13 +68,14 @@ import { parser as jsParser } from '@lezer/javascript';
 import { parser as pythonParser } from '@lezer/python';
 import { parser as rustParser } from '@lezer/rust';
 import { Text } from '@codemirror/state';
+import type { Tree } from '@lezer/common';
 import { describe, expect, it } from 'vitest';
 import { fileSymbols } from '../src/core/symbols';
 
 const ts = jsParser.configure({ dialect: 'ts' });
 
 /** Parse with `parser` and return the symbols as "qualified:kind" strings. */
-function scan(parser: { parse: (input: string) => never }, source: string): string[] {
+function scan(parser: { parse(input: string): Tree }, source: string): string[] {
   const doc = Text.of(source.split('\n'));
   return fileSymbols(parser.parse(source), doc).map((s) => `${s.qualified}:${s.kind}`);
 }
@@ -446,9 +447,11 @@ Beside `lineRows` in the same component:
     if (symbols.length === 0) {
       // Two different empty states, because they call for different actions:
       // nothing to find, versus nothing that *can* be found here.
-      const language = buffer ? languageById(buffer.languageId).name : null;
-      return language && !PARSED_LANGUAGES.has(buffer!.languageId)
-        ? hintRow(`Nox has no parser for ${language}`, 'Symbols need a grammar; syntax highlighting does too')
+      return buffer && !hasGrammar(buffer.language.id)
+        ? hintRow(
+            `Nox has no parser for ${buffer.language.name}`,
+            'Symbols come from the grammar, the same one syntax highlighting uses',
+          )
         : hintRow('No functions or classes in this file', 'Only structure is listed, not variables');
     }
 
@@ -470,27 +473,16 @@ Beside `lineRows` in the same component:
   }
 ```
 
-`fuzzyFilter` and `languageById` need importing if the component does not already have them:
+Imports the component may not already have:
 
 ```ts
   import { fuzzyFilter } from '@core/fuzzy';
-  import { languageById } from '@core/languages';
+  import { hasGrammar } from '@editor/languages';
 ```
 
-`PARSED_LANGUAGES` is the set of ids a grammar ships for. Define it beside `KIND_LABEL`, from the list in `ARCHITECTURE.md` §4:
+**Do not build a list of parsed languages.** `hasGrammar(languageId)` already answers this, backed by the `LOADERS` table the editor loads grammars from, and `StatusBar.svelte:143` already uses it to grey a language name that has no parser. A second list here would be a copy that drifts the first time a grammar is added.
 
-```ts
-  /**
-   * The language ids a parser ships for. `core/languages.ts` registers 25
-   * languages for detection and the status bar; only these nine families are
-   * parsed, which is why the others get a different empty state rather than a
-   * misleading "no symbols".
-   */
-  const PARSED_LANGUAGES = new Set([
-    'typescript', 'tsx', 'javascript', 'jsx', 'json',
-    'html', 'css', 'scss', 'markdown', 'python', 'rust',
-  ]);
-```
+`workspace.active()` returns a `Buffer`, whose language is a `LanguageInfo` object — so it is `buffer.language.id` and `buffer.language.name`, **not** `buffer.languageId`. (`languageId` and `languageName` are flat fields on `BufferSnapshot`, which is a different type and not what `active()` hands back.)
 
 - [ ] **Step 3: Add the prefix hint**
 
