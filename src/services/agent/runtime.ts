@@ -45,6 +45,16 @@ const SELECTION_MAX_LINES = 200;
 const SELECTION_MAX_CHARS = 8_000;
 
 /**
+ * The instruction **Explain Selection** sends.
+ *
+ * Here rather than in `app.ts` so a test can assert the string that actually
+ * ships without importing the whole application, and so the wording lives in
+ * one place rather than inside a command literal.
+ */
+export const EXPLAIN_INSTRUCTION =
+  'Explain what this code does, and anything surprising about how it does it.';
+
+/**
  * Clip selected text to the cap, saying so when it clips.
  *
  * The marker is not decoration. A model handed a fragment with no sign that

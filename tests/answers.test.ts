@@ -5,6 +5,7 @@ import {
   ProviderTransport,
   AgentRuntime,
   answerFreshness,
+  EXPLAIN_INSTRUCTION,
   type AgentSession,
 } from '../src/services/agent/runtime';
 import { ScriptedProvider, type ModelRequest } from '../src/services/agent/provider';
@@ -331,5 +332,16 @@ describe('whether an answer still describes the code', () => {
    */
   it('is gone when the buffer is closed', () => {
     expect(answerFreshness(about, -1)).toBe('gone');
+  });
+});
+
+describe('the built-in explain instruction', () => {
+  /**
+   * The failure this prevents: a preset that ships as an empty string or a
+   * placeholder, which a local model answers with something unrelated.
+   */
+  it('asks a real question', () => {
+    expect(EXPLAIN_INSTRUCTION.trim().length).toBeGreaterThan(20);
+    expect(EXPLAIN_INSTRUCTION).toMatch(/explain/i);
   });
 });
