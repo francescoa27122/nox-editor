@@ -9,7 +9,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorState, Text } from '@codemirror/state';
 import type { Tree } from '@lezer/common';
 import { describe, expect, it } from 'vitest';
-import { fileSymbols, symbolListState, type SymbolListFacts } from '../src/core/symbols';
+import { createSymbolCache, fileSymbols, symbolListState, type SymbolListFacts } from '../src/core/symbols';
 
 const ts = jsParser.configure({ dialect: 'ts' });
 
@@ -454,5 +454,63 @@ describe('the parse budget for large files', () => {
     expect(ensureSyntaxTree(state, state.doc.length, PARSE_BUDGET_MS)).toBeNull();
     // And what the palette falls back to is still a usable partial tree.
     expect(syntaxTree(state).length).toBeLessThan(state.doc.length);
+  });
+});
+
+describe('re-walking the same tree', () => {
+  /**
+   * `symbolRows` recomputes on every keystroke in the palette, but the tree
+   * only changes when the document does. The parse behind it amortises — each
+   * `ensureSyntaxTree` call resumes the cached `ParseContext` — while the walk
+   * does not, so on a large file the walk becomes the cost that stays.
+   *
+   * Identity rather than timing: a wall-clock assertion here would be the same
+   * bet the budget test had to be rewritten to stop making.
+   */
+  it('hands back the same result for the same tree and document', () => {
+    const source = 'class Foo {\n  bar() {}\n}\n';
+    const doc = Text.of(source.split('\n'));
+    const tree = ts.parse(source);
+    const symbolsFor = createSymbolCache();
+
+    const first = symbolsFor(tree, doc);
+    const second = symbolsFor(tree, doc);
+
+    expect(second).toBe(first);
+    expect(first.map((s) => s.qualified)).toEqual(['Foo', 'Foo.bar']);
+  });
+
+  /**
+   * The failure this prevents: a cache that never invalidates, so the list
+   * keeps describing the file you were looking at before.
+   */
+  it('recomputes when the tree changes', () => {
+    const symbolsFor = createSymbolCache();
+    const one = 'function a() {}\n';
+    const two = 'function b() {}\n';
+
+    const first = symbolsFor(ts.parse(one), Text.of(one.split('\n')));
+    const second = symbolsFor(ts.parse(two), Text.of(two.split('\n')));
+
+    expect(second).not.toBe(first);
+    expect(second.map((s) => s.name)).toEqual(['b']);
+  });
+
+  /**
+   * The failure this prevents: two buffers alternating through one cache and
+   * each getting the other's symbols. A single slot is enough for the palette,
+   * which only ever asks about the active file, but it has to miss rather than
+   * hand back the wrong file's list.
+   */
+  it('misses rather than answering for a different document', () => {
+    const symbolsFor = createSymbolCache();
+    const a = 'function a() {}\n';
+    const b = 'function b() {}\n';
+    const treeA = ts.parse(a);
+    const docA = Text.of(a.split('\n'));
+
+    expect(symbolsFor(treeA, docA).map((s) => s.name)).toEqual(['a']);
+    expect(symbolsFor(ts.parse(b), Text.of(b.split('\n'))).map((s) => s.name)).toEqual(['b']);
+    expect(symbolsFor(treeA, docA).map((s) => s.name)).toEqual(['a']);
   });
 });
