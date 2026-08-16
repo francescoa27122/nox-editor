@@ -74,16 +74,29 @@ constants would bury its own functions, and fuzzy matching stops
 discriminating once everything is in the list.
 
 The node names below were read out of the installed parsers
-(`parser.nodeSet.types`), not guessed:
+(`parser.nodeSet.types`), not guessed — except for three that were, and are
+corrected under the table:
 
 | Grammar | Nodes collected | Name taken from |
 |---|---|---|
-| JS / TS / JSX / TSX | `FunctionDeclaration`, `ClassDeclaration`, `MethodDeclaration`, `InterfaceDeclaration`, `TypeAliasDeclaration`, `EnumDeclaration`, `NamespaceDeclaration` | `VariableDefinition`, `PropertyName` or `TypeDefinition` child |
+| JS / TS / JSX / TSX | `FunctionDeclaration`, `ClassDeclaration`, `MethodDeclaration`, `InterfaceDeclaration`, `TypeAliasDeclaration`, `EnumDeclaration`, `NamespaceDeclaration` | `VariableDefinition`, `PropertyDefinition`, `PrivatePropertyDefinition` or `TypeDefinition` child |
 | Python | `FunctionDefinition`, `ClassDefinition` | the name child |
 | Rust | `FunctionItem`, `ModItem` | `BoundIdentifier` |
-| Rust | `StructItem`, `EnumItem`, `TraitItem`, `ImplItem`, `TypeItem` | `TypeIdentifier` |
+| Rust | `StructItem`, `EnumItem`, `TraitItem`, `TypeItem` | `TypeIdentifier` |
+| Rust | `ImplItem` | the type before the block, through any wrapper |
 | CSS / SCSS | `RuleSet` | the text from the node's start to its `Block` child |
-| Markdown | `ATXHeading1`–`6`, `SetextHeading1`–`2` | the heading's text |
+| Markdown | `ATXHeading1`–`6`, `SetextHeading1`–`2` | the heading's text, up to its closing or underlining `HeaderMark` |
+
+**Three rows above are corrections, and the "read out of the installed
+parsers" above them was not true when it was written.** `PropertyName` is what
+the JavaScript grammar produces for `a.b`; it never names a method, and the
+`PrivatePropertyDefinition` that names `#foo() {}` was missing, so every
+private method in a file was dropped. `ImplItem` cannot be read as a
+`TypeIdentifier` child: in `impl Foo<T>` a `GenericType` wraps the type, and in
+`impl<T> Display for Inner<T>` the only direct one is the trait. A
+`SetextHeading` node spans its `=====` underline as well as its text, so the
+title has to stop at the mark. Each was found by dumping a parse of the
+construct, which is what the sentence above claimed had already happened.
 
 **JSON and HTML collect nothing.** JSON has no declarations. HTML's only
 structural node is `Element`, so its outline would be every `<div>` in the
@@ -188,14 +201,30 @@ S and Z), and a single-modifier chord suits something reached as often as
 quick-open.
 
 **The empty case is a hint row, not an empty list**, following `lineRows`.
-Three different states, three different sentences, because they call for
-different actions:
+One sentence per state, because they call for different actions:
 
 | State | The row says |
 |---|---|
 | Parser ships, file has no symbols | No functions or classes in this file |
 | No parser for this language | Nox has no parser for *Ruby* |
+| A parser ships but has not loaded yet | Loading the grammar for this file |
+| The parse budget ran out before anything was found | Still parsing this file |
 | No file open | Open a file to list its symbols |
+
+**This section specified three of those and implementation found two more**,
+both by opening a file in the running app rather than by any test. §9's budget
+produces the fourth; the third is the window in which `EditorPane`'s dynamic
+import has not resolved, so there is a language id and no parser, and the list
+was saying a file had nothing in it before anything had read it.
+
+The first four are decided by `symbolListState` in `core/symbols.ts`, from
+whether a grammar exists, whether it has loaded, whether the forced parse came
+back and how many symbols were found — in that order, since a document with no
+parser attached also comes back with no symbols. The fifth is settled before
+there is anything to parse, so the palette answers it where it looks for the
+editor. The decision was inline in the component until every state existed and
+none was tested; §10 required the test, and a component this repo has no
+harness for could not carry one.
 
 ## 8. Where the code lives
 
@@ -236,14 +265,18 @@ implementation, against a real large file, not a number to guess here.
   tree. This is §5's whole argument, and it would regress silently under a
   per-language table — HTML's own rules collect nothing, so the file would
   come back empty.
-- The three empty states in §7 produce the three different sentences.
+- Each state in §7 that `symbolListState` decides, and the order it decides
+  them in: with the parse facts read first, every grammar state comes out as
+  "no functions or classes in this file".
 - `@` switches mode from within an open palette, and `>`, `~`, `:` still do
   what they did.
 
 The palette component itself has no automated coverage — this repo has no
 Svelte component harness, which is the piece of work queued directly behind
 this one. Until it exists, the mode's wiring is checked in the browser target
-against the demo project.
+against the demo project. That is why the empty-state decision is a pure
+function in `core/` and not a chain of `if`s in the component: it is the only
+way this list of tests can include it.
 
 ## 11. Files
 

@@ -505,15 +505,22 @@ one name for two different things would have to agree; none of the five that
 contribute rules does, and this is a single file to change if that ever stops
 being true.
 
-Every name in the table was read out of `parser.nodeSet.types` and checked
-against a real parse rather than recalled, and that is not fussiness for its
-own sake: `MethodDeclaration`
-takes its name from a `PropertyDefinition` or `PropertyName` child, Rust names
-functions with `BoundIdentifier` and types with `TypeIdentifier`, and an
-`ImplItem` for `impl Display for Foo` has *two* `TypeIdentifier` children where
-only the second is what the block's methods belong to. Guessing any of those
-produces a list that is wrong rather than empty, which is the more expensive
-kind of wrong.
+**Every name in the table is read off a parse of the construct it claims to
+match**, and this paragraph claimed that before it was true. It said a
+`MethodDeclaration` takes its name from a `PropertyDefinition` or
+`PropertyName` child. `PropertyName` is what the JavaScript grammar produces
+for the `b` in `a.b`, and never appears under a method; `#foo() {}` is named by
+a `PrivatePropertyDefinition`, which was in neither the table nor this page. So
+every private method in a file was dropped without a trace — 26 of `app.ts`'s
+own 63 — and the tests agreed, because they were written from the same table.
+Rust's `ImplItem` was read the same way, by taking the last direct
+`TypeIdentifier` child: that is the target type in `impl Display for Foo`, but
+in `impl Foo<T>` a `GenericType` wraps the type so there is no such child at
+all, and in `impl<T> Display for Inner<T>` the only one left is the *trait*.
+The impl's target is now taken by position — the type before the block —
+because position is what the grammar keeps stable across all four shapes.
+Guessing produces a list that is wrong rather than empty, which is the more
+expensive kind of wrong.
 
 **Markdown headings come out flat and need no exception to.** They nest by
 level, not by containment: an ATX or Setext heading node spans only its own
@@ -565,8 +572,19 @@ said "No functions or classes in this file" about a file nothing had read yet.
 No unit test could reach that window: they hand `fileSymbols` a parser
 directly, or build an `EditorState` with the language already attached, and
 neither goes near the dynamic import. It was found by opening a file in the
-running app and pressing ⌘R before the import landed, which is the argument for
-walking a feature rather than trusting a green suite.
+running app and pressing ⌘R before the import landed.
+
+**Which of those four it is gets decided in `core/`, not in the component.**
+`symbolListState` takes the four facts they are told apart by — a grammar
+exists, it has loaded, the forced parse came back, how many symbols were found
+— and names the state, the fifth being an ordinary list of symbols, partial or
+not; `symbolRows` maps that to a sentence and does nothing else. The
+order is the substance of the function, because a document with no parser
+attached also comes back with no symbols: read after the parse facts, every
+grammar state shows up as "no functions or classes in this file", which is the
+bug above. That is testable and now tested, which it was not while it lived in
+a Svelte file this repo has no harness for. "No file is open" is the exception
+and stays in the component, settled before there is anything to parse.
 
 ### The session save latch
 
