@@ -424,8 +424,16 @@ describe('the parse budget for large files', () => {
    * quicker than this one would have flipped the assertion.
    *
    * Sizing it here needs only enough margin to cover measurement noise and a
-   * warmer JIT on the second parse, so the multiplier is small and the
-   * document stays a tenth of the size.
+   * warmer JIT on the second parse, so the multiplier is 10 and the only
+   * thing left to bet on is that the second parse is not ten times faster
+   * than the first — which no machine speed can change, since both parses run
+   * on the same machine.
+   *
+   * The document that comes out is not smaller than the fixed one it
+   * replaces. It tracks whatever machine is running the test, and on this one
+   * three runs measured 2.06, 2.39 and 2.64 MB against the old 858 KB. Size
+   * was never the property worth having; a margin derived rather than assumed
+   * is.
    */
   it('ensureSyntaxTree gives up within the palette budget on a document too large to finish', () => {
     const MARGIN = 10;
