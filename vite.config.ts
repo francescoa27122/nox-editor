@@ -7,10 +7,17 @@ const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 export default defineConfig({
   plugins: [svelte()],
   resolve: {
-    // Svelte publishes a server build, and the default conditions resolve to
-    // it — under which `mount()` throws `lifecycle_function_unavailable`.
-    // Gated on VITEST so the app's own build resolves exactly as it did.
-    conditions: process.env.VITEST ? ['browser'] : [],
+    // Svelte publishes a server build, and under a test run the default
+    // conditions resolve to it — `mount()` then throws
+    // `lifecycle_function_unavailable`.
+    //
+    // Spread rather than `conditions: process.env.VITEST ? [...] : []`, which
+    // is what shipped and broke `npm run dev`. An empty array does not mean
+    // "leave the defaults alone" — it *replaces* them, and Vite's defaults are
+    // where `browser` comes from. So outside vitest the dev server resolved
+    // svelte to its server build and the app failed to start with the very
+    // error this line exists to prevent. The key has to be absent, not empty.
+    ...(process.env.VITEST ? { conditions: ['browser'] } : {}),
     alias: {
       '@core': r('./src/core'),
       '@platform': r('./src/platform'),
