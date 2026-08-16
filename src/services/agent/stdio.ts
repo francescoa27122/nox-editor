@@ -100,7 +100,12 @@ export class StdioTransport implements AgentTransport {
     run.signal.addEventListener('abort', stop);
 
     try {
-      await this.#write({ type: 'run', instruction: run.instruction, context: run.context });
+      await this.#write({
+        type: 'run',
+        instruction: run.instruction,
+        context: run.context,
+        ...(run.expects ? { expects: run.expects } : {}),
+      });
 
       while (!run.signal.aborted) {
         const line = await this.#nextLine();

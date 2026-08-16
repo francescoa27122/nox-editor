@@ -19,7 +19,7 @@ export type OverlayKind =
   | 'keybindings';
 
 /** Which panel the sidebar is showing. */
-export type SidebarView = 'explorer' | 'search' | 'notes';
+export type SidebarView = 'explorer' | 'search' | 'notes' | 'answers';
 
 export interface PromptRequest {
   title: string;
@@ -41,7 +41,15 @@ export interface ConfirmRequest {
   resolve: (choiceId: string | null) => void;
 }
 
-export type FocusZone = 'editor' | 'explorer' | 'search' | 'find' | 'overlay' | 'terminal' | 'notes';
+export type FocusZone =
+  | 'editor'
+  | 'explorer'
+  | 'search'
+  | 'find'
+  | 'overlay'
+  | 'terminal'
+  | 'notes'
+  | 'answers';
 
 export class UIService {
   readonly overlay = new Signal<OverlayKind | null>(null);
@@ -102,6 +110,8 @@ export class UIService {
   readonly focusExplorerRequest = new Signal(0);
   /** Bumped to ask the notes panel to put the cursor in the note body. */
   readonly focusNotesRequest = new Signal(0);
+  /** Bumped to ask the answers panel to take focus. */
+  readonly focusAnswersRequest = new Signal(0);
 
   openOverlay(kind: OverlayKind): void {
     this.overlay.set(kind);
@@ -170,6 +180,7 @@ export class UIService {
     // straight back to the explorer — invisible while there were only two.
     if (view === 'search') this.focusSearch();
     else if (view === 'notes') this.focusNotes();
+    else if (view === 'answers') this.focusAnswers();
     else if (view === 'explorer') this.focusExplorer();
     else this.sidebarView.set(view);
   }
@@ -190,6 +201,24 @@ export class UIService {
     this.sidebarView.set('notes');
     this.focusZone.set('notes');
     this.focusNotesRequest.update((n) => n + 1);
+  }
+
+  focusAnswers(): void {
+    this.sidebarView.set('answers');
+    this.focusZone.set('answers');
+    this.focusAnswersRequest.update((n) => n + 1);
+  }
+
+  /**
+   * Stop showing a view that is no longer available.
+   *
+   * The answers section exists only while an agent does, and agents.json can
+   * be edited or reloaded at any time. Falling back to the explorer is the
+   * same healing the editor groups do when a pane empties: a layout with a
+   * hole where something used to be is worse than one that closes up.
+   */
+  dropView(view: SidebarView): void {
+    if (this.sidebarView.get() === view) this.focusExplorer();
   }
 
   /** True when something is showing that Escape should dismiss. */

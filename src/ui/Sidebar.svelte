@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { runnableAgents } from '@services/agent/config';
   import type { SidebarView } from '@services/ui';
   import { useApp } from './context';
   import ExplorerPanel from './ExplorerPanel.svelte';
   import SearchPanel from './SearchPanel.svelte';
   import NotesPanel from './NotesPanel.svelte';
+  import AnswersPanel from './AnswersPanel.svelte';
   import Icon, { type IconName } from './Icon.svelte';
 
   /**
@@ -16,19 +18,40 @@
    */
 
   const app = useApp();
-  const { ui, keymap } = app;
+  const { ui, keymap, agentConfig, agents } = app;
   const view = ui.sidebarView;
+  const configured = agentConfig.agents;
+  const providers = agents.providers;
 
   const VIEWS: { id: SidebarView; icon: IconName; label: string; command: string }[] = [
     { id: 'explorer', icon: 'sidebar', label: 'Explorer', command: 'nav.focusExplorer' },
     { id: 'search', icon: 'search', label: 'Search', command: 'search.focus' },
     { id: 'notes', icon: 'note', label: 'Notes', command: 'notes.focus' },
+    { id: 'answers', icon: 'info', label: 'Answers', command: 'answers.focus' },
   ];
+
+  // The same policy `AgentPanel.svelte` and `NoxApp.#runnableAgents()` use, so
+  // the rail and the command that focuses it can never disagree about whether
+  // the section exists at all.
+  const available = $derived(
+    runnableAgents($configured, {
+      canSpawn: app.platform.capabilities.agentProcesses,
+      providerIds: new Set($providers.map((provider) => provider.id)),
+    }).length > 0,
+  );
+
+  const views = $derived(available ? VIEWS : VIEWS.filter((entry) => entry.id !== 'answers'));
+
+  // The section exists only while an agent does. Without this, removing the
+  // last agent leaves the panel showing with no button in the rail for it.
+  $effect(() => {
+    if (!available) ui.dropView('answers');
+  });
 </script>
 
 <aside class="nox-sidebar" aria-label="Sidebar">
   <nav class="rail" aria-label="Sidebar views">
-    {#each VIEWS as entry (entry.id)}
+    {#each views as entry (entry.id)}
       {@const hint = keymap.displayFor(entry.command)}
       <button
         class="rail-button"
@@ -47,6 +70,11 @@
     <SearchPanel />
   {:else if $view === 'notes'}
     <NotesPanel />
+    <!-- Guarded on `available` as well as the view, so an answers view that
+         outlives its last agent by a frame falls through to the explorer
+         below rather than rendering nothing at all. -->
+  {:else if $view === 'answers' && available}
+    <AnswersPanel />
   {:else}
     <ExplorerPanel />
   {/if}

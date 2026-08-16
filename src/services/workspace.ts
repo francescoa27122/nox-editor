@@ -112,6 +112,16 @@ export interface BufferSnapshot {
   eol: Eol;
   encoding: Encoding;
   externalState: ExternalState;
+  /**
+   * `Buffer.revision`, published so it can be *subscribed to*.
+   *
+   * `revisionOf(id)` answers the same question, but it is a method: a
+   * component cannot depend on a method call, so a panel comparing revisions
+   * to decide whether an answer still describes the code could not see the
+   * edit that invalidated it. This list is already republished on every
+   * document change, which is exactly the cadence that question needs.
+   */
+  revision: number;
 }
 
 class Buffer {
@@ -187,6 +197,7 @@ class Buffer {
       eol: this.eol,
       encoding: this.encoding,
       externalState: this.externalState,
+      revision: this.revision,
     };
   }
 }

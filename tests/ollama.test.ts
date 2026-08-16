@@ -5,7 +5,7 @@ import type { Platform } from '../src/platform/types';
 import { OllamaProvider, parseTurn, resolveEdit } from '../src/services/agent/ollama';
 import type { OllamaAgentConfig } from '../src/services/agent/config';
 import type { CoreResponse, RequestBody } from '../src/services/agent/protocol';
-import type { ModelChunk } from '../src/services/agent/provider';
+import type { AnswerExpectation, ModelChunk } from '../src/services/agent/provider';
 import { AgentRuntime, ProviderTransport, type AgentSession } from '../src/services/agent/runtime';
 import { CommandRegistry } from '../src/services/commands';
 import { ContextService } from '../src/services/context';
@@ -994,13 +994,14 @@ async function runSession(
   platform: Platform,
   config: OllamaAgentConfig,
   world?: Awaited<ReturnType<typeof sessionWorld>>,
+  options?: { instruction?: string; expects?: AnswerExpectation },
 ) {
   const { runtime } = world ?? (await sessionWorld());
 
   const session = runtime.start(
     new ProviderTransport(new OllamaProvider(platform, config)),
-    'say hello',
-    { label: config.label },
+    options?.instruction ?? 'say hello',
+    { label: config.label, ...(options?.expects ? { expects: options.expects } : {}) },
   );
 
   // A deadline rather than a fixed number of ticks, for the reason
@@ -1247,5 +1248,124 @@ describe('a session that ended for a reason of its own', () => {
     expect(errorsOf(session)).toMatch(/text not found in the buffer/);
     // The quote itself, so the user can see the literal `\n` the model wrote.
     expect(errorsOf(session)).toMatch(/export function add/);
+  });
+});
+
+describe('answering in prose', () => {
+  /** Drive a prose stream to completion. */
+  async function drainProse(provider: OllamaProvider, instruction: string) {
+    const chunks: ModelChunk[] = [];
+    const stream = provider.complete({ instruction, context: '', expects: 'prose' });
+    for (let step = await stream.next(); !step.done; step = await stream.next(undefined)) {
+      chunks.push(step.value);
+    }
+    return chunks;
+  }
+
+  /**
+   * The failure this prevents — and the reason this feature exists. On main,
+   * a prose reply is swallowed into the action loop: the turn is spent parsing
+   * it, it fails as a non-action, the narration is kept but the real answer is
+   * discarded, and a spurious session.summary gets generated instead. This path
+   * bypasses all that, taking the prose as the answer on the first turn. See
+   * `tests/ollama.test.ts:1202` for the test that covers the two-turn throw when
+   * the model genuinely cannot produce the format.
+   */
+  it('takes a prose reply as the answer rather than as a failed turn', async () => {
+    const { platform, bodies } = fakePlatform(['It adds two numbers and returns the sum.']);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const chunks = await drainProse(provider, 'what does this do?');
+
+    expect(chunks).toEqual([{ type: 'text', text: 'It adds two numbers and returns the sum.' }]);
+    expect(bodies).toHaveLength(1);
+  });
+
+  /**
+   * The failure this prevents: a prose answer being parsed for actions,
+   * which would let an explanation that happens to contain a JSON example
+   * turn into a request Nox acts on.
+   */
+  it('never yields an action, even when the prose contains one', async () => {
+    const prose = 'You could call it like this:\n{"method":"context.openBuffers"}\nand that lists the buffers.';
+    const { platform } = fakePlatform([prose]);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const chunks = await drainProse(provider, 'how do I list buffers?');
+
+    expect(chunks).toEqual([{ type: 'text', text: prose }]);
+  });
+
+  /**
+   * The failure this prevents: a fenced code block being stripped out of an
+   * explanation by machinery that exists to find JSON actions. An
+   * explanation of code is the prose most likely to contain a fence.
+   */
+  it('leaves fenced code in the answer untouched', async () => {
+    const answer = 'Like so:\n```js\nconst x = 1;\n```\nThat is all.';
+    const { platform } = fakePlatform([answer]);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const chunks = await drainProse(provider, 'show me');
+
+    expect(chunks).toEqual([{ type: 'text', text: answer }]);
+  });
+
+  /**
+   * The failure this prevents: an empty reply becoming an empty answer card
+   * that looks like a rendering bug rather than a model that said nothing.
+   */
+  it('yields nothing at all when the model returns only whitespace', async () => {
+    const { platform } = fakePlatform(['   \n  ']);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    expect(await drainProse(provider, 'say nothing')).toEqual([]);
+  });
+
+  /**
+   * The regression test this whole feature exists for, at the level the defect
+   * was measured — a real `OllamaProvider` driving a real `AgentRuntime`,
+   * nothing below the platform substituted. Every other prose test here stops
+   * at the provider or starts at a `ScriptedProvider`; the two halves meet
+   * inside `ProviderTransport`, and a seam neither side covers is exactly
+   * where this bug lived.
+   *
+   * On main this ends `failed`. The action loop spends the first turn parsing
+   * the prose for JSON and counts it as a non-action; the second turn does the
+   * same, and two consecutive actionless turns throw. The answer is discarded
+   * as narration and the user is told the agent broke.
+   *
+   * **The fixture scripts the answer twice on purpose.** With a single entry
+   * `fakePlatform` answers turn 2 from its fallback — a valid
+   * `session.summary` action — which resets the failure count and lets main
+   * finish cleanly at `done`. Measured, not assumed: one reply ends `done` on
+   * main and this test would then fail there only on `session.answer` being
+   * undefined, which is a field that does not exist on main rather than the
+   * defect. Two replies end `failed`, which is the claim the spec makes about
+   * this test. That fixture has now made three separate tests look like they
+   * proved something they did not.
+   *
+   * On this branch the second entry is never read: the prose branch takes one
+   * round trip and stops, which the `bodies` assertion below pins.
+   */
+  it('ends done with the answer, not failed, when the model replies in prose', async () => {
+    const answer = 'It adds the two arguments and returns the total.';
+    const { platform, bodies } = fakePlatform([answer, answer]);
+
+    const session = await runSession(platform, CONFIG, undefined, {
+      instruction: 'what does this do?',
+      expects: 'prose',
+    });
+
+    expect(session.status.get()).toBe('done');
+    expect(session.answer.get()).toBe(answer);
+    // One round trip, so the second scripted reply is never consumed. This is
+    // what makes the second fixture entry's purpose legible: it exists for the
+    // main-branch run, not for this one.
+    expect(bodies).toHaveLength(1);
+    // Asserted rather than assumed: "done with an answer" would still be a
+    // failure of this feature if the trail were full of refusals explaining
+    // that the prose could not be parsed.
+    expect(errorsOf(session)).toBe('');
   });
 });

@@ -47,8 +47,13 @@ import {
 } from '@services/agent/config';
 import { OllamaProvider } from '@services/agent/ollama';
 import type { AgentTransport } from '@services/agent/protocol';
-import type { ModelProvider } from '@services/agent/provider';
-import { AgentRuntime, ProviderTransport, scopeFromSelection } from '@services/agent/runtime';
+import type { AnswerExpectation, ModelProvider } from '@services/agent/provider';
+import {
+  AgentRuntime,
+  EXPLAIN_INSTRUCTION,
+  ProviderTransport,
+  scopeFromSelection,
+} from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
 import { FileTreeService } from '@services/filetree';
@@ -571,6 +576,46 @@ export class NoxApp {
     await this.#startAgentSession(chosen, instruction, scope);
   }
 
+  /**
+   * Ask a model about the selected text, in prose.
+   *
+   * The mirror of `runAgentOnSelection`, and deliberately the same shape: the
+   * scope is captured before anything is typed, so it describes where the
+   * user was looking rather than where they ended up. Here it records what
+   * the answer is *about* rather than defaulting a hunk — a prose session
+   * produces none.
+   *
+   * `instruction` is supplied by **Explain Selection**, which skips the
+   * dialog; **Ask About Selection…** leaves it undefined and asks.
+   */
+  async askAboutSelection(instruction?: string): Promise<void> {
+    const scope = this.#selectionScope();
+    if (!scope) {
+      this.notifications.info(
+        'Nothing is selected',
+        'Select the code you want explained, then run this again.',
+      );
+      return;
+    }
+
+    const chosen = await this.#chooseAgent();
+    if (!chosen) return;
+
+    const question =
+      instruction ??
+      (await this.ui.askForText({
+        title: `Ask ${chosen.label} about the selection`,
+        label: 'What do you want to know?',
+        initialValue: '',
+        placeholder: 'What does this actually do when the list is empty?',
+        confirmLabel: 'Ask',
+        validate: (value) => (value.trim().length === 0 ? 'Say what you want to know' : null),
+      }));
+    if (!question) return;
+
+    await this.#startAgentSession(chosen, question, scope, 'prose');
+  }
+
   /** Pick a runnable agent, or explain why there is none. */
   async #chooseAgent(agentId?: string): Promise<AgentConfig | undefined> {
     const configured = this.agentConfig.agents.get();
@@ -604,13 +649,15 @@ export class NoxApp {
   /**
    * Start a session against a chosen record.
    *
-   * Shared by both agent commands so a fix to one cannot miss the other —
-   * the reload guard below was written once and is load-bearing for both.
+   * Shared by every agent command so a fix to one cannot miss the others —
+   * the reload guard below was written once and is load-bearing for all of
+   * them.
    */
   async #startAgentSession(
     chosen: AgentConfig,
     instruction: string,
     scope?: ReviewScope,
+    expects?: AnswerExpectation,
   ): Promise<void> {
     let transport: AgentTransport;
     // Defaults to the record picked from the list; the ollama branch below
@@ -648,8 +695,19 @@ export class NoxApp {
     this.agents.start(transport, instruction.trim(), {
       label,
       ...(scope ? { scope } : {}),
+      ...(expects ? { expects } : {}),
     });
-    this.ui.showAgents();
+    // A question goes where its answer will be. The agents panel is a record
+    // of what a session read and ran, and takes over the editor area to show
+    // it — the wrong place, and the wrong size, for a paragraph of prose.
+    if (expects === 'prose') {
+      // The sidebar can be hidden, and unlike the edit path prose has no
+      // second surface to land on: the answer would arrive in a panel that is
+      // not on screen and nothing would say so. Same move `search.focus` and
+      // `nav.focusExplorer` make before focusing.
+      this.config.set('workbench.showExplorer', true);
+      this.ui.focusAnswers();
+    } else this.ui.showAgents();
   }
 
   /** The scope the active editor's selection implies, or null. */
@@ -1730,6 +1788,24 @@ export class NoxApp {
         run: () => this.runAgentOnSelection(),
       },
       {
+        id: 'agents.askAboutSelection',
+        title: 'Ask About Selection…',
+        category: 'Agents',
+        keywords: ['ai', 'explain', 'what does', 'question', 'selection'],
+        // The same predicate as the edit command, for the same reason: a
+        // command offered and then refused is the drift it exists to prevent.
+        enabled: () => this.#runnableAgents().length > 0 && this.#selectionScope() !== null,
+        run: () => this.askAboutSelection(),
+      },
+      {
+        id: 'agents.explainSelection',
+        title: 'Explain Selection',
+        category: 'Agents',
+        keywords: ['ai', 'what does this do', 'describe', 'selection'],
+        enabled: () => this.#runnableAgents().length > 0 && this.#selectionScope() !== null,
+        run: () => this.askAboutSelection(EXPLAIN_INSTRUCTION),
+      },
+      {
         id: 'agents.configure',
         title: 'Configure Agents',
         category: 'Agents',
@@ -2304,6 +2380,24 @@ export class NoxApp {
         },
       },
 
+      // --- Answers ------------------------------------------------------------
+      {
+        id: 'answers.focus',
+        title: 'Show Answers',
+        category: 'Answers',
+        keyHint: 'Mod+Shift+A',
+        keywords: ['explain', 'ask', 'ai', 'answer'],
+        // The agent half of the selection predicate only: this command and
+        // the sidebar rail must never disagree about whether the section
+        // exists.
+        enabled: () => this.#runnableAgents().length > 0,
+        run: () => {
+          // Otherwise ⌘⇧A is inert whenever the sidebar is hidden.
+          this.config.set('workbench.showExplorer', true);
+          this.ui.focusAnswers();
+        },
+      },
+
       // --- Notes ------------------------------------------------------------
       {
         id: 'notes.focus',
@@ -2433,6 +2527,7 @@ export class NoxApp {
       'Mod+Shift+E': 'nav.focusExplorer',
       'Mod+Shift+F': 'search.focus',
       'Mod+Shift+N': 'notes.focus',
+      'Mod+Shift+A': 'answers.focus',
 
       // Edit
       'Mod+F': 'edit.find',

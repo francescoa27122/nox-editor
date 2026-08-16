@@ -94,6 +94,48 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     left a second, explicitly requested change untouched. Read the diff
     rather than assuming the instruction was carried out in full.
 
+- **Explain Selection** and **Ask About Selection…** Select some code and ask
+  what it does: **Explain Selection** asks for you and skips the dialog,
+  **Ask About Selection…** takes your own question. The answer comes back as
+  prose in a new **Answers** section in the sidebar (<kbd>⌘⇧A</kbd>) — not as
+  a diff, and not through the review panel.
+  - An answer says which file and lines it was about, and marks itself *the
+    code has changed since* when that text has been edited, or *file is
+    closed* when the buffer is gone. An explanation of code that has moved on
+    is worse than no explanation, and a file you closed is not the same thing
+    as one you edited. It is a label and never a refusal: the answer is still
+    the answer, and you decide what it is worth.
+  - **An explain session cannot change anything.** Everything but prose is
+    refused by the runtime, not discouraged in the prompt — so it holds for an
+    agent running in another process too. Such a session cannot read a file,
+    run a command or propose an edit.
+  - Answers last for the session and are not written anywhere, for the reason
+    change marks are not: an explanation kept past the code it described is
+    attribution that has quietly gone wrong.
+  - **The answer arrives all at once**, not word by word. There is no partial
+    text to watch: for however long the model takes, the entry says only that
+    it is working, and the whole answer appears when it lands.
+  - **Expect a partial answer**, for the reason to expect a partial edit.
+    Asked to explain some code *and anything surprising about how it does it*,
+    qwen2.5-coder:7b gave a correct account of what the function does and
+    never addressed the second half. Same shape as the partial edit above, on
+    a command that hands you no diff to check it against.
+  - Prose is rendered as text with its line breaks kept, plus triple-backtick
+    fenced runs as monospace blocks. Nothing else: no headings, no emphasis,
+    no links, no HTML, and no new dependency to sanitise model output with.
+    Other markdown arrives as the characters the model typed. An opening fence
+    whose info string has a space in it (`js title=foo` rather than `js`)
+    leaves that string in the block rather than dropping it — the splitter
+    would rather show you a stray line than eat one.
+  - Clicking the file and lines an answer was about opens that buffer, unless
+    it has been closed. Reopening the file does not revive the link: buffer
+    ids come from a counter rather than a path, so the reopened file is a
+    different buffer and the entry goes on saying *file is closed*.
+  - The section is not there at all until you have configured an agent that
+    can run. Remove the last one and it goes away again, and the sidebar falls
+    back to the explorer rather than showing a panel the rail no longer has a
+    button for.
+
 ### Fixed
 
 - **What a session handed the model was missing from its own record.** The
@@ -123,6 +165,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stopped at the turn cap having staged nothing. The brief now renders
   `name [id]` everywhere it names a file.
 
+- **Asking a model to explain something reported the model as broken.** The
+  local-model loop required every reply to carry a JSON action, so a model
+  that answered a question in prose — the correct thing to do — was told twice
+  that it was wrong, and the session ended failed with the explanation filed
+  in the trail as narration, where nobody would look for an essay. Nox now
+  says which kind of reply it wants, and a prose answer takes one round trip
+  with no parsing at all. No scripted test could have found this: a test
+  provider yields the actions its test wrote, so none of them can reach a turn
+  that produced none.
+
 ### Changed
 
 - CI builds and tests on every push, and a tag now produces macOS (Apple
@@ -133,6 +185,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A tag that disagrees with the version in `tauri.conf.json` is now refused.
   The bundler names assets from the config rather than the tag, so the two
   drifting apart shipped binaries labelled with the wrong release.
+- The `run` message an out-of-process agent receives may now carry `expects`,
+  which is `"prose"` when Nox wants an answer rather than actions. It is
+  optional and every agent written before it behaves exactly as it did. An
+  agent that ignores it is not a hazard — its non-prose requests are refused
+  with `invalid-request`, and each refusal is recorded in the session's trail —
+  but it may produce a session holding nothing except those refusals, which is
+  a limitation rather than a guarantee to rely on.
+- A buffer's revision is published on its snapshot rather than only through
+  `revisionOf(id)`. The method answers the same question, but a method call is
+  not something a component can subscribe to, so anything that has to notice
+  an edit as it happens — the staleness mark on an answer is the first — needs
+  the number in a list it is already watching. Purely additive.
 
 ## [0.2.0] — 2026-08-13
 

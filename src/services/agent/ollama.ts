@@ -358,6 +358,22 @@ function systemPrompt(): string {
   ].join('\n');
 }
 
+/**
+ * The system prompt for a prose answer.
+ *
+ * Deliberately says nothing about JSON, methods or actions. The action
+ * vocabulary is a large prompt and every word of it invites the model to
+ * emit one — which is the thing this path exists not to parse.
+ */
+function prosePrompt(): string {
+  return [
+    'You are a careful programming assistant answering a question about code.',
+    'Answer in prose, directly and briefly. Do not invent code the user did not show you.',
+    'If the answer needs code, put it in a fenced block.',
+    'Say what you actually know from the code you were given; do not guess at what you were not shown.',
+  ].join('\n');
+}
+
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -485,6 +501,31 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async *complete(request: ModelRequest): ModelStream {
+    // One round trip, no parsing, no turn loop. The action loop below cannot
+    // terminate on a reply that contains no action — it counts one as a
+    // failure and throws on the second — so a model asked to explain
+    // something would comply and be reported as broken. See the design doc
+    // §4; this branch is why that no longer happens.
+    if (request.expects === 'prose') {
+      const answer = await this.#ask(
+        [
+          { role: 'system', content: prosePrompt() },
+          {
+            role: 'user',
+            content: `Question: ${request.instruction}\n\n${request.context}`,
+          },
+        ],
+        request.signal,
+      );
+      // `null` is cancellation, which has nothing to report. Whitespace is a
+      // model that said nothing, and an empty answer card reads as a
+      // rendering bug rather than as what happened.
+      if (answer !== null && answer.trim().length > 0) {
+        yield { type: 'text', text: answer.trim() };
+      }
+      return;
+    }
+
     const messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt() },
       {

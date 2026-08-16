@@ -6,7 +6,7 @@ import { PermissionError, type PermissionService, type Principal } from '../perm
 import type { ReviewScope, ReviewService, StagedChangeSet } from '../review';
 import type { ChangeSetId } from '../transactions';
 import type { BufferId, WorkspaceService } from '../workspace';
-import type { ModelProvider } from './provider';
+import type { AnswerExpectation, ModelProvider } from './provider';
 import {
   failure,
   parseBaseRevisions,
@@ -43,6 +43,16 @@ import {
  */
 const SELECTION_MAX_LINES = 200;
 const SELECTION_MAX_CHARS = 8_000;
+
+/**
+ * The instruction **Explain Selection** sends.
+ *
+ * Here rather than in `app.ts` so a test can assert the string that actually
+ * ships without importing the whole application, and so the wording lives in
+ * one place rather than inside a command literal.
+ */
+export const EXPLAIN_INSTRUCTION =
+  'Explain what this code does, and anything surprising about how it does it.';
 
 /**
  * Clip selected text to the cap, saying so when it clips.
@@ -123,7 +133,71 @@ export interface AgentSession {
   readonly status: Signal<SessionStatus>;
   readonly actions: Signal<AgentAction[]>;
   readonly summary: Signal<string | null>;
+  readonly expects: AnswerExpectation | undefined;
+  readonly answer: Signal<string | null>;
+  readonly about: Signal<AnswerTarget | null>;
   cancel(): void;
+}
+
+/**
+ * What an answer was about.
+ *
+ * `revision` is the buffer's revision at the moment the brief was built —
+ * the text the model was actually shown. Comparing it against the buffer's
+ * revision now is the whole of staleness; it is a label, never a refusal.
+ */
+export interface AnswerTarget {
+  bufferId: BufferId;
+  fromLine: number;
+  toLine: number;
+  revision: number;
+}
+
+/**
+ * Whether an answer still describes the code it was about.
+ *
+ * Pure and here rather than in the panel, so the three cases are testable
+ * without a component — and because `-1` (the buffer is closed) is *also*
+ * "not equal", and collapsing it into "changed" would report a file you
+ * closed as one you edited.
+ */
+export function answerFreshness(
+  about: AnswerTarget,
+  currentRevision: number,
+): 'current' | 'changed' | 'gone' {
+  if (currentRevision === -1) return 'gone';
+  return currentRevision === about.revision ? 'current' : 'changed';
+}
+
+/** A run of an answer: prose, or the inside of a fenced block. */
+export interface AnswerPart {
+  code: boolean;
+  text: string;
+}
+
+/**
+ * Split an answer into prose and fenced code.
+ *
+ * The whole of the markdown handled, on purpose. A renderer is a dependency
+ * and a sanitisation surface for model output; the panel renders every part
+ * as text, never as markup.
+ *
+ * Pure and here rather than in the panel for the same reason as
+ * `answerFreshness`: it is the one piece of this feature that can lose the
+ * user's content, so it has to be reachable from a test.
+ *
+ * The newline after the info string is required, not optional. Making it
+ * optional let `[a-zA-Z0-9-]*` run whether or not a fence opened a block, so
+ * an inline ```` ```json```` ate the word after it and rendered nothing at
+ * all. Every other limitation of this splitter shows content in the wrong
+ * style; that one showed no content, which a deliberately bounded renderer
+ * must never do.
+ */
+export function answerParts(text: string): AnswerPart[] {
+  return text
+    .split(/```(?:[a-zA-Z0-9-]*\n)?/)
+    .map((piece, index) => ({ code: index % 2 === 1, text: piece }))
+    .filter((piece) => piece.text.trim().length > 0);
 }
 
 /**
@@ -141,6 +215,11 @@ export interface AgentSessionSnapshot {
   status: SessionStatus;
   actions: AgentAction[];
   summary: string | null;
+  expects: AnswerExpectation | undefined;
+  /** The prose a prose session produced. Null for every other session. */
+  answer: string | null;
+  /** The buffer and lines the question was about, and their revision then. */
+  about: AnswerTarget | null;
   /** How many change sets this session has landed. */
   changes: number;
 }
@@ -171,6 +250,13 @@ export interface SessionOptions {
    * Only ever defaults a hunk; never refuses an edit.
    */
   scope?: ReviewScope;
+  /**
+   * What this session wants back. Absent means actions.
+   *
+   * A prose session refuses every request but `session.note` and
+   * `session.summary`, so "explain this" cannot edit anything.
+   */
+  expects?: AnswerExpectation;
 }
 
 export class AgentRuntime {
@@ -265,6 +351,8 @@ export class AgentRuntime {
     const actions = new Signal<AgentAction[]>([]);
     const status = new Signal<SessionStatus>('running');
     const summary = new Signal<string | null>(null);
+    const answer = new Signal<string | null>(null);
+    const about = new Signal<AnswerTarget | null>(null);
 
     const record = (action: NewAction) => {
       actions.update((current) => [...current, { ...action, at: Date.now() } as AgentAction]);
@@ -296,6 +384,7 @@ export class AgentRuntime {
     const readAt = new Map<BufferId, number>();
 
     const scope = options.scope;
+    const expects = options.expects;
 
     const session: AgentSession & { principal: Principal } = {
       id,
@@ -309,6 +398,9 @@ export class AgentRuntime {
       status,
       actions,
       summary,
+      expects,
+      answer,
+      about,
       cancel: () => job.cancel(),
     };
 
@@ -332,16 +424,51 @@ export class AgentRuntime {
         // always in the brief and are not what this record exists for.
         if (briefed.carried) record({ kind: 'brief', detail: briefed.carried });
 
+        // Captured here, not at stage time: this is the revision of the text
+        // the brief actually carried. Later is the wrong moment — the user
+        // goes on typing while the model thinks.
+        //
+        // Gated on `expects === 'prose'`: an ordinary action session can
+        // carry a scope too — "Edit Selection with a Model…" always does —
+        // and it never asked a question. Capturing `about` for it regardless
+        // of `expects` would describe a question that was never asked.
+        if (expects === 'prose' && scope) {
+          about.set({ ...scope, revision: this.#workspace.revisionOf(scope.bufferId) });
+        }
+
         const run: AgentRun = {
           instruction,
           context: briefed.text,
           signal: context.signal,
+          ...(expects ? { expects } : {}),
         };
 
         let staged = false;
         await transport.run(run, async (request) => {
           if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
-          const response = await this.#handle(session.principal, request, record, readAt, scope);
+          // The answer is what the agent *said*, not something it did to the
+          // workspace, so it is published rather than filed as an action.
+          // An essay in the trail would bury the reads the trail is for —
+          // the same distinction `brief` already makes.
+          // `typeof` rather than a truthiness check, and the malformed case
+          // falls through rather than being answered here. `parseInbound`
+          // validates only `id` and `method`, so `params.text` can be missing
+          // or any type at all from another process — reading it here, outside
+          // `#handle`'s try/catch, threw a TypeError all the way out through
+          // `StdioTransport.run` and killed the session. The identical message
+          // in a non-prose session gets a clean refusal and the agent carries
+          // on; one mistake should not have two behaviours.
+          if (
+            expects === 'prose' &&
+            request.method === 'session.note' &&
+            typeof request.params?.text === 'string'
+          ) {
+            const text = request.params.text;
+            answer.update((current) => (current === null ? text : `${current}${text}`));
+            this.#publish();
+            return success(request.id, null);
+          }
+          const response = await this.#handle(session.principal, request, record, readAt, scope, expects);
           if (request.method === 'proposal.stage' && response.ok) staged = true;
           if (request.method === 'session.summary') {
             summary.set(request.params.text);
@@ -391,6 +518,9 @@ export class AgentRuntime {
         status: session.status.get(),
         actions: session.actions.get(),
         summary: session.summary.get(),
+        expects: session.expects,
+        answer: session.answer.get(),
+        about: session.about.get(),
         changes: this.changesBy(session.id).length,
       })),
     );
@@ -512,7 +642,28 @@ export class AgentRuntime {
     record: (action: NewAction) => void,
     readAt: Map<BufferId, number>,
     scope: ReviewScope | undefined,
+    expects: AnswerExpectation | undefined,
   ): Promise<CoreResponse> {
+    // A prose session has one job and no side effects. Refused here rather
+    // than left to the prompt, because an out-of-process agent that ignores
+    // `expects` reaches this line too — which is what makes "explain this
+    // cannot edit anything" a property rather than an intention.
+    if (
+      expects === 'prose' &&
+      request.method !== 'session.note' &&
+      request.method !== 'session.summary'
+    ) {
+      const message =
+        'This session asked for an explanation. Reply in prose; it cannot read, run or propose.';
+      // Recorded as well as refused, like every other refusal in this method.
+      // Without it a session that ignored `expects` ended holding nothing at
+      // all, so the one thing that could explain the empty answer — that its
+      // requests were turned down, and why — was the one thing not written
+      // down anywhere.
+      record({ kind: 'error', message });
+      return failure(request.id, 'invalid-request', message);
+    }
+
     const reader = this.#context.reader(principal);
 
     try {
@@ -838,6 +989,7 @@ export class ProviderTransport implements AgentTransport {
       instruction: run.instruction,
       context: run.context,
       signal: run.signal,
+      ...(run.expects ? { expects: run.expects } : {}),
     });
 
     // Each response is fed back into the generator, so an agent can read a
