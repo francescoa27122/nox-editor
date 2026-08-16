@@ -357,13 +357,18 @@
     const symbols = fileSymbols(tree ?? syntaxTree(view.state), view.state.doc);
 
     if (symbols.length === 0) {
-      // Two different empty states, because they call for different actions:
-      // nothing to find, versus nothing that *can* be found here.
-      return buffer && !hasGrammar(buffer.language.id)
-        ? hintRow(
-            `Nox has no parser for ${buffer.language.name}`,
-            'Symbols come from the grammar, the same one syntax highlighting uses',
-          )
+      // Three different empty states, because they call for different
+      // messages: no grammar at all, nothing found in a *complete* parse, and
+      // nothing found yet in a parse that hasn't finished. The last one must
+      // not claim the file has no symbols — it doesn't know that yet.
+      if (buffer && !hasGrammar(buffer.language.id)) {
+        return hintRow(
+          `Nox has no parser for ${buffer.language.name}`,
+          'Symbols come from the grammar, the same one syntax highlighting uses',
+        );
+      }
+      return partial
+        ? hintRow('Still parsing this file', 'More symbols may appear once parsing catches up')
         : hintRow('No functions or classes in this file', 'Only structure is listed, not variables');
     }
 
