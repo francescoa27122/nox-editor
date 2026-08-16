@@ -649,8 +649,9 @@ export class NoxApp {
   /**
    * Start a session against a chosen record.
    *
-   * Shared by both agent commands so a fix to one cannot miss the other —
-   * the reload guard below was written once and is load-bearing for both.
+   * Shared by every agent command so a fix to one cannot miss the others —
+   * the reload guard below was written once and is load-bearing for all of
+   * them.
    */
   async #startAgentSession(
     chosen: AgentConfig,
@@ -696,7 +697,11 @@ export class NoxApp {
       ...(scope ? { scope } : {}),
       ...(expects ? { expects } : {}),
     });
-    this.ui.showAgents();
+    // A question goes where its answer will be. The agents panel is a record
+    // of what a session read and ran, and takes over the editor area to show
+    // it — the wrong place, and the wrong size, for a paragraph of prose.
+    if (expects === 'prose') this.ui.focusAnswers();
+    else this.ui.showAgents();
   }
 
   /** The scope the active editor's selection implies, or null. */
@@ -2369,6 +2374,20 @@ export class NoxApp {
         },
       },
 
+      // --- Answers ------------------------------------------------------------
+      {
+        id: 'answers.focus',
+        title: 'Show Answers',
+        category: 'Answers',
+        keyHint: 'Mod+Shift+A',
+        keywords: ['explain', 'ask', 'ai', 'answer'],
+        // The agent half of the selection predicate only: this command and
+        // the sidebar rail must never disagree about whether the section
+        // exists.
+        enabled: () => this.#runnableAgents().length > 0,
+        run: () => this.ui.focusAnswers(),
+      },
+
       // --- Notes ------------------------------------------------------------
       {
         id: 'notes.focus',
@@ -2498,6 +2517,7 @@ export class NoxApp {
       'Mod+Shift+E': 'nav.focusExplorer',
       'Mod+Shift+F': 'search.focus',
       'Mod+Shift+N': 'notes.focus',
+      'Mod+Shift+A': 'answers.focus',
 
       // Edit
       'Mod+F': 'edit.find',

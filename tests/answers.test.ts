@@ -15,6 +15,7 @@ import { FileTreeService } from '../src/services/filetree';
 import { JobRunner } from '../src/services/jobs';
 import { PermissionService } from '../src/services/permissions';
 import { ReviewService } from '../src/services/review';
+import { UIService } from '../src/services/ui';
 import { WorkspaceService, type BufferId } from '../src/services/workspace';
 
 const A = 'one\ntwo\nthree\nfour\nfive\n';
@@ -343,5 +344,48 @@ describe('the built-in explain instruction', () => {
   it('asks a real question', () => {
     expect(EXPLAIN_INSTRUCTION.trim().length).toBeGreaterThan(20);
     expect(EXPLAIN_INSTRUCTION).toMatch(/explain/i);
+  });
+});
+
+describe('the answers sidebar section', () => {
+  /**
+   * The failure this prevents: the section staying selected after the last
+   * agent is removed from agents.json, leaving the rail with no button for
+   * the panel that is showing.
+   */
+  it('falls back to the explorer when its view is dropped', () => {
+    const ui = new UIService();
+    ui.focusAnswers();
+    expect(ui.sidebarView.get()).toBe('answers');
+
+    ui.dropView('answers');
+
+    expect(ui.sidebarView.get()).toBe('explorer');
+  });
+
+  /**
+   * The failure this prevents: dropping a view yanking the user out of an
+   * unrelated panel they are working in.
+   */
+  it('leaves another view alone', () => {
+    const ui = new UIService();
+    ui.focusSearch();
+
+    ui.dropView('answers');
+
+    expect(ui.sidebarView.get()).toBe('search');
+  });
+
+  /**
+   * The failure this prevents: `showView` — what the rail button calls —
+   * dropping through to the explorer for a view it has no branch for, which
+   * is what happened to notes before its branch was added.
+   */
+  it('is reachable from showView', () => {
+    const ui = new UIService();
+    ui.showView('answers');
+
+    expect(ui.sidebarView.get()).toBe('answers');
+    expect(ui.focusZone.get()).toBe('answers');
   });
 });
