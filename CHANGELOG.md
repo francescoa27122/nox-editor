@@ -96,6 +96,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **What a session handed the model was missing from its own record.** The
+  opening brief embeds your selected code — up to 8,000 characters — and
+  reached the context service directly, so none of it appeared in the read log
+  or in the session's trail in the Agents panel. It now reads through the same
+  recorded path everything else does, and a session shows what its brief
+  carried before the agent asked for anything.
+
 - **A project-wide replace marked whole files as changed, not just the lines
   it touched.** Replace collapsed every match in a file into one edit spanning
   the whole document, so provenance — which marks whatever a change set

@@ -847,18 +847,25 @@ brief, so the identifier every `context.*` call needs sits next to the name a
 person would use. No unit test caught this — every scripted provider in the
 suite passes ids by construction — which is what the walk was for.
 
-`brief()` also reads outside the recorded reader. It calls
-`this.#context.selection(...)` directly on `ContextService` rather than through
-the `context.reader(principal)` proxy every other read goes through: the brief
-is assembled before a request exists, and `#handle` binds that proxy per
-request. The selection text it embeds, up to `SELECTION_MAX_CHARS` (8,000)
-characters, never lands in `reads`. This is not a selection-edit gap —
-`brief()` opens every session, so a plain `Run Agent…` on a buffer with an
-active selection carries the same unrecorded text. It is not a security hole:
-the text leaves the machine only once `net.request` is granted, and a model
-could read the same buffer through the recorded API regardless. But `reads` is
-meant to be the whole account of what a session saw, and for what `brief()`
-sends, it currently is not.
+`brief()` is on the record, and it took a second pass to get there. It
+originally read straight off `ContextService`, skipping the
+`context.reader(principal)` proxy every other read goes through — understandably,
+since the brief is assembled before any request exists and `#handle` binds that
+proxy per request. The effect was that up to `SELECTION_MAX_CHARS` (8,000)
+characters of the user's code opened a session having been recorded nowhere.
+Not a security hole — the text leaves the machine only once `net.request` is
+granted, and a model could read the same buffer through the recorded API
+anyway — but `reads` is meant to be the whole account of what a session saw,
+and it was not.
+
+It now takes a principal and reads through the proxy, and a session records a
+`brief` action naming the buffer and how much text went with it. That action
+is its own `AgentAction` variant rather than a `read`: the trail means *what
+the agent did*, and the brief is what Nox handed it unasked. Filing one as the
+other would misattribute the thing being made honest. It is recorded only when
+a selection was carried — open-file names and line counts were always in the
+brief, and a line on every session for those would bury the case the record
+exists for.
 
 ### A review narrows the change set; it does not apply hunks
 

@@ -84,6 +84,8 @@ export type AgentAction =
   | { kind: 'instruction'; at: number; text: string }
   | { kind: 'note'; at: number; text: string }
   | { kind: 'read'; at: number; method: string; target?: string }
+  /** What the opening brief handed the model before it asked for anything. */
+  | { kind: 'brief'; at: number; detail: string }
   | {
       kind: 'command';
       at: number;
@@ -325,9 +327,14 @@ export class AgentRuntime {
           );
         }
 
+        const briefed = this.#brief(session.principal);
+        // Only when it carried the user's text. Names and line counts were
+        // always in the brief and are not what this record exists for.
+        if (briefed.carried) record({ kind: 'brief', detail: briefed.carried });
+
         const run: AgentRun = {
           instruction,
-          context: this.brief(),
+          context: briefed.text,
           signal: context.signal,
         };
 
@@ -442,9 +449,25 @@ export class AgentRuntime {
    * descriptive parens beside them, so the id is never one of several tokens
    * a model has to guess between.
    */
-  brief(): string {
-    const buffers = this.#context.openBuffers();
+  brief(principal: Principal): string {
+    return this.#brief(principal).text;
+  }
+
+  /**
+   * The brief, plus a description of the selection it carried.
+   *
+   * Split from `brief` so `start` can record what was handed over without
+   * re-deriving which buffer and how much — two answers to one question drift.
+   * Reads go through `reader(principal)` rather than the service directly:
+   * the brief hands the model up to `SELECTION_MAX_CHARS` of the user's code
+   * before it asks for anything, and a read that escapes the log is exactly
+   * what the log exists to prevent.
+   */
+  #brief(principal: Principal): { text: string; carried: string | null } {
+    const reader = this.#context.reader(principal);
+    const buffers = reader.openBuffers();
     const active = buffers.find((buffer) => buffer.isActive);
+    let carried: string | null = null;
     const lines = [
       `Open files: ${buffers.map((buffer) => `${buffer.name} [${buffer.id}]`).join(', ') || 'none'}`,
     ];
@@ -452,19 +475,23 @@ export class AgentRuntime {
       lines.push(
         `Active file: ${active.name} [${active.id}] (${active.languageName}, ${active.lineCount} lines)`,
       );
-      const viewport = this.#context.viewport(active.id);
+      const viewport = reader.viewport(active.id);
       if (viewport) lines.push(`On screen: lines ${viewport.from}–${viewport.to}`);
 
-      const selection = this.#context.selection(active.id);
+      const selection = reader.selection(active.id);
       const range = selection && !selection.isEmpty ? selection.ranges[selection.main] : undefined;
       if (range) {
+        // Clipped once and measured from the result: reporting the raw
+        // selection would tell the audit the model saw text the cap kept back.
+        const embedded = clipSelection(range.text);
         lines.push(
           `Selected in ${active.name} [${active.id}], lines ${range.fromLine}–${range.toLine}:`,
-          clipSelection(range.text),
+          embedded,
         );
+        carried = `selection from ${active.name} [${active.id}], ${embedded.length} characters`;
       }
     }
-    return lines.join('\n');
+    return { text: lines.join('\n'), carried };
   }
 
   // --- The protocol handler ------------------------------------------------
