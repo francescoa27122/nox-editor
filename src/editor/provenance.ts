@@ -8,7 +8,7 @@ import {
   type Range,
   type Transaction,
 } from '@codemirror/state';
-import { gutter, GutterMarker, hoverTooltip } from '@codemirror/view';
+import { gutter, GutterMarker, hoverTooltip, showTooltip, type Tooltip } from '@codemirror/view';
 import { changeSetAnnotation, type Provenance } from '@services/transactions';
 
 /**
@@ -194,6 +194,28 @@ export function provenanceAt(state: EditorState, pos: number): ProvenanceHit | n
   return found;
 }
 
+/**
+ * The first mark anywhere on a line, or null.
+ *
+ * The bar is drawn per *line* — `lineMarker` asks only whether the line has any
+ * mark at all — so the hover that explains the bar has to ask the same
+ * question. `provenanceAt` answers about a single position, and a mark that
+ * begins partway along a line does not touch that line's start, which is true
+ * of every mark that is not the first thing on its line. A gutter hover driven
+ * by `provenanceAt` would be dead on most of the lines the bar is drawn for.
+ *
+ * Takes the first mark rather than the one nearest the pointer: the bar carries
+ * no position within the line, so there is nothing for "nearest" to mean.
+ */
+export function provenanceOnLine(state: EditorState, from: number, to: number): ProvenanceHit | null {
+  let found: ProvenanceHit | null = null;
+  state.field(provenanceField).between(from, to, (rangeFrom, rangeTo, value) => {
+    found = { from: rangeFrom, to: rangeTo, provenance: value.provenance };
+    return false;
+  });
+  return found;
+}
+
 export function hasProvenance(state: EditorState): boolean {
   return state.field(provenanceField).size > 0;
 }
@@ -252,30 +274,98 @@ class ProvenanceMarker extends GutterMarker {
 
 const marker = new ProvenanceMarker();
 
+/** Anchor the gutter's tooltip at this line's start, or `null` to put it away. */
+const showGutterProvenance = StateEffect.define<number | null>();
+
+/**
+ * The tooltip the gutter bar shows, held in state rather than derived.
+ *
+ * `hoverTooltip` cannot do this job, which is why the bar answered nothing for
+ * a whole release: it resolves a *document position* and only fires over
+ * `.cm-content`, while the bar lives in a sibling element. Hovering the changed
+ * text, which advertises nothing, worked; hovering the mark — the only thing on
+ * screen saying there is attribution to read — did not.
+ */
+const gutterTooltipField = StateField.define<readonly Tooltip[]>({
+  create: () => [],
+  update(current, tr) {
+    for (const effect of tr.effects) {
+      if (!effect.is(showGutterProvenance)) continue;
+      if (effect.value === null) return [];
+      const line = tr.state.doc.lineAt(effect.value);
+      const hit = provenanceOnLine(tr.state, line.from, line.to);
+      if (!hit) return [];
+      return [
+        {
+          // Anchored at the line's start, beside the bar that raised it, rather
+          // than at the mark: the bar names a line, and a tooltip that slid
+          // along the line as the mark moved would sit nowhere near the pointer
+          // that asked for it.
+          pos: line.from,
+          above: true,
+          create: () => {
+            const dom = document.createElement('div');
+            dom.className = 'cm-tooltip-provenance';
+            dom.textContent = describeProvenance(hit.provenance, Date.now());
+            return { dom };
+          },
+        },
+      ];
+    }
+    // The tooltip is anchored at a position an edit can move or delete.
+    // Dropping it is safe: the pointer is still over the gutter, so the next
+    // movement puts it back with whatever the line says now.
+    return tr.docChanged ? [] : current;
+  },
+  provide: (field) => showTooltip.computeN([field], (state) => state.field(field)),
+});
+
 export function provenanceGutter(): Extension {
-  return gutter({
-    class: 'cm-provenanceGutter',
-    lineMarker(view, line) {
-      // `between` stops at the first hit: the line either has attribution or
-      // it does not, and which change set it came from does not change the bar.
-      let hit = false;
-      view.state.field(provenanceField).between(line.from, line.to, () => {
-        hit = true;
-        return false;
-      });
-      return hit ? marker : null;
-    },
-    // This gutter never populates a `markers` RangeSet — it derives each
-    // line's marker from `lineMarker` alone — so without telling it
-    // explicitly when to repaint, `SingleGutterView.update` has nothing to
-    // compare and never asks `lineMarker` again. "Clear Change Marks"
-    // dispatches a transaction with no document change, so it also fails
-    // `GutterView.updateGutters`'s other repaint checks (docChanged,
-    // heightChanged, viewportChanged), and the bars would stay on screen
-    // until the next edit, scroll or tab switch.
-    lineMarkerChange: (update) =>
-      update.startState.field(provenanceField) !== update.state.field(provenanceField),
-  });
+  return [
+    gutterTooltipField,
+    gutter({
+      class: 'cm-provenanceGutter',
+      // CodeMirror attaches these to the gutter's own element and resolves the
+      // line under the pointer itself, snapping to the centre of whichever marker
+      // element the event landed on — which is why this takes a `line` and does
+      // no coordinate arithmetic of its own.
+      domEventHandlers: {
+        mousemove(view, line) {
+          // Without this check, travelling down the gutter dispatches a
+          // transaction per pixel; the tooltip only changes when the line does.
+          if (view.state.field(gutterTooltipField)[0]?.pos === line.from) return false;
+          view.dispatch({ effects: showGutterProvenance.of(line.from) });
+          return false;
+        },
+        mouseleave(view) {
+          if (view.state.field(gutterTooltipField).length > 0) {
+            view.dispatch({ effects: showGutterProvenance.of(null) });
+          }
+          return false;
+        },
+      },
+      lineMarker(view, line) {
+        // `between` stops at the first hit: the line either has attribution or
+        // it does not, and which change set it came from does not change the bar.
+        let hit = false;
+        view.state.field(provenanceField).between(line.from, line.to, () => {
+          hit = true;
+          return false;
+        });
+        return hit ? marker : null;
+      },
+      // This gutter never populates a `markers` RangeSet — it derives each
+      // line's marker from `lineMarker` alone — so without telling it
+      // explicitly when to repaint, `SingleGutterView.update` has nothing to
+      // compare and never asks `lineMarker` again. "Clear Change Marks"
+      // dispatches a transaction with no document change, so it also fails
+      // `GutterView.updateGutters`'s other repaint checks (docChanged,
+      // heightChanged, viewportChanged), and the bars would stay on screen
+      // until the next edit, scroll or tab switch.
+      lineMarkerChange: (update) =>
+        update.startState.field(provenanceField) !== update.state.field(provenanceField),
+    }),
+  ];
 }
 
 /** "claude-1 · Rewrite the greeting · 10m ago". */

@@ -9,6 +9,7 @@ import {
   previousProvenance,
   provenanceAt,
   provenanceField,
+  provenanceOnLine,
   type ProvenanceValue,
 } from '../src/editor/provenance';
 import { MemoryPlatform } from '../src/platform/memory';
@@ -576,5 +577,45 @@ describe('clearing every buffer', () => {
 
     expect(hasProvenance(workspace.stateOf(a)!)).toBe(false);
     expect(hasProvenance(workspace.stateOf(b)!)).toBe(false);
+  });
+});
+
+describe('finding the mark a gutter bar stands for', () => {
+  /**
+   * The failure this prevents, and the reason this function exists: the
+   * gutter bar is drawn for a line that has *any* mark on it, but
+   * `provenanceAt` answers about a single position. Asking it about the start
+   * of the line finds nothing whenever the marked text sits further along,
+   * which is most of the time — so a hover driven by `provenanceAt` would go
+   * dead on exactly the lines the bar is drawn for.
+   */
+  it('finds a mark that starts partway along the line', () => {
+    const state = applySet(stateWith('let x = 1;\nlet y = 2;\n'), { from: 19, to: 20, insert: '9' });
+    const line = state.doc.line(2);
+
+    expect(provenanceAt(state, line.from)).toBeNull();
+    expect(provenanceOnLine(state, line.from, line.to)?.provenance.changeSetId).toBe('cs-1');
+  });
+
+  /** A line with nothing on it has no bar, and must produce no tooltip. */
+  it('finds nothing on an unmarked line', () => {
+    const state = applySet(stateWith('one\ntwo\n'), { from: 0, to: 3, insert: 'ONE' });
+    const second = state.doc.line(2);
+
+    expect(provenanceOnLine(state, second.from, second.to)).toBeNull();
+  });
+
+  /**
+   * The bar says "something touched this line" and nothing more, so with two
+   * marks on one line the hover describes the first. Pinned because taking
+   * the last instead would describe a different change from the one a reader
+   * scanning left to right meets first.
+   */
+  it('takes the first mark when a line carries two', () => {
+    const once = applySet(stateWith('aaaa bbbb'), { from: 0, to: 4, insert: 'AAAA' });
+    const twice = applySet(once, { from: 5, to: 9, insert: 'BBBB' }, record({ changeSetId: 'cs-2' }));
+    const line = twice.doc.line(1);
+
+    expect(provenanceOnLine(twice, line.from, line.to)?.provenance.changeSetId).toBe('cs-1');
   });
 });
