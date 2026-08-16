@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import {
     answerFreshness,
+    answerParts,
     type AgentSessionSnapshot,
     type AnswerTarget,
   } from '@services/agent/runtime';
@@ -84,20 +85,6 @@
     };
   }
 
-  /**
-   * Split an answer into prose and fenced code.
-   *
-   * The whole of the markdown handled, on purpose. A renderer is a dependency
-   * and a sanitisation surface for model output; every part below is rendered
-   * as text by Svelte, never as markup.
-   */
-  function parts(text: string): { code: boolean; text: string }[] {
-    return text
-      .split(/```(?:[a-zA-Z0-9-]*\n?)?/)
-      .map((piece, index) => ({ code: index % 2 === 1, text: piece }))
-      .filter((piece) => piece.text.trim().length > 0);
-  }
-
   /** The last thing that went wrong, which is why the session says it failed. */
   function failure(session: AgentSessionSnapshot): string {
     // `findLast` would read better, but the lib target here is ES2022.
@@ -145,7 +132,7 @@
           {:else if session.answer === null}
             <p class="working">Working…</p>
           {:else}
-            {#each parts(session.answer) as piece}
+            {#each answerParts(session.answer) as piece}
               {#if piece.code}
                 <pre class="code">{piece.text}</pre>
               {:else}
@@ -214,12 +201,16 @@
     border-bottom: 1px solid var(--nox-border);
   }
 
+  /* A question is whatever the user typed, and a filename is whatever it is:
+     both routinely contain a pasted path with no break opportunity in it.
+     Without this the sidebar — 200px at its narrowest — scrolls sideways. */
   .question {
     margin: 0;
     font-size: var(--nox-fs-sm);
     font-weight: var(--nox-fw-semibold);
     color: var(--nox-text-bright);
     line-height: var(--nox-lh-ui);
+    overflow-wrap: anywhere;
   }
 
   .meta {
@@ -237,6 +228,8 @@
     text-decoration: underline;
     text-underline-offset: 2px;
     cursor: pointer;
+    text-align: left;
+    overflow-wrap: anywhere;
   }
 
   .where:hover:not(:disabled) {

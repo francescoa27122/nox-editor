@@ -169,6 +169,37 @@ export function answerFreshness(
   return currentRevision === about.revision ? 'current' : 'changed';
 }
 
+/** A run of an answer: prose, or the inside of a fenced block. */
+export interface AnswerPart {
+  code: boolean;
+  text: string;
+}
+
+/**
+ * Split an answer into prose and fenced code.
+ *
+ * The whole of the markdown handled, on purpose. A renderer is a dependency
+ * and a sanitisation surface for model output; the panel renders every part
+ * as text, never as markup.
+ *
+ * Pure and here rather than in the panel for the same reason as
+ * `answerFreshness`: it is the one piece of this feature that can lose the
+ * user's content, so it has to be reachable from a test.
+ *
+ * The newline after the info string is required, not optional. Making it
+ * optional let `[a-zA-Z0-9-]*` run whether or not a fence opened a block, so
+ * an inline ```` ```json```` ate the word after it and rendered nothing at
+ * all. Every other limitation of this splitter shows content in the wrong
+ * style; that one showed no content, which a deliberately bounded renderer
+ * must never do.
+ */
+export function answerParts(text: string): AnswerPart[] {
+  return text
+    .split(/```(?:[a-zA-Z0-9-]*\n)?/)
+    .map((piece, index) => ({ code: index % 2 === 1, text: piece }))
+    .filter((piece) => piece.text.trim().length > 0);
+}
+
 /**
  * A session as the UI sees it: plain data, republished whenever anything
  * about the session changes.

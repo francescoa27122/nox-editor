@@ -5,6 +5,7 @@ import {
   ProviderTransport,
   AgentRuntime,
   answerFreshness,
+  answerParts,
   EXPLAIN_INSTRUCTION,
   type AgentSession,
 } from '../src/services/agent/runtime';
@@ -387,5 +388,74 @@ describe('the answers sidebar section', () => {
 
     expect(ui.sidebarView.get()).toBe('answers');
     expect(ui.focusZone.get()).toBe('answers');
+  });
+
+  /**
+   * The failure this prevents: ⌘⇧A selecting the section but leaving focus
+   * where it was. The counter is the only thing that moves the panel's DOM
+   * focus, and because it is a counter rather than a flag it also has to bump
+   * when the section is *already* showing — otherwise focusing a panel you
+   * are already looking at does nothing.
+   */
+  it('bumps the focus request every time, by either route', () => {
+    const ui = new UIService();
+    const start = ui.focusAnswersRequest.get();
+
+    ui.focusAnswers();
+    expect(ui.focusAnswersRequest.get()).toBe(start + 1);
+
+    ui.showView('answers');
+    expect(ui.focusAnswersRequest.get()).toBe(start + 2);
+  });
+});
+
+describe('splitting an answer into prose and code', () => {
+  it('keeps a fenced block as one code part and the prose around it', () => {
+    expect(answerParts('Like this:\n```js\nconst a = 1;\n```\nand that is all.')).toEqual([
+      { code: false, text: 'Like this:\n' },
+      { code: true, text: 'const a = 1;\n' },
+      { code: false, text: 'and that is all.' },
+    ]);
+  });
+
+  /**
+   * The failure this prevents: content vanishing. An optional newline after
+   * the info string let the language matcher run on an *inline* fence too, so
+   * "Use ```json``` for details." rendered with the word `json` deleted —
+   * present in neither part, and nothing on screen to suggest anything was
+   * missing. Every other limitation of this splitter shows content in the
+   * wrong style; only this one showed no content, which is why it is the one
+   * with a test.
+   */
+  it('does not swallow the word after an inline fence', () => {
+    expect(answerParts('Use ```json``` for details.')).toEqual([
+      { code: false, text: 'Use ' },
+      { code: true, text: 'json' },
+      { code: false, text: ' for details.' },
+    ]);
+  });
+
+  /** The same shape in ordinary phrasing, where a model explains markdown. */
+  it('keeps the tag when a fence is never closed', () => {
+    expect(answerParts('wrap it in ```ts fences')).toEqual([
+      { code: false, text: 'wrap it in ' },
+      { code: true, text: 'ts fences' },
+    ]);
+  });
+
+  /**
+   * The failure this prevents: half an info string leaking into the code. Only
+   * a bare tag is consumed, so anything the matcher does not recognise — a
+   * space, a `+` — stays visible rather than being silently half-eaten.
+   */
+  it('leaves an info string it does not recognise in the block', () => {
+    expect(answerParts('```js title=foo\ncode\n```')).toEqual([
+      { code: true, text: 'js title=foo\ncode\n' },
+    ]);
+    expect(answerParts('```c++\nint x;\n```')).toEqual([{ code: true, text: 'c++\nint x;\n' }]);
+  });
+
+  it('drops runs that are only whitespace', () => {
+    expect(answerParts('   \n')).toEqual([]);
   });
 });
