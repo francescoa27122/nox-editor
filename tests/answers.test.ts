@@ -206,6 +206,29 @@ describe('the answer a prose session produces', () => {
   });
 
   /**
+   * The failure this prevents: only the first chunk of a multi-chunk answer
+   * surviving. Every other test's `speaks` yields exactly one chunk, so the
+   * `current === null ? text : `${current}${text}`` branch's non-null side
+   * was never exercised before this test. `ProviderTransport.run` turns each
+   * chunk into its own `session.note`, so two chunks means two calls into
+   * the interception, and the second must append rather than replace.
+   */
+  it('concatenates a multi-chunk answer in order, with no separator', async () => {
+    const { runtime } = await setup();
+    const transport = new ProviderTransport(
+      new ScriptedProvider(() => [
+        { type: 'text' as const, text: 'It adds ' },
+        { type: 'text' as const, text: 'two numbers.' },
+      ]),
+    );
+    const session = runtime.start(transport, 'what does this do?', { expects: 'prose' });
+    await settle(session);
+
+    const snapshot = runtime.sessions.get().find((entry) => entry.id === session.id);
+    expect(snapshot?.answer).toBe('It adds two numbers.');
+  });
+
+  /**
    * The failure this prevents: the trail filling with the whole answer,
    * burying the reads it exists to show. Same distinction the `brief` action
    * already makes.
@@ -262,6 +285,26 @@ describe('the answer a prose session produces', () => {
 
     const snapshot = runtime.sessions.get().find((entry) => entry.id === session.id);
     expect(snapshot?.answer).toBeNull();
+    expect(snapshot?.about).toBeNull();
+  });
+
+  /**
+   * The failure this prevents: "Edit Selection with a Model…" — an ordinary
+   * action session that always carries a scope — reporting a target as if it
+   * had been asked a question. A later panel treats a non-null `about` as
+   * "this session asked something"; capturing it for every scoped session,
+   * prose or not, would make that read wrong for the most common scoped
+   * session there is. Unlike the test above, this one *does* pass a scope,
+   * so it is the one that actually exercises the gate.
+   */
+  it('leaves a scoped ordinary session with no target either', async () => {
+    const { runtime, a } = await setup();
+    const session = runtime.start(speaks('narration'), 'rename Task to Job', {
+      scope: { bufferId: a, fromLine: 1, toLine: 2 },
+    });
+    await settle(session);
+
+    const snapshot = runtime.sessions.get().find((entry) => entry.id === session.id);
     expect(snapshot?.about).toBeNull();
   });
 });

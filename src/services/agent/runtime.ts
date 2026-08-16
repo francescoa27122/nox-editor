@@ -386,7 +386,12 @@ export class AgentRuntime {
         // Captured here, not at stage time: this is the revision of the text
         // the brief actually carried. Later is the wrong moment — the user
         // goes on typing while the model thinks.
-        if (scope) {
+        //
+        // Gated on `expects === 'prose'`: an ordinary action session can
+        // carry a scope too — "Edit Selection with a Model…" always does —
+        // and it never asked a question. Capturing `about` for it regardless
+        // of `expects` would describe a question that was never asked.
+        if (expects === 'prose' && scope) {
           about.set({ ...scope, revision: this.#workspace.revisionOf(scope.bufferId) });
         }
 
