@@ -110,9 +110,22 @@ grammar that deliberately collects nothing, and miss every symbol in the
 `<script>` and `<style>` blocks. A shared name table has nothing to get wrong:
 it matches whatever node it meets, whichever grammar produced it.
 
-Svelte and Vue would be the sharper example and are deliberately not cited:
-`core/languages.ts` registers them for detection, but no parser ships for
-either, so they have no tree to walk.
+**Svelte and Vue are the sharper example, and this section twice said
+otherwise.** `editor/languages.ts` maps both to `@codemirror/lang-html`, so
+`hasGrammar` is true for them and a `.svelte` file parses as HTML with CSS and
+JavaScript nested inside — a script block and a style block in one tree, which
+is precisely the case per-language rules would halve.
+
+The first draft cited them. A later revision removed them, on the grounds that
+no parser ships for either; that was read off `ARCHITECTURE.md`'s "nine
+language families" prose rather than out of the `LOADERS` map, and it was
+wrong. The claim is corrected here rather than quietly deleted, because the
+same mistake is available to anyone who checks the prose instead of the code.
+
+The one honest caveat: the HTML grammar on a Svelte file is an approximation,
+since template syntax is not HTML. That is the same trade `LOADERS` already
+makes for SCSS, and its comment there says so — "close enough to be useful,
+honest about being an approximation."
 
 The cost is that two grammars using one name for different things would have
 to agree. None of the five above does, and the table is one file to change if

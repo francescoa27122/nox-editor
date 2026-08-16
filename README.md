@@ -233,7 +233,7 @@ you're actually able to change.
 ## Status
 
 **v0.2.** It's young, and it's a personal project rather than a product, but
-it's real software with 759 tests and I use it. Expect rough edges, and open an
+it's real software with 779 tests and I use it. Expect rough edges, and open an
 issue if you hit one.
 
 **Local models and asking about a selection both landed after v0.2 was
@@ -260,7 +260,7 @@ Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 filesystem and project search. The editor itself lives in the renderer.
 
 ```bash
-npm test          # 759 unit tests
+npm test          # 779 unit tests
 npm run check     # TypeScript + Svelte
 npm run app:build # a distributable, ~4 MB on macOS
 ```
