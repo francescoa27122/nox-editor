@@ -34,21 +34,24 @@ interface Rule {
   /**
    * Direct-child node types holding the name, tried in order. Rust needs two:
    * `BoundIdentifier` names functions and modules, `TypeIdentifier` names
-   * structs, enums, traits, impls and type aliases.
+   * structs, enums, traits and type aliases. JavaScript needs two as well:
+   * a method is named by a `PropertyDefinition` unless it is private, and
+   * `#foo() {}` is named by a `PrivatePropertyDefinition`.
    */
   nameFrom?: readonly string[];
   /**
-   * Take the last matching child instead of the first, for `ImplItem`:
-   * `impl Foo` has one `TypeIdentifier` child (the type), but
-   * `impl Display for Foo` has two (the trait, then the type) and the type
-   * — what the impl's methods actually belong to — is the second one.
-   * `impl Foo` is unaffected, since first and last coincide there.
+   * Take the node's own text, stopping at the last child of this type that is
+   * not the node's own opening mark — for nodes with no name child. See
+   * `ownTextEnd`.
    */
-  lastNameFrom?: boolean;
-  /** Take the node's own text up to `stopAt`, for nodes with no name child. */
-  ownTextUntil?: string | true;
+  ownTextUntil?: string;
   /** Strip this from the front of the text, for Markdown's `##`. */
   strip?: RegExp;
+  /**
+   * Take the name from the type sitting immediately before this child, for
+   * Rust's `impl`. See `targetTypeOf`.
+   */
+  targetTypeBefore?: string;
 }
 
 /**
@@ -62,14 +65,21 @@ interface Rule {
  * spellings of one idea — so matching on the name alone has nothing to get
  * wrong. See the design doc §5.
  *
- * Every name below was read out of `parser.nodeSet.types` and confirmed
- * against a real parse, not remembered.
+ * Every name below is now read out of a real parse of the construct it
+ * claims to match, which is not how the first version was written: it named
+ * `PropertyName` as a method's name child, a node the JavaScript grammar only
+ * ever produces for `a.b`, and left out the `PrivatePropertyDefinition` that
+ * actually names `#foo() {}` — so every private method in the file was
+ * dropped, silently, and the tests were written from the same table.
  */
 const RULES: Record<string, Rule> = {
   // JavaScript / TypeScript / JSX / TSX
   FunctionDeclaration: { kind: 'function', nameFrom: ['VariableDefinition'] },
   ClassDeclaration: { kind: 'class', nameFrom: ['VariableDefinition'] },
-  MethodDeclaration: { kind: 'function', nameFrom: ['PropertyDefinition', 'PropertyName'] },
+  MethodDeclaration: {
+    kind: 'function',
+    nameFrom: ['PropertyDefinition', 'PrivatePropertyDefinition'],
+  },
   InterfaceDeclaration: { kind: 'interface', nameFrom: ['TypeDefinition'] },
   TypeAliasDeclaration: { kind: 'type', nameFrom: ['TypeDefinition'] },
   EnumDeclaration: { kind: 'enum', nameFrom: ['TypeDefinition'] },
@@ -85,7 +95,7 @@ const RULES: Record<string, Rule> = {
   StructItem: { kind: 'class', nameFrom: ['TypeIdentifier'] },
   EnumItem: { kind: 'enum', nameFrom: ['TypeIdentifier'] },
   TraitItem: { kind: 'interface', nameFrom: ['TypeIdentifier'] },
-  ImplItem: { kind: 'class', nameFrom: ['TypeIdentifier'], lastNameFrom: true },
+  ImplItem: { kind: 'class', targetTypeBefore: 'DeclarationList' },
   TypeItem: { kind: 'type', nameFrom: ['TypeIdentifier'] },
 
   // CSS / SCSS. The selector is the text before the block, not a child.
@@ -95,31 +105,103 @@ const RULES: Record<string, Rule> = {
   // spans only its own line(s) and is a sibling of whatever follows it, never
   // an ancestor — so the generic walk already gives headings unqualified
   // names, the same way a top-level function does.
-  ATXHeading1: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
-  ATXHeading2: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
-  ATXHeading3: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
-  ATXHeading4: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
-  ATXHeading5: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
-  ATXHeading6: { kind: 'heading', ownTextUntil: true, strip: /^#+\s*/ },
-  SetextHeading1: { kind: 'heading', ownTextUntil: true },
-  SetextHeading2: { kind: 'heading', ownTextUntil: true },
+  //
+  // Both heading forms stop at a `HeaderMark`, for two different marks: an
+  // ATX heading's optional closing `#` run, and a Setext heading's `=====`
+  // underline, which the node spans along with its text line. The opening
+  // `#` run is a `HeaderMark` too, but it sits at the node's own start, and
+  // `ownTextEnd` ignores it; `strip` takes it off the front of the text.
+  ATXHeading1: { kind: 'heading', ownTextUntil: 'HeaderMark', strip: /^#+\s*/ },
+  ATXHeading2: { kind: 'heading', ownTextUntil: 'HeaderMark', strip: /^#+\s*/ },
+  ATXHeading3: { kind: 'heading', ownTextUntil: 'HeaderMark', strip: /^#+\s*/ },
+  ATXHeading4: { kind: 'heading', ownTextUntil: 'HeaderMark', strip: /^#+\s*/ },
+  ATXHeading5: { kind: 'heading', ownTextUntil: 'HeaderMark', strip: /^#+\s*/ },
+  ATXHeading6: { kind: 'heading', ownTextUntil: 'HeaderMark', strip: /^#+\s*/ },
+  SetextHeading1: { kind: 'heading', ownTextUntil: 'HeaderMark' },
+  SetextHeading2: { kind: 'heading', ownTextUntil: 'HeaderMark' },
 };
+
+/**
+ * Where a node's own text ends: at the last child of `type` that starts after
+ * the node does, or at the node's end when there is none.
+ *
+ * The "after the node does" is what lets one rule serve three shapes. A CSS
+ * `RuleSet` stops at its `Block`. A Setext heading stops at the `HeaderMark`
+ * holding its `=====` underline, which the node spans along with its text. An
+ * ATX heading stops at the `HeaderMark` holding its *closing* `#` run when it
+ * has one — and its opening run is a `HeaderMark` at the node's own start,
+ * which would otherwise make every ATX heading's text empty.
+ *
+ * Taking it from the grammar rather than a regex also means CommonMark's rule
+ * for what counts as a closing run is not re-derived here: `# Title #` gets a
+ * second mark and `# Title#` does not, and the difference is already decided.
+ */
+function ownTextEnd(node: SyntaxNode, type: string): number {
+  const after = node.getChildren(type).filter((child) => child.from > node.from);
+  const last = after[after.length - 1];
+  return last ? last.from : node.to;
+}
+
+/**
+ * The type a Rust `impl` block's methods belong to: whatever sits immediately
+ * before the block, skipping a `where` clause.
+ *
+ * Reading direct `TypeIdentifier` children instead is wrong twice over. In
+ * `impl Foo<T>` the type is wrapped in a `GenericType` and is not a direct
+ * child at all, so the impl went unnamed and its methods came out unqualified.
+ * In `impl<T> Display for Inner<T>` the only direct `TypeIdentifier` is the
+ * *trait*, so the methods came out as `Display.fmt` — a name that sends you
+ * looking in the wrong place, which is worse than none.
+ *
+ * Position settles it where child type cannot: `impl Foo`, `impl Trait for
+ * Foo`, `impl<T> Wrapper<T>` and `impl Trait for &Foo` all put the target type
+ * last. Its head name is then the first `TypeIdentifier` inside it —
+ * `Wrapper` in `Wrapper<T>`, `Foo` in `&Foo`, `Foo` in `crate::Foo`.
+ */
+function targetTypeOf(node: SyntaxNode, body: string): SyntaxNode | null {
+  let type = node.getChild(body)?.prevSibling ?? node.lastChild;
+  while (type && type.name === 'WhereClause') type = type.prevSibling;
+  if (!type) return null;
+
+  const cursor = type.cursor();
+  do {
+    if (cursor.name === 'TypeIdentifier') return cursor.node;
+  } while (cursor.next());
+  return null;
+}
 
 /** The name for one matched node, or null when the grammar gave us none. */
 function nameOf(node: SyntaxNode, rule: Rule, doc: Text): string | null {
   if (rule.ownTextUntil) {
-    const stop =
-      rule.ownTextUntil === true ? node.to : (node.getChild(rule.ownTextUntil)?.from ?? node.to);
-    let text = doc.sliceString(node.from, stop).trim();
+    const stop = ownTextEnd(node, rule.ownTextUntil);
+    // A selector may span lines, and its newline and the next line's indent
+    // would go into the title, where they wreck a one-line row and give fuzzy
+    // matching whitespace to match on.
+    let text = doc.sliceString(node.from, stop).replace(/\s+/g, ' ').trim();
     if (rule.strip) text = text.replace(rule.strip, '').trim();
     return text.length > 0 ? text : null;
   }
+  if (rule.targetTypeBefore) {
+    const type = targetTypeOf(node, rule.targetTypeBefore);
+    return type ? doc.sliceString(type.from, type.to) : null;
+  }
   for (const type of rule.nameFrom ?? []) {
-    const children = node.getChildren(type);
-    const child = rule.lastNameFrom ? children[children.length - 1] : children[0];
+    const child = node.getChild(type);
     if (child) return doc.sliceString(child.from, child.to);
   }
   return null;
+}
+
+/**
+ * A name appended to its enclosing path: `Foo` inside `PackRow` is
+ * `PackRow.Foo`.
+ *
+ * The dot is left out when the name brings its own, which CSS names do:
+ * `.card` nesting `.title` is `.card.title`, not `.card..title`.
+ */
+function qualify(prefix: string | undefined, name: string): string {
+  if (prefix === undefined) return name;
+  return name.startsWith('.') ? prefix + name : `${prefix}.${name}`;
 }
 
 /**
@@ -134,6 +216,9 @@ function nameOf(node: SyntaxNode, rule: Rule, doc: Text): string | null {
  */
 export function fileSymbols(tree: Tree, doc: Text): FileSymbol[] {
   const found: FileSymbol[] = [];
+  // The qualified path of each enclosing symbol, not its bare name, so that
+  // `qualify`'s rule about names that bring their own dot applies at every
+  // depth rather than only the first.
   const enclosing: string[] = [];
 
   tree.iterate({
@@ -144,9 +229,9 @@ export function fileSymbols(tree: Tree, doc: Text): FileSymbol[] {
       const name = nameOf(nodeRef.node, rule, doc);
       if (name === null) return true;
 
-      const qualified = enclosing.length > 0 ? `${enclosing.join('.')}.${name}` : name;
+      const qualified = qualify(enclosing[enclosing.length - 1], name);
       found.push({ name, qualified, kind: rule.kind, from: nodeRef.from, to: nodeRef.to });
-      enclosing.push(name);
+      enclosing.push(qualified);
       return true;
     },
     leave(nodeRef) {

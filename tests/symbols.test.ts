@@ -39,6 +39,26 @@ describe('the symbols in a file', () => {
     expect(scan(ts, source)).toEqual(['real:function']);
   });
 
+  /**
+   * The failure this prevents, and it shipped: `#foo() {}` names its method
+   * with `PrivatePropertyDefinition`, not `PropertyDefinition`, so a rule that
+   * only reads the latter drops every private method without a trace — 26 of
+   * `src/app.ts`'s own 63 methods, 6 of `src/services/watcher.ts`'s 11.
+   * `static`, `get` and `set` all keep `PropertyDefinition`, so they are here
+   * to pin that the modifiers change nothing.
+   */
+  it('reads private, static and accessor methods', () => {
+    const source =
+      'class A {\n  #hidden() {}\n  static make() {}\n  get value() { return 1 }\n  set value(v) {}\n}\n';
+    expect(scan(ts, source)).toEqual([
+      'A:class',
+      'A.#hidden:function',
+      'A.make:function',
+      'A.value:function',
+      'A.value:function',
+    ]);
+  });
+
   it('reads TypeScript interfaces, type aliases, enums and namespaces', () => {
     const source = 'interface I {}\ntype T = string;\nenum E { A }\nnamespace N {}\n';
     expect(scan(ts, source)).toEqual(['I:interface', 'T:type', 'E:enum', 'N:module']);
@@ -82,12 +102,49 @@ describe('the symbols in a file', () => {
   });
 
   /**
+   * The failure this prevents, and it shipped: in `impl Foo<T>` the type is
+   * wrapped in a `GenericType` node, so it is not a direct child of the
+   * `ImplItem` at all. Reading direct `TypeIdentifier` children found nothing
+   * for the inherent impl — no row, and its methods unqualified — and for the
+   * trait impl found only the *trait*, which is worse: `Display.fmt` sends you
+   * looking for a type that does not have that method. Both are ordinary Rust.
+   */
+  it('names a generic impl by its type, through the wrapper node', () => {
+    const source =
+      'impl<T> Wrapper<T> {\n    fn get() {}\n}\nimpl<T> Display for Inner<T> {\n    fn fmt() {}\n}\n';
+    expect(scan(rustParser, source)).toEqual([
+      'Wrapper:class',
+      'Wrapper.get:function',
+      'Inner:class',
+      'Inner.fmt:function',
+    ]);
+  });
+
+  /**
    * A CSS rule set has no name child: the selector is the text from the node
    * to its `Block`. Taking the whole node's text would put the declarations
    * in the title.
    */
   it('names a CSS rule set by its selector', () => {
     expect(scan(cssParser, '.foo, .bar {\n  color: red;\n}\n')).toEqual(['.foo, .bar:rule']);
+  });
+
+  /**
+   * A selector may span lines. Its text carries the newline and the next
+   * line's indent into the title, where it wrecks a single-line row and gives
+   * fuzzy matching whitespace to match on.
+   */
+  it('normalises the whitespace in a selector that spans lines', () => {
+    expect(scan(cssParser, '.a,\n  .b > .c {\n  color: red;\n}\n')).toEqual(['.a, .b > .c:rule']);
+  });
+
+  /**
+   * Qualification joins with a dot, and a class selector already starts with
+   * one: `.card { .title {} }` came out as `.card..title`.
+   */
+  it('does not double the dot when qualifying a nested rule', () => {
+    const source = '.card {\n  .title { color: red }\n  span { color: blue }\n}\n';
+    expect(scan(cssParser, source)).toEqual(['.card:rule', '.card.title:rule', '.card.span:rule']);
   });
 
   /**
@@ -116,6 +173,34 @@ describe('the symbols in a file', () => {
   it('names Markdown headings without qualifying them to one another', () => {
     const source = '# Title\n\n## Subtitle\n\ntext\n';
     expect(scan(markdownLanguage.parser, source)).toEqual(['Title:heading', 'Subtitle:heading']);
+  });
+
+  /**
+   * The failure this prevents, and it shipped: a `SetextHeading` node spans
+   * the text line *and* the `=====` under it, so its own text came back as
+   * `"Title\n====="`. The underline is a `HeaderMark` child, which is where
+   * the title has to stop.
+   */
+  it('names a Setext heading without its underline', () => {
+    const source = 'Title\n=====\n\nSub\n---\n\ntext\n';
+    expect(scan(markdownLanguage.parser, source)).toEqual(['Title:heading', 'Sub:heading']);
+  });
+
+  /**
+   * An ATX heading may close with a second run of hashes, which is a mark and
+   * not part of the title. Stopping at the last `HeaderMark` that is not the
+   * opening one drops it without guessing at CommonMark's rule for when a
+   * trailing run counts: the grammar has already decided. `### Kept#` is the
+   * proof — no space before the hash, so it is not a closing sequence, the
+   * grammar emits no second mark, and the hash stays in the title.
+   */
+  it("drops an ATX heading's closing hashes but not a trailing hash in its text", () => {
+    const source = '# Title #\n\n## Deep ##########\n\n### Kept#\n';
+    expect(scan(markdownLanguage.parser, source)).toEqual([
+      'Title:heading',
+      'Deep:heading',
+      'Kept#:heading',
+    ]);
   });
 
   /**
