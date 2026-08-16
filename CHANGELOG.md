@@ -6,6 +6,24 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The breadcrumb navigates.** The trail in the title bar has shown where you
+  are since v0.1; now clicking a folder in it opens the explorer, expands that
+  folder, and scrolls to it. Clicking the file at the end reveals the file,
+  which is what **Reveal in Explorer** already did.
+  - Segments of a file outside the workspace are not clickable. There is
+    nothing to reveal into — the explorer watches one root — and a button that
+    takes the click and does nothing is worse than plain text.
+
+### Changed
+
+- **Reveal in Explorer now selects what it reveals.** It expanded the tree to
+  the file and left the selection alone, which was only invisible because the
+  explorer follows the active tab by itself. A folder revealed from the
+  breadcrumb has no such effect behind it, and one that expands without being
+  selected can open entirely off-screen.
+
 ## [0.3.0] — 2026-08-16
 
 ### Added
