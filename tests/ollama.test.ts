@@ -1249,3 +1249,73 @@ describe('a session that ended for a reason of its own', () => {
     expect(errorsOf(session)).toMatch(/export function add/);
   });
 });
+
+describe('answering in prose', () => {
+  /** Drive a prose stream to completion. */
+  async function drainProse(provider: OllamaProvider, instruction: string) {
+    const chunks: ModelChunk[] = [];
+    const stream = provider.complete({ instruction, context: '', expects: 'prose' });
+    for (let step = await stream.next(); !step.done; step = await stream.next(undefined)) {
+      chunks.push(step.value);
+    }
+    return chunks;
+  }
+
+  /**
+   * The failure this prevents — and the reason this feature exists. On main,
+   * a model that replies with prose and no JSON is told twice it is wrong and
+   * the session ends *failed*, with the answer discarded as narration. The
+   * loop cannot terminate on prose, so no prompt fixes it.
+   */
+  it('takes a prose reply as the answer rather than as a failed turn', async () => {
+    const { platform, bodies } = fakePlatform(['It adds two numbers and returns the sum.']);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const chunks = await drainProse(provider, 'what does this do?');
+
+    expect(chunks).toEqual([{ type: 'text', text: 'It adds two numbers and returns the sum.' }]);
+    expect(bodies).toHaveLength(1);
+  });
+
+  /**
+   * The failure this prevents: a prose answer being parsed for actions,
+   * which would let an explanation that happens to contain a JSON example
+   * turn into a request Nox acts on.
+   */
+  it('never yields an action, even when the prose contains one', async () => {
+    const { platform } = fakePlatform([
+      'You could call it like this:\n{"method":"context.openBuffers"}\nand that lists the buffers.',
+    ]);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const chunks = await drainProse(provider, 'how do I list buffers?');
+
+    expect(chunks.every((chunk) => chunk.type === 'text')).toBe(true);
+  });
+
+  /**
+   * The failure this prevents: a fenced code block being stripped out of an
+   * explanation by machinery that exists to find JSON actions. An
+   * explanation of code is the prose most likely to contain a fence.
+   */
+  it('leaves fenced code in the answer untouched', async () => {
+    const answer = 'Like so:\n```js\nconst x = 1;\n```\nThat is all.';
+    const { platform } = fakePlatform([answer]);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    const chunks = await drainProse(provider, 'show me');
+
+    expect(chunks).toEqual([{ type: 'text', text: answer }]);
+  });
+
+  /**
+   * The failure this prevents: an empty reply becoming an empty answer card
+   * that looks like a rendering bug rather than a model that said nothing.
+   */
+  it('yields nothing at all when the model returns only whitespace', async () => {
+    const { platform } = fakePlatform(['   \n  ']);
+    const provider = new OllamaProvider(platform, CONFIG);
+
+    expect(await drainProse(provider, 'say nothing')).toEqual([]);
+  });
+});
