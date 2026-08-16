@@ -128,10 +128,19 @@ Fuzzy matching runs over the title, so this is what lets you type `packrender`
 classes each having a `render` gives four identical rows and no way to
 separate them.
 
-**Markdown headings are the exception and stay flat.** `ATXHeading1`–`6` are
-siblings in the tree; they nest by *level*, not by containment. Deriving a
-hierarchy from the numbers is a second, different algorithm, and a flat list
-of headings is what a reader of a Markdown file already has in their head.
+**Markdown headings come back flat, and need no special case to.** They nest
+by *level*, not by containment: an `ATXHeading1` node covers only its own
+line, so `# Title` and `## Subtitle` are siblings of the document rather than
+parent and child. The generic containment walk therefore yields them
+unqualified already — the stack is empty again before the next heading is
+entered.
+
+This corrects an earlier version of this section, which drew the opposite
+conclusion from the same fact and specified a `flat` flag to exempt them. The
+flag was written, and then found to be unreachable: forcing it off against a
+real parse produced byte-identical output. Deriving a hierarchy from the level
+numbers would be a second, different algorithm, and is still not wanted — but
+nothing has to be done to *avoid* one.
 
 ## 7. The palette mode
 
