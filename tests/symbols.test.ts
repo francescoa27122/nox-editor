@@ -327,6 +327,9 @@ describe('what the symbol list has to say', () => {
  * `symbolRows` in CommandPalette.svelte relies on it doing.
  */
 describe('the parse budget for large files', () => {
+  /** The budget `symbolRows` spends, mirrored from CommandPalette.svelte. */
+  const PARSE_BUDGET_MS = 100;
+
   /** `n` top-level functions, source enough to push a document past the parse frontier. */
   function manyFunctions(n: number): string {
     let source = '';
@@ -334,6 +337,22 @@ describe('the parse budget for large files', () => {
       source += `function f${i}(x) {\n  return x + ${i};\n}\n\n`;
     }
     return source;
+  }
+
+  /**
+   * Characters of this source per millisecond, measured on the machine
+   * running the test rather than the one that wrote it.
+   *
+   * The parse is forced with a budget far past what it needs, so what is
+   * being timed is the parse finishing, not the deadline expiring.
+   */
+  function measureParseRate(): number {
+    const state = EditorState.create({ doc: manyFunctions(2000), extensions: [javascript()] });
+    const start = performance.now();
+    const tree = ensureSyntaxTree(state, state.doc.length, 60_000);
+    const elapsed = performance.now() - start;
+    expect(tree?.length).toBe(state.doc.length);
+    return state.doc.length / Math.max(elapsed, 0.001);
   }
 
   /**
@@ -366,16 +385,31 @@ describe('the parse budget for large files', () => {
   });
 
   /**
-   * The budget `symbolRows` actually uses (`PARSE_BUDGET_MS = 100` in
-   * CommandPalette.svelte) is a real deadline, not a formality: a document
-   * too large to finish in it makes `ensureSyntaxTree` give up and return
-   * null rather than block the palette. 20,000 functions (~1.2MB) parses at
-   * roughly 40 chars/ms in this environment, so 100ms is nowhere near enough
-   * — the margin holds even on a machine several times faster than the one
-   * this was measured on.
+   * The budget `symbolRows` spends is a real deadline, not a formality: a
+   * document too large to finish inside it makes `ensureSyntaxTree` give up
+   * and return null rather than block the palette on a keystroke.
+   *
+   * The document is sized from a rate measured a moment earlier, because the
+   * fixed one here before was a bet on wall-clock that a faster machine
+   * wins. It used 20,000 functions and a comment claiming ~40 chars/ms and a
+   * margin of "several times faster". Measured: that document is 857,780
+   * characters, it parses at ~2,437 chars/ms, and it finishes in ~352ms —
+   * against a 100ms budget, a margin of 3.5×, not 60×. A machine four times
+   * quicker than this one would have flipped the assertion.
+   *
+   * Sizing it here needs only enough margin to cover measurement noise and a
+   * warmer JIT on the second parse, so the multiplier is small and the
+   * document stays a tenth of the size.
    */
   it('ensureSyntaxTree gives up within the palette budget on a document too large to finish', () => {
-    const state = EditorState.create({ doc: manyFunctions(20000), extensions: [javascript()] });
-    expect(ensureSyntaxTree(state, state.doc.length, 100)).toBeNull();
+    const MARGIN = 10;
+    const rate = measureParseRate();
+    const perFunction = manyFunctions(100).length / 100;
+    const functions = Math.ceil((rate * PARSE_BUDGET_MS * MARGIN) / perFunction);
+
+    const state = EditorState.create({ doc: manyFunctions(functions), extensions: [javascript()] });
+    expect(ensureSyntaxTree(state, state.doc.length, PARSE_BUDGET_MS)).toBeNull();
+    // And what the palette falls back to is still a usable partial tree.
+    expect(syntaxTree(state).length).toBeLessThan(state.doc.length);
   });
 });
