@@ -27,15 +27,25 @@ export interface Mounted {
  * `unmount()` at the end should call it from a `finally` or an `afterEach`
  * instead.
  *
- * `Component` takes no props — `Harness.svelte` renders `<Rendered />` with
- * nothing passed, so a component that requires them cannot be mounted here.
- * Supporting props means a generic parameter on this function, a widened
- * prop type, and a `{...props}` spread in `Harness.svelte`: two files, not
- * one line.
+ * Pass props via `options.props`; `Harness.svelte` spreads them onto
+ * `Component` as `<Rendered {...props} />`. Props-free components need not
+ * pass the option at all.
+ *
+ * Declared as an overload rather than one generic signature: callers see
+ * only the first, checked against the real `P` of whatever component they
+ * pass — `AnswersPanel`'s `{}` or `ConfirmDialog`'s `{ request:
+ * ConfirmRequest }`. The implementation signature underneath is deliberately
+ * wider (`Record<string, unknown>`, matching `Harness.svelte`'s own prop
+ * type), which is what lets the body hand `Component` and `options.props`
+ * to `Harness` without a cast.
  */
+export function mountComponent<P extends Record<string, unknown>>(
+  Component: Component<P>,
+  options?: { props?: P; app?: NoxApp },
+): Mounted;
 export function mountComponent(
-  Component: Component<Record<string, never>>,
-  options?: { app?: NoxApp },
+  Component: Component<Record<string, unknown>>,
+  options?: { props?: Record<string, unknown>; app?: NoxApp },
 ): Mounted {
   const app = options?.app ?? new NoxApp(new MemoryPlatform());
 
@@ -47,7 +57,7 @@ export function mountComponent(
 
   const instance = mount(Harness, {
     target: container,
-    props: { app, component: Component },
+    props: { app, component: Component, props: options?.props ?? {} },
   });
 
   return {
@@ -67,7 +77,7 @@ export function mountComponent(
       // of `document.body` for the rest of the file — `document.body` itself
       // accumulates one per test, and `document.activeElement` (or any other
       // `document`-level query) can still reach it, which matters because
-      // lines 42-46 deliberately attach it there so the focus effect works.
+      // lines 52-56 deliberately attach it there so the focus effect works.
       container.remove();
     },
   };
