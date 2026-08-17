@@ -1,13 +1,6 @@
-import {
-  findNext,
-  findPrevious,
-  RegExpCursor,
-  SearchCursor,
-  SearchQuery,
-  setSearchQuery,
-} from '@codemirror/search';
+import { findNext, findPrevious, SearchQuery, setSearchQuery } from '@codemirror/search';
 import { type ChangeSpec, EditorSelection, type EditorState } from '@codemirror/state';
-import type { EditorView } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { expandReplacement, preserveCase } from '@core/replace';
 import { Signal } from '@core/signal';
 
@@ -69,23 +62,27 @@ interface FoundMatch {
 /**
  * Advance a `SearchQuery` cursor and read the whole match off it.
  *
- * `getCursor` is typed as a bare `Iterator<{from, to}>`, but it only ever
- * returns one of the two exported cursor classes, and both publish `precise`
- * (and, for the regex one, the match) on `value`. Narrowing on the class is
- * how we get at them without a cast — and without building a second matcher.
+ * `getCursor` is declared as a bare `Iterator<{from, to}>`, so `precise` and
+ * the regex match are absent from the type even though every cursor publishes
+ * them. We read them **by shape, never by class.** `RegExpCursor`'s
+ * constructor `return`s a `MultilineRegExpCursor` for any pattern containing
+ * `\s`, `\W`, `\D`, `\n`, `\r` or `[^` (dist/index.js:166), and that class is
+ * neither exported nor a subclass — so an `instanceof` test silently loses the
+ * match object for exactly those patterns and writes the raw `$1` template
+ * into the document. Widening to optional properties needs no cast, and covers
+ * every cursor the library has or adds.
  */
 function step(cursor: Iterator<{ from: number; to: number }>): FoundMatch | null {
   const result = cursor.next();
   if (result.done) return null;
-  if (cursor instanceof RegExpCursor) {
-    const { from, to, precise, match } = cursor.value;
-    return { from, to, precise, match };
-  }
-  if (cursor instanceof SearchCursor) {
-    const { from, to, precise } = cursor.value;
-    return { from, to, precise, match: null };
-  }
-  return { from: result.value.from, to: result.value.to, precise: true, match: null };
+  const value: { from: number; to: number; precise?: boolean; match?: RegExpExecArray } =
+    result.value;
+  return {
+    from: value.from,
+    to: value.to,
+    precise: value.precise ?? true,
+    match: value.match ?? null,
+  };
 }
 
 /**
@@ -229,15 +226,24 @@ export class FindController {
    * The first match at or after `to`, wrapping to the top of the document.
    *
    * This is `@codemirror/search`'s internal `nextMatch`, rebuilt on the one
-   * cursor its public surface gives us. Null when the wrap lands back on the
-   * range we started from — a lone match must not read as "advanced".
+   * cursor its public surface gives us — including the two bounds that look
+   * like details and are not. The wrap search stops at `from` for a regex
+   * query and at `from + query.length` for a literal one, so it can only
+   * return a match *behind* the cursor; searching the whole document instead
+   * lets a match straddling the cursor come back and drags the selection
+   * backwards. And the literal path alone rejects a result identical to the
+   * range we started from, so a document with one match does not "advance" to
+   * itself.
    */
   #nextMatch(query: SearchQuery, state: EditorState, from: number, to: number): FoundMatch | null {
-    const forward = step(query.getCursor(state, to));
-    if (forward) return forward;
-    const wrapped = step(query.getCursor(state, 0));
-    if (!wrapped || (wrapped.from === from && wrapped.to === to)) return null;
-    return wrapped;
+    const wrapEnd = query.regexp
+      ? from
+      : Math.min(state.doc.length, from + unquote(query.search).length);
+    const found =
+      step(query.getCursor(state, to)) ?? step(query.getCursor(state, 0, wrapEnd));
+    if (!found) return null;
+    if (!query.regexp && found.from === from && found.to === to) return null;
+    return found;
   }
 
   /**
@@ -248,6 +254,10 @@ export class FindController {
    * ⌘F's Replace safe to lean on — the following match is located in the
    * *old* document and mapped through the change, and change plus selection
    * go out as a single transaction, so one undo takes it back.
+   *
+   * The announcement is the library's, kept because `findNext` still announces
+   * through it: a panel where navigating speaks and destroying is silent is
+   * worse than one that says nothing at all.
    */
   #replaceNext(view: EditorView): boolean {
     const query = this.#build();
@@ -259,11 +269,13 @@ export class FindController {
     if (!match) return false;
 
     const changes: ChangeSpec[] = [];
+    let announcement: string | null = null;
     let next: FoundMatch | null = match;
     if (!match.precise) {
       next = this.#nextMatch(query, state, match.from, match.to);
     } else if (match.from === from && match.to === to) {
       changes.push({ from: match.from, to: match.to, insert: this.#replacementFor(state, match) });
+      announcement = `${state.phrase('replaced match on line $', state.doc.lineAt(from).number)}.`;
       next = this.#nextMatch(query, state, match.from, match.to);
     }
 
@@ -271,6 +283,7 @@ export class FindController {
     view.dispatch({
       changes: changeSet,
       selection: next ? EditorSelection.single(next.from, next.to).map(changeSet) : undefined,
+      effects: announcement === null ? undefined : EditorView.announce.of(announcement),
       scrollIntoView: next !== null,
       userEvent: 'input.replace',
     });
@@ -294,7 +307,11 @@ export class FindController {
     }
     if (changes.length === 0) return false;
 
-    view.dispatch({ changes, userEvent: 'input.replace.all' });
+    view.dispatch({
+      changes,
+      effects: EditorView.announce.of(`${state.phrase('replaced $ matches', changes.length)}.`),
+      userEvent: 'input.replace.all',
+    });
     return true;
   }
 
