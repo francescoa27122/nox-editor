@@ -127,6 +127,12 @@ jobs:
           # Left as a draft deliberately: the notes below are the minimum a
           # download needs to work, not the release notes. Write those, then
           # publish by hand.
+          #
+          # The file names below must match `bundle.targets` in
+          # src-tauri/tauri.conf.json — today `app`, `dmg`, `deb`, `rpm`,
+          # `nsis`. Offering a download that is not in that list sends people
+          # looking for a file the build never produced, and nothing here
+          # fails when they disagree: these are a string, not a manifest.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
@@ -149,7 +155,7 @@ jobs:
             build from source instead; `npm run app` does the same thing from
             code you can read.
 
-            **Linux** — take the `.deb` or the `.AppImage`. Built on Ubuntu
-            22.04, so it needs glibc 2.35 or newer.
+            **Linux** — take the `.deb` or the `.rpm`. Built on Ubuntu 22.04,
+            so it needs glibc 2.35 or newer. There is no AppImage.
 
             **Windows** — build from source for now.
