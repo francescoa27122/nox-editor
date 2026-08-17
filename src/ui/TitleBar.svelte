@@ -61,8 +61,22 @@
   });
 </script>
 
-<header class="nox-titlebar" class:reserve={reserveTrafficLights} data-tauri-drag-region>
-  <div class="identity" data-tauri-drag-region>
+<!--
+  `deep` rather than a bare `data-tauri-drag-region`, and only here.
+
+  Tauri's `drag.js` walks the composed path and stops at the *first* element
+  carrying the attribute: bare means "drag only if this exact element was the
+  mousedown target", so a bare attribute drags nothing but the slivers between
+  children. It was on three elements, and the two inner ones ended the walk
+  before it reached this one — which is why nothing on the bar could be
+  dragged, wordmark and breadcrumb included.
+
+  Buttons still take their clicks: the same walk returns false as soon as it
+  meets a clickable element with no attribute of its own, so `deep` here does
+  not steal the palette trigger or a breadcrumb segment.
+-->
+<header class="nox-titlebar" class:reserve={reserveTrafficLights} data-tauri-drag-region="deep">
+  <div class="identity">
     <Icon name="logo" size={15} class="mark" />
     <span class="wordmark">Nox</span>
     {#if rootName}
@@ -71,7 +85,7 @@
     {/if}
   </div>
 
-  <div class="center" data-tauri-drag-region>
+  <div class="center">
     {#if trail.length > 0}
       <nav class="breadcrumb" aria-label="File path">
         {#each trail as crumb, index (index)}
