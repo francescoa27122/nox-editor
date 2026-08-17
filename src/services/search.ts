@@ -1,5 +1,5 @@
 import { basename, dirname, relative } from '@core/path';
-import { computeReplacements, expandReplacement } from '@core/replace';
+import { computeReplacements, expandReplacement, preserveCase } from '@core/replace';
 import { buildSearchRegex } from '@core/search-match';
 import { Signal } from '@core/signal';
 import type { Platform, SearchFileResult, SearchSummary } from '@platform/types';
@@ -23,6 +23,7 @@ export interface SearchOptions {
   caseSensitive: boolean;
   wholeWord: boolean;
   regexp: boolean;
+  preserveCase: boolean;
   includes: string;
   excludes: string;
   respectGitIgnore: boolean;
@@ -54,6 +55,7 @@ export class SearchService {
     caseSensitive: false,
     wholeWord: false,
     regexp: false,
+    preserveCase: false,
     includes: '',
     excludes: '',
     respectGitIgnore: true,
@@ -97,7 +99,7 @@ export class SearchService {
     this.#scheduleRun();
   }
 
-  toggle(key: 'caseSensitive' | 'wholeWord' | 'regexp' | 'respectGitIgnore'): void {
+  toggle(key: 'caseSensitive' | 'wholeWord' | 'regexp' | 'preserveCase' | 'respectGitIgnore'): void {
     this.setOption(key, !this.options.get()[key]);
   }
 
@@ -329,8 +331,13 @@ export class SearchService {
   previewReplacement(match: { preview: string; column: number; length: number }): string | null {
     const template = this.replacement.get();
     const options = this.options.get();
+    // Same string a `computeReplacements` call would shape the case against —
+    // the matched text itself, not the pattern that found it.
+    const matched = match.preview.slice(match.column, match.column + match.length);
 
-    if (!options.regexp) return template;
+    if (!options.regexp) {
+      return options.preserveCase ? preserveCase(matched, template) : template;
+    }
 
     let matcher: RegExp;
     try {
@@ -346,9 +353,12 @@ export class SearchService {
         matcher.lastIndex++;
         continue;
       }
-      if (found.index === match.column) return expandReplacement(template, found, true);
+      if (found.index === match.column) {
+        const expanded = expandReplacement(template, found, true);
+        return options.preserveCase ? preserveCase(found[0], expanded) : expanded;
+      }
     }
-    return template;
+    return options.preserveCase ? preserveCase(matched, template) : template;
   }
 
   /**
@@ -461,6 +471,7 @@ export class SearchService {
           // result rows, which may be stale for a file edited since the search.
           const result = computeReplacements(source.text, matcher, replacement, {
             expand: options.regexp,
+            preserveCase: options.preserveCase,
           });
           if (result.count === 0) continue;
 

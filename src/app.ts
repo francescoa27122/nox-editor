@@ -1509,6 +1509,13 @@ export class NoxApp {
         run: () => this.search.toggle('regexp'),
       },
       {
+        id: 'search.togglePreserveCase',
+        title: 'Search: Toggle Preserve Case',
+        category: 'Search',
+        keywords: ['case', 'preserve', 'AB'],
+        run: () => this.search.toggle('preserveCase'),
+      },
+      {
         id: 'search.toggleGitIgnore',
         title: 'Search: Toggle Respect .gitignore',
         category: 'Search',
