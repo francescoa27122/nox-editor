@@ -24,7 +24,7 @@ If you cannot satisfy a test, that is a finding to report — not a reason to ed
 - **Do not run prettier.** Single quotes, 2-space indent, semicolons, matched by hand.
 - TypeScript strict, `noUncheckedIndexedAccess`. **No `any`**, no casts.
 - **Every test comment names the failure it prevents.** House style — see `tests/symbols.test.ts`.
-- Run `npm test` and `npm run check` before every commit. Green on this branch's base: **825 tests, 34 files**, check clean at 382.
+- Run `npm test` and `npm run check` before every commit. Green on this branch's base: **814 tests, 33 files**, check clean at 380. (This branch is cut from `main`; the sticky-scroll work is still on PR #18 and its higher counts do not apply here.)
 - Do **not** run `npm run app`. Task 4 uses the browser target.
 - **Replace is destructive.** `core/replace.ts`'s own header says it is "the part that can destroy work". Prefer reporting a doubt over guessing.
 
@@ -223,7 +223,7 @@ Expected: **43 passing, unchanged.** If any fails, stop and report — the share
 
 - [ ] **Step 6: Verify and commit**
 
-Run `npm test` → expected **835 tests, 35 files**. Run `npm run check` → clean.
+Run `npm test` → expected **824 tests, 34 files**. Run `npm run check` → clean.
 
 ```bash
 git add src/core/replace.ts tests/preserve-case.test.ts
@@ -257,7 +257,7 @@ Read the surrounding markup before writing — match its structure rather than i
 
 - [ ] **Step 3: Verify**
 
-Run `npm test` → 835 tests. Run `npm run check` → clean.
+Run `npm test` → 824 tests. Run `npm run check` → clean.
 
 No new automated tests here: the option's behaviour is Task 1's, and the toggle is markup. If you find yourself wanting a test for the wiring, that is a signal the wiring has logic in it — report that rather than testing markup.
 
@@ -315,7 +315,7 @@ In `src/ui/FindPanel.svelte`, beside the existing toggles at `:89-99`, same shap
 
 - [ ] **Step 5: Verify**
 
-Run `npm test` → 835 tests, and **`tests/replace.test.ts`'s 43 must still pass**. Run `npm run check` → clean.
+Run `npm test` → 824 tests, and **`tests/replace.test.ts`'s 43 must still pass**. Run `npm run check` → clean.
 
 - [ ] **Step 6: Commit**
 
