@@ -23,6 +23,7 @@ export interface SearchOptions {
   caseSensitive: boolean;
   wholeWord: boolean;
   regexp: boolean;
+  preserveCase: boolean;
   includes: string;
   excludes: string;
   respectGitIgnore: boolean;
@@ -54,6 +55,7 @@ export class SearchService {
     caseSensitive: false,
     wholeWord: false,
     regexp: false,
+    preserveCase: false,
     includes: '',
     excludes: '',
     respectGitIgnore: true,
@@ -97,7 +99,7 @@ export class SearchService {
     this.#scheduleRun();
   }
 
-  toggle(key: 'caseSensitive' | 'wholeWord' | 'regexp' | 'respectGitIgnore'): void {
+  toggle(key: 'caseSensitive' | 'wholeWord' | 'regexp' | 'preserveCase' | 'respectGitIgnore'): void {
     this.setOption(key, !this.options.get()[key]);
   }
 
@@ -461,6 +463,7 @@ export class SearchService {
           // result rows, which may be stale for a file edited since the search.
           const result = computeReplacements(source.text, matcher, replacement, {
             expand: options.regexp,
+            preserveCase: options.preserveCase,
           });
           if (result.count === 0) continue;
 
