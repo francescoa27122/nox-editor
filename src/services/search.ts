@@ -1,5 +1,5 @@
 import { basename, dirname, relative } from '@core/path';
-import { computeReplacements, expandReplacement } from '@core/replace';
+import { computeReplacements, expandReplacement, preserveCase } from '@core/replace';
 import { buildSearchRegex } from '@core/search-match';
 import { Signal } from '@core/signal';
 import type { Platform, SearchFileResult, SearchSummary } from '@platform/types';
@@ -331,8 +331,13 @@ export class SearchService {
   previewReplacement(match: { preview: string; column: number; length: number }): string | null {
     const template = this.replacement.get();
     const options = this.options.get();
+    // Same string a `computeReplacements` call would shape the case against —
+    // the matched text itself, not the pattern that found it.
+    const matched = match.preview.slice(match.column, match.column + match.length);
 
-    if (!options.regexp) return template;
+    if (!options.regexp) {
+      return options.preserveCase ? preserveCase(matched, template) : template;
+    }
 
     let matcher: RegExp;
     try {
@@ -348,9 +353,12 @@ export class SearchService {
         matcher.lastIndex++;
         continue;
       }
-      if (found.index === match.column) return expandReplacement(template, found, true);
+      if (found.index === match.column) {
+        const expanded = expandReplacement(template, found, true);
+        return options.preserveCase ? preserveCase(found[0], expanded) : expanded;
+      }
     }
-    return template;
+    return options.preserveCase ? preserveCase(matched, template) : template;
   }
 
   /**

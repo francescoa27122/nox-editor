@@ -318,6 +318,59 @@ describe('SearchService', () => {
   });
 });
 
+describe('previewReplacement with preserveCase', () => {
+  it('leaves the template alone when the option is off', async () => {
+    const { workspace, search } = setup();
+    await workspace.openFolder('/w');
+    await runSearch(search, 'needle');
+    search.setReplacement('worker');
+
+    // notes.txt matched case-insensitively against an all-caps line — a
+    // preview that shaped case here without being asked would be the bug.
+    const upper = search.results.get().find((f) => f.path === '/w/notes.txt')!;
+    expect(search.previewReplacement(upper.matches[0]!)).toBe('worker');
+  });
+
+  it('shapes a literal preview to the matched case, same as computeReplacements would write it', async () => {
+    const { workspace, search } = setup();
+    await workspace.openFolder('/w');
+    await runSearch(search, 'needle');
+    search.setReplacement('worker');
+    search.setOption('preserveCase', true);
+
+    const lower = search.results.get().find((f) => f.path === '/w/src/main.ts')!;
+    expect(search.previewReplacement(lower.matches[0]!)).toBe('worker');
+
+    const upper = search.results.get().find((f) => f.path === '/w/notes.txt')!;
+    expect(search.previewReplacement(upper.matches[0]!)).toBe('WORKER');
+  });
+
+  it('shapes a regex preview from the actual matched text, after group expansion', async () => {
+    const { workspace, search } = setup();
+    await workspace.openFolder('/w');
+    search.setOption('regexp', true);
+    await runSearch(search, 'needle');
+    search.setReplacement('worker');
+    search.setOption('preserveCase', true);
+
+    const upper = search.results.get().find((f) => f.path === '/w/notes.txt')!;
+    expect(search.previewReplacement(upper.matches[0]!)).toBe('WORKER');
+  });
+
+  it('still reports an invalid pattern as null rather than throwing', async () => {
+    const { workspace, search } = setup();
+    await workspace.openFolder('/w');
+    await runSearch(search, 'needle');
+    const match = search.results.get()[0]!.matches[0]!;
+
+    search.setOption('regexp', true);
+    search.setOption('preserveCase', true);
+    search.query.set('(unclosed');
+
+    expect(search.previewReplacement(match)).toBeNull();
+  });
+});
+
 // --- Cancellation -----------------------------------------------------------
 
 /**
