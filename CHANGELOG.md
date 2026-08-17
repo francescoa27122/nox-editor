@@ -24,6 +24,20 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   breadcrumb has no such effect behind it, and one that expands without being
   selected can open entirely off-screen.
 
+### Fixed
+
+- **The window can be dragged by its title bar.** It never could — not since
+  v0.1. Two things were wrong at once, and either alone was enough: the app
+  never requested `core:window:allow-start-dragging`, so the backend refused
+  every drag the front end asked for; and the drag regions were declared bare,
+  which in Tauri means "drag only when this exact element was clicked", so even
+  once permitted only the empty slivers between the logo, the breadcrumb and
+  the buttons would have worked.
+  - Dragging by the traffic-light corner always worked, because macOS moves the
+    window itself there without asking the app. That is why this survived
+    unnoticed for two releases.
+  - The buttons in the bar still take their clicks rather than starting a drag.
+
 ## [0.3.0] — 2026-08-16
 
 ### Added
