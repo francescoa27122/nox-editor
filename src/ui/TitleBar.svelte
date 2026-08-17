@@ -21,6 +21,34 @@
    */
   const reserveTrafficLights = app.platform.id === 'tauri' && platformIsMac;
 
+  /**
+   * Windows hides its decorations, so this bar is the only window chrome
+   * there is and has to carry the three controls itself.
+   *
+   * Read off the platform rather than sniffed here: which OS gets custom
+   * controls is a property of the shell, and `ui/` is not allowed to know
+   * about the OS — see `platform/types.ts`.
+   */
+  const drawWindowControls = app.platform.capabilities.customWindowControls;
+
+  let maximized = $state(false);
+
+  $effect(() => {
+    if (!drawWindowControls) return;
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    // The subscription is async, so a teardown can land first. Without the
+    // flag the listener outlives the component and writes to dead state.
+    void app.platform.onMaximizeChange((value) => (maximized = value)).then((unlisten) => {
+      if (cancelled) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  });
+
   const paletteHint = $derived(keymap.displayFor('nav.commandPalette') ?? '');
 
   interface Crumb {
@@ -144,6 +172,35 @@
       <Icon name="settings" size={15} />
     </button>
   </div>
+
+  {#if drawWindowControls}
+    <div class="window-controls">
+      <button
+        class="window-control"
+        onclick={() => void app.platform.minimizeWindow()}
+        title="Minimise"
+        aria-label="Minimise"
+      >
+        <Icon name="minimize" size={13} />
+      </button>
+      <button
+        class="window-control"
+        onclick={() => void app.platform.toggleMaximizeWindow()}
+        title={maximized ? 'Restore' : 'Maximise'}
+        aria-label={maximized ? 'Restore' : 'Maximise'}
+      >
+        <Icon name={maximized ? 'restore' : 'maximize'} size={13} />
+      </button>
+      <button
+        class="window-control danger"
+        onclick={() => void app.platform.closeWindow()}
+        title="Close"
+        aria-label="Close window"
+      >
+        <Icon name="close" size={13} />
+      </button>
+    </div>
+  {/if}
 </header>
 
 <style>
@@ -302,6 +359,46 @@
 
   .icon-button:hover {
     background: var(--nox-hover);
+    color: var(--nox-text-bright);
+  }
+
+  /*
+    Windows' own controls, redrawn.
+
+    Full bar height and flush to the right edge, with no radius and no gap —
+    that shape is what makes them read as window chrome rather than as three
+    more toolbar buttons. The header keeps its right padding for every other
+    platform, so it is cancelled here instead of made conditional.
+  */
+  .window-controls {
+    display: flex;
+    align-items: stretch;
+    flex: none;
+    align-self: stretch;
+    margin-right: calc(-1 * var(--nox-sp-3));
+    margin-left: var(--nox-sp-2);
+    -webkit-app-region: no-drag;
+  }
+
+  .window-control {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    color: var(--nox-text-muted);
+    transition:
+      background var(--nox-dur-fast) var(--nox-ease),
+      color var(--nox-dur-fast) var(--nox-ease);
+  }
+
+  .window-control:hover {
+    background: var(--nox-hover);
+    color: var(--nox-text-bright);
+  }
+
+  /* Close is the one that loses work if mis-clicked, so it is the one that
+     looks different under the cursor. */
+  .window-control.danger:hover {
+    background: var(--nox-danger);
     color: var(--nox-text-bright);
   }
 </style>

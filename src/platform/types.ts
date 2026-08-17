@@ -49,6 +49,15 @@ export interface PlatformCapabilities {
   terminals: boolean;
   /** True when `streamJsonLines` can reach a local model server. */
   localModels: boolean;
+  /**
+   * True when the window has no OS chrome and the title bar must draw its own
+   * minimise / maximise / close.
+   *
+   * Platform-dependent *within* the desktop build, which is why it is a
+   * capability rather than a constant. macOS keeps its traffic lights over an
+   * overlay title bar and is false; Windows hides decorations and is true.
+   */
+  customWindowControls: boolean;
 }
 
 /** What to start, for `Platform.spawnAgent`. */
@@ -336,6 +345,37 @@ export interface Platform {
   pickSavePath(options?: SaveDialogOptions): Promise<string | null>;
 
   setWindowTitle(title: string): Promise<void>;
+
+  /**
+   * The three window controls, for a build that hides its OS chrome.
+   *
+   * These exist on `Platform` rather than being called directly because
+   * `ui/` may not import `@tauri-apps/*` — see the rule at the top of this
+   * file. Where `capabilities.customWindowControls` is false nothing calls
+   * them, and the implementations are inert rather than throwing: a browser
+   * tab has no window to minimise, and that is not an error worth surfacing.
+   */
+  minimizeWindow(): Promise<void>;
+
+  /** Maximise, or restore when already maximised. Resolves to the new state. */
+  toggleMaximizeWindow(): Promise<boolean>;
+
+  /**
+   * Close the window the way the OS would — running the close handler, so
+   * unsaved work is still persisted. Not `destroy`, which skips it.
+   */
+  closeWindow(): Promise<void>;
+
+  /**
+   * Observe whether the window is maximised, calling `handler` once with the
+   * current state and again on every change.
+   *
+   * Subscription rather than a getter because the user has other ways in:
+   * the OS keyboard shortcut, a double-click on the drag region, and on
+   * Windows the snap layouts. A button drawn from a value read once goes
+   * stale the first time any of those is used.
+   */
+  onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void>;
 }
 
 /** Thrown for every platform failure so services can present one error shape. */

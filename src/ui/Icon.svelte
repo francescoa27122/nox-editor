@@ -20,6 +20,13 @@
     // everywhere else, and delete here is permanent.
     trash: 'M3 4.5h10 M6.25 4.5V2.9a.4.4 0 0 1 .4-.4h2.7a.4.4 0 0 1 .4.4v1.6 M4.6 4.5l.5 8.2a.8.8 0 0 0 .8.8h4.2a.8.8 0 0 0 .8-.8l.5-8.2',
     close: 'M4 4l8 8M12 4l-8 8',
+    // The three window controls, for the Windows build that draws its own.
+    // Squarer and flatter than the rest of the set on purpose: these sit
+    // where the OS would have drawn them, and every other platform's look
+    // like this. `close` above is reused as the third.
+    minimize: 'M4 8h8',
+    maximize: 'M4 4h8v8H4Z',
+    restore: 'M4 6.5h5.5V12H4Z M6.5 6.5V4H12v5.5H9.5',
     plus: 'M8 3.5v9M3.5 8h9',
     search: 'M7.25 11.5a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5ZM10.4 10.4 13.5 13.5',
     replace:

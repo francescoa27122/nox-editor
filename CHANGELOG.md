@@ -6,6 +6,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Windows no longer shows two title bars.** The window kept its native bar
+  above Nox's own, so the top of the app was a grey strip belonging to the OS.
+  `titleBarStyle` and `hiddenTitle` — the settings that hide it — are macOS-only
+  and Windows ignores them, which is why it survived into the first Windows
+  build. The decorations are now switched off there, and the Nox title bar
+  carries minimise, maximise/restore and close itself.
+  - The maximise button follows the *window*, not its own last click, so it
+    still reads correctly after the keyboard shortcut, a double-click on the
+    bar, or a Windows snap layout.
+  - Close runs the same shutdown path the OS button did, so unsaved work is
+    still written to the session on the way out.
+  - macOS is untouched: its traffic lights sit over an overlay title bar, and a
+    second set of buttons beside them would be duplicate chrome.
+
 ## [0.4.0] — 2026-08-17
 
 ### Added

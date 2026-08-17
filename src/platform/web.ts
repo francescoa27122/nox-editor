@@ -30,6 +30,7 @@ export class WebPlatform extends MemoryPlatform {
     // No model server reachable from a browser tab either; see
     // `MemoryPlatform.streamJsonLines`.
     localModels: false,
+    customWindowControls: false,
   };
 
   constructor() {
