@@ -82,6 +82,14 @@ jobs:
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             args: ''
+          # Produces the NSIS installer — `nsis` has been in bundle.targets
+          # since before there was a runner to build it. Unsigned, so
+          # SmartScreen warns; the release notes say so rather than letting
+          # people discover it.
+          - label: Windows (x86_64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
 
     steps:
       - uses: actions/checkout@v7
@@ -158,4 +166,8 @@ jobs:
             **Linux** — take the `.deb` or the `.rpm`. Built on Ubuntu 22.04,
             so it needs glibc 2.35 or newer. There is no AppImage.
 
-            **Windows** — build from source for now.
+            **Windows** — take the `-setup.exe`. It is ad-hoc built rather
+            than signed with a code-signing certificate, so SmartScreen shows
+            *"Windows protected your PC"* on first run: choose **More info**,
+            then **Run anyway**. Same trade as macOS above — a certificate
+            costs money annually, and building from source avoids both.

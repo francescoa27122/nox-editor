@@ -49,7 +49,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-latest]
+        # Windows is here so that `#[cfg(windows)]` is compiled by something
+        # other than a release. fs.rs and pty.rs have had Windows branches all
+        # along and nothing has ever built them — a release runner alone would
+        # have found that out at tag time, which is the worst moment.
+        os: [ubuntu-22.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
