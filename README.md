@@ -225,10 +225,11 @@ palette whether or not it has a shortcut.
 
 Also in the box: syntax highlighting for nine language families, multiple
 cursors, code folding, jumping to a function or class by name in the file
-you're in, split panes, a terminal, your own notes, and project-wide search and
-replace that shows you a diff first. The settings panel is built from the same
-list the app reads its settings from, so it can't drift out of date with what
-you're actually able to change.
+you're in, sticky scroll to keep the enclosing declaration on screen, split
+panes, a terminal, your own notes, and project-wide search and replace that
+shows you a diff first. The settings panel is built from the same list the app
+reads its settings from, so it can't drift out of date with what you're
+actually able to change.
 
 ## Status
 

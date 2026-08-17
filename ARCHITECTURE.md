@@ -587,6 +587,32 @@ a Svelte file this repo had no harness for. It does now — see §7. "No file is
 open" is the exception and stays in the component, settled before there is
 anything to parse.
 
+### Sticky scroll is a panel, and what pins is a pure function
+
+Sticky scroll reads `core/symbols.ts`'s table too, so it never disagrees with
+Go to Symbol about what counts as structure — declarations only, never `if`,
+`for` or other control blocks.
+
+**What pins is `stickyRows`, a pure function beside `fileSymbols`, not a
+computation done inline in the extension.** It takes the symbol list, the top
+visible line, the document and a cap, and returns rows outermost-first — no
+`EditorView` in the signature, so it is tested against real parses with no
+DOM, the same reason `symbolListState` was pulled out of `CommandPalette`.
+Deciding which rows pin costs on the order of the symbol walk itself: about
+0.012 ms on `src/app.ts` (2,690 lines, 67 symbols), against the walk's own
+~1.378 ms — which is also why the symbol cache is one slot per `EditorView`
+rather than one shared slot. Two views open on different files would otherwise
+fight over a single cached parse.
+
+**The strip is a CodeMirror panel (`showPanel`, `{ top: true }`), not a
+floating overlay inside `.cm-scroller`.** A panel is positioned and sized by
+CodeMirror itself, which accounts for it in the editor's own layout — so the
+last line of the document is never hidden behind the strip, and there is no
+`scrollTop` arithmetic of Nox's own to get wrong. An overlay is the more
+familiar look and was considered; the panel is the version that cannot be
+subtly mispositioned, at the cost of pushing the document down by a row
+instead of floating over it.
+
 ### The session save latch
 
 Services subscribe to workspace signals in the constructor, and `Signal`
