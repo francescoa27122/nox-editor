@@ -332,11 +332,14 @@ export interface StickyRow {
  * build `qualified` names, so sorting again here would be redundant. Filtering
  * in place therefore keeps outermost-first for free.
  *
- * Linear in the symbol count, and it runs once per scroll frame. Measured
- * against `src/app.ts` (2,669 lines, 67 symbols): ~0.0137 ms per call, well
- * under a sixteenth of a 16 ms frame — the linear filter stays; do not reach
- * for a sorted array and binary search without a new measurement to justify
- * it.
+ * Linear in the symbol count. The consumer (Task 2) recomputes this from
+ * `Panel.update` on `viewportMoved`, not on every animation frame, so the
+ * true call rate is lower than a frame budget implies — but the cost is worth
+ * knowing regardless. Measured against `src/app.ts` (2,690 lines, 67
+ * symbols): ~0.011–0.014 ms per call against a 16 ms frame budget — roughly
+ * three orders of magnitude of headroom. The linear filter stays; do not
+ * reach for a sorted array and binary search without a new measurement to
+ * justify it.
  */
 export function stickyRows(
   symbols: readonly FileSymbol[],

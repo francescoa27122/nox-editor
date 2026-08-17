@@ -78,6 +78,43 @@ describe('what stays pinned while scrolling', () => {
   });
 
   /**
+   * The failure this prevents: an implementation that applies "still open"
+   * only up to the first qualifying symbol, then pins everything else that
+   * merely starts above `topLine` regardless of whether it has closed. Line 7
+   * is the class's own closing brace: the class (1–7) is still open there but
+   * the method (2–6) is not, so a mixed depth is exercised — every other
+   * `topLine` in this file has either both open or both closed, and a passing
+   * suite without this case did not tell the two implementations apart.
+   */
+  it('excludes a closed inner declaration while its outer one is still open', () => {
+    expect(rowsAt(SOURCE, 7)).toEqual(['0:class Service {']);
+  });
+
+  /**
+   * The failure this prevents: an implementation that scans in document order
+   * and stops at the first symbol that does not qualify, instead of skipping
+   * it and continuing. `before` closes on line 3, long before the enclosing
+   * `Service`/`reveal` chain even starts — a scan that breaks there returns
+   * nothing for a line that plainly has two enclosing declarations. As with
+   * the case above, no `topLine` in `SOURCE` alone puts a closed declaration
+   * *before* the open chain, so this was not previously exercised.
+   */
+  it('does not stop scanning at a closed declaration preceding the enclosing chain', () => {
+    const source = [
+      'function before() {', // 1
+      '  x();', // 2
+      '}', // 3
+      '', // 4
+      'class Service {', // 5
+      '  async reveal(path) {', // 6
+      '    load(path);', // 7
+      '  }', // 8
+      '}', // 9
+    ].join('\n');
+    expect(rowsAt(source, 7)).toEqual(['0:class Service {', '1:async reveal(path) {']);
+  });
+
+  /**
    * The failure this prevents: blocks creeping in. `for` is not a declaration
    * and `core/symbols.ts` does not collect it, so the strip must show two rows
    * here and not three. This is the shared-rule-table decision from the spec's
