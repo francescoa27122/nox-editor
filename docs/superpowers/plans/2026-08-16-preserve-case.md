@@ -330,11 +330,11 @@ git commit -m "Compute the editor's replacements where the project's are compute
 
 Per spec §9 this is **not optional and not a formality**. Task 3 took over destructive behaviour in a file with no automated coverage, and this is the only thing that checks it.
 
-- [ ] **Step 1: Start the browser target**
+- [x] **Step 1: Start the browser target**
 
 Use the `nox-web` dev server (port 1420). Do not run `npm run app`. If the port is taken by another session's server, that server serves this same working tree — open `http://localhost:1420` rather than fighting for it.
 
-- [ ] **Step 2: Walk the editor path (⌘F)**
+- [x] **Step 2: Walk the editor path (⌘F)**
 
 On a file with several matches in mixed case:
 
@@ -346,18 +346,18 @@ On a file with several matches in mixed case:
 6. Turn `AB` on: `scheduler`, `Scheduler` and `SCHEDULER` each come back correctly shaped.
 7. Type an invalid regex with regex mode on: it reports rather than throwing, and replaces nothing.
 
-- [ ] **Step 3: Walk the project path (⌘⇧F)**
+- [x] **Step 3: Walk the project path (⌘⇧F)**
 
 1. Replace across files with `AB` on — each match keeps its own shape.
 2. One ⌘Z takes the project replace back, as it did before.
 
-- [ ] **Step 4: Record and fix**
+- [x] **Step 4: Record and fix**
 
-Write what you saw into the report, including anything that looked wrong. A walk reporting only "it works" is a walk that was not taken. If a step fails, fix it here — with a test where one is possible, and a note where one is not.
+Written up in the handoff's "Task 4 — the walk (done 2026-08-17)" table: all 17 items pass, item 14 measured rather than seen, and one pre-existing focus defect found and recorded under "Known issues, not fixed".
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
-Skip if nothing changed, and say so.
+No feature code changed — nothing failed. The commit carries the walk record only.
 
 ---
 
