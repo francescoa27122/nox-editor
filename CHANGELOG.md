@@ -73,6 +73,19 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     window itself there without asking the app. That is why this survived
     unnoticed for two releases.
   - The buttons in the bar still take their clicks rather than starting a drag.
+- **Enter in the find fields no longer types into your file.** Pressing Enter
+  in the Find field steps to the next match, and it used to hand keyboard
+  focus to the document at the same time — so the *second* press, the one
+  that should have gone to the second match, inserted a newline into the file
+  instead. Enter in the Replace field did the same thing, one keystroke after
+  editing the document, which is the worst possible moment to lose the caret.
+  Both now leave focus where you are typing, so Enter repeats.
+  - The editor still gets focus back where you would expect it: Escape closes
+    the panel and returns it, and **Select All Occurrences** takes it
+    deliberately, because it exists to hand you a cursor per match.
+  - The match you are on stays legible while the editor is unfocused — it
+    carries its own highlight, and the theme has always had a separate,
+    dimmer selection colour for exactly this.
 
 ## [0.3.0] — 2026-08-16
 
