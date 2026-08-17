@@ -242,9 +242,53 @@ export function noxTheme(options: ThemeOptions): Extension {
         lineHeight: 'var(--nox-lh-ui)',
       },
 
-      // CodeMirror's own panels are unused — Nox draws its own find UI — but
-      // hide them defensively so a stray extension cannot inject a light bar.
-      '.cm-panels': { display: 'none' },
+      // CodeMirror's bottom panels are unused — Nox draws its own find UI —
+      // so hide them defensively, the same guard this rule always was. Top
+      // panels are no longer blanket-hidden: sticky scroll (`editor/sticky.ts`)
+      // is a deliberate `showPanel` consumer and needs its container to
+      // render. Its background and text colour replace CM's own hardcoded
+      // ones so nothing here ever shows an untokened colour, painted or not.
+      '.cm-panels-bottom': { display: 'none' },
+      '.cm-panels-top': {
+        backgroundColor: 'transparent',
+        color: 'inherit',
+      },
+
+      // --- Sticky scroll ---------------------------------------------------
+      // The panel container itself carries no border or padding — only
+      // `.nox-sticky-scroll` does, and it collapses to nothing via `:empty`
+      // when there is nothing to pin, so an empty file never shows a bare
+      // strip.
+      '.nox-sticky-scroll': {
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundColor: 'var(--nox-bg-editor)',
+        borderBottom: '1px solid var(--nox-border)',
+      },
+      '.nox-sticky-scroll:empty': {
+        display: 'none',
+        border: 'none',
+      },
+      '.nox-sticky-row': {
+        display: 'block',
+        width: '100%',
+        border: 'none',
+        background: 'transparent',
+        textAlign: 'left',
+        color: 'var(--nox-text-muted)',
+        fontFamily: 'inherit',
+        fontSize: '0.92em',
+        lineHeight: String(options.lineHeight),
+        padding: '0 var(--nox-sp-5) 0 var(--nox-sp-4)',
+        cursor: 'pointer',
+        whiteSpace: 'pre',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+      },
+      '.nox-sticky-row:hover': {
+        background: 'var(--nox-hover)',
+        color: 'var(--nox-text-bright)',
+      },
     },
     { dark: true },
   );

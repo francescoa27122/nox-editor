@@ -214,6 +214,11 @@ export const SETTINGS_SCHEMA = {
     description: 'Show fold arrows in the gutter. Needs a grammar for the language.',
     category: 'Text',
   }),
+  'editor.stickyScroll': bool(true, {
+    label: 'Sticky Scroll',
+    description: 'Keep the enclosing function or class pinned above the editor.',
+    category: 'Editor',
+  }),
   'editor.bracketMatching': bool(true, {
     label: 'Bracket Matching',
     description: 'Highlight the bracket matching the one at the cursor.',
