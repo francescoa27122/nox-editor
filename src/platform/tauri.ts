@@ -27,6 +27,19 @@ import {
 } from './types';
 
 /**
+ * Which OS the shell is running on, for the one capability that differs
+ * between desktop targets.
+ *
+ * Sniffed the same way `services/keymap.ts` decides ⌘ from ⌃, rather than
+ * through `@tauri-apps/plugin-os`: this is one boolean read once at startup,
+ * and it is not worth a plugin, a permission entry and an async call. It is
+ * read here, in the platform layer, because that is where knowledge of the OS
+ * is allowed to live.
+ */
+const PLATFORM_IS_WINDOWS =
+  typeof navigator !== 'undefined' && /Win/.test(navigator.platform ?? navigator.userAgent);
+
+/**
  * Desktop target. Every method here is a thin adapter over a Rust command —
  * no logic. If you find yourself writing an `if` in this file, it belongs in a
  * service instead.
@@ -54,6 +67,10 @@ export class TauriPlatform implements Platform {
     agentProcesses: true,
     terminals: true,
     localModels: true,
+    // Windows is the only desktop target that hides its decorations — see
+    // `lib.rs`'s setup hook. macOS keeps its traffic lights over an overlay
+    // title bar and must not draw a second set beside them.
+    customWindowControls: PLATFORM_IS_WINDOWS,
   };
 
   async homeDir(): Promise<string | null> {
@@ -164,6 +181,40 @@ export class TauriPlatform implements Platform {
 
   async setWindowTitle(title: string): Promise<void> {
     await getCurrentWindow().setTitle(title);
+  }
+
+  async minimizeWindow(): Promise<void> {
+    await getCurrentWindow().minimize();
+  }
+
+  async toggleMaximizeWindow(): Promise<boolean> {
+    const window = getCurrentWindow();
+    await window.toggleMaximize();
+    return window.isMaximized();
+  }
+
+  /**
+   * `close`, never `destroy`.
+   *
+   * `close` raises the close-requested event that `onCloseRequested` above is
+   * listening for, which is what writes the session and flushes settings.
+   * `destroy` tears the window down without it, and the unsaved-work
+   * guarantee goes with it.
+   */
+  async closeWindow(): Promise<void> {
+    await getCurrentWindow().close();
+  }
+
+  async onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void> {
+    const window = getCurrentWindow();
+    handler(await window.isMaximized());
+    // Resize is the only event that covers every route in: the button here,
+    // the OS shortcut, a double-click on the drag region, and Windows' snap
+    // layouts. There is no dedicated maximise event to listen for.
+    const unlisten = await window.onResized(() => {
+      void window.isMaximized().then(handler);
+    });
+    return unlisten;
   }
 
   /**

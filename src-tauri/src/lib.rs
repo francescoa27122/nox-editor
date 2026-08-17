@@ -15,6 +15,30 @@ mod watcher;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|_app| {
+            // Windows keeps its native title bar unless told otherwise, and
+            // Nox draws its own — so without this you get two stacked bars.
+            // `titleBarStyle` and `hiddenTitle` in tauri.conf.json do not
+            // cover it: both are macOS-only and Windows ignores them.
+            //
+            // Done here rather than in a `tauri.windows.conf.json` because
+            // the platform config files are merged as an RFC 7386 merge
+            // patch, where an array *replaces* rather than merges. Overriding
+            // one field of `app.windows[0]` would mean restating the whole
+            // window — size, minimums, theme, background, drag-drop — in a
+            // second file, with nothing to catch the two copies drifting.
+            #[cfg(windows)]
+            {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
+                    // Ignored rather than propagated: a window that keeps its
+                    // decorations is cosmetically wrong, and refusing to boot
+                    // over it would be worse.
+                    let _ = window.set_decorations(false);
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .manage(agent::AgentState::default())
         .manage(watcher::WatcherState::default())

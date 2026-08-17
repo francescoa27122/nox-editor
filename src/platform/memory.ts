@@ -39,6 +39,9 @@ export class MemoryPlatform implements Platform {
     projectSearch: true,
     terminals: false,
     localModels: false,
+    // A browser tab's chrome is the browser's. Nothing to hide, nothing to
+    // draw in its place.
+    customWindowControls: false,
   };
 
   /** path -> contents. Directories are stored with a null value. */
@@ -486,6 +489,27 @@ export class MemoryPlatform implements Platform {
 
   async setWindowTitle(title: string): Promise<void> {
     if (typeof document !== 'undefined') document.title = title;
+  }
+
+  /**
+   * The window controls are inert here, and nothing should be calling them:
+   * `capabilities.customWindowControls` is false, so the title bar does not
+   * draw the buttons. Inert rather than throwing, because a browser tab
+   * having no window to minimise is not a failure to report.
+   */
+  async minimizeWindow(): Promise<void> {}
+
+  async toggleMaximizeWindow(): Promise<boolean> {
+    return false;
+  }
+
+  async closeWindow(): Promise<void> {}
+
+  async onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void> {
+    // Called once, like the real one, so a caller that renders from the first
+    // value behaves the same on both platforms.
+    handler(false);
+    return () => {};
   }
 }
 
