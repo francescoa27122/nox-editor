@@ -235,8 +235,9 @@ and otherwise falls through to CodeMirror to collapse multi-cursors.
 ### Nox draws its own find UI
 
 CodeMirror's search *engine* is excellent and its panel looks nothing like Nox.
-We keep the engine (`SearchQuery`, `findNext`, `replaceAll`) and draw our own
-panel. One consequence worth knowing: CM ties match highlighting to the
+We keep the engine (`SearchQuery`, `findNext`, `findPrevious`) and draw our own
+panel. Replace is the exception and is ours — see *The editor borrows the match
+and owns the text* below. One consequence worth knowing: CM ties highlighting to the
 lifecycle of its panel, which we never open — so
 `editor/search-highlight.ts` decorates matches itself, viewport-bounded.
 
@@ -411,6 +412,49 @@ a parallel walk over a whole tree; replace operates on an already-bounded
 result set (capped at 5000 matches) and needs the buffer and undo logic that
 only exists in the renderer. Splitting it across the boundary would buy
 nothing and duplicate the rules above.
+
+### The editor borrows the match and owns the text
+
+⌘F's replace no longer calls `@codemirror/search`'s `replaceNext`/`replaceAll`.
+It walks the same `SearchQuery` cursor those did, but the string each match is
+replaced *with* now comes from `core/replace.ts` — the same `expandReplacement`
+and `preserveCase` the project panel runs through. That is the whole point of
+the split: ⌘F and ⌘⇧F can no longer write different text for the same match,
+because there is only one function that decides what the text is.
+
+**Matching deliberately did not move.** The first attempt computed the editor's
+replacements through `computeReplacements` outright, and it was built, measured
+and reverted: that function is line-based, so it lost multi-line regex, the
+`\n`/`\t` unquoting of the find field, and the Unicode character categorizer
+behind whole-word — `café café` stops matching both halves the moment a plain
+`\b` stands in for it. `SearchQuery` carries all three. Because the counter, the
+highlights and replace-all now walk one query, they also cannot disagree about
+what counts as a match.
+
+**What the editor path still owns** is everything about *which* match: that a
+replace only writes when the selection covers a match exactly (otherwise it
+advances, which is what makes Replace safe to lean on), that the search wraps at
+the end of the document, where the selection lands, and scrolling it into view.
+That is `replaceNext`'s contract, rebuilt on the one cursor the public API
+exposes — including two bounds that read like details and are not. The wrap
+search stops at `from` for a regex query and `from + query.length` for a literal
+one, so it can only return a match *behind* the cursor; searching the whole
+document instead lets a match straddling the cursor come back and drags the
+selection backwards. And the literal path alone rejects a result identical to
+the range it started from, so a document with one match does not "advance" to
+itself.
+
+One trap is worth naming because it shipped once. **Read the cursor by shape,
+never by class.** `RegExpCursor`'s constructor `return`s an unexported
+`MultilineRegExpCursor` for any pattern containing `\s`, `\W`, `\D`, `\n`, `\r`
+or `[^`, and that class is neither exported nor a subclass — so an `instanceof`
+test silently loses the match object for exactly those patterns and writes the
+raw `$1` template into the document.
+
+`src/editor/find.ts` has no automated tests; §7 records why anything embedding a
+CodeMirror view does not. A manual walk of both panels is its only coverage, and
+the plan that introduced this split treats that walk as a required step rather
+than a formality.
 
 ### Split panes: one buffer, one group
 

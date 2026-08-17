@@ -65,7 +65,6 @@ The MVP: a real editor you can work in.
 
 | | Why |
 |---|---|
-| **Preserve case on replace** | `Scheduler` → `Dispatcher` rather than `dispatcher` when the search is case-insensitive. The `AB` toggle other editors have. |
 | **Replace individual matches** | Today replace applies per file or per project; dismissing a file excludes it, but single matches cannot be excluded. |
 | **The same file in two panes** | Needs a second CodeMirror view over one document, forwarding transactions between them. The one real limit of the current split model. |
 | **Nested splits** | A column inside a row. The layout is a flat list today. |
@@ -77,6 +76,7 @@ The MVP: a real editor you can work in.
 |---|---|
 | **Go to symbol** | ⌘R, or `@` in the palette, lists the functions, classes, methods, rule sets and headings in the file you are on. A method reads as `Class.method`, so either half finds it. It reads the parse folding already keeps, so it is a reader rather than a second source, and a language with no parser says so instead of coming back empty. |
 | **Sticky scroll** | Keeps the enclosing declaration pinned above the editor once its header scrolls out of view; click a pinned row to jump to it. Reads the same rule table Go to symbol does, so it pins declarations only, never `if`/`for` blocks. A panel, not an overlay, so it costs a row of height instead of covering the last line. |
+| **Preserve case on replace** | The `AB` toggle in both replace panels: one replacement string comes back shaped to each match, so a case-insensitive search for `scheduler` writes `dispatcher`, `Dispatcher` and `DISPATCHER` where it found the three spellings. Three shapes only — a match that is none of them is written verbatim rather than guessed at. Off by default, and independent of Match case. |
 | **Breadcrumb navigation** | The trail in the title bar is clickable: a folder segment opens the explorer and expands it, the file at the end reveals the file. Segments of a file outside the workspace stay inert, because there is nothing to reveal into. |
 
 ---

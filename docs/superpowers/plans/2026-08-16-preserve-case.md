@@ -365,25 +365,29 @@ No feature code changed — nothing failed. The commit carries the walk record o
 
 **Files:** `CHANGELOG.md`, `ROADMAP.md`, `README.md`, `ARCHITECTURE.md`
 
-- [ ] **Step 1: Changelog**
+- [x] **Step 1: Changelog**
 
 Under `## [Unreleased]` → `### Added`. Read the neighbours for voice. Worth saying: which three shapes it recognises, that irregular casing is left alone deliberately, that it is off by default, and that it now works in both panels.
 
-- [ ] **Step 2: Roadmap**
+- [x] **Step 2: Roadmap**
 
 Move **Preserve case on replace** from v0.3's pending table into `### ✅ Shipped in v0.3`, matching how **Go to symbol** is written there.
 
-- [ ] **Step 3: Architecture**
+- [x] **Step 3: Architecture**
 
-`ARCHITECTURE.md` §4. Record the decision that matters beyond this feature: **both replace paths now compute through `core/replace.ts`**, so regex expansion, zero-width handling and edit ordering cannot diverge between the two panels. Note what the editor path still owns — which match, wrapping, scrolling — and that it has no automated coverage.
+Written as *The editor borrows the match and owns the text*, after *Replace decides which text is authoritative*.
 
-Do **not** add a §7 debt row for that; §7 already records the untested-editor-view boundary.
+**Written against the handoff's framing, not this step's.** This step still says "both replace paths now compute through `core/replace.ts`", which is the pre-reversal claim — spec §5 was corrected in 83a3f8c and `src/editor/find.ts:1` still imports `SearchQuery`/`findNext` from `@codemirror/search`. What is shared is the replacement *text*; matching stays on the library. Recording the plan's version would have put a false statement in the file this feature exists to keep honest.
 
-- [ ] **Step 4: README**
+Also fixed a stale sentence the step did not ask about: *Nox draws its own find UI* claimed we keep CM's `replaceAll`, which this branch removed.
 
-Only if it lists features at this level of detail. Check first; if it would be the odd entry out, leave it and say why in the report.
+No §7 debt row added — §7's last row already covers it.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 4: README**
+
+Left alone. Its feature sections are whole capabilities ("Undo works across files"), and its keybinding table lists chords — preserve case is a toggle with no chord, reachable from the palette as `search.togglePreserveCase`. An entry would be the odd one out at both levels.
+
+- [x] **Step 5: Verify and commit**
 
 `npm test` and `npm run check`. Do **not** push or open a PR — the controller handles that.
 

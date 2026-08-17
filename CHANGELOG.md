@@ -30,6 +30,27 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     line and it still encloses that line; a heading spans only its own line,
     so it never encloses anything below it. CSS rule sets are unaffected,
     since a rule set spans its whole block.
+- **Replace can keep the case it is replacing.** Turn on the `AB` toggle and a
+  single replacement string comes back shaped to each match it lands on:
+  searching `scheduler` case-insensitively and replacing with `dispatcher`
+  writes `dispatcher`, `Dispatcher` and `DISPATCHER` on the three lines that
+  spelled it three ways. Off by default, and in both ⌘F and ⌘⇧F.
+  - **Three shapes, and no fourth.** all lower, Capitalized, ALL UPPER. A match
+    that is none of them — `sChEdUlEr`, `scheduleR` — is written verbatim
+    rather than guessed at. Irregular casing is deliberate often enough that
+    rewriting it is worse than leaving it, and there is no rule that would be
+    right.
+  - Capitalising touches the first character only, so `dispatcherService` stays
+    `DispatcherService`. A lone capital reads as capitalised rather than as a
+    shout — `S` gives `Dispatcher`, `SS` gives `DISPATCHER` — and a match with
+    no letters in it at all, like `123` or `---`, is left alone.
+  - **Independent of Match case**, deliberately. The two are about different
+    things, and a toggle that silently disables another is worse than a
+    predictable one.
+  - Under regex the shape is read from the *expanded* replacement, never the
+    template. Casing the template would rewrite `$<word>` to `$<WORD>`, which
+    names no group and resolves to nothing — silent data loss in the one part
+    of the editor that can destroy work.
 
 ### Changed
 

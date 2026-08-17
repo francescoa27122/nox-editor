@@ -18,7 +18,7 @@ merged). Base is green: **844 tests / 35 files**, `npm run check` clean at 383.
 | 2 — project panel (⌘⇧F) | **complete**, Approved after 2 fix rounds |
 | 3 — editor panel (⌘F) | **complete**, review clean after 1 revert + 1 fix round |
 | 4 — the walk | **complete** 2026-08-17 — all 17 items pass, nothing to fix |
-| 5 — documentation | **not started** |
+| 5 — documentation | **complete** 2026-08-17 — CHANGELOG, ROADMAP, ARCHITECTURE; README deliberately untouched |
 
 Commits on the branch, oldest first: the spec, the plan, a baseline
 correction, `preserveCase` and its tests, the mutation-gap fixes, the project
@@ -109,21 +109,35 @@ why those cases exist.
 coverage, and it is now spent — a later change to that file gets no warning
 from it.
 
-## Task 5 — documentation
+## Task 5 — documentation (done 2026-08-17)
 
-- `CHANGELOG.md` under `## [Unreleased]` → `### Added`. Worth saying: the
-  three shapes it recognises, that irregular casing is left verbatim
-  deliberately, that it is off by default, and that it works in both panels.
-- `ROADMAP.md` — move **Preserve case on replace** from v0.3's pending table
-  into `### ✅ Shipped in v0.3`, matching how **Go to symbol** and **Sticky
-  scroll** are written there.
-- `ARCHITECTURE.md` §4 — record that the editor's replace now takes its
-  *replacement text* from `core/replace.ts` while its *matching* stays on
-  `@codemirror/search`, and why that split follows the risk. Do **not** add a
-  §7 debt row; the untested-editor-view boundary is already recorded.
-- `README.md` only if it lists features at this level of detail.
+- `CHANGELOG.md` — entry under `## [Unreleased]` → `### Added`, with the three
+  shapes, the verbatim fourth case, the first-character-only rule, the
+  independence from Match case, and the after-expansion ordering.
+- `ROADMAP.md` — **Preserve case on replace** moved out of v0.3's pending table
+  into `### ✅ Shipped in v0.3`, written like **Go to symbol** and **Sticky
+  scroll**.
+- `ARCHITECTURE.md` §4 — new decision *The editor borrows the match and owns
+  the text*, placed after *Replace decides which text is authoritative*. It
+  records the split the way §5 was **corrected** to describe it — replacement
+  text is shared, matching stays on `@codemirror/search` — not the way the
+  plan's Step 3 still words it. Also fixed a stale line in *Nox draws its own
+  find UI* that claimed we keep CM's `replaceAll`. No §7 row: the last row of
+  §7 already covers untested CodeMirror-embedding components.
+- `README.md` — deliberately untouched. Its feature sections are whole
+  capabilities and its table lists chords; this is a toggle with no chord
+  (palette only, `search.togglePreserveCase`), so it would be the odd one out.
 
-Then push and open the PR. Nothing is pushed beyond this branch.
+**The "nothing is pushed" line at the top of this file is stale, and it matters.**
+`origin/main` is at `10a8cc0`, *Merge pull request #19 from
+francescoa27122/preserve-case*, which took this branch as far as `3029d62` —
+Tasks 1–3 and this handoff — into a **public** repo. So the feature code is
+already shipped and the docs for it were not: until the two commits above land,
+`main` describes an editor that behaves differently from the one it ships.
+
+What is left is therefore a second, docs-only integration of `bfacff7` and
+`5fb4363` — a local merge into `main`, or PR #20. Pushing is publication and is
+the operator's call, per `CLAUDE.md`.
 
 ## Decisions a fresh session would otherwise re-litigate
 
