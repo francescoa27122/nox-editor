@@ -51,6 +51,41 @@ export function expandReplacement(
 }
 
 /**
+ * Shape `replacement` to the case pattern of `matched`.
+ *
+ * Precedence — order is load-bearing — all lower, then Capitalized, then ALL
+ * UPPER, then verbatim. A single capital letter (`S`) satisfies both
+ * Capitalized and ALL UPPER: its remainder is empty, which is trivially
+ * lower-case. Capitalized is checked first because one capital reads as a
+ * capitalised word, not a shout; `SS` has a non-lower remainder and so only
+ * ever matches ALL UPPER.
+ *
+ * A match with no cased letter — digits, punctuation, or empty — is
+ * verbatim. `matched === matched.toUpperCase()` alone would call `123` ALL
+ * UPPER, because a string with no letters is equal to both its upper- and
+ * lower-cased form; comparing the upper and lower forms against each other
+ * instead of against `matched` catches that, and does it for any script, not
+ * just ASCII.
+ */
+export function preserveCase(matched: string, replacement: string): string {
+  const upper = matched.toUpperCase();
+  const lower = matched.toLowerCase();
+  if (upper === lower) return replacement; // No cased letter — verbatim.
+
+  if (matched === lower) return replacement.toLowerCase();
+
+  const first = matched.charAt(0);
+  const rest = matched.slice(1);
+  if (first === first.toUpperCase() && rest === rest.toLowerCase()) {
+    return replacement.charAt(0).toUpperCase() + replacement.slice(1);
+  }
+
+  if (matched === upper) return replacement.toUpperCase();
+
+  return replacement;
+}
+
+/**
  * Compute the replacement for one document.
  *
  * Walks line by line in exactly the order `findMatches` does, so `skip` indices
@@ -62,9 +97,9 @@ export function computeReplacements(
   text: string,
   matcher: RegExp,
   replacement: string,
-  options: { expand?: boolean; skip?: ReadonlySet<number> } = {},
+  options: { expand?: boolean; skip?: ReadonlySet<number>; preserveCase?: boolean } = {},
 ): ReplacementResult {
-  const { expand = false, skip } = options;
+  const { expand = false, skip, preserveCase: shouldPreserveCase = false } = options;
   const edits: FileEdit[] = [];
   const lines = text.split('\n');
 
@@ -83,10 +118,14 @@ export function computeReplacements(
 
       index++;
       if (!skip?.has(index)) {
+        // preserveCase is applied after expansion, to the expanded string —
+        // casing the template instead would rewrite named-group references
+        // like `$<word>` to `$<WORD>`, silently losing the captured text.
+        const expanded = expandReplacement(replacement, found, expand);
         edits.push({
           from: lineStart + found.index,
           to: lineStart + found.index + found[0].length,
-          insert: expandReplacement(replacement, found, expand),
+          insert: shouldPreserveCase ? preserveCase(found[0], expanded) : expanded,
         });
       }
     }
