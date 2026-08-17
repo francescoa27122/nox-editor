@@ -114,6 +114,16 @@
           >
             <Icon name="regex" size={13} />
           </button>
+          <button
+            class="toggle"
+            class:on={$options.preserveCase}
+            title="Preserve case"
+            aria-label="Preserve case"
+            aria-pressed={$options.preserveCase}
+            onclick={() => find.toggle('preserveCase')}
+          >
+            <span class="preserve-case-label">AB</span>
+          </button>
         </div>
       </div>
 
@@ -325,6 +335,12 @@
   .toggle.on {
     background: var(--nox-active);
     color: var(--nox-accent);
+  }
+
+  .preserve-case-label {
+    font-size: var(--nox-fs-2xs);
+    font-weight: var(--nox-fw-semibold);
+    line-height: 1;
   }
 
   .controls {
