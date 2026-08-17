@@ -61,6 +61,50 @@ describe('shaping a replacement to the case it is replacing', () => {
   it('handles an empty replacement', () => {
     expect(preserveCase('SCHEDULER', '')).toBe('');
   });
+
+  /**
+   * The failure this prevents: an ASCII-only "has letters" guard, such as
+   * `/[a-zA-Z]/.test(matched)`. A script with no ASCII letters at all —
+   * Cyrillic, here — has no character that regex would count as cased, so
+   * that guard would treat every match as letterless and return the
+   * replacement verbatim in all three cases. Accented Latin would not catch
+   * this: `École` still contains plain ASCII letters (`c`, `o`, `l`, `e`), so
+   * an ASCII regex passes it through by accident. Comparing
+   * `toUpperCase()`/`toLowerCase()` gets this right for any script, because
+   * those methods know casing beyond ASCII.
+   */
+  it('shapes a match written in a script with no ASCII letters', () => {
+    expect(preserveCase('график', 'dispatcher')).toBe('dispatcher');
+    expect(preserveCase('График', 'dispatcher')).toBe('Dispatcher');
+    expect(preserveCase('ГРАФИК', 'dispatcher')).toBe('DISPATCHER');
+  });
+
+  /**
+   * The failure this prevents: checking Capitalized before all-lower. An
+   * uncased leading character such as `_` trivially satisfies
+   * `first === first.toUpperCase()` (there is no case to change), so
+   * `_scheduler`'s remainder (`scheduler`) being lower-case would make the
+   * whole match look Capitalized if that check ran first — upper-casing the
+   * replacement's first letter for a match that is actually all lower-case.
+   * All-lower must be checked first so a leading uncased character does not
+   * get misread as a capital.
+   */
+  it('prefers all-lower over Capitalized when the leading character is uncased', () => {
+    expect(preserveCase('_scheduler', 'dispatcher')).toBe('dispatcher');
+    expect(preserveCase('_SCHEDULER', 'dispatcher')).toBe('DISPATCHER');
+  });
+
+  /**
+   * This is spec-conformant, not a gap: Capitalized requires the *entire*
+   * remainder to be lower-case, and `_Scheduler`'s remainder is `Scheduler`,
+   * which is not `scheduler`. So this falls through every pattern to
+   * verbatim. It is the rule's least intuitive output — worth pinning so a
+   * future reader does not "fix" it into the Capitalized branch and take
+   * `_scheduler` (the previous test) down with it.
+   */
+  it('leaves an underscore-prefixed capitalised-looking match verbatim', () => {
+    expect(preserveCase('_Scheduler', 'dispatcher')).toBe('dispatcher');
+  });
 });
 
 describe('preserve case through a replace run', () => {
@@ -120,5 +164,22 @@ describe('preserve case through a replace run', () => {
       preserveCase: true,
     });
     expect(result.text).toBe('SCHED_X\n');
+  });
+
+  /**
+   * The failure this prevents: `skip` and `preserveCase` interfering with
+   * each other at the call sites Tasks 2-3 build. They are independent by
+   * construction — `skip` decides whether an edit is emitted at all,
+   * `preserveCase` only shapes edits that are — but nothing pinned that
+   * before. A skipped match must stay untouched in the source text, and a
+   * kept match must still get its case shaped.
+   */
+  it('applies skip and preserveCase independently', () => {
+    const result = computeReplacements('scheduler\nScheduler\n', /scheduler/gi, 'dispatcher', {
+      preserveCase: true,
+      skip: new Set([0]),
+    });
+    expect(result.text).toBe('scheduler\nDispatcher\n');
+    expect(result.count).toBe(1);
   });
 });

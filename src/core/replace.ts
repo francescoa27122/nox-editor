@@ -54,18 +54,32 @@ export function expandReplacement(
  * Shape `replacement` to the case pattern of `matched`.
  *
  * Precedence — order is load-bearing — all lower, then Capitalized, then ALL
- * UPPER, then verbatim. A single capital letter (`S`) satisfies both
- * Capitalized and ALL UPPER: its remainder is empty, which is trivially
- * lower-case. Capitalized is checked first because one capital reads as a
- * capitalised word, not a shout; `SS` has a non-lower remainder and so only
- * ever matches ALL UPPER.
+ * UPPER, then verbatim. Both boundaries in that order are load-bearing, not
+ * just the second one:
+ *
+ * - All-lower before Capitalized: an uncased leading character such as `_`
+ *   or a digit trivially satisfies `first === first.toUpperCase()` (there is
+ *   no case to change), so a leading-underscore lower-case match like
+ *   `_scheduler` would be misread as Capitalized — and its replacement's
+ *   first letter wrongly upper-cased — if Capitalized were checked first.
+ * - Capitalized before ALL UPPER: a single capital letter (`S`) satisfies
+ *   both — its remainder is empty, which is trivially lower-case — and one
+ *   capital reads as a capitalised word, not a shout. `SS` has a non-lower
+ *   remainder and so only ever matches ALL UPPER.
  *
  * A match with no cased letter — digits, punctuation, or empty — is
  * verbatim. `matched === matched.toUpperCase()` alone would call `123` ALL
  * UPPER, because a string with no letters is equal to both its upper- and
  * lower-cased form; comparing the upper and lower forms against each other
  * instead of against `matched` catches that, and does it for any script, not
- * just ASCII.
+ * just ASCII — an ASCII `/[a-zA-Z]/` guard would wrongly call a Cyrillic or
+ * Greek match letterless, since none of its characters are in `a-zA-Z`.
+ *
+ * A match like `_Scheduler` is deliberately verbatim, not Capitalized:
+ * Capitalized requires the *entire* remainder to be lower-case, and
+ * `_Scheduler`'s remainder is `Scheduler`, not `scheduler`. That is the
+ * rule's least intuitive output but it is spec-conformant — resist folding
+ * it into the Capitalized branch, which would also capture `_scheduler`.
  */
 export function preserveCase(matched: string, replacement: string): string {
   const upper = matched.toUpperCase();
