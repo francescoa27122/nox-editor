@@ -105,7 +105,43 @@ replacements through `core/replace.ts`, and `editor/find.ts` delegates to
 `core/replace.ts` alone would make the `AB` toggle work in ⌘⇧F and silently do
 nothing in ⌘F.
 
-**Both paths will compute their replacements through `core/replace.ts`.**
+**Both paths will compute their replacement *text* through `core/replace.ts`.
+Matching stays where it is.**
+
+**This section originally said something stronger and it was wrong.** It said
+both paths would compute their replacements through `core/replace.ts`
+outright — that the editor would stop using `@codemirror/search` for replace
+entirely. That was built, measured, and reverted. Recorded here rather than
+quietly rewritten, because the reasoning that produced it is the kind that
+looks strongest right before it fails.
+
+`computeReplacements` is line-based — `text.split('\n')`, one matcher pass per
+line. `@codemirror/search` has a `MultilineRegExpCursor` that flattens chunks
+across line boundaries, a `SearchQuery.unquote` that turns `\n` and `\t` in
+the find and replace fields into real characters, and a Unicode character
+categorizer behind `wholeWord` rather than a plain regex `\b`. Routing ⌘F's
+replace through the shared function therefore **loses working capability**:
+multi-line regex replace, `\n` unquoting, and correct word boundaries outside
+ASCII.
+
+Measured on the reverted implementation, with the find panel's counter still
+reading from `SearchQuery`: `café café` with whole-word on counted 2 matches
+and replaced 0; regex `cat\ndog` counted 1 and replaced 0. So the divergence
+this section exists to eliminate did not disappear — it moved *inside* the
+find panel, as a silent no-op in a destructive command. Worse than the problem
+it was solving.
+
+**The corrected split follows the actual risk.** The danger was never in
+computing the replacement text; it is in matching. So `editor/find.ts` keeps
+`SearchQuery` and its cursor for finding matches — the same query the counter
+and the highlights already use, so those three can never disagree — and uses
+`expandReplacement` and `preserveCase` from `core/replace.ts` for each match's
+replacement text, dispatched as one transaction.
+
+What that gives up is this section's original claim that the two panels can
+never diverge on regex expansion or zero-width handling. They still can. That
+is a real cost, and it is smaller than the capabilities the stronger version
+destroyed.
 
 The alternative considered and rejected was writing a second preserve-case
 implementation against `SearchCursor` for the editor path. That duplicates
@@ -129,16 +165,25 @@ that the destination already exists and is already tested.
 The editor command stops owning *what the new text is* and keeps owning *which
 match and where the view goes*:
 
-- **Given up to `core/replace.ts`:** the replacement string, regex expansion,
-  zero-width handling, edit ordering.
+- **Taken from `core/replace.ts`:** the replacement text for each match —
+  `expandReplacement` for `$1`/`$&`/`$<name>`, then `preserveCase`.
+- **Kept on `@codemirror/search`:** finding the matches at all. `SearchQuery`
+  and its cursor stay, so multi-line regex, `\n` unquoting and Unicode word
+  boundaries keep working, and the counter, the highlights and replace all read
+  the same query.
 - **Kept in `editor/find.ts`:** which match is current, advancing to the next,
   wrapping at the end of the document, scrolling the result into view, and
   leaving the selection where a user expects after a replace.
 
-That second list is the risk, and it is worth naming rather than discovering:
-we currently inherit those behaviours from `@codemirror/search` and will own
-them. They are also the half no headless test reaches, in a file that has none
-today.
+**This section originally listed regex expansion, zero-width handling and edit
+ordering as given up too, and the matching as ours to own.** That was the
+version §5 records as reverted. The corrected boundary is narrower and follows
+the risk: replacement text is shared, matching is not.
+
+The remaining risk is the third list — the view behaviour we already own and
+no headless test reaches, in a file with no tests. Smaller than it was, because
+replace now walks the same cursor `selectAllMatches` already walks rather than
+a second matcher built from scratch.
 
 **Mitigation is a walk, not a test.** §9 says what the walk must cover.
 
