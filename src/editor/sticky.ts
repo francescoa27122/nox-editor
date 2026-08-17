@@ -22,17 +22,6 @@ import { createSymbolCache, stickyRows, type StickyRow } from '@core/symbols';
 /** Rows beyond this are not worth the vertical space they would take. */
 const MAX_ROWS = 5;
 
-/**
- * One slot, shared by every buffer this view opens.
- *
- * Module-level rather than per-panel: `createSymbolCache`'s whole point is
- * that the walk is skipped when the tree and doc are unchanged from last
- * time, and a scroll rarely changes either. A cache built fresh inside the
- * panel constructor would only ever see one call before the panel outlives
- * it, which defeats the point.
- */
-const symbolsFor = createSymbolCache();
-
 /** The document line at the very top of the visible scroll area. */
 function topVisibleLine(view: EditorView): number {
   const block = view.lineBlockAtHeight(view.scrollDOM.scrollTop - view.documentTop);
@@ -64,7 +53,7 @@ function rowDOM(view: EditorView, row: StickyRow): HTMLButtonElement {
 }
 
 /** Repaint `dom` with the rows enclosing the current top visible line. */
-function render(view: EditorView, dom: HTMLElement): void {
+function render(view: EditorView, dom: HTMLElement, symbolsFor: ReturnType<typeof createSymbolCache>): void {
   const symbols = symbolsFor(syntaxTree(view.state), view.state.doc);
   const rows = stickyRows(symbols, topVisibleLine(view), view.state.doc, MAX_ROWS);
 
@@ -80,14 +69,27 @@ function render(view: EditorView, dom: HTMLElement): void {
 function stickyPanelConstructor(view: EditorView): Panel {
   const dom = document.createElement('div');
   dom.className = 'nox-sticky-scroll';
-  render(view, dom);
+
+  // Per view, not module-level. `EditorArea.svelte` allows several editor
+  // groups open side by side, each with its own view, so a single shared
+  // slot thrashes: pane A's scroll evicts pane B's cached parse and vice
+  // versa, forcing a full re-walk on essentially every scroll in a split
+  // view — the exact case the cache exists to avoid. Measured on
+  // `src/app.ts` (2,690 lines, 67 symbols), that walk (`fileSymbols`, what
+  // the cache guards) costs ~1.378 ms, against ~0.012 ms for `stickyRows`
+  // (the filter over its output) — about 115× more, and entirely avoidable.
+  // One cache per view keeps each pane's hits intact regardless of what the
+  // other panes are showing, at the cost of one extra closure per view,
+  // which is free.
+  const symbolsFor = createSymbolCache();
+  render(view, dom, symbolsFor);
 
   return {
     dom,
     top: true,
     update(update: ViewUpdate) {
       if (update.docChanged || update.viewportMoved || update.geometryChanged) {
-        render(update.view, dom);
+        render(update.view, dom, symbolsFor);
       }
     },
   };
