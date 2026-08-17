@@ -330,11 +330,11 @@ git commit -m "Compute the editor's replacements where the project's are compute
 
 Per spec §9 this is **not optional and not a formality**. Task 3 took over destructive behaviour in a file with no automated coverage, and this is the only thing that checks it.
 
-- [ ] **Step 1: Start the browser target**
+- [x] **Step 1: Start the browser target**
 
 Use the `nox-web` dev server (port 1420). Do not run `npm run app`. If the port is taken by another session's server, that server serves this same working tree — open `http://localhost:1420` rather than fighting for it.
 
-- [ ] **Step 2: Walk the editor path (⌘F)**
+- [x] **Step 2: Walk the editor path (⌘F)**
 
 On a file with several matches in mixed case:
 
@@ -346,18 +346,18 @@ On a file with several matches in mixed case:
 6. Turn `AB` on: `scheduler`, `Scheduler` and `SCHEDULER` each come back correctly shaped.
 7. Type an invalid regex with regex mode on: it reports rather than throwing, and replaces nothing.
 
-- [ ] **Step 3: Walk the project path (⌘⇧F)**
+- [x] **Step 3: Walk the project path (⌘⇧F)**
 
 1. Replace across files with `AB` on — each match keeps its own shape.
 2. One ⌘Z takes the project replace back, as it did before.
 
-- [ ] **Step 4: Record and fix**
+- [x] **Step 4: Record and fix**
 
-Write what you saw into the report, including anything that looked wrong. A walk reporting only "it works" is a walk that was not taken. If a step fails, fix it here — with a test where one is possible, and a note where one is not.
+Written up in the handoff's "Task 4 — the walk (done 2026-08-17)" table: all 17 items pass, item 14 measured rather than seen, and one pre-existing focus defect found and recorded under "Known issues, not fixed".
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
-Skip if nothing changed, and say so.
+No feature code changed — nothing failed. The commit carries the walk record only.
 
 ---
 
@@ -365,25 +365,29 @@ Skip if nothing changed, and say so.
 
 **Files:** `CHANGELOG.md`, `ROADMAP.md`, `README.md`, `ARCHITECTURE.md`
 
-- [ ] **Step 1: Changelog**
+- [x] **Step 1: Changelog**
 
 Under `## [Unreleased]` → `### Added`. Read the neighbours for voice. Worth saying: which three shapes it recognises, that irregular casing is left alone deliberately, that it is off by default, and that it now works in both panels.
 
-- [ ] **Step 2: Roadmap**
+- [x] **Step 2: Roadmap**
 
 Move **Preserve case on replace** from v0.3's pending table into `### ✅ Shipped in v0.3`, matching how **Go to symbol** is written there.
 
-- [ ] **Step 3: Architecture**
+- [x] **Step 3: Architecture**
 
-`ARCHITECTURE.md` §4. Record the decision that matters beyond this feature: **both replace paths now compute through `core/replace.ts`**, so regex expansion, zero-width handling and edit ordering cannot diverge between the two panels. Note what the editor path still owns — which match, wrapping, scrolling — and that it has no automated coverage.
+Written as *The editor borrows the match and owns the text*, after *Replace decides which text is authoritative*.
 
-Do **not** add a §7 debt row for that; §7 already records the untested-editor-view boundary.
+**Written against the handoff's framing, not this step's.** This step still says "both replace paths now compute through `core/replace.ts`", which is the pre-reversal claim — spec §5 was corrected in 83a3f8c and `src/editor/find.ts:1` still imports `SearchQuery`/`findNext` from `@codemirror/search`. What is shared is the replacement *text*; matching stays on the library. Recording the plan's version would have put a false statement in the file this feature exists to keep honest.
 
-- [ ] **Step 4: README**
+Also fixed a stale sentence the step did not ask about: *Nox draws its own find UI* claimed we keep CM's `replaceAll`, which this branch removed.
 
-Only if it lists features at this level of detail. Check first; if it would be the odd entry out, leave it and say why in the report.
+No §7 debt row added — §7's last row already covers it.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 4: README**
+
+Left alone. Its feature sections are whole capabilities ("Undo works across files"), and its keybinding table lists chords — preserve case is a toggle with no chord, reachable from the palette as `search.togglePreserveCase`. An entry would be the odd one out at both levels.
+
+- [x] **Step 5: Verify and commit**
 
 `npm test` and `npm run check`. Do **not** push or open a PR — the controller handles that.
 
