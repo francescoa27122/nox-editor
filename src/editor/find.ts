@@ -315,11 +315,31 @@ export class FindController {
     return true;
   }
 
+  /**
+   * Run a find command against the attached view, and **leave focus alone.**
+   *
+   * This used to end in `view.focus()`, which is the kind of line that looks
+   * like a courtesy and is a bug: every one of these commands can be reached
+   * from a field in the panel, and Enter in a field that then hands focus to
+   * the document means the user's *next* keystroke is an edit. Press Enter
+   * twice in the Find field to step through two matches and the second press
+   * typed a newline into the file.
+   *
+   * It was also not buying anything, because every caller that should end in
+   * the editor is already there. A keybinding fires from the editor, which
+   * has focus by definition. The palette's accept runs `ui.closeOverlay()`
+   * — and so `ui.focusEditor()` — before it executes the command. And moving
+   * focus back is the panel's own job on Escape, through `ui.closeFind()`.
+   * That single channel is also what keeps `ui.focusZone` honest; focusing
+   * the view from here moved the caret without telling it.
+   *
+   * `selectAllMatches` is the deliberate exception and focuses the view
+   * itself: it exists to hand you a cursor per match so that you can type.
+   */
   #run(command: (view: EditorView) => boolean): void {
     const view = this.#view;
     if (!view || this.query.get().length === 0) return;
     command(view);
-    view.focus();
     this.#count();
   }
 
