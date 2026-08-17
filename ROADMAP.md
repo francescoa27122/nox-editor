@@ -3,9 +3,17 @@
 Ordered by what makes Nox a better editor, not by what is easiest to build.
 Anything not listed is not planned.
 
+**The `v0.x` headings below are milestones, not releases**, and the two have
+never lined up. A milestone is a theme; a release is whatever was finished when
+a tag was cut. The v0.2 milestone's local model went out in release 0.3.0, and
+three of the v0.3 milestone's four features went out in release 0.4.0. Each
+shipped table says which release its rows landed in;
+[CHANGELOG.md](CHANGELOG.md) is the authority on that, and this file is the
+record of *why* something was built.
+
 ---
 
-## ✅ v0.1.0 — Foundation *(shipped)*
+## ✅ v0.1 — Foundation *(released as 0.1.0)*
 
 The MVP: a real editor you can work in.
 
@@ -37,7 +45,7 @@ The MVP: a real editor you can work in.
 | **Untitled buffer language picker** | Status bar click to set the language before a first save. |
 | **Explorer virtualisation** | The flat-node model already anticipates this; needed past a few thousand entries. |
 
-### ✅ Shipped in v0.2 *(M1–M7 of [AGENT-PLATFORM.md](AGENT-PLATFORM.md))*
+### ✅ Shipped *(M1–M7 of [AGENT-PLATFORM.md](AGENT-PLATFORM.md) — released in 0.2.0, except the local model in 0.3.0)*
 
 | | |
 |---|---|
@@ -68,9 +76,9 @@ The MVP: a real editor you can work in.
 | **Replace individual matches** | Today replace applies per file or per project; dismissing a file excludes it, but single matches cannot be excluded. |
 | **The same file in two panes** | Needs a second CodeMirror view over one document, forwarding transactions between them. The one real limit of the current split model. |
 | **Nested splits** | A column inside a row. The layout is a flat list today. |
-| **Terminal** *(shipped early)* | A real pty, not piped stdio, so `vim`, colour and job control work. Previously ruled out as its own project; it turned out to share process supervision with the agent transport, which is what made it affordable. |
+| **Terminal** *(shipped early, in 0.3.0)* | A real pty, not piped stdio, so `vim`, colour and job control work. Previously ruled out as its own project; it turned out to share process supervision with the agent transport, which is what made it affordable. |
 
-### ✅ Shipped in v0.3
+### ✅ Shipped *(Go to symbol released in 0.3.0; the other three in 0.4.0)*
 
 | | |
 |---|---|
@@ -137,7 +145,7 @@ architecture supports it when the time comes: `Platform` isolates network
 access, commands expose actions uniformly, and the workspace can already
 enumerate buffers and project files.
 
-- Explain selection *(shipped early)* — both halves are built: **Edit
+- Explain selection *(shipped early, in 0.3.0)* — both halves are built: **Edit
   Selection with a Model…** returns a diff through the review panel, and
   **Explain Selection** and **Ask About Selection…** return prose to an
   **Answers** sidebar section. That section is the result surface this line
