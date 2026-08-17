@@ -29,6 +29,7 @@ import { foldingExtension } from './folding';
 import { languageCompartment } from './languages';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
 import { searchHighlighter } from './search-highlight';
+import { stickyScrollExtension } from './sticky';
 import { noxTheme } from './theme';
 
 /**
@@ -54,6 +55,7 @@ const compartments = {
   autoIndent: new Compartment(),
   folding: new Compartment(),
   provenance: new Compartment(),
+  sticky: new Compartment(),
 } as const;
 
 type CompartmentName = keyof typeof compartments;
@@ -78,6 +80,7 @@ const SETTING_TO_COMPARTMENTS: Partial<Record<keyof Settings, CompartmentName[]>
   'editor.autoIndent': ['autoIndent'],
   'editor.codeFolding': ['folding'],
   'workbench.showChangeMarks': ['provenance'],
+  'editor.stickyScroll': ['sticky'],
 };
 
 // --- Per-compartment content ------------------------------------------------
@@ -150,6 +153,8 @@ function compartmentContent(name: CompartmentName, s: Settings): Extension {
       return foldingExtension(s['editor.codeFolding']);
     case 'provenance':
       return s['workbench.showChangeMarks'] ? [provenanceGutter(), provenanceTooltip()] : [];
+    case 'sticky':
+      return stickyScrollExtension(s['editor.stickyScroll']);
   }
 }
 

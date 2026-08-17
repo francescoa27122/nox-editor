@@ -15,6 +15,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Segments of a file outside the workspace are not clickable. There is
     nothing to reveal into — the explorer watches one root — and a button that
     takes the click and does nothing is worse than plain text.
+- **Sticky scroll keeps the enclosing declaration on screen.** Scroll into the
+  body of a long class or function and its header stays pinned above the
+  editor instead of scrolling out of view. Click a pinned row to jump to it.
+  Off with `editor.stickyScroll`.
+  - Declarations only — classes, functions, methods, interfaces, CSS rule
+    sets. Never `if`, `for` or other control blocks: it reads the same rule
+    table ⌘R (Go to Symbol) uses, so the two can never disagree about what
+    counts as structure.
+  - It is a strip above the editor, not an overlay on top of it, so it costs a
+    row of height rather than covering the last line of the document.
+  - **Markdown headings never pin, so sticky scroll shows nothing in `.md`
+    files.** A symbol pins only when its declaration is above the top visible
+    line and it still encloses that line; a heading spans only its own line,
+    so it never encloses anything below it. CSS rule sets are unaffected,
+    since a rule set spans its whole block.
 
 ### Changed
 
