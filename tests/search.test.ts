@@ -357,6 +357,28 @@ describe('previewReplacement with preserveCase', () => {
     expect(search.previewReplacement(upper.matches[0]!)).toBe('WORKER');
   });
 
+  it('expands a named group before shaping case, rather than casing the reference itself', async () => {
+    // `worker`/`$1s` above would produce the same string whichever order ran
+    // first — toUpperCase() is a no-op on `$`, digits, and an already-upper
+    // literal, so that pairing cannot tell the orders apart. A named-group
+    // reference can: casing the *template* first turns `$<word>` into
+    // `$<WORD>`, a group name the match's `groups` object does not have, so
+    // `expandReplacement` silently drops it — exactly the failure mode
+    // `computeReplacements` documents at src/core/replace.ts:135-137.
+    const { workspace, search } = setup();
+    await workspace.openFolder('/w');
+    search.setOption('regexp', true);
+    await runSearch(search, '(?<word>needle)');
+    search.setReplacement('$<word>s');
+    search.setOption('preserveCase', true);
+
+    const upper = search.results.get().find((f) => f.path === '/w/notes.txt')!;
+    // Expand first: $<word> -> 'NEEDLE', giving 'NEEDLEs'; then shape to the
+    // all-caps match, giving 'NEEDLES'. Casing the template first would lose
+    // the captured text and leave only 'S'.
+    expect(search.previewReplacement(upper.matches[0]!)).toBe('NEEDLES');
+  });
+
   it('still reports an invalid pattern as null rather than throwing', async () => {
     const { workspace, search } = setup();
     await workspace.openFolder('/w');
