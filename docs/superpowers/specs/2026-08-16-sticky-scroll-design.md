@@ -120,9 +120,62 @@ one question: does it touch CodeMirror? `Text` is `@codemirror/state`, which
 
 `showPanel` with `{ top: true }`, constructed once and updated in place.
 
-`Panel.update(update)` recomputes when `update.docChanged`, or
-`update.viewportMoved`, or the geometry changed. The first visible line comes
-from `view.lineBlockAtHeight(view.scrollDOM.scrollTop - view.documentTop)`.
+**The two paragraphs this replaces were wrong, and "checked against the
+installed CodeMirror" at the top of this document was not true of either
+claim in them** — both were worked out from the API surface, not from reading
+CodeMirror's own measure/update machinery, and both broke Task 2's first
+implementation in ways only running the editor surfaced.
+
+**The top visible line is a layout read, and it has to happen in a measure
+phase.** `view.lineBlockAtHeight(...)` calls into CodeMirror's
+`readMeasured`, which throws when called outside one:
+
+```js
+readMeasured() {
+    if (this.updateState == 2 /* UpdateState.Updating */)
+        throw new Error("Reading the editor layout isn't allowed during an update");
+```
+
+The panel constructor runs from inside the `EditorView` constructor, and
+`Panel.update` runs from inside `updatePlugins` — both are within that
+window. Reading layout directly from either, as this section originally said
+to, throws on every editor open; `PluginInstance` catches the throw, logs
+"CodeMirror plugin crashed", and deactivates `panelPlugin` entirely, so no
+panel container is ever built. The fix is `view.requestMeasure({ read,
+write })`, called from the constructor, from `Panel.update`, and from the
+scroll hook below — `read` runs in CodeMirror's own measure phase, where
+`readMeasured` is permitted, and `write` then builds the DOM from what `read`
+found.
+
+**The height expression was also wrong**, independently of when it ran:
+`view.scrollDOM.scrollTop - view.documentTop` double-counts the scroll
+offset. `lineBlockAtHeight` wants a document-relative height, and
+`scrollDOM.scrollTop` already is one — CodeMirror's own equivalent
+(`scrollAnchorAt`) passes it straight through with no adjustment.
+`documentTop` is a *screen* coordinate
+(`contentDOM.getBoundingClientRect().top + paddingTop`), which goes more
+negative as the document scrolls, so subtracting it does not cancel the
+scroll offset, it adds a second copy of it. The correct read is
+`view.lineBlockAtHeight(view.scrollDOM.scrollTop)`. The bug is invisible at
+the top of a file, where the error is exactly zero, and grows toward double
+the true depth as you scroll — a 100-line file scrolled to line 50 pinned
+whatever enclosed roughly line 94, which is why it survived a glance at the
+top of the file and nothing further.
+
+**`update.docChanged` / `viewportMoved` / `geometryChanged` is the right set
+of conditions, but not a sufficient trigger on its own.** Plain scrolling
+usually produces no `ViewUpdate` at all: CodeMirror's `measure()` bails when
+nothing changed, and it tolerates roughly 250px of scroll drift before
+recomputing the viewport and setting `viewportMoved` — so relying on `update`
+alone lags the true top line by up to ~13 lines of ordinary scrolling, for a
+feature whose entire job is tracking that line. The fix composes with the
+measure-phase fix above rather than replacing it:
+`EditorView.domEventHandlers({ scroll(event, view) { view.requestMeasure(...) } })`
+hooks the scroller's native `scroll` event directly, and a `requestMeasure`
+request scheduled from there runs regardless of whether an update would have
+justified it — so the panel's `update` still guards against unnecessary work
+on unrelated transactions, and the scroll hook is what actually keeps the
+strip current while scrolling.
 
 **Why a panel rather than an overlay.** CodeMirror positions and sizes panels
 itself and accounts for them in its own layout, so the last line of the
