@@ -52,21 +52,24 @@ Next:
 
 Blocked / unverified:
 
-- **`src-tauri/src/lsp.rs` has never been compiled.** There is no cargo
-  toolchain on this machine. Its nine framing tests have never run; CI is the
-  first thing that will execute them. The framing *algorithm* was verified by
-  porting `push` line-for-line to Python and running the same nine cases (9/9),
-  which catches off-by-ones and says nothing about whether the Rust compiles.
+- ~~`src-tauri/src/lsp.rs` has never been compiled.~~ **Resolved.** CI built
+  it on Linux, macOS and Windows and ran all nine framing tests green (run
+  32090362916). It did not compile on the first try: `push` was written before
+  the crate's `Result<T>` alias existed and returned `Result<Vec<String>,
+  String>`, which is E0107 against a one-argument alias. That is exactly the
+  class of error the Python port could not catch, and exactly why the PR went
+  up as a draft.
 - **No real language server has ever talked to this.** Every test is against a
   fake process or a Node script. The first run against
   `typescript-language-server` is the one that will find what the spec got
   wrong.
-- Nothing is pushed. Three branches sit on top of `main`, unmerged.
+- `lsp-client` is pushed as draft PR #28, CI green. The other two branches
+  (`fix-replace-preview-groups`, `retire-preserve-case-plans`) are unpushed.
 
 Confidence:
 
 - High on the TypeScript: red-green watched on every task, four mutation
   checks, and the full suite green.
-- Medium on `lsp.rs`: the algorithm is verified, the Rust is not compiled.
+- High on `lsp.rs` now: compiled and tested on all three platforms by CI.
 - Low on the end-to-end claim. "Diagnostics appear" is true of the code paths
   and untested against a real server.
