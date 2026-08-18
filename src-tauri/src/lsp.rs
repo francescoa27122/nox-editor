@@ -136,6 +136,46 @@ pub fn frame(message: &str) -> Vec<u8> {
     out
 }
 
+/// Start the server process, with the pipes it needs.
+///
+/// On Windows a second attempt goes through `cmd /C`. Most language servers
+/// are installed by npm, which puts a `.cmd` shim on `PATH` rather than an
+/// executable — `typescript-language-server` is one, and it is the command the
+/// `servers.json` template ships. `CreateProcess`, which `Command` uses, runs
+/// `.exe` and not `.cmd`, so the direct attempt fails with "program not found"
+/// for exactly the configuration Nox recommends.
+///
+/// Direct first, so a real executable never goes through a shell: `cmd /C`
+/// re-splits its command line on spaces, and a server installed under
+/// `C:\Program Files` would break in a way that reports the wrong cause.
+fn spawn_server(command: &str, args: &[String], cwd: Option<&str>) -> std::io::Result<Child> {
+    fn build(program: &str, args: &[String], cwd: Option<&str>) -> Command {
+        let mut builder = Command::new(program);
+        builder
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(directory) = cwd {
+            builder.current_dir(directory);
+        }
+        builder
+    }
+
+    let direct = build(command, args, cwd).spawn();
+
+    #[cfg(windows)]
+    if let Err(error) = &direct {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            let mut shell_args = vec!["/C".to_string(), command.to_string()];
+            shell_args.extend_from_slice(args);
+            return build("cmd", &shell_args, cwd).spawn();
+        }
+    }
+
+    direct
+}
+
 /// Start a language server. `id` is chosen by the renderer so replies can be
 /// matched without a round trip to learn what the process was called.
 #[tauri::command]
@@ -151,19 +191,10 @@ pub fn nox_lsp_start(
         return Err(format!("exists: a language server with id {id} is already running"));
     }
 
-    let mut builder = Command::new(&command);
-    builder
-        .args(&args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(directory) = cwd {
-        builder.current_dir(directory);
-    }
-
-    let mut child = builder
-        .spawn()
-        .map_err(|e| format!("spawn: could not start {command} ({e})"))?;
+    let mut child = match spawn_server(&command, &args, cwd.as_deref()) {
+        Ok(child) => child,
+        Err(e) => return Err(format!("spawn: could not start {command} ({e})")),
+    };
 
     let streams = (child.stdin.take(), child.stdout.take(), child.stderr.take());
     let (Some(stdin), Some(mut stdout), Some(stderr)) = streams else {

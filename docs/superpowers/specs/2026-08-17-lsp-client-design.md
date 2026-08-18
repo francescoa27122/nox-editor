@@ -171,6 +171,11 @@ one. `MemoryPlatform` therefore needs no fake of its own; it refuses like
 
 The part where being wrong is expensive, so both choices are conservative.
 
+**Verified against a real server, 2026-08-18.** `typescript-language-server`
+5.3.0 advertises `textDocumentSync: 2` — incremental — and accepts a
+full-document change event anyway, clearing the diagnostic when the error is
+fixed. The choice below costs nothing against the primary server.
+
 **Full-text sync, debounced, even where the server offers incremental.**
 Incremental is a performance optimisation whose failure mode is silent: one
 off-by-one in a range conversion desynchronises the server's copy of the file,
@@ -208,10 +213,15 @@ editor bridge renders only the URI it is showing.
 
 **Ranges are clamped to the document, and this is correctness rather than
 defensiveness.** `publishDiagnostics`'s `version` field is optional, so a server
-that omits it defeats the revision check in §6 entirely. CodeMirror throws on
-out-of-range positions, which makes an unclamped stale batch a crash in the
-editor rather than a cosmetic error. Severity maps 1-4 to
-`error | warning | info | hint`.
+that omits it defeats the revision check in §6 entirely — and
+`typescript-language-server` **does** omit it, measured against 5.3.0 on
+2026-08-18. Against the primary server the version check is therefore dead
+code, and this clamp is the only thing between a batch computed from older
+text and an out-of-range position. CodeMirror throws on out-of-range
+positions, which makes an unclamped stale batch a crash in the editor rather
+than a cosmetic error. The version check stays, for servers that do send one,
+but it must not be mistaken for the safeguard carrying the feature. Severity
+maps 1-4 to `error | warning | info | hint`.
 
 **The panel copies `SearchPanel`'s shape**, not merely its styling: grouped by
 file, flattened to a `rows()` list with a `focused` index, arrow-key navigable,
@@ -255,7 +265,7 @@ Each of these is a test, not an intention.
 
 | Failure | Behaviour |
 |---|---|
-| Command not found | Session ends `failed`; status bar says which command; no retry loop. |
+| Command not found | Session ends `failed`; status bar says which command; no retry loop. On Windows a `.cmd` shim is retried through `cmd /C` first — npm installs most servers as `.cmd`, and `CreateProcess` does not run those, so the shipped template would otherwise fail on a first-class platform. |
 | Server exits during `initialize` | `failed`, stderr tail retained and reachable from the status item. |
 | Server crashes while running | Its diagnostics are cleared, then restart with backoff (1s, 2s, 4s), capped at 3 attempts inside 60s; after the cap it stays down and says so. A silent respawn loop is worse than a stop. |
 | Request never answered | A 10s per-request timeout rejects the promise. No unbounded pending map. |
