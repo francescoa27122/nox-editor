@@ -1,4 +1,4 @@
-import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { acceptCompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import {
   defaultKeymap,
   history,
@@ -186,6 +186,13 @@ function editorKeymap(): Extension {
     ...standardKeymap,
     ...defaultKeymap,
     ...historyKeymap,
+    // Tab accepts the highlighted completion, and otherwise indents.
+    //
+    // One key, two jobs, and no mode flag: `acceptCompletion` returns false
+    // when no picker is open, so the binding below it runs instead. Ordering
+    // is the whole mechanism — earlier entries are tried first — which is why
+    // this sits above `indentWithTab` rather than anywhere tidier.
+    { key: 'Tab', run: acceptCompletion },
     // Tab indents rather than moving focus. Shift-Tab still outdents; users
     // who need to escape the editor by keyboard use ⌘⇧E to focus the explorer.
     indentWithTab,
