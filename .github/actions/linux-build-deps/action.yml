@@ -1,0 +1,91 @@
+name: Linux build dependencies
+description: >
+  Install the GTK/WebKit stack Tauri needs on Linux, without being at the
+  mercy of the apt mirror behind GitHub's runners.
+
+inputs:
+  extra-packages:
+    description: Extra packages to install alongside the Tauri prerequisites.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        DEBIAN_FRONTEND: noninteractive
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
+      run: |
+        set -euo pipefail
+
+        read -ra extra <<< "$EXTRA_PACKAGES"
+        packages=(
+          libwebkit2gtk-4.1-dev
+          build-essential
+          curl
+          wget
+          file
+          libxdo-dev
+          libssl-dev
+          libayatana-appindicator3-dev
+          librsvg2-dev
+          "${extra[@]}"
+        )
+
+        # ForceIPv4 because the stall this step defends against looks exactly
+        # like a connect timeout paid once per request: the runners offer IPv6
+        # the mirror does not always answer on. Retries covers the unrelated
+        # case of a hard error mid-index-churn; it does nothing for the stall,
+        # because the stall never errors.
+        opts=(-o Acquire::ForceIPv4=true -o Acquire::Retries=3 -o Dpkg::Use-Pty=0)
+
+        cache=~/apt-archives
+        mkdir -p "$cache"
+
+        # jammy only gets security updates now, so superseded .debs trickle in
+        # slowly rather than flooding — but don't let them pile up forever.
+        if [ "$(du -sm "$cache" | cut -f1)" -gt 400 ]; then
+          echo "apt archive cache over 400 MB; starting it fresh."
+          rm -f "${cache:?}"/*.deb
+        fi
+
+        retry() {
+          local limit=$1; shift
+          local attempt
+          for attempt in 1 2 3; do
+            if sudo timeout "$limit" "$@"; then
+              return 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::$1 attempt $attempt/3 gave up after ${limit}s; retrying"
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "::error::$1 failed three times; the apt mirror is not usable right now"
+          return 1
+        }
+
+        retry 120 apt-get "${opts[@]}" update
+
+        # Seed apt from the previous run. Every .deb already here is one the
+        # mirror is never asked for, which is the only real immunity there is.
+        seeded=$(find "$cache" -maxdepth 1 -name '*.deb' | wc -l)
+        if [ "$seeded" -gt 0 ]; then
+          sudo cp -n "$cache"/*.deb /var/cache/apt/archives/
+        fi
+        echo "Seeded $seeded package(s) from the previous run's cache."
+
+        # Download and install are split so a timeout can only ever interrupt
+        # the network half. Completed .debs survive the kill, so attempts
+        # accumulate rather than restart, and dpkg is never interrupted
+        # part-way through unpacking (which would need `dpkg --configure -a`).
+        retry 300 apt-get "${opts[@]}" install -y --no-install-recommends --download-only "${packages[@]}"
+
+        # Save what we fetched before installing, so that even a later failure
+        # in this job leaves the next run a warm cache.
+        sudo cp -u /var/cache/apt/archives/*.deb "$cache"/ 2>/dev/null || true
+        sudo chown -R "$(id -u):$(id -g)" "$cache"
+
+        # Everything needed is on disk now, so this cannot stall on the mirror.
+        sudo apt-get "${opts[@]}" install -y --no-install-recommends "${packages[@]}"

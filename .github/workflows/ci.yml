@@ -57,20 +57,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The Azure apt mirror behind these runners intermittently degrades in a
+      # way apt cannot detect: every request still succeeds, but each one takes
+      # 5-18s to start regardless of size, and ~130 packages fetched serially
+      # turn a 40-second step into a 10-26 minute one. Nothing errors, so apt's
+      # own retry and timeout options never fire. Measured 2026-08-18: healthy
+      # was 55.6 MB in 9s, degraded was the same 55.6 MB in 22min 12s.
+      # Caching the .debs is what actually removes the exposure; the retry
+      # inside the action bounds the cost of a cold cache on a bad day.
+      - name: Cache apt archives
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/cache@v6
+        with:
+          path: ~/apt-archives
+          key: apt-jammy-base-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
+          restore-keys: apt-jammy-base-
+
       - name: Install Linux build dependencies
         if: matrix.os == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
+        uses: ./.github/actions/linux-build-deps
+        # A backstop only: the action's own per-attempt timeouts should fire
+        # long before this does.
+        timeout-minutes: 20
 
       - uses: dtolnay/rust-toolchain@stable
 
