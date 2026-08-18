@@ -2,9 +2,10 @@
   import { hasGrammar } from '@editor/languages';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
+  import { serverStatusLabel, serverStatusTitle } from './lsp-status';
 
   const app = useApp();
-  const { workspace, config, commands, files, jobs, review, ui } = app;
+  const { workspace, config, commands, files, jobs, review, ui, lsp } = app;
 
   const buffers = workspace.buffers;
   const activeId = workspace.activeId;
@@ -31,6 +32,10 @@
     if (total) return `${job.title} · ${Math.round((done / total) * 100)}%`;
     return done > 0 ? `${job.title} · ${done}` : job.title;
   });
+
+  const lspSessions = lsp.sessions;
+  const lspLabel = $derived(serverStatusLabel($lspSessions));
+  const lspFailed = $derived($lspSessions.some((session) => session.status === 'failed'));
 
   const active = $derived($buffers.find((b) => b.id === $activeId) ?? null);
   const dirtyCount = $derived($buffers.filter((b) => b.isDirty).length);
@@ -104,6 +109,17 @@
   </div>
 
   <div class="side right">
+    {#if lspLabel}
+      <button
+        class="item"
+        class:warn={lspFailed}
+        title={serverStatusTitle($lspSessions)}
+        onclick={() => void commands.execute('lsp.reload')}
+      >
+        {lspLabel}
+      </button>
+    {/if}
+
     {#if selectionLabel}
       <span class="item static accent">{selectionLabel}</span>
     {/if}
