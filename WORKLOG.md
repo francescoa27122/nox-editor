@@ -66,15 +66,34 @@ One thing worth carrying forward:
   only because the warm-cache run was actually executed rather than reasoned
   about.
 
+Then confirmed on the real runners, two `workflow_dispatch` runs on the pushed
+branch (32184094506 cold, 32184425793 warm), all ten jobs green:
+
+- Cold: `Cache not found`, `Seeded 0`, `Fetched 52.8 MB in 51s`, then
+  `Need to get 0 B/52.8 MB` for the install half. Step took 1m52s.
+- Warm: `Cache hit`, `Seeded 122 package(s)`, `Need to get 0 B/52.8 MB`.
+  **Nothing was fetched from the mirror at all.** Step took 1m09s.
+- `--no-install-recommends` is worth more on the runner than in the container:
+  137 packages and 55.6 MB become 122 and 52.8 MB. Fewer serial requests is
+  the axis that matters, since the stall is per-request.
+- actionlint clean over both workflows, which is the only check `release.yml`
+  gets — it runs on tags, so the `extra-packages: patchelf` wiring is
+  structurally verified but has not executed.
+
 Next:
 
-- Push the branch and let CI run it. Cold on the first run, warm on the
-  second; the second is the one that proves the cache. Nothing here has been
-  through GitHub Actions yet.
+- Open the PR. CI does not run on a branch push here (`push` is `main` only),
+  so a PR is also what makes the check appear on the PR itself.
+- Watch whether a stall ever recurs on a *cold* cache. That is the only path
+  still exposed, and it is now bounded at three 5-minute attempts rather than
+  open-ended.
 
 Blocked:
 
-- Not pushed — asking first, since it is a public repo.
+- `lsp-hover` carries a copy of these four files, swept in by a parallel
+  session's `git add -A` while both were in this worktree. Merging it would
+  bring this change in twice. Left alone: it is someone else's branch in
+  flight.
 - `Acquire::ForceIPv4` is a hypothesis, not a measurement. Constant
   size-independent per-request latency is what a failed IPv6 connect followed
   by IPv4 fallback looks like, but the runner logs do not say so outright. It
