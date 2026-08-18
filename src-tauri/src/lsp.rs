@@ -15,6 +15,42 @@
 //! What a message *means* is decided in the renderer, in `services/lsp/`,
 //! where it can be unit-tested against a fake server instead of a real one.
 
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+pub type Result<T> = std::result::Result<T, String>;
+
+#[derive(Default)]
+pub struct LspState(Mutex<HashMap<String, Running>>);
+
+struct Running {
+    child: Arc<Mutex<Child>>,
+    stdin: ChildStdin,
+}
+
+#[derive(Clone, Serialize)]
+struct MessagePayload {
+    id: String,
+    message: String,
+}
+
+#[derive(Clone, Serialize)]
+struct LinePayload {
+    id: String,
+    line: String,
+}
+
+#[derive(Clone, Serialize)]
+struct ExitPayload {
+    id: String,
+    code: Option<i32>,
+}
+
 /// Reassembles `Content-Length`-framed messages across read boundaries.
 ///
 /// Separate from the reading so it can be tested without a server, exactly as
@@ -98,6 +134,208 @@ pub fn frame(message: &str) -> Vec<u8> {
     let mut out = format!("Content-Length: {}\r\n\r\n", message.len()).into_bytes();
     out.extend_from_slice(message.as_bytes());
     out
+}
+
+/// Start a language server. `id` is chosen by the renderer so replies can be
+/// matched without a round trip to learn what the process was called.
+#[tauri::command]
+pub fn nox_lsp_start(
+    app: AppHandle,
+    state: State<'_, LspState>,
+    id: String,
+    command: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+) -> Result<()> {
+    if state.0.lock().map_err(poisoned)?.contains_key(&id) {
+        return Err(format!("exists: a language server with id {id} is already running"));
+    }
+
+    let mut builder = Command::new(&command);
+    builder
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(directory) = cwd {
+        builder.current_dir(directory);
+    }
+
+    let mut child = builder
+        .spawn()
+        .map_err(|e| format!("spawn: could not start {command} ({e})"))?;
+
+    let streams = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+    let (Some(stdin), Some(mut stdout), Some(stderr)) = streams else {
+        let _ = child.kill();
+        return Err(format!("spawn: {command} did not give Nox its pipes"));
+    };
+
+    let child = Arc::new(Mutex::new(child));
+
+    // stdout: bytes in, whole messages out. Reading into a fixed buffer rather
+    // than by line is the entire difference from `agent.rs` — an LSP body has
+    // no trailing newline, so a line reader would hold every message until the
+    // next one arrived.
+    {
+        let app = app.clone();
+        let id = id.clone();
+        let child = Arc::clone(&child);
+        std::thread::spawn(move || {
+            let mut stream = MessageStream::default();
+            let mut chunk = [0u8; 8192];
+
+            loop {
+                let read = match stdout.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => n,
+                };
+
+                let messages = match stream.push(&chunk[..read]) {
+                    Ok(messages) => messages,
+                    Err(error) => {
+                        // Framing is lost and cannot be guessed back. Say so on
+                        // the channel built for saying so, and stop rather than
+                        // emit garbage the renderer would try to parse.
+                        let _ = app.emit(
+                            "nox://lsp-stderr",
+                            LinePayload {
+                                id: id.clone(),
+                                line: error,
+                            },
+                        );
+                        break;
+                    }
+                };
+
+                let mut window_gone = false;
+                for message in messages {
+                    // A failed emit means the window is gone; nothing to recover.
+                    if app
+                        .emit(
+                            "nox://lsp-message",
+                            MessagePayload {
+                                id: id.clone(),
+                                message,
+                            },
+                        )
+                        .is_err()
+                    {
+                        window_gone = true;
+                        break;
+                    }
+                }
+                if window_gone {
+                    break;
+                }
+            }
+
+            // stdout closing is the earliest reliable sign the server is done.
+            // Reaping here also stops the child becoming a zombie when nobody
+            // calls `stop`.
+            let code = child
+                .lock()
+                .ok()
+                .and_then(|mut child| child.wait().ok())
+                .and_then(|status| status.code());
+
+            // Forget it, or the id stays registered for the life of the app and
+            // starting under it again is refused as "already running" — which
+            // is exactly what happens after the window reloads and the
+            // renderer's counter starts over.
+            if let Some(state) = app.try_state::<LspState>() {
+                if let Ok(mut servers) = state.0.lock() {
+                    servers.remove(&id);
+                }
+            }
+
+            let _ = app.emit("nox://lsp-exit", ExitPayload { id, code });
+        });
+    }
+
+    // stderr is diagnostics about the server, never protocol. Forwarded under
+    // its own event so a server that dies during its handshake says why
+    // instead of just disappearing.
+    {
+        let app = app.clone();
+        let id = id.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                let _ = app.emit(
+                    "nox://lsp-stderr",
+                    LinePayload {
+                        id: id.clone(),
+                        line,
+                    },
+                );
+            }
+        });
+    }
+
+    state
+        .0
+        .lock()
+        .map_err(poisoned)?
+        .insert(id, Running { child, stdin });
+    Ok(())
+}
+
+/// Send one message. The framing is added here so a caller cannot half-send a
+/// message by computing its length on the wrong side of the encoding.
+#[tauri::command]
+pub fn nox_lsp_send(state: State<'_, LspState>, id: String, message: String) -> Result<()> {
+    let mut servers = state.0.lock().map_err(poisoned)?;
+    let Some(server) = servers.get_mut(&id) else {
+        return Err(format!("not-found: no language server {id}"));
+    };
+
+    server
+        .stdin
+        .write_all(&frame(&message))
+        .and_then(|_| server.stdin.flush())
+        .map_err(|e| format!("io: could not write to language server {id} ({e})"))
+}
+
+/// Stop one server and forget it. Safe to call on one that has already exited.
+#[tauri::command]
+pub fn nox_lsp_stop(state: State<'_, LspState>, id: String) -> Result<()> {
+    let Some(server) = state.0.lock().map_err(poisoned)?.remove(&id) else {
+        return Ok(());
+    };
+    stop(server);
+    Ok(())
+}
+
+/// Stop every server. Called when the window goes away, so a reload does not
+/// leave orphans running with nothing left to talk to them.
+#[tauri::command]
+pub fn nox_lsp_stop_all(state: State<'_, LspState>) -> Result<()> {
+    let servers: Vec<Running> = state
+        .0
+        .lock()
+        .map_err(poisoned)?
+        .drain()
+        .map(|(_, server)| server)
+        .collect();
+
+    for server in servers {
+        stop(server);
+    }
+    Ok(())
+}
+
+/// Dropping stdin closes it, which is how a well-behaved server is asked to
+/// stop once it has had its `exit` notification. The kill is for the others.
+fn stop(server: Running) {
+    drop(server.stdin);
+    if let Ok(mut child) = server.child.lock() {
+        let _ = child.kill();
+    }
+}
+
+fn poisoned<T>(_: T) -> String {
+    "io: language server registry is poisoned".to_string()
 }
 
 #[cfg(test)]

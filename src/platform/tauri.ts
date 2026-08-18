@@ -51,6 +51,7 @@ export class TauriPlatform implements Platform {
   static #nextAgent = 0;
   /** The same, for terminals, which share the bus but not the id space. */
   static #nextTerminal = 0;
+  static #nextServer = 0;
   /** The same, for JSON-lines streams. */
   static #nextStream = 0;
   /** Distinguishes one load of the window from the next. */
@@ -69,9 +70,7 @@ export class TauriPlatform implements Platform {
     agentProcesses: true,
     terminals: true,
     localModels: true,
-    // Flipped on once `nox_lsp_start` exists; until then the desktop build
-    // genuinely cannot start one, and the flag says what is true today.
-    languageServers: false,
+    languageServers: true,
     // Windows is the only desktop target that hides its decorations — see
     // `lib.rs`'s setup hook. macOS keeps its traffic lights over an overlay
     // title bar and must not draw a second set beside them.
@@ -254,17 +253,79 @@ export class TauriPlatform implements Platform {
     await invoke('nox_agent_kill_all');
   }
 
-  /**
-   * Not yet. `nox_lsp_start` does not exist in the Rust side at this commit,
-   * and a method that invoked a missing command would fail as an opaque IPC
-   * error rather than as the capability it actually is.
-   */
-  async startLanguageServer(_spec: LanguageServerSpec): Promise<LanguageServerProcess> {
-    throw new PlatformError('this build cannot start language servers yet', 'unsupported');
+  async startLanguageServer(spec: LanguageServerSpec): Promise<LanguageServerProcess> {
+    // Same reasoning as `spawnAgent`: the instance token keeps ids unique
+    // across a reload, which the Rust side survives.
+    const id = `lsp-${TauriPlatform.#instance}-${++TauriPlatform.#nextServer}`;
+    const messageHandlers: ((message: string) => void)[] = [];
+    const stderrHandlers: ((line: string) => void)[] = [];
+    const exitHandlers: ((code: number | null) => void)[] = [];
+    // Held until someone subscribes. A server can emit `window/logMessage` and
+    // its `initialize` response in the tick it starts, and dropping those
+    // loses the handshake the whole session is predicated on.
+    const bufferedMessages: string[] = [];
+    const bufferedStderr: string[] = [];
+    let exitCode: { code: number | null } | null = null;
+    let alive = true;
+
+    // Attached *before* the start, for the same reason as `spawnAgent`.
+    const unlisten = await Promise.all([
+      listen<{ id: string; message: string }>('nox://lsp-message', (event) => {
+        if (event.payload.id !== id) return;
+        if (messageHandlers.length === 0) bufferedMessages.push(event.payload.message);
+        else for (const handler of messageHandlers) handler(event.payload.message);
+      }),
+      listen<{ id: string; line: string }>('nox://lsp-stderr', (event) => {
+        if (event.payload.id !== id) return;
+        if (stderrHandlers.length === 0) bufferedStderr.push(event.payload.line);
+        else for (const handler of stderrHandlers) handler(event.payload.line);
+      }),
+      listen<{ id: string; code: number | null }>('nox://lsp-exit', (event) => {
+        if (event.payload.id !== id || !alive) return;
+        alive = false;
+        exitCode = { code: event.payload.code };
+        for (const handler of exitHandlers) handler(event.payload.code);
+      }),
+    ]);
+
+    const release = () => unlisten.forEach((off) => off());
+
+    try {
+      await call<void>('nox_lsp_start', {
+        id,
+        command: spec.command,
+        args: spec.args ?? [],
+        cwd: spec.cwd ?? null,
+      });
+    } catch (error) {
+      release();
+      throw error;
+    }
+
+    return {
+      send: (message) => call<void>('nox_lsp_send', { id, message }),
+      onMessage: (handler) => {
+        messageHandlers.push(handler);
+        for (const message of bufferedMessages.splice(0)) handler(message);
+      },
+      onStderr: (handler) => {
+        stderrHandlers.push(handler);
+        for (const line of bufferedStderr.splice(0)) handler(line);
+      },
+      onExit: (handler) => {
+        exitHandlers.push(handler);
+        if (exitCode) handler(exitCode.code);
+      },
+      kill: async () => {
+        alive = false;
+        release();
+        await call<void>('nox_lsp_stop', { id });
+      },
+    };
   }
 
   async stopAllLanguageServers(): Promise<void> {
-    /* Nothing is started yet, so there is nothing to stop. */
+    await invoke('nox_lsp_stop_all');
   }
 
   async onCloseRequested(handler: () => Promise<void>): Promise<() => void> {
