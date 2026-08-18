@@ -2525,6 +2525,20 @@ export class NoxApp {
         },
       },
 
+      // --- Problems ---------------------------------------------------------
+      {
+        id: 'problems.focus',
+        title: 'Show Problems',
+        category: 'Language',
+        keywords: ['diagnostics', 'errors', 'warnings', 'lsp'],
+        run: () => {
+          // Otherwise the command is inert whenever the sidebar is hidden,
+          // which is the same trap `answers.focus` documents.
+          this.config.set('workbench.showExplorer', true);
+          this.ui.showView('problems');
+        },
+      },
+
       // --- Notes ------------------------------------------------------------
       {
         id: 'notes.focus',
