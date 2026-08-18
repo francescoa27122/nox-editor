@@ -67,7 +67,7 @@ impl MessageStream {
     ///
     /// Decoding happens only once a whole body is in hand, which is the whole
     /// point: the length is a byte count, so it cannot be applied to text.
-    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, String> {
+    pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>> {
         self.buffer.extend_from_slice(bytes);
         let mut out = Vec::new();
 
