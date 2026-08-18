@@ -45,7 +45,7 @@ import {
   type AgentConfig,
   type OllamaAgentConfig,
 } from '@services/agent/config';
-import { LspService, ServerRegistry, SERVERS_FILE } from '@services/lsp';
+import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
 import { applyDiagnostics } from './editor/lsp';
 import { pathToUri } from '@core/uri';
 import { OllamaProvider } from '@services/agent/ollama';
@@ -121,6 +121,8 @@ export class NoxApp {
   readonly agentConfig: AgentConfigService;
   /** Language servers the user has configured in `servers.json`. */
   readonly serverRegistry: ServerRegistry;
+  /** Failures already announced, so a republished status does not repeat one. */
+  #reportedFailures = new Set<string>();
   /** The running servers, and the diagnostics they publish. */
   readonly lsp: LspService;
   readonly terminal: TerminalService;
@@ -315,6 +317,15 @@ export class NoxApp {
     this.workspace.rootPath.subscribe((root) => {
       void this.#restartLanguageServers(root);
     });
+
+    // A server that fails says so once, with the reason.
+    //
+    // The status bar already turns yellow and the tooltip already carries the
+    // message, but a colour change is something you notice and then have to
+    // interrogate. The most common first-run failure -- a server that cannot
+    // find its own TypeScript -- is entirely diagnosable from the text the
+    // server sent, and leaving that text one hover away wastes it.
+    this.lsp.sessions.subscribe((sessions) => this.#reportFailedServers(sessions));
 
     // A batch, or a different buffer in front of you, both mean the squiggles
     // on screen are for the wrong text.
@@ -774,6 +785,41 @@ export class NoxApp {
     if (!root) return;
     if (!this.platform.capabilities.languageServers) return;
     await this.lsp.start();
+  }
+
+  /**
+   * Announce a newly failed server, once each.
+   *
+   * Keyed by name and message together, so a server that fails, is fixed, and
+   * fails again for a different reason says so again — while a status
+   * republished for any other reason stays quiet.
+   */
+  #reportFailedServers(sessions: readonly SessionStatusRow[]): void {
+    const failed = new Set<string>();
+
+    for (const session of sessions) {
+      if (session.status !== 'failed') continue;
+
+      const key = `${session.name}: ${session.error ?? ''}`;
+      failed.add(key);
+      if (this.#reportedFailures.has(key)) continue;
+
+      // The server's own words first: it knows why it refused, and no
+      // paraphrase here could be more useful than the original. Its last
+      // stderr lines are the fallback, for a server that died without saying
+      // anything on the protocol.
+      const detail =
+        session.error ?? (session.stderr.length > 0 ? session.stderr.slice(-3).join(' · ') : null);
+
+      this.notifications.error(
+        `${session.name} could not start`,
+        detail ?? 'The server exited without saying why.',
+      );
+    }
+
+    // Forgotten once recovered, so a later failure is announced again rather
+    // than silently swallowed by a stale key.
+    this.#reportedFailures = failed;
   }
 
   /** Draw the diagnostics for whatever buffer is in front of the user. */

@@ -74,3 +74,72 @@ describe('the tooltip', () => {
     expect(serverStatusTitle([row()])).toBe('typescript-language-server: running');
   });
 });
+
+describe('announcing a failure', () => {
+  /**
+   * Mirrors `App.#reportFailedServers`: which failures are new, given what has
+   * already been announced. Extracted here because the rule — announce once,
+   * announce again if the reason changes, forget once recovered — is the part
+   * that can be wrong, and the notification call itself cannot.
+   */
+  function newlyFailed(
+    sessions: readonly SessionStatusRow[],
+    reported: ReadonlySet<string>,
+  ): { announce: string[]; next: Set<string> } {
+    const next = new Set<string>();
+    const announce: string[] = [];
+
+    for (const session of sessions) {
+      if (session.status !== 'failed') continue;
+      const key = `${session.name}: ${session.error ?? ''}`;
+      next.add(key);
+      if (!reported.has(key)) announce.push(key);
+    }
+
+    return { announce, next };
+  }
+
+  const failed = (name: string, error: string | null): SessionStatusRow => ({
+    name,
+    status: 'failed',
+    error,
+    stderr: [],
+  });
+
+  it('announces a failure the first time', () => {
+    const { announce } = newlyFailed([failed('tsls', 'no TypeScript')], new Set());
+
+    expect(announce).toEqual(['tsls: no TypeScript']);
+  });
+
+  it('stays quiet when the same status is republished', () => {
+    // `sessions` republishes whenever any server changes state, so without
+    // this the same failure would be announced on every republication.
+    const first = newlyFailed([failed('tsls', 'no TypeScript')], new Set());
+    const again = newlyFailed([failed('tsls', 'no TypeScript')], first.next);
+
+    expect(again.announce).toEqual([]);
+  });
+
+  it('announces again when the same server fails for a different reason', () => {
+    const first = newlyFailed([failed('tsls', 'no TypeScript')], new Set());
+    const second = newlyFailed([failed('tsls', 'port in use')], first.next);
+
+    expect(second.announce).toEqual(['tsls: port in use']);
+  });
+
+  it('forgets a failure once the server recovers, so a later one is announced', () => {
+    const first = newlyFailed([failed('tsls', 'no TypeScript')], new Set());
+    const recovered = newlyFailed([row({ name: 'tsls' })], first.next);
+    const relapsed = newlyFailed([failed('tsls', 'no TypeScript')], recovered.next);
+
+    expect(recovered.announce).toEqual([]);
+    expect(relapsed.announce).toEqual(['tsls: no TypeScript']);
+  });
+
+  it('says nothing about servers that are running', () => {
+    const { announce } = newlyFailed([row(), row({ name: 'rust-analyzer' })], new Set());
+
+    expect(announce).toEqual([]);
+  });
+});
