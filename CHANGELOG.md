@@ -24,6 +24,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for whichever suggestion you have highlighted — `typescript-language-server`
   sends none up front, so fetching it lazily is the only way to see it at all.
 
+  **Tab** accepts the highlighted suggestion. With no picker open it still
+  indents, as it always did — one key, two jobs, no mode to remember.
+
   Snippets are not supported yet. A server offering `foo(${1:arg})` gets
   inserted as `foo(arg)` rather than with the placeholder syntax intact,
   because the alternative is `${1:arg}` appearing in your file.
