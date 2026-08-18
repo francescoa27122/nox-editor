@@ -8,6 +8,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Completion from the language server.** Type `console.` and the members
+  appear, with the kind icon and the signature the server reports. It triggers
+  on the characters the server itself asks for, and documentation is fetched
+  for whichever suggestion you have highlighted — `typescript-language-server`
+  sends none up front, so fetching it lazily is the only way to see it at all.
+
+  Snippets are not supported yet. A server offering `foo(${1:arg})` gets
+  inserted as `foo(arg)` rather than with the placeholder syntax intact,
+  because the alternative is `${1:arg}` appearing in your file.
+
 - **Language server support.** Nox can run a language server and show what it
   says about your code: squiggles under the problems, marks in the gutter, and
   the server's own name in the status bar. Run **Configure Language Servers**

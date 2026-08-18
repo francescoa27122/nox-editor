@@ -2,7 +2,12 @@
   import { EditorView } from '@codemirror/view';
   import { onMount } from 'svelte';
   import { cursorInfo } from '@editor/commands';
-  import { reconfigureAllEffects, reconfigureEffects } from '@editor/extensions';
+  import {
+    completionCompartment,
+    reconfigureAllEffects,
+    reconfigureEffects,
+  } from '@editor/extensions';
+  import { lspCompletionExtension } from '@editor/completion';
   import { cachedLanguage, hasGrammar, languageCompartment, loadLanguage } from '@editor/languages';
   import { applyDiagnostics } from '@editor/lsp';
   import { pathToUri } from '@core/uri';
@@ -36,6 +41,22 @@
   let host = $state<HTMLElement | null>(null);
   let view: EditorView | null = null;
   let currentId: string | null = null;
+
+  /**
+   * Built once per pane, not per tab: `documentOf` closes over `currentId`,
+   * so the same extension answers correctly for whichever buffer the view is
+   * holding. Keyed off `currentId` rather than the app-wide active id, for
+   * the reason the diagnostics paint is — they are not the same question.
+   */
+  const completion = lspCompletionExtension({
+    lsp,
+    documentOf: () => {
+      if (!currentId) return null;
+      const buffer = workspace.buffers.get().find((b) => b.id === currentId);
+      if (!buffer?.path) return null;
+      return { uri: pathToUri(buffer.path), languageId: buffer.languageId };
+    },
+  });
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {
@@ -158,6 +179,9 @@
       effects: [
         ...reconfigureAllEffects(config.settings.get()),
         languageCompartment.reconfigure(cachedLanguage(languageId) ?? []),
+        // `setState` resets every compartment to the state's own
+        // configuration, so this is re-applied on each swap rather than once.
+        completionCompartment.reconfigure(completion),
       ],
       // `setState` resets the scroll to the top of the document, so without
       // this a tab switch — or a session restored mid-file — lands nowhere

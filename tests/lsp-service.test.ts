@@ -261,3 +261,81 @@ describe('stopping', () => {
     expect(service.sessions.get()).toEqual([]);
   });
 });
+
+describe('the request door', () => {
+  it('asks the server that serves the language', async () => {
+    const { service, spawned } = await setup();
+    await service.start();
+
+    const pending = service.requestFor('typescript', 'textDocument/completion', { a: 1 });
+    await vi.waitFor(() =>
+      expect(spawned[0]!.written.some((m) => m.method === 'textDocument/completion')).toBe(true),
+    );
+
+    const sent = spawned[0]!.written.find((m) => m.method === 'textDocument/completion')!;
+    spawned[0]!.say({ jsonrpc: '2.0', id: sent.id, result: { items: [] } });
+    await expect(pending).resolves.toEqual({ items: [] });
+  });
+
+  it('rejects when no server serves the language', async () => {
+    // Distinct from an empty result: "no server" and "no suggestions" mean
+    // very different things to someone staring at an empty picker.
+    const { service } = await setup();
+    await service.start();
+
+    await expect(service.requestFor('rust', 'textDocument/completion', {})).rejects.toThrow(
+      /no language server/i,
+    );
+  });
+
+  it('reports the capabilities of the server for a language', async () => {
+    const { service } = await setup();
+    await service.start();
+
+    expect(service.capabilitiesFor('typescript')).toEqual({});
+    expect(service.capabilitiesFor('rust')).toBeNull();
+  });
+
+  it('does not treat a failed server as available', async () => {
+    // Queuing a request behind a dead session would resolve long after the
+    // keystroke that asked for it, if ever.
+    const { service, spawned } = await setup();
+    await service.start();
+    spawned[0]!.die(1);
+
+    expect(service.capabilitiesFor('typescript')).toBeNull();
+    await expect(service.requestFor('typescript', 'x', {})).rejects.toThrow();
+  });
+});
+
+describe('requests see the current document', () => {
+  it('sends pending changes before asking, not after', async () => {
+    // The bug this exists for: `didChange` is debounced 300ms, completion
+    // fires on the keystroke, and a server that has not been sent the change
+    // answers about the text it still holds. Typing `console.` returned 2010
+    // globals instead of 20 members, measured against a real tsserver.
+    vi.useFakeTimers();
+    try {
+      const { workspace, service, spawned } = await setup();
+      await service.start();
+      const id = (await workspace.open('/w/src/main.ts'))!;
+      workspace.replaceContents(id, 'console.\n');
+
+      // Nothing sent yet: the debounce has not fired.
+      expect(spawned[0]!.written.some((m) => m.method === 'textDocument/didChange')).toBe(false);
+
+      void service.requestFor('typescript', 'textDocument/completion', {});
+      await vi.advanceTimersByTimeAsync(0);
+
+      const methods = spawned[0]!.written.map((m) => m.method);
+      const changed = methods.indexOf('textDocument/didChange');
+      const asked = methods.indexOf('textDocument/completion');
+
+      expect(changed).toBeGreaterThanOrEqual(0);
+      expect(asked).toBeGreaterThanOrEqual(0);
+      expect(changed).toBeLessThan(asked);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

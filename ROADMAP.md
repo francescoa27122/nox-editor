@@ -97,7 +97,7 @@ The MVP: a real editor you can work in.
 |---|---|
 | **LSP client** ✅ | Process supervision in Rust, JSON-RPC over stdio, a CodeMirror bridge in `editor/`. Unlocks everything below. The framing lives in Rust because `Content-Length` counts bytes and a renderer string counts UTF-16 code units; everything above it is TypeScript over an injected process, and therefore testable without a server. Servers come from `servers.json` — Nox never discovers or spawns one on its own. |
 | **Diagnostics** ✅ | Inline squiggles, gutter marks, and a Problems panel listing every file a server has reported on — including files you never opened, which is where a project's real errors hide. Ranges are clamped to the document, because `publishDiagnostics` carries an optional version and an out-of-range range is a crash rather than a cosmetic error. |
-| **Completion** | Wire `@codemirror/autocomplete` to LSP; it is already a dependency for bracket closing. |
+| **Completion** ✅ | Suggestions from the language server, on the server's own trigger characters rather than an assumed `.`. A `textEdit` is honoured over a guessed range, documentation is fetched per highlighted item because tsserver sends none in the list, and an `isIncomplete` list is never cached. Snippets are **not** supported: placeholders are stripped to their default text so `${1:arg}` cannot land in the buffer. |
 | **Hover, go to definition, find references** | |
 | **Rename symbol** | Project-wide, via LSP. |
 | **Formatting on save** | Through LSP or a configured external command. |

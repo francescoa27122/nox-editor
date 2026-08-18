@@ -205,3 +205,86 @@ describe('a real typescript-language-server', () => {
     await session.stop();
   }, 90_000);
 });
+
+describe('completion from a real typescript-language-server', () => {
+  /**
+   * The test that can contradict the design. Its predecessor found that
+   * tsserver sends no `version` on diagnostics, which turned a safeguard
+   * into dead code; the equivalent assumption here is that a bare member
+   * access returns anything useful at all.
+   */
+  it('offers members after a dot', async () => {
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    expect(session.status.get(), `stderr: ${session.stderr.join(' | ')}`).toBe('running');
+
+    const source = 'const s = "abc";\ns.\n';
+    await session.notify('textDocument/didOpen', {
+      textDocument: {
+        uri: pathToUri(filePath),
+        languageId: 'typescript',
+        version: 1,
+        text: source,
+      },
+    });
+
+    const response = await session.request<{
+      items?: { label: string; kind?: number }[];
+      isIncomplete?: boolean;
+    }>('textDocument/completion', {
+      textDocument: { uri: pathToUri(filePath) },
+      // Line 1, just after the dot.
+      position: { line: 1, character: 2 },
+    });
+
+    const items = Array.isArray(response) ? response : (response.items ?? []);
+    const labels = items.map((item) => item.label);
+    await session.stop();
+
+    expect(items.length).toBeGreaterThan(0);
+    // A string has these; if they are missing, the assumption that a bare
+    // member access is useful was wrong, and the design needs to know.
+    expect(labels).toContain('toUpperCase');
+    expect(items.find((item) => item.label === 'toUpperCase')?.kind).toBeDefined();
+  }, 90_000);
+
+  it('reports whether its completion items carry their own documentation', async () => {
+    // Recorded rather than required. If they do, the lazy resolve path is
+    // dead weight; if they do not, it is the only way to show a tooltip.
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    const source = 'const s = "abc";\ns.\n';
+    await session.notify('textDocument/didOpen', {
+      textDocument: {
+        uri: pathToUri(filePath),
+        languageId: 'typescript',
+        version: 1,
+        text: source,
+      },
+    });
+
+    const response = await session.request<{ items?: { documentation?: unknown }[] }>(
+      'textDocument/completion',
+      {
+        textDocument: { uri: pathToUri(filePath) },
+        position: { line: 1, character: 2 },
+      },
+    );
+
+    const items = Array.isArray(response) ? response : (response.items ?? []);
+    const withDocs = items.filter((item) => item.documentation !== undefined);
+    await session.stop();
+
+    // The measured answer: none of them carry documentation, which is what
+    // makes `completionItem/resolve` load-bearing rather than optional.
+    expect(withDocs).toHaveLength(0);
+  }, 90_000);
+});

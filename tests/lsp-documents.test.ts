@@ -181,3 +181,45 @@ describe('disposal', () => {
     expect(session.methods()).toEqual(['textDocument/didOpen']);
   });
 });
+
+describe('flushing', () => {
+  it('sends a pending change immediately', async () => {
+    // A request that depends on document content cannot wait out the
+    // debounce: the server would answer about text it has not been sent.
+    vi.useFakeTimers();
+    const { workspace, session, sync } = setup();
+    await workspace.openFolder('/w');
+    const id = (await workspace.open('/w/src/main.ts'))!;
+
+    workspace.replaceContents(id, 'const a = 9;\n');
+    expect(session.methods()).toEqual(['textDocument/didOpen']);
+
+    sync.flush();
+
+    expect(session.methods()).toEqual(['textDocument/didOpen', 'textDocument/didChange']);
+    expect(session.last()?.params.contentChanges).toEqual([{ text: 'const a = 9;\n' }]);
+  });
+
+  it('does not send the change twice when the debounce later fires', async () => {
+    vi.useFakeTimers();
+    const { workspace, session, sync } = setup();
+    await workspace.openFolder('/w');
+    const id = (await workspace.open('/w/src/main.ts'))!;
+
+    workspace.replaceContents(id, 'const a = 9;\n');
+    sync.flush();
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(session.methods().filter((m) => m === 'textDocument/didChange')).toHaveLength(1);
+  });
+
+  it('is a no-op when nothing is pending', async () => {
+    const { workspace, session, sync } = setup();
+    await workspace.openFolder('/w');
+    await workspace.open('/w/src/main.ts');
+
+    sync.flush();
+
+    expect(session.methods()).toEqual(['textDocument/didOpen']);
+  });
+});
