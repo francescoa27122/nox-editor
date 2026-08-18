@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import type { LanguageServerProcess } from '../src/platform/types';
 import { LspSession } from '../src/services/lsp/session';
@@ -271,5 +272,154 @@ describe('failure', () => {
     server.die(1);
 
     await expect(session.request('textDocument/hover')).rejects.toThrow();
+  });
+});
+
+describe('a real child process', () => {
+  /**
+   * Adapts a Node child to `LanguageServerProcess`.
+   *
+   * This is what `src-tauri/src/lsp.rs` does, in about the same number of
+   * lines. Standing it up here means the wire format and the whole client are
+   * exercised against genuine pipes — everything except the Rust plumbing
+   * itself, which cannot run without a window.
+   *
+   * The reader is byte-based rather than line-based, which is the one thing
+   * that could not be copied from `tests/stdio.test.ts`: an LSP body has no
+   * trailing newline, so `readline` would hold every message until the next
+   * one arrived.
+   */
+  async function spawnNode(script: string): Promise<LanguageServerProcess> {
+    const { spawn } = await import('node:child_process');
+
+    const child = spawn(process.execPath, [script], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    const messages: ((message: string) => void)[] = [];
+    const stderr: ((line: string) => void)[] = [];
+    const exits: ((code: number | null) => void)[] = [];
+    const bufferedMessages: string[] = [];
+    const bufferedStderr: string[] = [];
+    let exited: { code: number | null } | null = null;
+    let buffer = Buffer.alloc(0);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      for (;;) {
+        const split = buffer.indexOf('\r\n\r\n');
+        if (split === -1) return;
+        const header = buffer.subarray(0, split).toString('ascii');
+        // Counted in bytes, which is the whole reason this is a Buffer and not
+        // a string. `subarray` slices bytes; `slice` on a decoded string would
+        // cut the wrong place on the first accented character.
+        const length = Number(/content-length:\s*(\d+)/i.exec(header)?.[1]);
+        if (buffer.length < split + 4 + length) return;
+
+        const message = buffer.subarray(split + 4, split + 4 + length).toString('utf8');
+        buffer = buffer.subarray(split + 4 + length);
+
+        if (messages.length === 0) bufferedMessages.push(message);
+        else for (const handler of messages) handler(message);
+      }
+    });
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      const line = chunk.toString('utf8').trimEnd();
+      if (stderr.length === 0) bufferedStderr.push(line);
+      else for (const handler of stderr) handler(line);
+    });
+
+    child.on('exit', (code: number | null) => {
+      exited = { code };
+      for (const handler of exits) handler(code);
+    });
+
+    // A write racing the child's own exit fails asynchronously, and an
+    // unhandled 'error' on a stream is an uncaught exception rather than a
+    // rejected promise. `exit` is precisely such a write — the server acts on
+    // it by dying — so this is the normal path, not a defensive one. The Rust
+    // side gets this for free: `write_all` returns an Err that `nox_lsp_send`
+    // turns into a message.
+    child.stdin.on('error', () => {});
+
+    return {
+      send: async (message: string) => {
+        if (exited || child.stdin.destroyed) return;
+        const body = Buffer.from(message, 'utf8');
+        // One write rather than two: a header and a body written separately
+        // can be interleaved with the exit and leave half a message on the
+        // wire, which is unframeable rather than merely incomplete.
+        child.stdin.write(
+          Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'ascii'), body]),
+        );
+      },
+      onMessage: (handler) => {
+        messages.push(handler);
+        for (const message of bufferedMessages.splice(0)) handler(message);
+      },
+      onStderr: (handler) => {
+        stderr.push(handler);
+        for (const line of bufferedStderr.splice(0)) handler(line);
+      },
+      onExit: (handler) => {
+        exits.push(handler);
+        if (exited) handler(exited.code);
+      },
+      kill: async () => {
+        child.kill();
+      },
+    };
+  }
+
+  // `fileURLToPath`, not `.pathname`: this repository lives under a directory
+  // with a space in its name, so the pathname is percent-encoded and naming a
+  // file that does not exist. The child then fails to start, and the session
+  // reports it as a server that could not be spawned — which is true, and
+  // says nothing about why.
+  const SCRIPT = fileURLToPath(new URL('./support/fake-lsp-server.mjs', import.meta.url));
+
+  it('completes a handshake over real pipes', async () => {
+    const session = new LspSession(() => spawnNode(SCRIPT), {
+      name: 'fake',
+      rootUri: 'file:///w',
+    });
+
+    await session.start();
+    expect(session.status.get()).toBe('running');
+    await session.stop();
+  });
+
+  it('carries a non-ASCII payload through intact', async () => {
+    // 'café — naïve' is longer in bytes than in characters. A client that
+    // framed over decoded text would deliver this truncated, and the
+    // truncation would land mid-JSON and fail to parse rather than politely
+    // losing the accent.
+    const session = new LspSession(() => spawnNode(SCRIPT), {
+      name: 'fake',
+      rootUri: 'file:///w',
+    });
+
+    await session.start();
+    const info = session.serverInfo.get();
+    await session.stop();
+
+    expect(info?.name).toBe('café — naïve');
+  });
+
+  it('delivers a pushed notification, unasked', async () => {
+    const session = new LspSession(() => spawnNode(SCRIPT), {
+      name: 'fake',
+      rootUri: 'file:///w',
+    });
+    const published: unknown[] = [];
+    session.onNotification('textDocument/publishDiagnostics', (params) => published.push(params));
+
+    await session.start();
+    await session.notify('textDocument/didOpen', {
+      textDocument: { uri: 'file:///w/a.ts', languageId: 'typescript', version: 1, text: 'x' },
+    });
+    await vi.waitFor(() => expect(published).toHaveLength(1));
+    await session.stop();
+
+    expect(published[0]).toMatchObject({ uri: 'file:///w/a.ts' });
   });
 });

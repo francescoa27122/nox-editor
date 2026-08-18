@@ -21,6 +21,12 @@ export type SessionStatus = 'idle' | 'initializing' | 'running' | 'failed' | 'st
 /** Whatever the server said it can do. Read, never assumed. */
 export type ServerCapabilities = Record<string, unknown>;
 
+/** What the server calls itself. Shown in the status bar. */
+export interface ServerInfo {
+  name: string;
+  version?: string;
+}
+
 export interface SessionOptions {
   /** Shown in the status bar and in errors. */
   name: string;
@@ -34,6 +40,7 @@ const STDERR_LINES = 20;
 export class LspSession {
   readonly status = new Signal<SessionStatus>('idle');
   readonly capabilities = new Signal<ServerCapabilities | null>(null);
+  readonly serverInfo = new Signal<ServerInfo | null>(null);
 
   /** Why it failed, when it did. */
   error: string | null = null;
@@ -45,6 +52,7 @@ export class LspSession {
   /** Sends held until the handshake completes. */
   #queue: (() => void)[] = [];
   #stderr: string[] = [];
+  #notificationHandlers = new Map<string, ((params: unknown) => void)[]>();
   #exitHandlers: ((code: number | null) => void)[] = [];
   #stopping = false;
 
@@ -76,6 +84,21 @@ export class LspSession {
   }
 
   /**
+   * Subscribe to something the server says on its own initiative.
+   *
+   * Registered against the session rather than the transport so a caller can
+   * subscribe before `start()` has built one — diagnostics arrive unasked, and
+   * a subscriber that had to wait for the handshake would miss the first
+   * batch of them.
+   */
+  onNotification(method: string, handler: (params: unknown) => void): void {
+    const handlers = this.#notificationHandlers.get(method) ?? [];
+    handlers.push(handler);
+    this.#notificationHandlers.set(method, handlers);
+    this.#transport?.onNotification(method, handler);
+  }
+
+  /**
    * Start the server and complete the handshake.
    *
    * Resolves either way — a server that cannot start is a state to render, not
@@ -101,6 +124,12 @@ export class LspSession {
 
     // Subscribed before anything is sent. The process contract buffers what
     // arrived first, so this cannot miss the handshake.
+    // Replayed onto the new transport, so anything subscribed before the
+    // start is still subscribed after it.
+    for (const [method, handlers] of this.#notificationHandlers) {
+      for (const handler of handlers) transport.onNotification(method, handler);
+    }
+
     server.onMessage((message) => transport.receive(message));
     server.onStderr((line) => {
       this.#stderr = [...this.#stderr.slice(-(STDERR_LINES - 1)), line];
@@ -108,7 +137,10 @@ export class LspSession {
     server.onExit((code) => this.#exited(code));
 
     try {
-      const result = await transport.request<{ capabilities?: ServerCapabilities }>('initialize', {
+      const result = await transport.request<{
+        capabilities?: ServerCapabilities;
+        serverInfo?: ServerInfo;
+      }>('initialize', {
         processId: null,
         rootUri: this.#options.rootUri,
         capabilities: {
@@ -124,6 +156,7 @@ export class LspSession {
       });
 
       this.capabilities.set(result.capabilities ?? {});
+      this.serverInfo.set(result.serverInfo ?? null);
       await transport.notify('initialized', {});
       this.status.set('running');
       this.#flush();
