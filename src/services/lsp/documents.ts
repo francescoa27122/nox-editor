@@ -45,6 +45,8 @@ export class DocumentSync {
   /** What each open buffer was last reported as, by buffer id. */
   #open = new Map<string, Open>();
   #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** What each pending timer would send, so `flush` can send it early. */
+  #pending = new Map<string, () => void>();
   #unsubscribe: (() => void) | null = null;
 
   constructor(workspace: WorkspaceService, options: DocumentSyncOptions = {}) {
@@ -62,6 +64,25 @@ export class DocumentSync {
   /** The documents the server has been told about. */
   openUris(): string[] {
     return [...this.#open.values()].map((document) => document.uri);
+  }
+
+  /**
+   * Send every debounced change now.
+   *
+   * The debounce is right for keeping a server's copy roughly current while
+   * someone types. It is wrong the moment something *asks* the server about
+   * the document: completion fires on the keystroke, well inside the window,
+   * and a server that has not been sent the change answers about the text it
+   * still holds. Typing `console.` and being offered 2010 globals instead of
+   * 20 members is exactly that.
+   */
+  flush(): void {
+    for (const [id, timer] of this.#timers) {
+      clearTimeout(timer);
+      this.#pending.get(id)?.();
+    }
+    this.#timers.clear();
+    this.#pending.clear();
   }
 
   dispose(): void {
@@ -128,26 +149,27 @@ export class DocumentSync {
     const existing = this.#timers.get(buffer.id);
     if (existing) clearTimeout(existing);
 
-    this.#timers.set(
-      buffer.id,
-      setTimeout(() => {
-        this.#timers.delete(buffer.id);
+    const send = () => {
+      this.#timers.delete(buffer.id);
+      this.#pending.delete(buffer.id);
 
-        // Read at send time, not at schedule time: the point of the debounce
-        // is that the text moved on, and the version must describe the text
-        // actually being sent.
-        const text = this.#workspace.textOf(buffer.id);
-        const revision = this.#workspace.revisionOf(buffer.id);
-        if (text === undefined) return;
+      // Read at send time, not at schedule time: the point of the debounce is
+      // that the text moved on, and the version must describe the text
+      // actually being sent.
+      const text = this.#workspace.textOf(buffer.id);
+      const revision = this.#workspace.revisionOf(buffer.id);
+      if (text === undefined) return;
 
-        for (const session of this.#sessionsFor(known.languageId)) {
-          void session.notify('textDocument/didChange', {
-            textDocument: { uri: known.uri, version: revision },
-            contentChanges: [{ text }],
-          });
-        }
-      }, this.#debounceMs),
-    );
+      for (const session of this.#sessionsFor(known.languageId)) {
+        void session.notify('textDocument/didChange', {
+          textDocument: { uri: known.uri, version: revision },
+          contentChanges: [{ text }],
+        });
+      }
+    };
+
+    this.#pending.set(buffer.id, send);
+    this.#timers.set(buffer.id, setTimeout(send, this.#debounceMs));
   }
 
   #closed(id: string, document: Open): void {
@@ -159,6 +181,7 @@ export class DocumentSync {
       clearTimeout(timer);
       this.#timers.delete(id);
     }
+    this.#pending.delete(id);
 
     this.#open.delete(id);
 

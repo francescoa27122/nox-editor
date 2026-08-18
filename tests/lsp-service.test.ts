@@ -307,3 +307,35 @@ describe('the request door', () => {
     await expect(service.requestFor('typescript', 'x', {})).rejects.toThrow();
   });
 });
+
+describe('requests see the current document', () => {
+  it('sends pending changes before asking, not after', async () => {
+    // The bug this exists for: `didChange` is debounced 300ms, completion
+    // fires on the keystroke, and a server that has not been sent the change
+    // answers about the text it still holds. Typing `console.` returned 2010
+    // globals instead of 20 members, measured against a real tsserver.
+    vi.useFakeTimers();
+    try {
+      const { workspace, service, spawned } = await setup();
+      await service.start();
+      const id = (await workspace.open('/w/src/main.ts'))!;
+      workspace.replaceContents(id, 'console.\n');
+
+      // Nothing sent yet: the debounce has not fired.
+      expect(spawned[0]!.written.some((m) => m.method === 'textDocument/didChange')).toBe(false);
+
+      void service.requestFor('typescript', 'textDocument/completion', {});
+      await vi.advanceTimersByTimeAsync(0);
+
+      const methods = spawned[0]!.written.map((m) => m.method);
+      const changed = methods.indexOf('textDocument/didChange');
+      const asked = methods.indexOf('textDocument/completion');
+
+      expect(changed).toBeGreaterThanOrEqual(0);
+      expect(asked).toBeGreaterThanOrEqual(0);
+      expect(changed).toBeLessThan(asked);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

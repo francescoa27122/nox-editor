@@ -133,9 +133,23 @@ export class LspService {
    * user an empty picker for both, and only one of those is worth fixing.
    */
   async requestFor<T>(languageId: string, method: string, params: unknown): Promise<T> {
-    const session = this.#sessionFor(languageId);
-    if (!session) throw new Error(`lsp: no language server for ${languageId}`);
-    return session.request<T>(method, params);
+    const entry = this.#running.find(
+      (candidate) =>
+        candidate.config.languages.includes(languageId) &&
+        candidate.session.status.get() === 'running',
+    );
+    if (!entry) throw new Error(`lsp: no language server for ${languageId}`);
+
+    // Before asking, never after. Document changes are debounced so a server's
+    // copy stays roughly current while someone types — but every request here
+    // is *about* the document, and completion fires on the keystroke, well
+    // inside that window. A server that has not been sent the change answers
+    // about the text it still holds: `console.` returned 2010 globals rather
+    // than 20 members, measured against a real tsserver. Hover, definition
+    // and rename would each have found this separately.
+    entry.sync.flush();
+
+    return entry.session.request<T>(method, params);
   }
 
   /** Start a session for every configured server. */
