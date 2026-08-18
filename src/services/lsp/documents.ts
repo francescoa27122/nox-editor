@@ -1,0 +1,171 @@
+import { pathToUri } from '@core/uri';
+import type { BufferSnapshot, WorkspaceService } from '@services/workspace';
+
+/**
+ * Keeps a server's copy of the open documents in step with Nox's.
+ *
+ * Full-text sync, deliberately, even where a server offers incremental.
+ * Incremental is a performance optimisation whose failure mode is silent: one
+ * off-by-one in a range conversion desynchronises the server's copy, and from
+ * then on every diagnostic lands on the wrong line while looking entirely
+ * plausible. Full sync cannot drift.
+ *
+ * The version sent is the buffer's own revision rather than a counter kept
+ * here, so a diagnostic batch can be checked against the text it was computed
+ * from. Two counters would drift, and the drift would be invisible.
+ */
+
+/** Just enough of `LspSession` to be told things. */
+export interface NotifyTarget {
+  notify(method: string, params?: unknown): Promise<void>;
+}
+
+export interface DocumentSyncOptions {
+  /** Long enough that a typed word is one message, short enough to feel live. */
+  debounceMs?: number;
+}
+
+const DEFAULT_DEBOUNCE_MS = 300;
+
+interface Attached {
+  session: NotifyTarget;
+  languages: ReadonlySet<string>;
+}
+
+interface Open {
+  uri: string;
+  languageId: string;
+  revision: number;
+}
+
+export class DocumentSync {
+  #workspace: WorkspaceService;
+  #debounceMs: number;
+  #attached: Attached[] = [];
+  /** What each open buffer was last reported as, by buffer id. */
+  #open = new Map<string, Open>();
+  #timers = new Map<string, ReturnType<typeof setTimeout>>();
+  #unsubscribe: (() => void) | null = null;
+
+  constructor(workspace: WorkspaceService, options: DocumentSyncOptions = {}) {
+    this.#workspace = workspace;
+    this.#debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.#unsubscribe = workspace.buffers.subscribe(() => this.#reconcile());
+  }
+
+  /** Start telling `session` about documents in the languages it serves. */
+  attach(session: NotifyTarget, languages: readonly string[]): void {
+    this.#attached.push({ session, languages: new Set(languages) });
+    this.#reconcile();
+  }
+
+  /** The documents the server has been told about. */
+  openUris(): string[] {
+    return [...this.#open.values()].map((document) => document.uri);
+  }
+
+  dispose(): void {
+    this.#unsubscribe?.();
+    this.#unsubscribe = null;
+    for (const timer of this.#timers.values()) clearTimeout(timer);
+    this.#timers.clear();
+  }
+
+  /**
+   * Diff what is open against what the servers were told, and say the
+   * difference. Driven off the buffer list rather than off edit events because
+   * that list is already republished on every document change — which is
+   * exactly the cadence this needs, and one fewer thing to keep in step.
+   */
+  #reconcile(): void {
+    const buffers = this.#workspace.buffers.get();
+    const seen = new Set<string>();
+
+    for (const buffer of buffers) {
+      if (buffer.path === null) continue; // Untitled: no URI to give a server.
+      seen.add(buffer.id);
+
+      const known = this.#open.get(buffer.id);
+      if (!known) {
+        this.#opened(buffer);
+        continue;
+      }
+      if (known.revision !== buffer.revision) this.#changed(buffer, known);
+    }
+
+    for (const [id, document] of [...this.#open]) {
+      if (seen.has(id)) continue;
+      this.#closed(id, document);
+    }
+  }
+
+  #sessionsFor(languageId: string): NotifyTarget[] {
+    return this.#attached
+      .filter((attached) => attached.languages.has(languageId))
+      .map((attached) => attached.session);
+  }
+
+  #opened(buffer: BufferSnapshot): void {
+    const sessions = this.#sessionsFor(buffer.languageId);
+    if (sessions.length === 0) return;
+
+    const uri = pathToUri(buffer.path!);
+    const text = this.#workspace.textOf(buffer.id);
+    if (text === undefined) return;
+
+    this.#open.set(buffer.id, { uri, languageId: buffer.languageId, revision: buffer.revision });
+
+    for (const session of sessions) {
+      void session.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId: buffer.languageId, version: buffer.revision, text },
+      });
+    }
+  }
+
+  #changed(buffer: BufferSnapshot, known: Open): void {
+    known.revision = buffer.revision;
+
+    const existing = this.#timers.get(buffer.id);
+    if (existing) clearTimeout(existing);
+
+    this.#timers.set(
+      buffer.id,
+      setTimeout(() => {
+        this.#timers.delete(buffer.id);
+
+        // Read at send time, not at schedule time: the point of the debounce
+        // is that the text moved on, and the version must describe the text
+        // actually being sent.
+        const text = this.#workspace.textOf(buffer.id);
+        const revision = this.#workspace.revisionOf(buffer.id);
+        if (text === undefined) return;
+
+        for (const session of this.#sessionsFor(known.languageId)) {
+          void session.notify('textDocument/didChange', {
+            textDocument: { uri: known.uri, version: revision },
+            contentChanges: [{ text }],
+          });
+        }
+      }, this.#debounceMs),
+    );
+  }
+
+  #closed(id: string, document: Open): void {
+    // Dropped rather than flushed: a didChange arriving after didClose
+    // describes a document the server has already forgotten, and servers are
+    // entitled to treat that as a protocol error.
+    const timer = this.#timers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.#timers.delete(id);
+    }
+
+    this.#open.delete(id);
+
+    for (const session of this.#sessionsFor(document.languageId)) {
+      void session.notify('textDocument/didClose', {
+        textDocument: { uri: document.uri },
+      });
+    }
+  }
+}
