@@ -33,16 +33,36 @@ Verified, and two of these contradict what the spec assumed:
 - `npm test` — 979 passed, 50 files. `npm run check` — 410 files, 0 errors.
   CI green on all five jobs.
 
+Smoke-tested on real hardware, from the `v0.4.1-lsp-test1` tag build:
+
+- Nox spawned the server through the fallback and the process tree proved it:
+  `Nox.exe -> cmd.exe "/C typescript-language-server --stdio" -> node.exe`.
+  Both untested paths — `lsp.rs` supervision and the Windows `.cmd` fallback —
+  confirmed working, not merely compiling.
+- Same server pid for 40s, so the handshake completed; a failed one restarts at
+  1s/2s/4s and then stays down.
+- A real window close (WM_CLOSE, not a kill) stopped the server with **no
+  orphans**. The one process that first appeared to be an orphan was the
+  PowerShell command doing the searching — its own command line contained the
+  search string.
+- The fallback was then widened: it retried only on `NotFound`, which covers a
+  bare command on PATH but not an absolute path to a `.cmd`, where
+  `CreateProcess` fails with a different error. Someone writing a full path
+  into `servers.json` is at least as likely.
+
 Debt, deliberate:
 
-- The Windows `.cmd` fallback **compiles** on Windows CI but has never *run*.
-  Nothing here can exercise it; only an installed build can.
+- **The squiggle has never been seen.** The UI could not be driven this
+  session, so "diagnostics appear" is proved as far as the server running and
+  the pipes connecting, and no further.
 
 Confidence:
 
-- High on the protocol layer — it has now met a real server and been
-  contradicted by it, which is worth more than the tests that agreed with me.
-- Untested: `lsp.rs` supervision end to end, and the UI actually painting.
+- High on the protocol layer — it has met a real server and been contradicted
+  by it, which is worth more than the tests that agreed with me.
+- High on supervision and Windows launching, now that the process tree has
+  been read directly.
+- Unverified: the rendering itself.
 
 ---
 

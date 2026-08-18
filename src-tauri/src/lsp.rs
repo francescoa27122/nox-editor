@@ -164,13 +164,20 @@ fn spawn_server(command: &str, args: &[String], cwd: Option<&str>) -> std::io::R
 
     let direct = build(command, args, cwd).spawn();
 
+    // Any failure retries, not only `NotFound`. A bare command that PATH only
+    // resolves to a `.cmd` fails as NotFound, but an *absolute* path to one
+    // that exists fails differently — `CreateProcess` rejects it as not a
+    // valid executable — and someone writing a full path into `servers.json`
+    // is at least as likely as someone relying on PATH.
     #[cfg(windows)]
-    if let Err(error) = &direct {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            let mut shell_args = vec!["/C".to_string(), command.to_string()];
-            shell_args.extend_from_slice(args);
-            return build("cmd", &shell_args, cwd).spawn();
+    if direct.is_err() {
+        let mut shell_args = vec!["/C".to_string(), command.to_string()];
+        shell_args.extend_from_slice(args);
+        if let Ok(child) = build("cmd", &shell_args, cwd).spawn() {
+            return Ok(child);
         }
+        // The shell could not start it either, so the first error is the one
+        // worth reporting: it names the command the user actually wrote.
     }
 
     direct
