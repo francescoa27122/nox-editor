@@ -8,6 +8,7 @@
 mod agent;
 mod fs;
 mod http;
+mod lsp;
 mod pty;
 mod search;
 mod watcher;
