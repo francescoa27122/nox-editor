@@ -261,3 +261,49 @@ describe('stopping', () => {
     expect(service.sessions.get()).toEqual([]);
   });
 });
+
+describe('the request door', () => {
+  it('asks the server that serves the language', async () => {
+    const { service, spawned } = await setup();
+    await service.start();
+
+    const pending = service.requestFor('typescript', 'textDocument/completion', { a: 1 });
+    await vi.waitFor(() =>
+      expect(spawned[0]!.written.some((m) => m.method === 'textDocument/completion')).toBe(true),
+    );
+
+    const sent = spawned[0]!.written.find((m) => m.method === 'textDocument/completion')!;
+    spawned[0]!.say({ jsonrpc: '2.0', id: sent.id, result: { items: [] } });
+    await expect(pending).resolves.toEqual({ items: [] });
+  });
+
+  it('rejects when no server serves the language', async () => {
+    // Distinct from an empty result: "no server" and "no suggestions" mean
+    // very different things to someone staring at an empty picker.
+    const { service } = await setup();
+    await service.start();
+
+    await expect(service.requestFor('rust', 'textDocument/completion', {})).rejects.toThrow(
+      /no language server/i,
+    );
+  });
+
+  it('reports the capabilities of the server for a language', async () => {
+    const { service } = await setup();
+    await service.start();
+
+    expect(service.capabilitiesFor('typescript')).toEqual({});
+    expect(service.capabilitiesFor('rust')).toBeNull();
+  });
+
+  it('does not treat a failed server as available', async () => {
+    // Queuing a request behind a dead session would resolve long after the
+    // keystroke that asked for it, if ever.
+    const { service, spawned } = await setup();
+    await service.start();
+    spawned[0]!.die(1);
+
+    expect(service.capabilitiesFor('typescript')).toBeNull();
+    await expect(service.requestFor('typescript', 'x', {})).rejects.toThrow();
+  });
+});

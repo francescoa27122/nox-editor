@@ -5,7 +5,7 @@ import type { LanguageServerProcess, Platform } from '@platform/types';
 import type { WorkspaceService } from '@services/workspace';
 import { DocumentSync } from './documents';
 import type { ServerConfig, ServerRegistry } from './registry';
-import { LspSession, type SessionStatus } from './session';
+import { LspSession, type ServerCapabilities, type SessionStatus } from './session';
 
 export * from './registry';
 export { LspSession, type SessionStatus } from './session';
@@ -102,6 +102,40 @@ export class LspService {
 
   diagnosticsFor(uri: string): LspDiagnostic[] {
     return this.diagnostics.get().get(uri) ?? [];
+  }
+
+  /**
+   * The running session serving this language, if there is one.
+   *
+   * Only `running` counts. A session that is still initializing would queue
+   * the request behind a cold start, and one that has failed would never
+   * answer at all — both arrive long after the keystroke that asked.
+   */
+  #sessionFor(languageId: string): LspSession | null {
+    const entry = this.#running.find(
+      (candidate) =>
+        candidate.config.languages.includes(languageId) &&
+        candidate.session.status.get() === 'running',
+    );
+    return entry?.session ?? null;
+  }
+
+  /** What the server serving this language can do, or null when none is. */
+  capabilitiesFor(languageId: string): ServerCapabilities | null {
+    return this.#sessionFor(languageId)?.capabilities.get() ?? null;
+  }
+
+  /**
+   * Ask the server serving `languageId`.
+   *
+   * Rejects rather than resolving empty when nothing is running: a caller
+   * that cannot tell "nothing configured" from "nothing to suggest" shows the
+   * user an empty picker for both, and only one of those is worth fixing.
+   */
+  async requestFor<T>(languageId: string, method: string, params: unknown): Promise<T> {
+    const session = this.#sessionFor(languageId);
+    if (!session) throw new Error(`lsp: no language server for ${languageId}`);
+    return session.request<T>(method, params);
   }
 
   /** Start a session for every configured server. */
