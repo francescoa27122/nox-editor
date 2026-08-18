@@ -8,6 +8,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Hover.** Rest the pointer on a symbol and Nox shows its type and
+  documentation, underlining exactly the span the server is talking about.
+
+  The server's markdown is shown as text rather than rendered as HTML. A
+  language server is a program you configured Nox to run, and what it says
+  about your code is derived from that code — which you may well have cloned
+  from someone else. Turning that into live HTML inside an editor with
+  filesystem access is not a trade worth making for italics, so `**bold**`
+  appears as you see it here.
+
 - **Completion from the language server.** Type `console.` and the members
   appear, with the kind icon and the signature the server reports. It triggers
   on the characters the server itself asks for, and documentation is fetched
