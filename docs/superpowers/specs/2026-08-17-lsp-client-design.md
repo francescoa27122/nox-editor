@@ -84,7 +84,7 @@ src/platform/types.ts         LanguageServerSpec, LanguageServerProcess,
                               capability `languageServers`
 src/platform/tauri.ts         real
 src/platform/web.ts           PlatformError('unsupported')
-src/platform/memory.ts        a scriptable fake server
+src/platform/memory.ts        PlatformError('unsupported'), as spawnAgent does
 
 src/services/lsp/
   transport.ts   JSON-RPC: id correlation, timeouts, notification dispatch
@@ -156,6 +156,16 @@ Dropping those loses the handshake the entire session is predicated on.
 
 `capabilities.languageServers` gates it, as `agentProcesses` and `terminals`
 already do for their subsystems.
+
+**A session takes a process factory, not a command line**, exactly as
+`StdioTransport` does: `new LspSession(open: () => Promise<LanguageServerProcess>)`
+with a `static spawnedBy(platform, spec)` for the normal path. That one choice
+is what makes the whole protocol testable against a fake process rather than a
+real server — no fixture binary to keep working on three platforms, no process
+teardown to leak, and failure modes (a silent server, a crash mid-handshake,
+garbage on the wire) that are near impossible to provoke on purpose with a real
+one. `MemoryPlatform` therefore needs no fake of its own; it refuses like
+`spawnAgent`, and the fakes live in the tests that use them.
 
 ## 6. Document synchronisation
 
@@ -263,8 +273,9 @@ Windows. There is no cargo toolchain on the development machine, which is
 precisely why the framing logic is a pure function with unit tests rather than
 something only observable through a running server.
 
-**TypeScript, against `MemoryPlatform`'s scriptable fake server** — no child
-process, no cargo, no network:
+**TypeScript, against a `FakeServer implements LanguageServerProcess`** defined
+in the test file, the way `tests/stdio.test.ts` defines its `FakeProcess` — no
+child process, no cargo, no network:
 
 - Lifecycle: initialize handshake; traffic queued before it completes; clean
   shutdown ordering; crash, clear, restart, cap.
@@ -277,6 +288,14 @@ process, no cargo, no network:
   throw.
 - URI: round trip for POSIX, Windows drive letters, UNC paths and spaces.
 - Position: line/character to offset over an emoji and over a CRLF document.
+
+**Against a real child process:** `tests/stdio.test.ts` already adapts a Node
+child to `AgentProcess` so that "the wire format, the reference agent and
+`StdioTransport` are all exercised against genuine pipes — everything except
+the Rust plumbing itself". The same trick applies here, and buys more: the Node
+script emits genuine `Content-Length`-framed messages including a non-ASCII
+body, so the framing contract from §1 is proved end to end over real pipes on
+this machine, with only `lsp.rs` itself left to CI.
 
 **Manual, once:** `typescript-language-server` against this repository, which is
 the dogfooding case — an error in a `.ts` file here shows a squiggle, a gutter
