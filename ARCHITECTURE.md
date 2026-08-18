@@ -130,6 +130,8 @@ src/
 │  ├─ context.ts         Structured read access for programmatic callers
 │  ├─ permissions.ts     Capabilities, policy, prompts, decision log
 │  ├─ jobs.ts            Long-running work: progress, cancellation
+│  ├─ lsp/               Language servers: JSON-RPC, lifecycle, document
+│  │                     sync, servers.json, the diagnostics store
 │  ├─ agent/protocol.ts  The agent wire contract and transport seam
 │  ├─ agent/provider.ts  Vendor-neutral model interface
 │  ├─ agent/ollama.ts    A local model: prompt, parser, edit resolution
@@ -165,6 +167,7 @@ src-tauri/src/
 ├─ fs.rs                 Filesystem commands. No logic.
 ├─ http.rs               Streaming HTTP to loopback. No logic.
 ├─ agent.rs              Supervises agent subprocesses over line-delimited JSON
+├─ lsp.rs                Supervises language servers; Content-Length framing
 ├─ pty.rs                Terminal sessions on a real pty
 ├─ search.rs             Parallel, gitignore-aware project search
 └─ watcher.rs            Recursive notify watcher; filters and forwards events

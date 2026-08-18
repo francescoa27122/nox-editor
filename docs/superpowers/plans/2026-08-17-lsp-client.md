@@ -33,7 +33,7 @@
 - Consumes: nothing.
 - Produces: `pathToUri(path: string): string`, `uriToPath(uri: string): string`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/uri.test.ts`:
 
@@ -74,12 +74,12 @@ describe('uriToPath', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `npx vitest run tests/uri.test.ts`
 Expected: FAIL — cannot resolve `../src/core/uri`.
 
-- [ ] **Step 3: Implement `src/core/uri.ts`**
+- [x] **Step 3: Implement `src/core/uri.ts`**
 
 ```ts
 /**
@@ -146,12 +146,12 @@ export function uriToPath(uri: string): string {
 }
 ```
 
-- [ ] **Step 4: Run it and watch it pass**
+- [x] **Step 4: Run it and watch it pass**
 
 Run: `npx vitest run tests/uri.test.ts`
 Expected: PASS. If the round-trip test fails on the Windows case, the expected value in the test is the authority — read what it produced and fix the implementation, not the assertion.
 
-- [ ] **Step 5: Type check and commit**
+- [x] **Step 5: Type check and commit**
 
 ```bash
 npm run check
@@ -171,7 +171,7 @@ git commit -m "Convert paths to file URIs, drive letters and UNC included"
 - Consumes: nothing.
 - Produces: `interface LspPosition { line: number; character: number }`, `offsetAt(text: string, position: LspPosition): number`, `positionAt(text: string, offset: number): LspPosition`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/lsp-position.test.ts`:
 
@@ -222,12 +222,12 @@ describe('positionAt', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `npx vitest run tests/lsp-position.test.ts`
 Expected: FAIL — cannot resolve `../src/core/lsp-position`.
 
-- [ ] **Step 3: Implement `src/core/lsp-position.ts`**
+- [x] **Step 3: Implement `src/core/lsp-position.ts`**
 
 ```ts
 /**
@@ -293,12 +293,12 @@ export function positionAt(text: string, offset: number): LspPosition {
 }
 ```
 
-- [ ] **Step 4: Run it and watch it pass**
+- [x] **Step 4: Run it and watch it pass**
 
 Run: `npx vitest run tests/lsp-position.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Type check and commit**
+- [x] **Step 5: Type check and commit**
 
 ```bash
 npm run check
@@ -319,7 +319,7 @@ git commit -m "Map LSP positions to offsets, clamping both directions"
 - Consumes: nothing.
 - Produces: `LanguageServerSpec`, `LanguageServerProcess`, `capabilities.languageServers`, `Platform.startLanguageServer(spec)`, `Platform.stopAllLanguageServers()`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/lsp-platform.test.ts`:
 
@@ -344,12 +344,12 @@ describe('language servers on a platform that has none', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `npx vitest run tests/lsp-platform.test.ts`
 Expected: FAIL — `languageServers` does not exist on the capabilities type, `startLanguageServer` is not a function.
 
-- [ ] **Step 3: Add the boundary**
+- [x] **Step 3: Add the boundary**
 
 In `src/platform/types.ts`, add to `PlatformCapabilities` after `localModels`:
 
@@ -436,12 +436,12 @@ In `src/platform/memory.ts`, beside `spawnAgent`:
 
 Set `languageServers: false` in every capabilities literal in `memory.ts`, `web.ts` and `demo-workspace.ts`, and add the same two refusing methods to `web.ts`.
 
-- [ ] **Step 4: Run the test and the type check**
+- [x] **Step 4: Run the test and the type check**
 
 Run: `npx vitest run tests/lsp-platform.test.ts && npm run check`
 Expected: test PASS; `npm run check` reports 0 errors. `svelte-check` will name every capabilities literal that still lacks `languageServers` — fix each rather than widening the type.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm test
@@ -461,7 +461,7 @@ git commit -m "Put language servers on the platform boundary, refusing where the
 - Consumes: nothing.
 - Produces: `pub struct MessageStream` with `pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, String>`.
 
-- [ ] **Step 1: Write the module with its tests, tests first in the file**
+- [x] **Step 1: Write the module with its tests, tests first in the file**
 
 Create `src-tauri/src/lsp.rs`:
 
@@ -633,7 +633,7 @@ mod tests {
 
 Add `mod lsp;` to `src-tauri/src/lib.rs` beside the other module declarations.
 
-- [ ] **Step 2: Verify what can be verified here**
+- [x] **Step 2: Verify what can be verified here**
 
 There is no cargo on this machine, so `cargo test` cannot run. Verify by inspection and by CI:
 
@@ -645,7 +645,7 @@ git commit -m "Frame LSP messages by byte length, and test the boundaries"
 
 State plainly in the commit and in any report that these tests are **unrun locally** and that CI is the first thing to execute them.
 
-- [ ] **Step 3: Note the follow-up**
+- [x] **Step 3: Note the follow-up**
 
 The unused-import warnings for `HashMap`, `Command`, etc. are expected until Task 5 adds the supervision that uses them. If CI's `cargo build` treats warnings as errors, move those imports into Task 5's edit instead.
 
@@ -662,7 +662,7 @@ The unused-import warnings for `HashMap`, `Command`, etc. are expected until Tas
 - Consumes: `MessageStream`, `frame` from Task 4; the `LanguageServerProcess` interface from Task 3.
 - Produces: commands `nox_lsp_start`, `nox_lsp_send`, `nox_lsp_stop`, `nox_lsp_stop_all`; events `nox://lsp-message`, `nox://lsp-stderr`, `nox://lsp-exit`.
 
-- [ ] **Step 1: Add supervision to `lsp.rs`**
+- [x] **Step 1: Add supervision to `lsp.rs`**
 
 Model it directly on `agent.rs`: a `LspState(Mutex<HashMap<String, Running>>)`, a `Running { child, stdin }`, a reader thread per server, and a stderr thread. The reader thread differs from `agent.rs` in exactly one way — it reads into a `[u8; 8192]` and feeds `MessageStream` rather than iterating lines:
 
@@ -725,7 +725,7 @@ loop {
 
 `nox_lsp_send` writes `frame(&message)` to the stored stdin and flushes. `nox_lsp_stop` removes the entry and kills. `nox_lsp_stop_all` drains the map.
 
-- [ ] **Step 2: Register in `lib.rs`**
+- [x] **Step 2: Register in `lib.rs`**
 
 Add `.manage(lsp::LspState::default())` beside the other `.manage` calls and these four lines to `generate_handler!`, after the `pty::` block:
 
@@ -736,11 +736,11 @@ Add `.manage(lsp::LspState::default())` beside the other `.manage` calls and the
             lsp::nox_lsp_stop_all,
 ```
 
-- [ ] **Step 3: Implement the renderer half in `src/platform/tauri.ts`**
+- [x] **Step 3: Implement the renderer half in `src/platform/tauri.ts`**
 
 Copy the shape of `spawnAgent` exactly — it already solves the buffering requirement. Three `listen` calls (`nox://lsp-message`, `nox://lsp-stderr`, `nox://lsp-exit`) filtered by id, buffers for anything arriving before a handler attaches, `invoke('nox_lsp_start', ...)`, and an `unlisten` on exit and on `kill`. Set `languageServers: true` in the Tauri capabilities literal.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 ```bash
 npm run check
@@ -749,7 +749,7 @@ npm test
 
 Expected: 0 errors, all tests pass. The Rust cannot be compiled here; say so.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src-tauri/src src/platform/tauri.ts
@@ -768,7 +768,7 @@ git commit -m "Supervise a language server, and stream its messages to the rende
 - Consumes: nothing.
 - Produces: `class JsonRpcTransport` with `constructor(send: (message: string) => Promise<void>, options?: { timeoutMs?: number })`, `receive(raw: string): void`, `request<T>(method: string, params?: unknown): Promise<T>`, `notify(method: string, params?: unknown): Promise<void>`, `onNotification(method: string, handler: (params: unknown) => void): void`, `onRequest(method: string, handler: (params: unknown) => Promise<unknown>): void`, `dispose(reason: string): void`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `tests/lsp-transport.test.ts` — cover, one `it` each:
 
@@ -783,21 +783,21 @@ git commit -m "Supervise a language server, and stream its messages to the rende
 
 The fake is a `const sent: string[] = []` and `async (m) => { sent.push(m) }` — no process needed at all.
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 Run: `npx vitest run tests/lsp-transport.test.ts`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Implement `transport.ts`**
+- [x] **Step 3: Implement `transport.ts`**
 
 Monotonic `#nextId`, `#pending = new Map<number, {resolve, reject, timer}>()`, `#notifications = new Map<string, handler[]>()`, `#requests = new Map<string, handler>()`. `receive` parses JSON once, then dispatches on shape: has `id` and `method` → incoming request; has `method` only → notification; has `id` only → reply. Unknown incoming request replies `{ error: { code: -32601, message: `unknown method: ${method}` } }`. Every `request` sets a timeout that deletes its own entry and rejects. `dispose` clears timers and rejects everything.
 
-- [ ] **Step 4: Run it and watch it pass**
+- [x] **Step 4: Run it and watch it pass**
 
 Run: `npx vitest run tests/lsp-transport.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test
@@ -817,7 +817,7 @@ git commit -m "Correlate JSON-RPC replies, and answer what Nox cannot do"
 - Consumes: `JsonRpcTransport` (Task 6), `LanguageServerProcess` (Task 3).
 - Produces: `class LspSession` with `constructor(open: () => Promise<LanguageServerProcess>, options: { name: string; rootUri: string })`, `static spawnedBy(platform, spec, options)`, `readonly status: Signal<'starting'|'initializing'|'running'|'failed'|'stopped'>`, `readonly capabilities: Signal<ServerCapabilities|null>`, `start(): Promise<void>`, `request/notify` delegating to the transport with pre-initialize queueing, `stop(): Promise<void>`, `readonly stderr: string[]`.
 
-- [ ] **Step 1: Write `FakeServer` and the failing tests**
+- [x] **Step 1: Write `FakeServer` and the failing tests**
 
 `FakeServer` must honour the buffering contract — a fake that does not honour the contract tests the wrong thing. Copy `tests/stdio.test.ts:25-60` and change `onLine` to `onMessage` and the parse to `JSON.parse` of a whole message.
 
@@ -834,17 +834,17 @@ Cases, one `it` each:
    here — leaves status `failed` with the error's message, and does **not**
    enter a retry loop. Spec §9's first row.
 
-- [ ] **Step 2: Run and watch fail**
+- [x] **Step 2: Run and watch fail**
 
 Run: `npx vitest run tests/lsp-session.test.ts` → FAIL, module not found.
 
-- [ ] **Step 3: Implement `session.ts`**
+- [x] **Step 3: Implement `session.ts`**
 
 State machine `starting → initializing → running → stopped`, with `failed` reachable from any of them. Hold a `#queue: (() => void)[]` flushed after `initialized`. Keep `#stderr` as the last 20 lines, exactly as `StdioTransport` does — "when a server dies during a handshake, its last words on stderr are the only explanation anyone will get".
 
-- [ ] **Step 4: Run and watch pass**, then `npm run check && npm test`.
+- [x] **Step 4: Run and watch pass**, then `npm run check && npm test`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/services/lsp/session.ts tests/lsp-session.test.ts
@@ -863,7 +863,7 @@ git commit -m "Run one server's lifecycle, queueing what it cannot yet hear"
 - Consumes: `LspSession` (Task 7).
 - Produces: nothing production.
 
-- [ ] **Step 1: Write the fake server script**
+- [x] **Step 1: Write the fake server script**
 
 `tests/support/fake-lsp-server.mjs` reads `Content-Length`-framed messages from stdin and replies. It must include a non-ASCII string in one reply, so the byte-vs-character contract is exercised over real pipes:
 
@@ -902,16 +902,16 @@ process.stdin.on('data', (chunk) => {
 });
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Adapt a Node child to `LanguageServerProcess` the way `tests/stdio.test.ts:389` adapts one to `AgentProcess` — but with a `Buffer`-based reader instead of `readline`, since messages are not lines. Assert that `session.start()` reaches `running` and that `capabilities` carries `serverInfo.name === 'café — naïve'` intact.
 
-- [ ] **Step 3: Run it**
+- [x] **Step 3: Run it**
 
 Run: `npx vitest run tests/lsp-session.test.ts`
 Expected: PASS. A mangled `serverInfo.name` means the adapter is framing over characters — fix the adapter, and note that the same bug in `lsp.rs` is what Task 4's `counts_bytes_rather_than_characters` test guards.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 npm test
@@ -931,7 +931,7 @@ git commit -m "Prove the framing over real pipes, accents included"
 - Consumes: `LspSession` (Task 7), `pathToUri` (Task 1), `WorkspaceService.buffers` / `textOf` / `revisionOf`.
 - Produces: `class DocumentSync` with `constructor(workspace: WorkspaceService, options?: { debounceMs?: number })`, `attach(session: LspSession, languages: readonly string[]): void`, `openUris(): string[]`, `dispose(): void`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Cases:
 
@@ -942,11 +942,11 @@ Cases:
 5. Closing sends `textDocument/didClose`.
 6. `didChange` carries the whole text (`contentChanges: [{ text }]`), because sync is full.
 
-- [ ] **Step 2–4: Fail, implement, pass.**
+- [x] **Step 2–4: Fail, implement, pass.**
 
 Subscribe to `workspace.buffers`; diff the previous snapshot list against the new one by `id` to derive opened / changed (revision moved) / closed. Send `didOpen` immediately, debounce `didChange` by 300ms per URI, send `didClose` immediately.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test
@@ -966,7 +966,7 @@ git commit -m "Sync whole documents, versioned by the buffer revision"
 - Consumes: `Platform.readConfigFile` / `writeConfigFile`.
 - Produces: `interface ServerConfig { languages: string[]; command: string; args?: string[]; initializationOptions?: unknown }`, `parseServers(text: string): { servers: ServerConfig[]; error: string | null }`, `EXAMPLE_SERVERS_JSON: string`, `class ServerRegistry` with `load(): Promise<void>`, `readonly servers: Signal<ServerConfig[]>`, `forLanguage(languageId: string): ServerConfig | null`, `ensureFile(): Promise<string>`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Cases:
 
@@ -976,11 +976,11 @@ Cases:
 4. `forLanguage('typescript')` finds the entry that lists it and returns `null` for one nothing claims.
 5. `EXAMPLE_SERVERS_JSON` itself parses, and yields a `typescript-language-server` entry — the file Nox writes for the user must be one that works.
 
-- [ ] **Step 2–4: Fail, implement, pass.**
+- [x] **Step 2–4: Fail, implement, pass.**
 
 `EXAMPLE_SERVERS_JSON` is the block from the spec's §8. Since `JSON.parse` rejects comments, ship it as valid JSON with a leading `"//"`-style note key or none at all — test 5 is what decides it; keep the file parseable.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test
@@ -1000,7 +1000,7 @@ git commit -m "Read servers.json, and refuse to spawn what it does not describe"
 - Consumes: Tasks 6, 7, 9, 10, plus `positionAt`/`offsetAt` (Task 2) and `uriToPath` (Task 1).
 - Produces: `interface LspDiagnostic { uri: string; range: { start: LspPosition; end: LspPosition }; severity: 1|2|3|4; message: string; source?: string }`, `class LspService` with `readonly diagnostics: Signal<ReadonlyMap<string, LspDiagnostic[]>>`, `readonly sessions: Signal<SessionStatus[]>`, `start(): Promise<void>`, `stop(): Promise<void>`, `diagnosticsFor(uri: string): LspDiagnostic[]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Cases:
 
@@ -1012,9 +1012,9 @@ Cases:
 6. A session that fails clears every URI it published, so no squiggle outlives its server.
 7. A crash restarts with backoff and stops after 3 attempts inside 60s, leaving status `failed` (`vi.useFakeTimers()`).
 
-- [ ] **Step 2–4: Fail, implement, pass.**
+- [x] **Step 2–4: Fail, implement, pass.**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test
@@ -1036,7 +1036,7 @@ git commit -m "Hold diagnostics by URI, and drop the ones the buffer outran"
 - Consumes: `LspDiagnostic` (Task 11), `offsetAt` (Task 2).
 - Produces: `toCodeMirrorDiagnostics(text: string, diagnostics: readonly LspDiagnostic[]): Diagnostic[]`, `lspDiagnosticsExtension(): Extension`, `applyDiagnostics(view: EditorView, diagnostics: readonly LspDiagnostic[]): void`.
 
-- [ ] **Step 1: Add the dependency**
+- [x] **Step 1: Add the dependency**
 
 ```bash
 npm install --save-exact @codemirror/lint@^6
@@ -1044,7 +1044,7 @@ npm install --save-exact @codemirror/lint@^6
 
 Then confirm `package-lock.json` changed, and remember the five-version rule does **not** apply here — that is for releases, and this is a dependency.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Cases for `toCodeMirrorDiagnostics`, which is the pure half and where the risk is:
 
@@ -1054,11 +1054,11 @@ Cases for `toCodeMirrorDiagnostics`, which is the pure half and where the risk i
 4. A range whose `end` precedes its `start` is normalised rather than emitted inverted.
 5. An empty list yields an empty list, and does not throw.
 
-- [ ] **Step 3–4: Fail, implement, pass.**
+- [x] **Step 3–4: Fail, implement, pass.**
 
 `lspDiagnosticsExtension()` returns `[lintGutter()]`; `applyDiagnostics` dispatches `setDiagnostics(view.state, converted)`. Add the extension into `buildExtensions` in its own `Compartment`, beside the others.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test
@@ -1103,13 +1103,13 @@ git commit -m "List every problem, arrow keys included"
 - Modify: `src/ui/StatusBar.svelte`
 - Test: `tests/lsp-status.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Cases: a running server shows its name; a failed one says so and exposes the stderr tail; nothing renders when `capabilities.languageServers` is false.
 
-- [ ] **Step 2–4: Fail, implement, pass.**
+- [x] **Step 2–4: Fail, implement, pass.**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test
@@ -1125,15 +1125,15 @@ git commit -m "Say which server is running, and why one is not"
 - Modify: `src/app.ts`
 - Test: `tests/lsp-commands.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Cases: **Configure Language Servers** creates `servers.json` from `EXAMPLE_SERVERS_JSON` when absent and opens it; **Reload Language Server Configuration** re-reads it; a malformed file raises a notification and leaves the previous configuration live; `stopAllLanguageServers` runs on close, beside `killAllAgents`.
 
-- [ ] **Step 2–4: Fail, implement, pass.**
+- [x] **Step 2–4: Fail, implement, pass.**
 
 Copy the `agents.json` handling in `app.ts:740-765` — it already solves create-with-example, reload, and error reporting.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test
@@ -1149,14 +1149,14 @@ git commit -m "Wire the LSP service in, and give servers.json its two commands"
 - Modify: `ROADMAP.md`, `ARCHITECTURE.md`, `CHANGELOG.md`
 - Create: `WORKLOG.md`
 
-- [ ] **Step 1: Update each**
+- [x] **Step 1: Update each**
 
 `ROADMAP.md`: mark **LSP client** and **Diagnostics** shipped in the v0.4 table, in whatever form `#24` established for "which release a milestone shipped in".
 `ARCHITECTURE.md`: add `services/lsp/` and `src-tauri/src/lsp.rs` to the module map, and state the framing rule once — it is the non-obvious constraint a future reader will otherwise undo.
 `CHANGELOG.md`: an Unreleased entry.
 `WORKLOG.md`: create it at the repo root in the operating manual's format (Shipped / Verified / Next / Blocked / Confidence), newest entry on top.
 
-- [ ] **Step 2: Verify and commit**
+- [x] **Step 2: Verify and commit**
 
 ```bash
 npm run check && npm test

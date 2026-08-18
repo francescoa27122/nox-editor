@@ -6,6 +6,23 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Language server support.** Nox can run a language server and show what it
+  says about your code: squiggles under the problems, marks in the gutter, and
+  the server's own name in the status bar. Run **Configure Language Servers**
+  from the palette to create `servers.json` — it arrives with a working
+  `typescript-language-server` entry — then **Reload Language Servers**.
+
+  Nothing starts on its own. Nox does not go looking for a server on your
+  `PATH`, because starting a process is the most powerful thing it does on your
+  behalf and it should be something you asked for. A server that fails to start
+  says so in the status bar, with its last words on stderr in the tooltip,
+  rather than leaving you wondering why nothing is underlined.
+
+  The problems panel listing every file at once is still to come; today the
+  diagnostics appear in the file you are looking at.
+
 ## [0.4.1] — 2026-08-17
 
 ### Added
