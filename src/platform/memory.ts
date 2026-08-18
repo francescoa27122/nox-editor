@@ -5,6 +5,7 @@ import {
   type DirEntry,
   type FileStat,
   type JsonLinesSpec,
+  type LanguageServerSpec,
   type Platform,
   type PlatformCapabilities,
   type SaveDialogOptions,
@@ -39,6 +40,7 @@ export class MemoryPlatform implements Platform {
     projectSearch: true,
     terminals: false,
     localModels: false,
+    languageServers: false,
     // A browser tab's chrome is the browser's. Nothing to hide, nothing to
     // draw in its place.
     customWindowControls: false,
@@ -429,6 +431,26 @@ export class MemoryPlatform implements Platform {
 
   async killAllAgents(): Promise<void> {
     /* No processes in memory; nothing to stop. */
+  }
+
+  /**
+   * No processes in memory.
+   *
+   * Refusing loudly for the same reason as `spawnAgent`: a server that
+   * silently produced nothing would be indistinguishable from one that is
+   * merely slow to start.
+   *
+   * The parameter is declared, as `streamJsonLines`'s is and unlike
+   * `spawnAgent`'s bare `()`, so a caller holding the concrete
+   * `MemoryPlatform` type can still call this with the real argument list
+   * under `strict`.
+   */
+  async startLanguageServer(_spec: LanguageServerSpec): Promise<never> {
+    throw new PlatformError('this build cannot start language servers', 'unsupported');
+  }
+
+  async stopAllLanguageServers(): Promise<void> {
+    /* No servers in memory; nothing to stop. */
   }
 
   /**

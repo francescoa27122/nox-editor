@@ -15,6 +15,8 @@ import {
   type ExternalDropEvent,
   type JsonLinesSpec,
   type JsonLinesStream,
+  type LanguageServerProcess,
+  type LanguageServerSpec,
   type SaveDialogOptions,
   type SearchFileResult,
   type SearchHandle,
@@ -67,6 +69,9 @@ export class TauriPlatform implements Platform {
     agentProcesses: true,
     terminals: true,
     localModels: true,
+    // Flipped on once `nox_lsp_start` exists; until then the desktop build
+    // genuinely cannot start one, and the flag says what is true today.
+    languageServers: false,
     // Windows is the only desktop target that hides its decorations — see
     // `lib.rs`'s setup hook. macOS keeps its traffic lights over an overlay
     // title bar and must not draw a second set beside them.
@@ -247,6 +252,19 @@ export class TauriPlatform implements Platform {
 
   async killAllAgents(): Promise<void> {
     await invoke('nox_agent_kill_all');
+  }
+
+  /**
+   * Not yet. `nox_lsp_start` does not exist in the Rust side at this commit,
+   * and a method that invoked a missing command would fail as an opaque IPC
+   * error rather than as the capability it actually is.
+   */
+  async startLanguageServer(_spec: LanguageServerSpec): Promise<LanguageServerProcess> {
+    throw new PlatformError('this build cannot start language servers yet', 'unsupported');
+  }
+
+  async stopAllLanguageServers(): Promise<void> {
+    /* Nothing is started yet, so there is nothing to stop. */
   }
 
   async onCloseRequested(handler: () => Promise<void>): Promise<() => void> {
