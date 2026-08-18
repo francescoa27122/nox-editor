@@ -87,7 +87,7 @@ async function setup(options: { servers?: number } = {}) {
 
   const spawned: FakeServer[] = [];
   const service = new LspService(workspace, registry, {
-    rootPath: '/w',
+    rootPath: () => '/w',
     open: async () => {
       const server = new FakeServer();
       spawned.push(server);
@@ -226,7 +226,7 @@ describe('configuration', () => {
 
     const spawned: FakeServer[] = [];
     const service = new LspService(workspace, registry, {
-      rootPath: '/w',
+      rootPath: () => '/w',
       open: async () => {
         const server = new FakeServer();
         spawned.push(server);

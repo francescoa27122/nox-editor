@@ -36,8 +36,14 @@ export interface SessionStatusRow {
 }
 
 export interface LspServiceOptions {
-  /** The workspace root, as a path. Becomes the LSP root URI. */
-  rootPath: string;
+  /**
+   * The workspace root, as a path. Becomes the LSP root URI.
+   *
+   * A getter rather than a value: the root is null until a folder opens, and
+   * servers start when one does — capturing it at construction would give
+   * every server a root of nowhere.
+   */
+  rootPath: () => string;
   open: (config: ServerConfig) => Promise<LanguageServerProcess>;
   /** Waits between restart attempts. Doubling, and capped by its own length. */
   backoffMs?: readonly number[];
@@ -81,7 +87,7 @@ export class LspService {
     platform: Platform,
     workspace: WorkspaceService,
     registry: ServerRegistry,
-    rootPath: string,
+    rootPath: () => string,
   ): LspService {
     return new LspService(workspace, registry, {
       rootPath,
@@ -89,7 +95,7 @@ export class LspService {
         platform.startLanguageServer({
           command: config.command,
           args: config.args,
-          cwd: rootPath,
+          cwd: rootPath(),
         }),
     });
   }
@@ -123,7 +129,7 @@ export class LspService {
   async #startOne(config: ServerConfig, attempts: number): Promise<void> {
     const session = new LspSession(() => this.#options.open(config), {
       name: config.command,
-      rootUri: pathToUri(this.#options.rootPath),
+      rootUri: pathToUri(this.#options.rootPath()),
     });
 
     const entry: Running = {
