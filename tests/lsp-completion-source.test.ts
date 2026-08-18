@@ -257,3 +257,17 @@ describe('lazy documentation', () => {
     expect(result!.options[0]!.info).toBeUndefined();
   });
 });
+
+describe('the extension the editor installs', () => {
+  it('is present in a freshly built state, so a pane can fill it in', async () => {
+    // The compartment must exist in the state `buildExtensions` produces;
+    // otherwise the pane's reconfigure lands on nothing and completion is
+    // silently absent rather than broken.
+    const { buildExtensions, completionCompartment } = await import('../src/editor/extensions');
+    const { defaultSettings } = await import('../src/services/config/schema');
+
+    const state = EditorState.create({ doc: '', extensions: buildExtensions(defaultSettings()) });
+
+    expect(completionCompartment.get(state)).toBeDefined();
+  });
+});
