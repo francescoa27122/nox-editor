@@ -393,6 +393,69 @@ describe('previewReplacement with preserveCase', () => {
   });
 });
 
+describe('previewReplacement over a windowed preview', () => {
+  /**
+   * A line past PREVIEW_BUDGET is windowed, so the preview starts mid-line and
+   * a rescan of it realigns: `a{7}` from a lead that is not a multiple of 7
+   * lands on 56, 63, 70 -- never on the match's own column 60. Scanning the
+   * preview for a match at that column therefore finds nothing, while the
+   * write, which runs over the whole line, expands the group as normal. The
+   * preview must say what the write will do or say nothing at all.
+   */
+  function windowedService(line: string, query: string, replacement: string) {
+    const { search } = setup();
+    search.query.set(query);
+    search.options.update((current) => ({ ...current, regexp: true, caseSensitive: true }));
+    search.setReplacement(replacement);
+
+    const matcher = buildSearchRegex(query, { ...plain, regexp: true });
+    const match = findMatches(line, matcher).find((found) => found.previewOffset > 0);
+    expect(match).toBeDefined();
+    return { search, match: match! };
+  }
+
+  it('expands the group from the match position, not from a rescan of the window', () => {
+    const { search, match } = windowedService('a'.repeat(400), 'a{7}', '[$&]');
+
+    expect(search.previewReplacement(match)).toBe('[aaaaaaa]');
+  });
+
+  it('reports null when the window truncates the match it would preview', () => {
+    // One 500-character match: the 320-character window cannot hold it, so no
+    // honest preview of `$&` exists. Showing the truncated text would promise
+    // a write that is 180 characters shorter than the real one.
+    const { search } = setup();
+    search.query.set('a+');
+    search.options.update((current) => ({ ...current, regexp: true, caseSensitive: true }));
+    search.setReplacement('[$&]');
+
+    const line = 'a'.repeat(500);
+    const match = findMatches(line, buildSearchRegex('a+', { ...plain, regexp: true }))[0]!;
+    expect(match.length).toBe(500);
+    expect(match.preview.length).toBe(PREVIEW_BUDGET);
+
+    expect(search.previewReplacement(match)).toBeNull();
+  });
+
+  it('reports null when the results predate the current query', async () => {
+    // The panel keeps the old rows through the debounce, so the query can be
+    // one the stored match never came from. A literal `[$1]` in the row would
+    // be a promise the write never keeps.
+    const { workspace, search } = setup();
+    await workspace.openFolder('/w');
+    await runSearch(search, 'needle');
+
+    search.options.update((current) => ({ ...current, regexp: true }));
+    search.query.set('const (\w+)');
+    search.setReplacement('[$1]');
+
+    const match = search.results.get().find((file) => file.path === '/w/src/main.ts')!.matches[0]!;
+    expect(match.column).toBe(6);
+
+    expect(search.previewReplacement(match)).toBeNull();
+  });
+});
+
 // --- Cancellation -----------------------------------------------------------
 
 /**
