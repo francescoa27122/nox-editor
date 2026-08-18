@@ -50,11 +50,30 @@ Smoke-tested on real hardware, from the `v0.4.1-lsp-test1` tag build:
   `CreateProcess` fails with a different error. Someone writing a full path
   into `servers.json` is at least as likely.
 
+Second build (`v0.4.1-lsp-test2`), after Francesco reported an empty console
+window appearing on reload:
+
+- **Windows gives a console-subsystem child its own window when the parent is
+  a GUI app.** The `cmd` shim and the server are both console apps, so an empty
+  console sat in front of the editor for the session — empty because the output
+  is piped to Nox, permanent because the server is meant to keep running.
+  Fixed with `CREATE_NO_WINDOW` on both spawn attempts.
+- The first check for the fix was wrong and nearly reported a failure:
+  `conhost.exe` is still created under the shim, because `CREATE_NO_WINDOW`
+  hides the console rather than preventing one. The right measurement is window
+  *visibility* — `EnumWindows` + `IsWindowVisible` finds no window belonging to
+  the `cmd` or `conhost`, and no `ConsoleWindowClass` visible anywhere.
+- Server stable for 25s afterwards, so the flag did not break the pipes.
+- **`agent.rs` has the identical defect** and was left alone to keep the PR
+  scoped. Spun off as its own task.
+
 Debt, deliberate:
 
 - **The squiggle has never been seen.** The UI could not be driven this
   session, so "diagnostics appear" is proved as far as the server running and
-  the pipes connecting, and no further.
+  the pipes connecting, and no further. The console-window bug is a reminder
+  that a process tree is not a screen: it was invisible to every check made
+  here and obvious the moment a human looked.
 
 Confidence:
 
