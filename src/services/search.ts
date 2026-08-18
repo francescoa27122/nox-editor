@@ -325,8 +325,11 @@ export class SearchService {
   /**
    * What one match will look like after replacement, for the preview row.
    *
-   * Groups are resolved by re-running the matcher over the match's own line,
-   * which is exactly the context the real replace will see for that occurrence.
+   * Groups are resolved by matching the pattern *at* the match's own column,
+   * and the result is shown only when it reproduces exactly what the search
+   * reported. Anything less certain returns null, and the row shows no
+   * preview: this is the input to the most destructive feature in the app, so
+   * a preview that disagrees with the write is worse than no preview at all.
    */
   previewReplacement(match: { preview: string; column: number; length: number }): string | null {
     const template = this.replacement.get();
@@ -341,24 +344,28 @@ export class SearchService {
 
     let matcher: RegExp;
     try {
-      matcher = buildSearchRegex(this.query.get(), options);
+      const base = buildSearchRegex(this.query.get(), options);
+      // Sticky, so the group is resolved *at* the match's own column rather
+      // than by rescanning the preview for it. A long line's preview is a
+      // window that starts mid-line, and rescanning that window realigns the
+      // matches -- `a{7}` from a lead of 143 lands on 56, 63, 70, never on the
+      // match's column 60 -- so a scan can miss the very match it was handed.
+      matcher = new RegExp(base.source, `${base.flags}y`);
     } catch {
       return null;
     }
 
-    matcher.lastIndex = 0;
-    let found: RegExpExecArray | null;
-    while ((found = matcher.exec(match.preview)) !== null) {
-      if (found[0].length === 0) {
-        matcher.lastIndex++;
-        continue;
-      }
-      if (found.index === match.column) {
-        const expanded = expandReplacement(template, found, true);
-        return options.preserveCase ? preserveCase(found[0], expanded) : expanded;
-      }
-    }
-    return options.preserveCase ? preserveCase(matched, template) : template;
+    matcher.lastIndex = match.column;
+    const found = matcher.exec(match.preview);
+    // Only a match that reproduces exactly what the search reported can be
+    // previewed honestly. A window can truncate a long match, and results can
+    // outlive the query that found them; in both cases the row shows no
+    // preview rather than a template the write will not produce. A zero-width
+    // match is rejected by the same check, since search never reports one.
+    if (!found || found[0].length !== match.length) return null;
+
+    const expanded = expandReplacement(template, found, true);
+    return options.preserveCase ? preserveCase(found[0], expanded) : expanded;
   }
 
   /**
