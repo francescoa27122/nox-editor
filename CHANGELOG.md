@@ -17,8 +17,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Nothing starts on its own. Nox does not go looking for a server on your
   `PATH`, because starting a process is the most powerful thing it does on your
   behalf and it should be something you asked for. A server that fails to start
-  says so in the status bar, with its last words on stderr in the tooltip,
-  rather than leaving you wondering why nothing is underlined.
+  says so twice over — a notification carrying the server's own explanation,
+  and a yellow marker in the status bar whose tooltip keeps it — rather than
+  leaving you wondering why nothing is underlined.
+
+  One thing worth knowing about `typescript-language-server` specifically: it
+  does not bundle TypeScript. It looks for the `typescript` package in your
+  workspace or beside its own install, so a global
+  `npm install -g typescript-language-server` also wants
+  `npm install -g typescript`. Without it the server refuses to start and says
+  so, which Nox now passes straight through to you.
 
   The **Problems** panel in the sidebar lists everything at once, grouped by
   file and driven with the arrow keys. It includes files you never opened —
