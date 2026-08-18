@@ -20,8 +20,17 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Suppresses the console window Windows would otherwise give a
+/// console-subsystem child of a GUI process. `winbase.h`'s value; not worth a
+/// dependency on the `windows` crate for one constant.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -159,6 +168,16 @@ fn spawn_server(command: &str, args: &[String], cwd: Option<&str>) -> std::io::R
         if let Some(directory) = cwd {
             builder.current_dir(directory);
         }
+
+        // Windows gives a console-subsystem child its own window when the
+        // parent is a GUI app. A language server is one, and so is the `cmd`
+        // that launches a `.cmd` shim — so without this an empty console sits
+        // in front of the editor for the whole session, looking like something
+        // hung. It is empty because the server's output is piped here, and it
+        // never closes because the server is meant to keep running.
+        #[cfg(windows)]
+        builder.creation_flags(CREATE_NO_WINDOW);
+
         builder
     }
 
