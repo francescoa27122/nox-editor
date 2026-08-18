@@ -21,12 +21,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a yellow marker in the status bar whose tooltip keeps it — rather than
   leaving you wondering why nothing is underlined.
 
-  One thing worth knowing about `typescript-language-server` specifically: it
-  does not bundle TypeScript. It looks for the `typescript` package in your
-  workspace or beside its own install, so a global
-  `npm install -g typescript-language-server` also wants
-  `npm install -g typescript`. Without it the server refuses to start and says
-  so, which Nox now passes straight through to you.
+  Two things worth knowing about `typescript-language-server` specifically. It
+  does not bundle TypeScript — it looks for the `typescript` package in your
+  workspace or beside its own install. And it needs `lib/tsserver.js`, which
+  **TypeScript 7 no longer ships**, so a global install wants
+  `npm install -g typescript@6` rather than plain `typescript`. Either way the
+  server refuses to start and explains why, which Nox now passes straight
+  through to you.
+
+  If you would rather not touch your global TypeScript, an entry in
+  `servers.json` can point the server at one directly:
+
+  ```json
+  { "languages": ["typescript"], "command": "typescript-language-server",
+    "args": ["--stdio"],
+    "initializationOptions": { "tsserver": { "path": "/path/to/typescript/lib/tsserver.js" } } }
+  ```
 
   The **Problems** panel in the sidebar lists everything at once, grouped by
   file and driven with the arrow keys. It includes files you never opened —

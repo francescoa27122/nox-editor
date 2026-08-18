@@ -32,6 +32,15 @@ export interface SessionOptions {
   name: string;
   rootUri: string;
   timeoutMs?: number;
+  /**
+   * Passed to the server verbatim in `initialize`.
+   *
+   * Server-specific by definition, so Nox does not interpret it — but it is
+   * the difference between a server that can be pointed at what it needs and
+   * one that must be reinstalled. `typescript-language-server` takes
+   * `tsserver.path` here.
+   */
+  initializationOptions?: unknown;
 }
 
 /** How many stderr lines to keep. Enough to explain a failed start. */
@@ -153,6 +162,11 @@ export class LspSession {
         // Nox advertises what it implements and nothing else. Claiming a
         // capability invites the server to use it.
         workspaceFolders: null,
+        // Omitted rather than sent as null when unset: a server is entitled to
+        // read a present-but-null field differently from an absent one.
+        ...(this.#options.initializationOptions === undefined
+          ? {}
+          : { initializationOptions: this.#options.initializationOptions }),
       });
 
       this.capabilities.set(result.capabilities ?? {});

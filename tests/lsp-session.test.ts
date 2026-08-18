@@ -132,6 +132,34 @@ describe('starting', () => {
     expect(server.methods()).toEqual(['initialize', 'initialized']);
   });
 
+  it('passes initializationOptions through when servers.json carries them', async () => {
+    // Dead config is worse than no config: `typescript-language-server` takes
+    // `tsserver.path` here, which is the difference between pointing at a
+    // working TypeScript and having to reinstall a global one.
+    const server = politeServer();
+    const session = new LspSession(async () => server, {
+      name: 'tsls',
+      rootUri: 'file:///w',
+      initializationOptions: { tsserver: { path: '/ts/lib/tsserver.js' } },
+    });
+    await session.start();
+
+    const initialize = server.written.find((message) => message.method === 'initialize');
+    expect(initialize?.params?.initializationOptions).toEqual({
+      tsserver: { path: '/ts/lib/tsserver.js' },
+    });
+  });
+
+  it('omits the key entirely when nothing is configured', async () => {
+    // Not `null`. A server is entitled to read a present-but-null field
+    // differently from an absent one.
+    const server = politeServer();
+    await sessionFor(server).start();
+
+    const initialize = server.written.find((message) => message.method === 'initialize');
+    expect(initialize?.params).not.toHaveProperty('initializationOptions');
+  });
+
   it('keeps what the server said it can do', async () => {
     const server = politeServer({ textDocumentSync: 2, hoverProvider: true });
     const session = sessionFor(server);

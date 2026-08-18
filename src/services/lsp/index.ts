@@ -130,6 +130,7 @@ export class LspService {
     const session = new LspSession(() => this.#options.open(config), {
       name: config.command,
       rootUri: pathToUri(this.#options.rootPath()),
+      initializationOptions: config.initializationOptions,
     });
 
     const entry: Running = {
