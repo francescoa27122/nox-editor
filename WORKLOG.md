@@ -67,9 +67,40 @@ window appearing on reload:
 - **`agent.rs` has the identical defect** and was left alone to keep the PR
   scoped. Spun off as its own task.
 
+Third build (`v0.4.1-lsp-test3`) — **the squiggle is confirmed on real
+hardware**, on the right buffer, with the server connected in the status bar.
+
+Two bugs found by looking at a screen, both invisible to every test here:
+
+- **A console window on every reload.** Windows gives a console-subsystem
+  child its own window when the parent is a GUI app. Fixed with
+  `CREATE_NO_WINDOW`; see the second build's entry.
+- **The squiggle for `x.ts` appeared inside `servers.json`.** `EditorPane`
+  holds one view and re-points it per tab, routing transactions to
+  `workspace.applyTransaction(currentId, …)`. The app painted from a
+  `workspace.activeId` subscription, which fires synchronously, while the pane
+  swaps state in an effect, which runs later — so the newly-active buffer's
+  diagnostics were dispatched while the *previous* buffer's state was loaded,
+  and recorded against it permanently. Two owners of "which buffer is this
+  view showing"; now one, the pane. **The tests added with the fix do not
+  reproduce the race** — restoring the old paint leaves them green, because
+  the harness drives effects through `flushSync`. Said out loud in the file.
+
+Also confirmed, and not a bug: the squiggle sits under the *variable name*,
+not the offending literal. `tsc --noEmit` reports `x.ts(1,7)` for
+`const n: number = "x";` — column 7 is the `n`. TypeScript reports an
+assignability error at the declaration, and Nox renders the range faithfully.
+
+The setup that finally worked, worth writing down: a **global**
+`typescript-language-server` needs a **global `typescript@6`** beside it.
+`npm install -g typescript` now installs TypeScript 7, which no longer ships
+`lib/tsserver.js`, and the server refuses to start without it.
+
 Debt, deliberate:
 
-- **The squiggle has never been seen.** The UI could not be driven this
+- ~~**The squiggle has never been seen.**~~ Seen, on the right buffer. Kept
+  below for the record of what it cost to get there.
+- **The squiggle had never been seen** when the first two builds shipped. The UI could not be driven this
   session, so "diagnostics appear" is proved as far as the server running and
   the pipes connecting, and no further. The console-window bug is a reminder
   that a process tree is not a screen: it was invisible to every check made
