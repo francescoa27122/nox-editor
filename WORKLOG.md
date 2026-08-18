@@ -8,6 +8,57 @@ are knowledge.**
 
 ---
 
+## 2026-08-18 (later) — Completion
+
+Shipped, on branch `lsp-completion`, all six planned tasks:
+
+- `LspService.requestFor` / `capabilitiesFor` — the request door. Diagnostics
+  arrive by push; everything else in v0.4 has to ask, and `#running` was
+  private. Hover, go-to-definition and rename reuse this.
+- `src/core/lsp-completion.ts` — items to CodeMirror completions, pure.
+- `src/editor/completion.ts` — the source, and the DOM half of lazy docs.
+- Wired through a compartment the pane reconfigures, keyed off `currentId`.
+
+Verified:
+
+- `npm test` — 1031 passed, 53 files. `npm run check` — 415 files, 0 errors.
+- Four guards mutation-checked rather than trusted: the `textEdit` range,
+  `filterText`, the `context.aborted` check, and `isIncomplete` suppressing
+  `validFor`. Each fails its own test when removed.
+- Against a real server: `s.` returns members with kinds, and **none of the
+  items carry documentation** — asserted, because that is what makes
+  `completionItem/resolve` load-bearing rather than an optimisation.
+
+Two things worth carrying forward:
+
+- **`npm run check` exits 0 even when it reports errors.** A
+  `check && test && commit` chain therefore does not gate on it. One commit
+  went in with a type error before this was noticed; grep the output for
+  `0 ERRORS` instead of trusting the exit code.
+- That error was real and reshaped the design: `CompletionInfo` is
+  `Node | null | {dom}`, never a string, so lazy documentation cannot return
+  text. `core/` stays DOM-free and the editor layer owns the callback.
+
+Next:
+
+- **The picker has never been seen.** Same gap as the squiggle before it: the
+  wire behaviour is proven and the rendering is not. A tag build and a human.
+- Then hover, which is the smallest feature left on the door this opened.
+
+Blocked:
+
+- Nothing. Not pushed.
+
+Confidence:
+
+- High on the conversion and the source — mutation-checked, and the real
+  server contradicted nothing this time.
+- Unverified: the picker itself, and the compartment actually delivering the
+  source into a live view. The test proves the compartment exists in a built
+  state, not that a keystroke reaches the server.
+
+---
+
 ## 2026-08-18 — A real server, and what it changed
 
 Shipped:
