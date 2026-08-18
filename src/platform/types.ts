@@ -49,6 +49,8 @@ export interface PlatformCapabilities {
   terminals: boolean;
   /** True when `streamJsonLines` can reach a local model server. */
   localModels: boolean;
+  /** True when `startLanguageServer` can start a language server. */
+  languageServers: boolean;
   /**
    * True when the window has no OS chrome and the title bar must draw its own
    * minimise / maximise / close.
@@ -89,6 +91,47 @@ export interface AgentProcess {
    */
   onLine(handler: (line: string) => void): void;
   /** Each line it writes to stderr — diagnostics, never protocol. Buffered too. */
+  onStderr(handler: (line: string) => void): void;
+  /** Called once, when the process ends. Fires immediately if it already has. */
+  onExit(handler: (code: number | null) => void): void;
+  /** Stop it and release the listeners. Safe to call twice. */
+  kill(): Promise<void>;
+}
+
+/** What to start, for `Platform.startLanguageServer`. */
+export interface LanguageServerSpec {
+  command: string;
+  args?: string[];
+  /** Defaults to the workspace root. */
+  cwd?: string;
+}
+
+/**
+ * A running language server, as complete JSON-RPC messages.
+ *
+ * Deliberately no knowledge of the protocol: this moves messages, and
+ * `services/lsp/` decides what they mean — the same split as `AgentProcess`,
+ * for the same reason.
+ *
+ * The framing is *not* the renderer's business, and cannot be.
+ * `Content-Length` counts bytes, and everything on this side of the boundary
+ * is a decoded string whose length is in UTF-16 code units; the two disagree
+ * on the first non-ASCII character in a hover string or a completion label.
+ */
+export interface LanguageServerProcess {
+  /** Write one message. The framing is added for you. */
+  send(message: string): Promise<void>;
+  /**
+   * Each complete message the server writes.
+   *
+   * **Anything produced before a handler is attached must be buffered and
+   * delivered when one is** — the same rule as `AgentProcess.onLine`, and
+   * more load-bearing here: a server can emit `window/logMessage` and its
+   * `initialize` response in the tick it starts, and dropping those loses the
+   * handshake the whole session is predicated on.
+   */
+  onMessage(handler: (message: string) => void): void;
+  /** Each stderr line — diagnostics about the server, never protocol. Buffered too. */
   onStderr(handler: (line: string) => void): void;
   /** Called once, when the process ends. Fires immediately if it already has. */
   onExit(handler: (code: number | null) => void): void;
@@ -283,6 +326,25 @@ export interface Platform {
    * with nothing left to talk to them.
    */
   killAllAgents(): Promise<void>;
+
+  /**
+   * Start a language server.
+   *
+   * Throws `PlatformError('unsupported')` where there are no processes to
+   * start — the browser target. Check `capabilities.languageServers` first.
+   *
+   * A language server is started only because the user configured one in
+   * `servers.json`; nothing here discovers a server or spawns one on its own.
+   */
+  startLanguageServer(spec: LanguageServerSpec): Promise<LanguageServerProcess>;
+
+  /**
+   * Stop every running language server.
+   *
+   * Called when the window is going away, for the reason `killAllAgents`
+   * gives: reloading the renderer does not kill the processes it started.
+   */
+  stopAllLanguageServers(): Promise<void>;
 
   /**
    * Open a terminal running a real shell.

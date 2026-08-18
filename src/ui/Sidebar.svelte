@@ -6,6 +6,7 @@
   import SearchPanel from './SearchPanel.svelte';
   import NotesPanel from './NotesPanel.svelte';
   import AnswersPanel from './AnswersPanel.svelte';
+  import ProblemsPanel from './ProblemsPanel.svelte';
   import Icon, { type IconName } from './Icon.svelte';
 
   /**
@@ -28,6 +29,7 @@
     { id: 'search', icon: 'search', label: 'Search', command: 'search.focus' },
     { id: 'notes', icon: 'note', label: 'Notes', command: 'notes.focus' },
     { id: 'answers', icon: 'info', label: 'Answers', command: 'answers.focus' },
+    { id: 'problems', icon: 'warning', label: 'Problems', command: 'problems.focus' },
   ];
 
   // The same policy `AgentPanel.svelte` and `NoxApp.#runnableAgents()` use, so
@@ -68,6 +70,8 @@
 
   {#if $view === 'search'}
     <SearchPanel />
+  {:else if $view === 'problems'}
+    <ProblemsPanel />
   {:else if $view === 'notes'}
     <NotesPanel />
     <!-- Guarded on `available` as well as the view, so an answers view that

@@ -4,6 +4,8 @@
   import { cursorInfo } from '@editor/commands';
   import { reconfigureAllEffects, reconfigureEffects } from '@editor/extensions';
   import { cachedLanguage, hasGrammar, languageCompartment, loadLanguage } from '@editor/languages';
+  import { applyDiagnostics } from '@editor/lsp';
+  import { pathToUri } from '@core/uri';
   import { useApp } from './context';
 
   /**
@@ -21,7 +23,7 @@
   let { groupId }: Props = $props();
 
   const app = useApp();
-  const { workspace, config, ui, find } = app;
+  const { workspace, config, ui, find, lsp } = app;
 
   const groups = workspace.groups;
   const focusRequest = ui.focusEditorRequest;
@@ -72,6 +74,15 @@
       return true;
     });
 
+    // Diagnostics are painted from here rather than from the app, because
+    // `currentId` is the only authoritative answer to "which buffer is this
+    // view showing". The app knows `workspace.activeId`, which changes
+    // synchronously — while the swap below happens in an effect, which runs
+    // later. Painting on the app's signal wrote the newly-active buffer's
+    // diagnostics into the previously-active buffer's state, and
+    // `dispatchTransactions` recorded them there permanently.
+    const offDiagnostics = lsp.diagnostics.subscribe(() => paintDiagnostics());
+
     syncToBuffer(activeId);
 
     const offReset = workspace.events.on('buffer-reset', ({ id }) => {
@@ -88,6 +99,7 @@
       offReset();
       offConfig();
       offDispatcher();
+      offDiagnostics();
       if (autosaveTimer) clearTimeout(autosaveTimer);
       app.unregisterGroupView(groupId);
       view?.destroy();
@@ -111,6 +123,20 @@
     void $focusRequest;
     if (isActiveGroup) view?.focus();
   });
+
+  /**
+   * Draw the diagnostics belonging to the buffer this view is actually
+   * showing. Keyed off `currentId`, never off the app-wide active id.
+   */
+  function paintDiagnostics() {
+    if (!view || !currentId) return;
+
+    const path = workspace.buffers.get().find((b) => b.id === currentId)?.path ?? null;
+    // An untitled buffer has no URI, so nothing can have been published for
+    // it — clear rather than return, or it keeps the marks of whatever the
+    // view showed before.
+    applyDiagnostics(view, path ? lsp.diagnosticsFor(pathToUri(path)) : []);
+  }
 
   function syncToBuffer(id: string | null, options: { force?: boolean } = {}) {
     if (!view) return;
@@ -138,6 +164,11 @@
       // near the cursor it just restored.
       scrollIntoView: true,
     });
+
+    // After the swap, never before: `setState` replaces the whole state, so
+    // anything painted first is discarded, and anything painted while the old
+    // state is still loaded lands on the wrong buffer.
+    paintDiagnostics();
 
     publishCursor();
     find.attach(view);

@@ -30,6 +30,9 @@ export class WebPlatform extends MemoryPlatform {
     // No model server reachable from a browser tab either; see
     // `MemoryPlatform.streamJsonLines`.
     localModels: false,
+    // Inherited refusals from MemoryPlatform cover the methods; this is the
+    // flag callers are told to check first.
+    languageServers: false,
     customWindowControls: false,
   };
 

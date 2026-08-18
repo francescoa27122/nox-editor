@@ -6,6 +6,42 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Language server support.** Nox can run a language server and show what it
+  says about your code: squiggles under the problems, marks in the gutter, and
+  the server's own name in the status bar. Run **Configure Language Servers**
+  from the palette to create `servers.json` — it arrives with a working
+  `typescript-language-server` entry — then **Reload Language Servers**.
+
+  Nothing starts on its own. Nox does not go looking for a server on your
+  `PATH`, because starting a process is the most powerful thing it does on your
+  behalf and it should be something you asked for. A server that fails to start
+  says so twice over — a notification carrying the server's own explanation,
+  and a yellow marker in the status bar whose tooltip keeps it — rather than
+  leaving you wondering why nothing is underlined.
+
+  Two things worth knowing about `typescript-language-server` specifically. It
+  does not bundle TypeScript — it looks for the `typescript` package in your
+  workspace or beside its own install. And it needs `lib/tsserver.js`, which
+  **TypeScript 7 no longer ships**, so a global install wants
+  `npm install -g typescript@6` rather than plain `typescript`. Either way the
+  server refuses to start and explains why, which Nox now passes straight
+  through to you.
+
+  If you would rather not touch your global TypeScript, an entry in
+  `servers.json` can point the server at one directly:
+
+  ```json
+  { "languages": ["typescript"], "command": "typescript-language-server",
+    "args": ["--stdio"],
+    "initializationOptions": { "tsserver": { "path": "/path/to/typescript/lib/tsserver.js" } } }
+  ```
+
+  The **Problems** panel in the sidebar lists everything at once, grouped by
+  file and driven with the arrow keys. It includes files you never opened —
+  which is usually where a project's real errors are.
+
 ## [0.4.1] — 2026-08-17
 
 ### Added

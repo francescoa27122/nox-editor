@@ -45,6 +45,7 @@ import {
   type AgentConfig,
   type OllamaAgentConfig,
 } from '@services/agent/config';
+import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
 import { OllamaProvider } from '@services/agent/ollama';
 import type { AgentTransport } from '@services/agent/protocol';
 import type { AnswerExpectation, ModelProvider } from '@services/agent/provider';
@@ -116,6 +117,12 @@ export class NoxApp {
   readonly agents: AgentRuntime;
   /** Agents the user has configured in `agents.json`. */
   readonly agentConfig: AgentConfigService;
+  /** Language servers the user has configured in `servers.json`. */
+  readonly serverRegistry: ServerRegistry;
+  /** Failures already announced, so a republished status does not repeat one. */
+  #reportedFailures = new Set<string>();
+  /** The running servers, and the diagnostics they publish. */
+  readonly lsp: LspService;
   readonly terminal: TerminalService;
   /** The user's own notes — not workspace files. See `notes.ts`. */
   readonly notes: NotesService;
@@ -175,6 +182,10 @@ export class NoxApp {
     });
 
     this.agentConfig = new AgentConfigService(platform);
+    this.serverRegistry = new ServerRegistry(platform);
+    this.lsp = LspService.spawnedBy(platform, this.workspace, this.serverRegistry, () =>
+      this.workspace.rootPath.get() ?? '',
+    );
     this.terminal = new TerminalService(
       platform,
       () => this.workspace.rootPath.get(),
@@ -208,6 +219,7 @@ export class NoxApp {
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
     await this.agentConfig.load();
+    await this.serverRegistry.load();
     await this.notes.load();
     this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
 
@@ -295,6 +307,28 @@ export class NoxApp {
       if (this.ui.reviewOpen.get()) this.ui.reviewOpen.set(false);
       if (this.ui.agentsOpen.get()) this.ui.agentsOpen.set(false);
     });
+
+    // Servers are per workspace, so they start when one opens and stop when it
+    // changes. Nothing starts without a root: a server given a root of nowhere
+    // indexes nothing and reports nothing, which looks exactly like a broken
+    // server.
+    this.workspace.rootPath.subscribe((root) => {
+      void this.#restartLanguageServers(root);
+    });
+
+    // A server that fails says so once, with the reason.
+    //
+    // The status bar already turns yellow and the tooltip already carries the
+    // message, but a colour change is something you notice and then have to
+    // interrogate. The most common first-run failure -- a server that cannot
+    // find its own TypeScript -- is entirely diagnosable from the text the
+    // server sent, and leaving that text one hover away wastes it.
+    this.lsp.sessions.subscribe((sessions) => this.#reportFailedServers(sessions));
+
+    // Diagnostics are painted by `EditorPane`, not from here. See the comment
+    // there: this class knows `workspace.activeId`, which is not the same
+    // question as "which buffer does that view currently hold", and answering
+    // the wrong one wrote diagnostics into the wrong file's state.
 
     this.workspace.rootPath.subscribe((root) => {
       void this.files.setRoot(root);
@@ -735,6 +769,82 @@ export class NoxApp {
       canSpawn: this.platform.capabilities.agentProcesses,
       providerIds: new Set(this.agents.providers.get().map((provider) => provider.id)),
     });
+  }
+
+  /**
+   * Bring the servers in line with the workspace.
+   *
+   * Stops whatever was running first: a server started against the previous
+   * root would answer every question about the wrong project.
+   */
+  async #restartLanguageServers(root: string | null): Promise<void> {
+    await this.lsp.stop();
+    if (!root) return;
+    if (!this.platform.capabilities.languageServers) return;
+    await this.lsp.start();
+  }
+
+  /**
+   * Announce a newly failed server, once each.
+   *
+   * Keyed by name and message together, so a server that fails, is fixed, and
+   * fails again for a different reason says so again — while a status
+   * republished for any other reason stays quiet.
+   */
+  #reportFailedServers(sessions: readonly SessionStatusRow[]): void {
+    const failed = new Set<string>();
+
+    for (const session of sessions) {
+      if (session.status !== 'failed') continue;
+
+      const key = `${session.name}: ${session.error ?? ''}`;
+      failed.add(key);
+      if (this.#reportedFailures.has(key)) continue;
+
+      // The server's own words first: it knows why it refused, and no
+      // paraphrase here could be more useful than the original. Its last
+      // stderr lines are the fallback, for a server that died without saying
+      // anything on the protocol.
+      const detail =
+        session.error ?? (session.stderr.length > 0 ? session.stderr.slice(-3).join(' · ') : null);
+
+      this.notifications.error(
+        `${session.name} could not start`,
+        detail ?? 'The server exited without saying why.',
+      );
+    }
+
+    // Forgotten once recovered, so a later failure is announced again rather
+    // than silently swallowed by a stale key.
+    this.#reportedFailures = failed;
+  }
+
+  /** Open `servers.json` for editing, creating it with an example if absent. */
+  async openServerConfig(): Promise<void> {
+    try {
+      await this.serverRegistry.ensureFile();
+    } catch (error) {
+      this.notifications.error(
+        'Could not create servers.json',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const directory = await this.platform.configDir().catch(() => null);
+    if (!directory) {
+      this.notifications.info(
+        'Language servers are configured in servers.json',
+        'The browser build keeps settings in the browser, so there is no file to open here.',
+      );
+      return;
+    }
+
+    await this.openPaths([join(directory, SERVERS_FILE)]);
+    this.notifications.info(
+      'Edit servers.json, then run "Reload Language Servers"',
+      'Each entry needs a command and the languages it serves.',
+    );
   }
 
   /** Open `agents.json` for editing, creating it with an example if absent. */
@@ -1820,6 +1930,39 @@ export class NoxApp {
         run: () => this.openAgentConfig(),
       },
       {
+        id: 'lsp.configure',
+        title: 'Configure Language Servers',
+        category: 'Language',
+        keywords: ['servers.json', 'lsp', 'diagnostics', 'typescript'],
+        capabilities: ['fs.create'],
+        run: () => this.openServerConfig(),
+      },
+      {
+        id: 'lsp.reload',
+        title: 'Reload Language Servers',
+        category: 'Language',
+        keywords: ['servers.json', 'lsp', 'restart'],
+        run: async () => {
+          const previous = this.serverRegistry.servers.get();
+          await this.serverRegistry.load();
+
+          const error = this.serverRegistry.error.get();
+          if (error) {
+            // The previous configuration stays live. A typo should not
+            // silently disarm the servers that were working a moment ago.
+            this.notifications.error('servers.json could not be read', error);
+            this.serverRegistry.servers.set(previous);
+            return;
+          }
+
+          await this.#restartLanguageServers(this.workspace.rootPath.get());
+          const count = this.serverRegistry.servers.get().length;
+          this.notifications.info(
+            `${count} language ${count === 1 ? 'server' : 'servers'} configured`,
+          );
+        },
+      },
+      {
         id: 'agents.reloadConfig',
         title: 'Reload Agent Configuration',
         category: 'Agents',
@@ -2412,6 +2555,20 @@ export class NoxApp {
         },
       },
 
+      // --- Problems ---------------------------------------------------------
+      {
+        id: 'problems.focus',
+        title: 'Show Problems',
+        category: 'Language',
+        keywords: ['diagnostics', 'errors', 'warnings', 'lsp'],
+        run: () => {
+          // Otherwise the command is inert whenever the sidebar is hidden,
+          // which is the same trap `answers.focus` documents.
+          this.config.set('workbench.showExplorer', true);
+          this.ui.showView('problems');
+        },
+      },
+
       // --- Notes ------------------------------------------------------------
       {
         id: 'notes.focus',
@@ -2683,6 +2840,11 @@ export class NoxApp {
     this.watcher.stop();
     // Notes first: settings and session each have an on-disk original to
     // fall back on if their flush is lost, but a note does not.
+    // Before the flushes: a reload does not kill the processes the renderer
+    // started, so without this every reload leaves a server orphaned with
+    // nothing left to talk to it.
+    await this.lsp.stop();
+    await this.platform.stopAllLanguageServers().catch(() => undefined);
     await this.notes.flush();
     await this.config.flush();
     await this.session.save();

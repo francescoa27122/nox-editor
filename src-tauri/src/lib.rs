@@ -8,6 +8,7 @@
 mod agent;
 mod fs;
 mod http;
+mod lsp;
 mod pty;
 mod search;
 mod watcher;
@@ -44,6 +45,7 @@ pub fn run() {
         .manage(watcher::WatcherState::default())
         .manage(search::SearchState::default())
         .manage(pty::PtyState::default())
+        .manage(lsp::LspState::default())
         .manage(http::HttpState::default())
         .invoke_handler(tauri::generate_handler![
             fs::nox_home_dir,
@@ -76,6 +78,10 @@ pub fn run() {
             pty::nox_pty_resize,
             pty::nox_pty_close,
             pty::nox_pty_close_all,
+            lsp::nox_lsp_start,
+            lsp::nox_lsp_send,
+            lsp::nox_lsp_stop,
+            lsp::nox_lsp_stop_all,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nox");
