@@ -33,8 +33,16 @@ back.**
 ## Try it
 
 **Download it** from the [latest release](https://github.com/francescoa27122/nox-editor/releases/latest).
+macOS, Windows and Linux all have builds: take the `.dmg` for your Mac's
+chip, the `-setup.exe` on Windows, or the `.deb` or `.rpm` on Linux.
 
-On macOS, drag Nox to Applications and run this once:
+Nox is not signed with a paid certificate on either platform that asks for
+one, so both interrupt the first run. Neither means the download is broken.
+
+On **Windows**, SmartScreen says *"Windows protected your PC"* — choose
+**More info**, then **Run anyway**.
+
+On **macOS**, drag Nox to Applications and run this once:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Nox.app
@@ -43,6 +51,9 @@ xattr -dr com.apple.quarantine /Applications/Nox.app
 You will need that command. Nox is ad-hoc signed rather than signed with an
 Apple Developer ID, so macOS quarantines it on download and claims it is
 *"damaged"*. That sounds like a corrupt download, but the file is fine.
+
+Linux packages are built on Ubuntu 22.04, so they need glibc 2.35 or newer.
+There is no AppImage.
 
 ### Or build it
 
@@ -233,13 +244,9 @@ actually able to change.
 
 ## Status
 
-**v0.2.** It's young, and it's a personal project rather than a product, but
-it's real software with 779 tests and I use it. Expect rough edges, and open an
+**v0.4.** It's young, and it's a personal project rather than a product, but
+it's real software with 855 tests and I use it. Expect rough edges, and open an
 issue if you hit one.
-
-**Local models and asking about a selection both landed after v0.2 was
-tagged**, so they're on `main` and in the next release rather than in the
-download above. Build from source if you want them now.
 
 Not there yet: no LSP, no Git integration, no plugins. Those are next, in
 roughly that order. See [ROADMAP.md](ROADMAP.md).

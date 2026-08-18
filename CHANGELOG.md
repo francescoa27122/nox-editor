@@ -6,6 +6,19 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-08-17
+
+### Added
+
+- **Windows builds.** The release now produces a Windows installer alongside
+  the macOS and Linux packages, so Windows is a platform you can download
+  rather than one you have to compile. It is ad-hoc built rather than signed,
+  so SmartScreen warns on first run — the same trade already made on macOS,
+  where the app is ad-hoc signed and has to be un-quarantined by hand.
+  - The first Windows installer was attached to 0.4.0 by hand, built from
+    that release's source once there was a runner to build it. From 0.4.1 it
+    is produced by the release build like every other package.
+
 ### Fixed
 
 - **Windows no longer shows two title bars.** The window kept its native bar
@@ -725,7 +738,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/francescoa27122/nox-editor/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francescoa27122/nox-editor/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francescoa27122/nox-editor/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/francescoa27122/nox-editor/compare/v0.1.0...v0.2.0
