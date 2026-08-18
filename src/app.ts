@@ -46,8 +46,6 @@ import {
   type OllamaAgentConfig,
 } from '@services/agent/config';
 import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
-import { applyDiagnostics } from './editor/lsp';
-import { pathToUri } from '@core/uri';
 import { OllamaProvider } from '@services/agent/ollama';
 import type { AgentTransport } from '@services/agent/protocol';
 import type { AnswerExpectation, ModelProvider } from '@services/agent/provider';
@@ -327,11 +325,10 @@ export class NoxApp {
     // server sent, and leaving that text one hover away wastes it.
     this.lsp.sessions.subscribe((sessions) => this.#reportFailedServers(sessions));
 
-    // A batch, or a different buffer in front of you, both mean the squiggles
-    // on screen are for the wrong text.
-    this.lsp.diagnostics.subscribe(() => this.#paintDiagnostics());
-    this.view.subscribe(() => this.#paintDiagnostics());
-    this.workspace.activeId.subscribe(() => this.#paintDiagnostics());
+    // Diagnostics are painted by `EditorPane`, not from here. See the comment
+    // there: this class knows `workspace.activeId`, which is not the same
+    // question as "which buffer does that view currently hold", and answering
+    // the wrong one wrote diagnostics into the wrong file's state.
 
     this.workspace.rootPath.subscribe((root) => {
       void this.files.setRoot(root);
@@ -820,19 +817,6 @@ export class NoxApp {
     // Forgotten once recovered, so a later failure is announced again rather
     // than silently swallowed by a stale key.
     this.#reportedFailures = failed;
-  }
-
-  /** Draw the diagnostics for whatever buffer is in front of the user. */
-  #paintDiagnostics(): void {
-    const view = this.view.get();
-    if (!view) return;
-
-    const path = this.workspace.active()?.path ?? null;
-    // An untitled buffer has no URI, so nothing can have been published for
-    // it. Clearing rather than returning: the view may still be showing the
-    // squiggles of the file that was there before.
-    const diagnostics = path ? this.lsp.diagnosticsFor(pathToUri(path)) : [];
-    applyDiagnostics(view, diagnostics);
   }
 
   /** Open `servers.json` for editing, creating it with an example if absent. */
