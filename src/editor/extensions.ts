@@ -26,6 +26,7 @@ import {
 import type { Settings } from '@services/config/schema';
 import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
+import { lspDiagnosticsExtension } from './lsp';
 import { languageCompartment } from './languages';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
 import { searchHighlighter } from './search-highlight';
@@ -216,6 +217,10 @@ export function buildExtensions(settings: Settings): Extension[] {
   return [
     ...staticExtensions(),
     ...configured,
+    // The gutter marks. Squiggles arrive per batch through `setDiagnostics`,
+    // so nothing here is conditional on a server being configured — with none
+    // running there are simply no diagnostics, and the gutter stays empty.
+    lspDiagnosticsExtension(),
     // Empty until the grammar resolves; see `editor/languages.ts`.
     languageCompartment.of([]),
   ];
