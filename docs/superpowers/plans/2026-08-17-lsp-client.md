@@ -1079,15 +1079,15 @@ git commit -m "Paint diagnostics through lint, clamped to the document"
 - Consumes: `LspService.diagnostics` (Task 11).
 - Produces: a `problems` panel id.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Follow `tests/answers-panel.test.ts` for the component-test harness. Cases: rows group by file; the count in the header matches the total; arrow keys move `focused`; Enter opens the file at the diagnostic's line; an empty state renders instead of a bare list.
 
-- [ ] **Step 2–4: Fail, implement, pass.**
+- [x] **Step 2–4: Fail, implement, pass.**
 
 Copy `SearchPanel`'s `rows()` / `focused` shape rather than inventing a second navigation model.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 npm run check && npm test

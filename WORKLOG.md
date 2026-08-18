@@ -8,7 +8,7 @@ are knowledge.**
 
 ---
 
-## 2026-08-17 — LSP client and diagnostics, 14 of 16 tasks
+## 2026-08-17 — LSP client and diagnostics, all 16 tasks
 
 Shipped:
 
@@ -19,17 +19,18 @@ Shipped:
   write substituted the capture. Branch `fix-replace-preview-groups`.
 - Deleted the two merged preserve-case plan docs. Branch
   `retire-preserve-case-plans`.
-- The LSP client, on branch `lsp-client`, tasks 1–12 and 14–15 of
+- The LSP client, on branch `lsp-client`, all sixteen tasks of
   `docs/superpowers/plans/2026-08-17-lsp-client.md`:
   `src/core/uri.ts`, `src/core/lsp-position.ts`, the `LanguageServerProcess`
   boundary, `src-tauri/src/lsp.rs` (framing + supervision + four commands),
   `src/services/lsp/{transport,session,documents,registry,index}.ts`,
-  `src/editor/lsp.ts`, `src/ui/lsp-status.ts`, and the `app.ts` wiring with
-  **Configure Language Servers** / **Reload Language Servers**.
+  `src/editor/lsp.ts`, `src/ui/{lsp-status,problems}.ts`,
+  `src/ui/ProblemsPanel.svelte`, and the `app.ts` wiring with **Configure
+  Language Servers**, **Reload Language Servers** and **Show Problems**.
 
 Verified:
 
-- `npm test` — 961 passed, 48 files. `npm run check` — 405 files, 0 errors.
+- `npm test` — 971 passed, 49 files. `npm run check` — 408 files, 0 errors.
   Baseline at session start was 855 / 37 and 385 files.
 - The replace bug was reproduced in node before any code changed: window lead
   143, match column 60, rescan lands on 56/63/70, never 60.
@@ -41,12 +42,13 @@ Verified:
 
 Next:
 
-- **Task 13, the problems panel** (`src/ui/ProblemsPanel.svelte` + sidebar
-  registration). It is the only piece of the spec's stated scope not built.
-  `LspService.diagnostics` already holds every URI, including files nobody
-  opened, so the panel is presentation over a store that is done and tested.
-  Copy `SearchPanel`'s `rows()`/`focused` shape rather than inventing a second
-  navigation model.
+- **Run it against a real `typescript-language-server`.** Everything is built
+  and nothing has met a real server. That run is worth more than any further
+  code, and it is what decides whether the design's assumptions hold — in
+  particular full-text sync at 300ms on a large file, and whether tsserver's
+  diagnostics carry the `version` the stale-batch check wants.
+- Then the next v0.4 item: completion, which is the cheapest one to reach from
+  here (`@codemirror/autocomplete` is already a dependency).
 
 Blocked / unverified:
 

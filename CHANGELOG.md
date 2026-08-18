@@ -20,8 +20,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   says so in the status bar, with its last words on stderr in the tooltip,
   rather than leaving you wondering why nothing is underlined.
 
-  The problems panel listing every file at once is still to come; today the
-  diagnostics appear in the file you are looking at.
+  The **Problems** panel in the sidebar lists everything at once, grouped by
+  file and driven with the arrow keys. It includes files you never opened —
+  which is usually where a project's real errors are.
 
 ## [0.4.1] — 2026-08-17
 
