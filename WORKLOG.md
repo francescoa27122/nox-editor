@@ -8,6 +8,97 @@ are knowledge.**
 
 ---
 
+## 2026-08-18 (later still) — The apt step that hangs
+
+On branch `ci-apt-mirror-stall`, not pushed. The `rust (ubuntu-22.04)` job's
+dependency install hung five times in one day, 10-26 minutes against ~1.8
+minutes healthy, each time needing a human to cancel and `gh run rerun`.
+
+What it actually is, from the run logs rather than from the symptom:
+
+- `apt-get update` is **not** the problem. It finishes in 3-8s even on the bad
+  runs (32s on the worst). The whole stall is inside `apt-get install`.
+- Nothing fails, times out, or errors. apt just crawls: run 32163740199
+  reported `Fetched 55.6 MB in 22min 12s (41.7 kB/s)` against `in 9s` on a
+  healthy run of the same commit.
+- Time per package is **uncorrelated with package size** — 14.2 kB took 17.9s,
+  356 kB took 5.0s. So it is per-request latency across 137 serial requests,
+  not bandwidth. That is why `Acquire::Retries` and `Acquire::http::Timeout`
+  are both no-ops here: there is no error to retry and no idle socket to time
+  out. A plain retry is also weak, because the degradation is sustained for
+  the whole 22 minutes rather than bursty.
+
+So the fix is to stop asking the mirror at all, and to bound what is left:
+
+- `.github/actions/linux-build-deps/` — new composite action, used by both
+  `ci.yml` and `release.yml` (which carried the identical block plus
+  `patchelf`). One copy, because the retry shell is subtle enough that two
+  copies would drift.
+- `actions/cache@v6` over `~/apt-archives`, seeded into
+  `/var/cache/apt/archives` **after** `apt-get update`. On a warm cache apt
+  downloads nothing, so the mirror cannot affect the step at all.
+- Download and install are split. A `timeout` can then only ever interrupt the
+  network half; dpkg is never killed part-way through unpacking. Completed
+  `.debs` survive the kill, so the three attempts accumulate progress rather
+  than restarting.
+- `--no-install-recommends` drops 42 packages of gstreamer, pipewire, pulse,
+  polkit and codecs that a compile-only job never uses.
+- `Acquire::ForceIPv4` — the one unproven piece, see Blocked.
+
+Verified, locally in Docker against a runner-like image:
+
+- Cold cache: 239 packages, exit 0, 48s, `pkg-config --modversion
+  webkit2gtk-4.1` → 2.50.4.
+- Warm cache: `Seeded 239 package(s)` → `Need to get 0 B/124 MB`. Zero
+  archives fetched. With `extra-packages: patchelf`, exactly `72.1 kB`.
+- Resume is real, not assumed: a download killed at 3s kept 55 of 281 `.debs`
+  and the retry fetched only `115 MB/133 MB`.
+- The retry function against a hang → three attempts then `::error::` and
+  nonzero, in 21s; against a twice-failing command → recovers on attempt 3;
+  `set -e` does not abort the script on a failed attempt.
+- `bash -n` clean, shellcheck clean, all three YAML files parse, CRLF intact.
+
+One thing worth carrying forward:
+
+- **Seed the apt cache after `apt-get update`, never before.** The first
+  version seeded first and silently re-downloaded all 124 MB — an
+  `APT::Update::Post-Invoke` hook can empty `/var/cache/apt/archives`. Caught
+  only because the warm-cache run was actually executed rather than reasoned
+  about.
+
+Then confirmed on the real runners, two `workflow_dispatch` runs on the pushed
+branch (32184094506 cold, 32184425793 warm), all ten jobs green:
+
+- Cold: `Cache not found`, `Seeded 0`, `Fetched 52.8 MB in 51s`, then
+  `Need to get 0 B/52.8 MB` for the install half. Step took 1m52s.
+- Warm: `Cache hit`, `Seeded 122 package(s)`, `Need to get 0 B/52.8 MB`.
+  **Nothing was fetched from the mirror at all.** Step took 1m09s.
+- `--no-install-recommends` is worth more on the runner than in the container:
+  137 packages and 55.6 MB become 122 and 52.8 MB. Fewer serial requests is
+  the axis that matters, since the stall is per-request.
+- actionlint clean over both workflows, which is the only check `release.yml`
+  gets — it runs on tags, so the `extra-packages: patchelf` wiring is
+  structurally verified but has not executed.
+
+Next:
+
+- Open the PR. CI does not run on a branch push here (`push` is `main` only),
+  so a PR is also what makes the check appear on the PR itself.
+- Watch whether a stall ever recurs on a *cold* cache. That is the only path
+  still exposed, and it is now bounded at three 5-minute attempts rather than
+  open-ended.
+
+Blocked:
+
+- `lsp-hover` carries a copy of these four files, swept in by a parallel
+  session's `git add -A` while both were in this worktree. Merging it would
+  bring this change in twice. Left alone: it is someone else's branch in
+  flight.
+- `Acquire::ForceIPv4` is a hypothesis, not a measurement. Constant
+  size-independent per-request latency is what a failed IPv6 connect followed
+  by IPv4 fallback looks like, but the runner logs do not say so outright. It
+  is harmless if wrong, and the cache does not depend on it being right.
+
 ## 2026-08-18 (later) — Completion
 
 Shipped, on branch `lsp-completion`, all six planned tasks:
