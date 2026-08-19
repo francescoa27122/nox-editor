@@ -27,6 +27,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   files it touched are opened and left unsaved, like every reviewed change;
   **Save All** writes them.
 
+- **Format Document**, and **Format on Save.** `Shift+Alt+F` asks the
+  language server to format the file and applies the answer as one change —
+  one undo takes it back. Turn on *Format on Save* in Settings and the same
+  happens just before each save, with the editor's own tab size and spaces
+  setting. The save never waits more than two seconds for the formatter and
+  never fails because of it: a slow server means a saved file and a note
+  saying it was saved unformatted; a keystroke while the server is thinking
+  wins over the format. Not run under after-delay Auto Save, which would
+  reformat under your cursor.
+
 ### Changed
 
 - **Go to Definition with several answers** now goes to the first and lists

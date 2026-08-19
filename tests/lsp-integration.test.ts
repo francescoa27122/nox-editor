@@ -8,6 +8,7 @@ import { hoverBlocks } from '../src/core/lsp-hover';
 import { definitionTargets } from '../src/core/lsp-definition';
 import { referenceTargets } from '../src/core/lsp-references';
 import { prepareRenameSeed, renameEdits } from '../src/core/lsp-rename';
+import { changesOf, textEditsOf } from '../src/core/lsp-text-edit';
 import { spawnLanguageServer } from './support/lsp-child';
 
 /**
@@ -504,5 +505,41 @@ describe('rename from a real typescript-language-server', () => {
       [0, 6, 12, 'result'],
       [1, 15, 21, 'result'],
     ]);
+  }, 90_000);
+});
+
+describe('formatting from a real typescript-language-server', () => {
+  it('offers formatting, and its edits tidy the document', async () => {
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    expect(session.status.get(), `stderr: ${session.stderr.join(' | ')}`).toBe('running');
+    expect(
+      (session.capabilities.get() as Record<string, unknown>).documentFormattingProvider,
+    ).toBeTruthy();
+
+    const source = 'const  x=1\nlet   y = 2\n';
+    const textDocument = { uri: pathToUri(filePath) };
+    await session.notify('textDocument/didOpen', {
+      textDocument: { ...textDocument, languageId: 'typescript', version: 1, text: source },
+    });
+
+    const response = await session.request<unknown>('textDocument/formatting', {
+      textDocument,
+      options: { tabSize: 2, insertSpaces: true },
+    });
+    await session.stop();
+
+    const edits = textEditsOf(response);
+    expect(edits.length).toBeGreaterThan(0);
+    // Apply them the way the app does and read the result. The exact edit
+    // list is tsserver's business; what it produces is ours to assert.
+    const changes = changesOf(source, edits).sort((a, b) => b.from - a.from);
+    let text = source;
+    for (const { from, to, insert } of changes) text = text.slice(0, from) + insert + text.slice(to);
+    expect(text).toBe('const x = 1\nlet y = 2\n');
   }, 90_000);
 });

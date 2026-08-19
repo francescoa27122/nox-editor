@@ -8,6 +8,80 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, night) — Formatting: on demand and on save
+
+On branch `lsp-format`, stacked on `lsp-rename` (#42). Design in
+`docs/superpowers/specs/2026-08-19-lsp-format-design.md`. The LSP half of
+the roadmap row; the external-command half is deliberately a separate row
+(spec §1) — **scope narrowed on purpose, say so**: a formatter binary wants
+a process seam and a per-language table, neither of which belongs inside a
+save path.
+
+Shipped:
+
+- `src/core/lsp-text-edit.ts` — `TextEdit`, `textEditsOf`, `changesOf`;
+  the reading rename had privately, moved out so rename and formatting
+  share one. `lsp-rename.ts` and `#renameSymbol` now use it.
+- `NoxApp.formatBuffer(id, { timeoutMs? })` → `formatted | unchanged |
+  unavailable | stale | failed | timeout`. `textDocument/formatting` with
+  `editor.tabSize` / `editor.insertSpaces`; applied via `workspace.apply`
+  with `baseRevisions`, so one undo takes it back and a keystroke during the
+  request is refused, not formatted over. The timeout race lives **inside**,
+  before the apply, so a late answer is never applied.
+- `lsp.formatDocument` — **Format Document**, `Shift+Alt+F`, enabled on
+  `documentFormattingProvider`. Reports `failed` and `unavailable`; says
+  nothing otherwise.
+- `files.formatOnSave` (bool, off) and `#formatBeforeSave` in `save` and
+  `saveAs`: skipped when off or under `afterDelay` autosave; 2 s bound;
+  timeout/failed → saved anyway with a warning; stale → saved as typed,
+  silently. **The save always happens.**
+- `tests/support/fake-lsp-process.ts` awaits a handler that returns a
+  promise — "answers late / never" is now stageable.
+- CHANGELOG `[Unreleased]`, ROADMAP row ✅ (LSP half), README.
+
+Verified:
+
+- `npm test` — 1162 passed, 66 files (was 1144/64). `npm run check` — 437
+  files, 0 errors. `npm run build` green.
+- `tests/lsp-text-edit.test.ts` (6), `tests/lsp-format.test.ts` (jsdom, 11:
+  real pane, real save path, in-memory disk read back). Six mutations seen
+  red: options not from config; `#formatBeforeSave` not awaited; setting
+  unchecked; autosave unchecked; `baseRevisions` dropped; the race removed.
+  **The late-answer test caught the first design**: racing the whole
+  `formatBuffer` from the save path and checking a flag afterwards let the
+  edit land before the flag was read, so the buffer went dirty right after
+  the save. The race moved inside, before the apply; the spec was rewritten
+  to match.
+- Real `typescript-language-server`: advertises formatting; its edits turn
+  `const  x=1` / `let   y = 2` into `const x = 1` / `let y = 2` (it does
+  not add semicolons). Asserted.
+- Browser build: *Format on Save* in Settings with its description;
+  "Language: Format Document Alt+Shift+F" in the palette; no console
+  errors. The format itself needs a server, so: seen in jsdom, not on a
+  screen.
+
+Next:
+
+- **A tag build.** Five LSP surfaces since 0.4.2 — references, the
+  definitions list, rename, format, format-on-save — none seen on a
+  display. `v0.4.3` and ten minutes with the desktop app before Git
+  starts.
+- Then the v0.5 table: Git gutter first.
+
+Blocked:
+
+- Nothing technical.
+
+Confidence:
+
+- High on the save invariant — it is the thing the suite tries hardest to
+  break, and the one mutation that survived the first draft was the one
+  that mattered.
+- Medium on the 2 s bound as a number: it is a guess at "fast enough not
+  to notice, slow enough for tsserver on a big file". Tune from use.
+
+---
+
 ## 2026-08-19 (PC, evening) — Rename symbol
 
 On branch `lsp-rename`, off `main` at `cfe3db4` (#39, #40, #41 merged).
