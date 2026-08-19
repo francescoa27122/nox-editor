@@ -28,7 +28,11 @@ export class FakeLanguageServer implements LanguageServerProcess {
     this.#capabilities = options.capabilities ?? {};
   }
 
-  /** Answer `method` requests with `fn(params)`. */
+  /**
+   * Answer `method` requests with `fn(params)`. A handler may return a
+   * promise: the reply is sent when it settles, which is how a test stages a
+   * server that answers late, or never.
+   */
   handle(method: string, fn: (params: unknown) => unknown): void {
     this.#handlers.set(method, fn);
   }
@@ -42,7 +46,7 @@ export class FakeLanguageServer implements LanguageServerProcess {
       this.say({ jsonrpc: '2.0', id: parsed.id, result: null });
     } else if (parsed.id !== undefined && parsed.method && this.#handlers.has(parsed.method)) {
       try {
-        const result = this.#handlers.get(parsed.method)!(parsed.params);
+        const result = await this.#handlers.get(parsed.method)!(parsed.params);
         this.say({ jsonrpc: '2.0', id: parsed.id, result });
       } catch (error) {
         this.say({

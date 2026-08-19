@@ -252,6 +252,12 @@ export const SETTINGS_SCHEMA = {
     description: 'Ensure the file ends with exactly one newline on save.',
     category: 'Files',
   }),
+  'files.formatOnSave': bool(false, {
+    label: 'Format on Save',
+    description:
+      'Ask the language server to format the file just before each save. Needs a server that offers formatting; skipped when Auto Save is After Delay.',
+    category: 'Files',
+  }),
   'files.excludeFromExplorer': str('.git, node_modules, target, dist, .DS_Store', {
     label: 'Hide In Explorer',
     description: 'Comma-separated names the explorer will not show.',

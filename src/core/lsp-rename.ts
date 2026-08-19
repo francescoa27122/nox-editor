@@ -1,5 +1,5 @@
 import type { LspRange } from './lsp-definition';
-import type { LspPosition } from './lsp-position';
+import { isLspRange, textEditsOf, type TextEdit } from './lsp-text-edit';
 
 /**
  * Rename symbol: the two answers a server gives, reduced.
@@ -12,10 +12,7 @@ import type { LspPosition } from './lsp-position';
  * `docs/superpowers/specs/2026-08-19-lsp-rename-design.md`.
  */
 
-export interface TextEdit {
-  range: LspRange;
-  newText: string;
-}
+export type { TextEdit } from './lsp-text-edit';
 
 export interface FileEdits {
   uri: string;
@@ -30,40 +27,6 @@ export interface RenamePlan {
    * whole rename: half of one is worse than none.
    */
   unsupported: string[];
-}
-
-function isPosition(value: unknown): value is LspPosition {
-  if (typeof value !== 'object' || value === null) return false;
-  const { line, character } = value as LspPosition;
-  return (
-    Number.isInteger(line) && line >= 0 && Number.isInteger(character) && character >= 0
-  );
-}
-
-function isRange(value: unknown): value is LspRange {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    isPosition((value as LspRange).start) &&
-    isPosition((value as LspRange).end)
-  );
-}
-
-function textEditOf(entry: unknown): TextEdit | null {
-  if (typeof entry !== 'object' || entry === null) return null;
-  const { range, newText } = entry as Record<string, unknown>;
-  if (!isRange(range) || typeof newText !== 'string') return null;
-  return { range, newText };
-}
-
-function textEditsOf(entries: unknown): TextEdit[] {
-  if (!Array.isArray(entries)) return [];
-  const edits: TextEdit[] = [];
-  for (const entry of entries) {
-    const edit = textEditOf(entry);
-    if (edit) edits.push(edit);
-  }
-  return edits;
 }
 
 /**
@@ -130,7 +93,7 @@ export function prepareRenameSeed(
   if (response === null) return null;
   if (typeof response !== 'object') return fallback;
   const record = response as Record<string, unknown>;
-  if (typeof record.placeholder === 'string' && isRange(record.range)) return record.placeholder;
-  if (isRange(response)) return textAt(response);
+  if (typeof record.placeholder === 'string' && isLspRange(record.range)) return record.placeholder;
+  if (isLspRange(response)) return textAt(response);
   return fallback;
 }

@@ -17,6 +17,7 @@ import type { EditorView } from '@codemirror/view';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
 import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
 import { prepareRenameSeed, renameEdits } from '@core/lsp-rename';
+import { changesOf, textEditsOf } from '@core/lsp-text-edit';
 import { offsetAt, positionAt } from '@core/lsp-position';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
@@ -79,8 +80,17 @@ import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
 import { UIService } from '@services/ui';
 import { FileWatcherService } from '@services/watcher';
-import { WorkspaceService } from '@services/workspace';
+import { WorkspaceService, type BufferId } from '@services/workspace';
 import type { ChangeSetSpec } from '@services/transactions';
+
+/** What `NoxApp.formatBuffer` did. The save path and the command read it differently. */
+export type FormatOutcome =
+  | { kind: 'formatted' }
+  | { kind: 'unchanged' }
+  | { kind: 'unavailable' }
+  | { kind: 'stale' }
+  | { kind: 'timeout' }
+  | { kind: 'failed'; message: string };
 
 export interface CursorReadout {
   line: number;
@@ -944,12 +954,114 @@ export class NoxApp {
       }
     }
 
+    await this.#formatBeforeSave(id, buffer.name);
+
     const saved = await this.workspace.save(id, this.#saveOptions());
     if (saved) {
       this.watcher.clearWarning(id);
       this.notifications.success(`Saved ${buffer.name}`);
     }
     return saved;
+  }
+
+  /** How long a save waits for the formatter before going ahead without it. */
+  static readonly FORMAT_ON_SAVE_TIMEOUT_MS = 2000;
+
+  /**
+   * Format on save, as a courtesy on the way to the disk.
+   *
+   * **The save always happens.** Whatever this returns, the caller writes —
+   * this only decides whether the bytes are the formatted ones. Bounded in
+   * time so a slow server cannot make Save a thing that sometimes does not
+   * save; a late answer is dropped, because applying it after the write
+   * would leave a just-saved file dirty with an edit nobody saw coming.
+   * Skipped under after-delay autosave: a format on every pause in typing
+   * rewrites the text under the cursor.
+   */
+  async #formatBeforeSave(id: BufferId, name: string): Promise<void> {
+    if (!this.config.get('files.formatOnSave')) return;
+    if (this.config.get('files.autoSave') === 'afterDelay') return;
+
+    const outcome = await this.formatBuffer(id, { timeoutMs: NoxApp.FORMAT_ON_SAVE_TIMEOUT_MS });
+
+    if (outcome.kind === 'timeout') {
+      this.notifications.warn(
+        `Saved ${name} without formatting`,
+        'The language server did not answer in time.',
+      );
+    } else if (outcome.kind === 'failed') {
+      this.notifications.warn(`Saved ${name} without formatting`, outcome.message);
+    }
+    // unavailable, unchanged, formatted: nothing to say. stale: the user was
+    // typing, and the keystroke wins over the format, silently.
+  }
+
+  /**
+   * Ask the server to format `id` and apply the answer as one change set.
+   *
+   * Not through the review panel: a format is not a proposal, it is the same
+   * text arranged the way the project already agreed on. One undo takes it
+   * back. The revision is captured before the request and checked by
+   * `apply`, so a keystroke while the server thinks is refused rather than
+   * formatted over.
+   *
+   * With `timeoutMs`, a server that has not answered by then yields
+   * `timeout` and its eventual answer is **never applied** — the race is
+   * decided before the apply, not after it, which is the only place that
+   * guarantee can be made. (A first version raced the whole call and checked
+   * a flag afterwards; the edit had already landed by then.)
+   */
+  async formatBuffer(id: BufferId, options: { timeoutMs?: number } = {}): Promise<FormatOutcome> {
+    const buffer = this.workspace.get(id);
+    const snapshot = this.workspace.buffers.get().find((b) => b.id === id);
+    if (!buffer || !snapshot?.path) return { kind: 'unavailable' };
+    if (!this.lsp.capabilitiesFor(snapshot.languageId)?.documentFormattingProvider) {
+      return { kind: 'unavailable' };
+    }
+
+    const revision = this.workspace.revisionOf(id);
+    const request = this.lsp.requestFor(snapshot.languageId, 'textDocument/formatting', {
+      textDocument: { uri: pathToUri(snapshot.path) },
+      // The editor's own indentation, so a formatter and a keystroke agree.
+      options: {
+        tabSize: this.config.get('editor.tabSize'),
+        insertSpaces: this.config.get('editor.insertSpaces'),
+      },
+    });
+
+    const TIMEOUT = Symbol('timeout');
+    const answered = request.then(
+      (response) => ({ response }),
+      (error: unknown) => ({ error }),
+    );
+    const winner =
+      options.timeoutMs === undefined
+        ? await answered
+        : await Promise.race([
+            answered,
+            new Promise<typeof TIMEOUT>((resolve) => setTimeout(() => resolve(TIMEOUT), options.timeoutMs)),
+          ]);
+    if (winner === TIMEOUT) return { kind: 'timeout' };
+    if ('error' in winner) {
+      const { error } = winner;
+      return { kind: 'failed', message: error instanceof Error ? error.message : String(error) };
+    }
+    const { response } = winner;
+
+    const edits = textEditsOf(response);
+    if (edits.length === 0) return { kind: 'unchanged' };
+    const text = this.workspace.textOf(id);
+    if (text === undefined) return { kind: 'unavailable' };
+
+    const result = this.workspace.apply({
+      description: `Format ${snapshot.name}`,
+      author: { kind: 'user' },
+      edits: [{ bufferId: id, changes: changesOf(text, edits) }],
+      baseRevisions: new Map([[id, revision]]),
+    });
+    if (result.ok) return { kind: 'formatted' };
+    if (result.reason === 'stale') return { kind: 'stale' };
+    return { kind: 'failed', message: `The server's edits could not be applied (${result.reason}).` };
   }
 
   async saveAs(id = this.workspace.activeId.get()): Promise<boolean> {
@@ -963,6 +1075,7 @@ export class NoxApp {
       : await this.#promptForPath('Save As', suggestion);
 
     if (!path) return false;
+    await this.#formatBeforeSave(id, basename(path));
     const saved = await this.workspace.saveAs(id, path, this.#saveOptions());
     if (saved) {
       this.notifications.success(`Saved ${basename(path)}`);
@@ -2012,6 +2125,29 @@ export class NoxApp {
         run: () => this.#renameSymbol(),
       },
       {
+        id: 'lsp.formatDocument',
+        title: 'Format Document',
+        category: 'Language',
+        keywords: ['format', 'prettify', 'indent', 'lsp'],
+        capabilities: ['buffer.edit'],
+        enabled: () => {
+          const snapshot = this.workspace.activeSnapshot();
+          if (!snapshot?.path) return false;
+          return Boolean(this.lsp.capabilitiesFor(snapshot.languageId)?.documentFormattingProvider);
+        },
+        run: async () => {
+          const id = this.workspace.activeId.get();
+          if (!id) return;
+          const outcome = await this.formatBuffer(id);
+          if (outcome.kind === 'failed') this.notifications.error('Format failed', outcome.message);
+          else if (outcome.kind === 'unavailable') {
+            this.notifications.info('No language server offers formatting for this file');
+          }
+          // formatted, unchanged, stale: the document shows the result, and a
+          // format that lost to a keystroke is not worth a toast.
+        },
+      },
+      {
         id: 'references.focus',
         title: 'Show References',
         category: 'Language',
@@ -2778,6 +2914,7 @@ export class NoxApp {
       F12: 'lsp.goToDefinition',
       'Shift+F12': 'lsp.findReferences',
       F2: 'lsp.renameSymbol',
+      'Shift+Alt+F': 'lsp.formatDocument',
 
       // View
       'Mod+B': 'view.toggleExplorer',
@@ -3057,14 +3194,7 @@ export class NoxApp {
       }
       const bufferText = this.workspace.textOf(id);
       if (bufferText === undefined) return;
-      edits.push({
-        bufferId: id,
-        changes: file.edits.map((edit) => {
-          const from = offsetAt(bufferText, edit.range.start);
-          const to = Math.max(from, offsetAt(bufferText, edit.range.end));
-          return { from, to, insert: edit.newText };
-        }),
-      });
+      edits.push({ bufferId: id, changes: changesOf(bufferText, file.edits) });
     }
     // Opening activates, and the user asked from `snapshot`'s file: the
     // review panel is what they look at next, and the file they were in is
