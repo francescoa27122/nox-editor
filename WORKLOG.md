@@ -59,14 +59,6 @@ Verified, locally in Docker against a runner-like image:
   `set -e` does not abort the script on a failed attempt.
 - `bash -n` clean, shellcheck clean, all three YAML files parse, CRLF intact.
 
-One thing worth carrying forward:
-
-- **Seed the apt cache after `apt-get update`, never before.** The first
-  version seeded first and silently re-downloaded all 124 MB — an
-  `APT::Update::Post-Invoke` hook can empty `/var/cache/apt/archives`. Caught
-  only because the warm-cache run was actually executed rather than reasoned
-  about.
-
 Then confirmed on the real runners, two `workflow_dispatch` runs on the pushed
 branch (32184094506 cold, 32184425793 warm), all ten jobs green:
 
@@ -84,15 +76,38 @@ branch (32184094506 cold, 32184425793 warm), all ten jobs green:
 - The repo was at 9.8 GB of its 10 GB Actions cache limit, 7.71 GB of it stale
   `v0.4.1-*-test` tag caches. Cleared — a 50 MB apt cache was otherwise a
   plausible eviction, which would have quietly undone all of this.
-- actionlint clean over both workflows, which is the only check `release.yml`
-  gets — it runs on tags, so the `extra-packages: patchelf` wiring is
-  structurally verified but has not executed.
+- actionlint clean over both workflows — which, until the tag run below, was
+  the only check `release.yml` got.
+
+And `release.yml`, which had never run, exercised by a throwaway tag
+`v0.4.1-apt-test1` off `main` (run 32207771888, since deleted along with its
+draft and caches). All four platforms built:
+
+- The `extra-packages: patchelf` input reaches the action — `EXTRA_PACKAGES:
+  patchelf` — and takes its own cache key, `apt-jammy-patchelf-`, separate
+  from CI's `apt-jammy-base-`. Worth keeping separate even though `patchelf`
+  turns out to be preinstalled on the runner and downloads nothing.
+- **The mirror degraded mid-run and the retry caught it**, unplanned. Two
+  120s attempts at `apt-get update` timed out, the third got through at
+  `Fetched 257 kB in 38s (6695 B/s)`, and the build went green with nobody
+  watching. Cold path cost 6m24s. That is the whole point of the change,
+  observed rather than argued.
+
+Two things worth carrying forward:
+
+- **Seed the apt cache after `apt-get update`, never before.** The first
+  version seeded first and silently re-downloaded all 124 MB — an
+  `APT::Update::Post-Invoke` hook can empty `/var/cache/apt/archives`. Caught
+  only because the warm-cache run was actually executed rather than reasoned
+  about.
+- **`apt-get update` degrades too.** Every one of the five logged incidents
+  sat in `apt-get install`, and the entry above says so — but the release run
+  stalled in `update` instead, at 6.7 kB/s. The pattern held across five
+  samples and still was not the rule. `update` is wrapped in the same retry
+  on general principle, and that is the only reason that run passed.
 
 Next:
 
-- `release.yml` still has not executed — it only runs on tags, so the
-  `extra-packages: patchelf` path is verified by actionlint and by sharing one
-  action with CI, but nothing has run it. A throwaway `v0.4.1-*` tag would.
 - Watch whether a stall ever recurs on a *cold* cache. That is the only path
   still exposed, and it is now bounded at three 5-minute attempts rather than
   open-ended.
@@ -103,6 +118,8 @@ Blocked:
   size-independent per-request latency is what a failed IPv6 connect followed
   by IPv4 fallback looks like, but the runner logs do not say so outright. It
   is harmless if wrong, and the cache does not depend on it being right.
+  The release run degraded straight through it, so whatever it does, it is
+  not a cure on its own — the cache and the retry are what carry this.
 
 ## 2026-08-18 (later) — Completion
 
