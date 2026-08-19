@@ -4,7 +4,7 @@
 
 **Goal:** `F12` / **Go to Definition** asks the language server where the symbol under the cursor is defined and moves the cursor there, opening the file first when needed.
 
-**Architecture:** A pure normaliser in `src/core/lsp-definition.ts` reduces the four LSP response shapes to `{ uri, range }[]`. `app.ts` gains a `lsp.goToDefinition` command and a public `revealLocation()` built on `workspace.open` plus a selection dispatch — the same primitives `ProblemsPanel` uses. Tests: node for the normaliser, jsdom (real `EditorPane` + `FakeLanguageServer`, as `tests/lsp-rendering.test.ts` does) for the command, and one case against the real tsserver.
+**Architecture:** A pure normaliser in `src/core/lsp-definition.ts` reduces the four LSP response shapes to `{ uri, range }[]`. `app.ts` gains a `lsp.goToDefinition` command and a public `revealLocation()` built on `workspace.open` plus `workspace.setSelection`. Tests: node for the normaliser, jsdom (real `EditorPane` + `FakeLanguageServer`, as `tests/lsp-rendering.test.ts` does) for the command, and one case against the real tsserver.
 
 **Tech Stack:** TypeScript, vitest 4 (node + jsdom), Svelte 5 harness, `@codemirror/state`.
 

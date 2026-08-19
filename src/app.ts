@@ -2723,14 +2723,15 @@ export class NoxApp {
       'Mod+Shift+G': 'edit.findPrevious',
       F3: 'edit.findNext',
       'Shift+F3': 'edit.findPrevious',
-      // Language. F12 is the convention everywhere; it needs no chord.
-      F12: 'lsp.goToDefinition',
       'Mod+Shift+L': 'edit.selectAllMatches',
       // ⌘⇧[ / ⌘⇧] already switch tabs, so folding takes the ⌥ variants.
       'Mod+Alt+[': 'edit.fold',
       'Mod+Alt+]': 'edit.unfold',
       'Mod+Alt+Shift+[': 'edit.foldAll',
       'Mod+Alt+Shift+]': 'edit.unfoldAll',
+
+      // Language. F12 is the convention everywhere; it needs no chord.
+      F12: 'lsp.goToDefinition',
 
       // View
       'Mod+B': 'view.toggleExplorer',
@@ -2846,8 +2847,8 @@ export class NoxApp {
       return;
     }
 
-    await this.revealLocation(targets[0]!);
-    if (targets.length > 1) {
+    const landed = await this.revealLocation(targets[0]!);
+    if (landed && targets.length > 1) {
       // One picker for many is a list UI; find references brings it, and
       // this command will use it. Until then, say what was skipped.
       this.notifications.info(`${targets.length} definitions — went to the first`);
@@ -2855,39 +2856,39 @@ export class NoxApp {
   }
 
   /**
-   * Open the file a location names, if it is not the active one, and select
-   * the range. Public because find references lands the same way.
+   * Open the file a location names and select the range. Returns whether the
+   * selection was set: the caller may have something to say about the jump,
+   * and must not say it after one that did not happen. Public because find
+   * references lands the same way.
    */
-  async revealLocation(location: LspLocation): Promise<void> {
+  async revealLocation(location: LspLocation): Promise<boolean> {
     let path: string;
     try {
       path = uriToPath(location.uri);
     } catch {
       this.notifications.info('Definition is not in a file Nox can open', location.uri);
-      return;
+      return false;
     }
 
-    const active = this.workspace.activeSnapshot();
-    let id = active?.path === path ? active.id : null;
-    if (!id) {
-      id = await this.workspace.open(path);
-      if (!id) {
-        this.notifications.error('Could not open', path);
-        return;
-      }
-    }
+    // `open` returns the id of a file already open, so there is nothing to
+    // save by checking first. A null means it already said why through the
+    // workspace's error event; a second toast here would only repeat it.
+    const id = await this.workspace.open(path);
+    if (!id) return false;
 
-    // Through the workspace, not the view: the pane swaps the view's state
-    // in an effect that has not run yet when `open` resolves, so a dispatch
-    // on the view here would land on the *previous* buffer. `setSelection`
-    // dispatches to the view when it is showing the buffer and updates the
-    // buffer's own state when it is not — the pane then swaps that state
-    // in, cursor included. It is the path session restore uses.
-    const text = this.workspace.textOf(id) ?? '';
-    const from = Math.min(offsetAt(text, location.range.start), text.length);
-    const to = Math.min(Math.max(from, offsetAt(text, location.range.end)), text.length);
+    const text = this.workspace.textOf(id);
+    if (text === undefined) return false;
+
+    // Through the workspace, not the view: `setSelection` dispatches to the
+    // pane showing the buffer and otherwise updates the buffer's own state,
+    // so it is right whether or not a pane has swapped to the target yet. It
+    // inherits the workspace's clamping and its scrollIntoView.
+    const from = offsetAt(text, location.range.start);
+    // A server that hands back an inverted range must not become a backwards
+    // selection.
+    const to = Math.max(from, offsetAt(text, location.range.end));
     this.workspace.setSelection(id, { ranges: [[from, to]], main: 0 });
-    this.view.get()?.focus();
+    return true;
   }
 
   /**

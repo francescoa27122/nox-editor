@@ -15,8 +15,9 @@ opening the target file first when it is a different one.
 The hover session called this "the same door and needs no new rendering",
 and that holds: the request goes through `LspService.requestFor`, which
 completion and hover already use, and the jump goes through primitives that
-already exist — `workspace.open(path)` and a selection dispatch on the pane's
-view, the pair `ProblemsPanel` and the search panel's `onReveal` use.
+already exist — `workspace.open(path)` and `workspace.setSelection`, the
+path session restore uses to put a cursor into a buffer whether or not it is
+on screen.
 
 ## 2. The response, reduced
 
@@ -68,7 +69,7 @@ In `app.ts`, next to the other `lsp.*` commands:
   4. `targets = definitionTargets(response)`. Empty →
      `notifications.info('No definition found')` and stop.
   5. `await this.revealLocation(targets[0])`.
-  6. If `targets.length > 1`,
+  6. If the reveal returned true and `targets.length > 1`,
      `notifications.info(\`${targets.length} definitions — went to the first\`)`.
      One picker for many locations is a list UI, and *find references* needs
      the same list; it arrives with that feature and this command will grow
@@ -81,16 +82,25 @@ will call it too:
 1. `path = uriToPath(uri)`. A URI that is not a file (`untitled:`, a
    virtual scheme) throws in `uriToPath`; catch it and
    `notifications.info('Definition is not in a file Nox can open', uri)`.
-2. If `path` is not the active buffer's path, `await workspace.open(path)`;
-   a `null` result (unreadable, outside the workspace's reach) →
-   `notifications.error('Could not open', path)` and stop.
-3. Read `this.view.get()` **after** the open — the pane re-points the same
-   view, so it is the same object, but its state is now the target's.
-   `from = offsetAt(text, range.start)`, `to = offsetAt(text, range.end)`,
-   clamped to the document; dispatch `{ selection: { anchor: from, head: to }, scrollIntoView: true }`
-   and `view.focus()`. The identifier is selected, not merely pointed at —
-   the shape every editor uses for this jump, and it makes the landing
-   visible on a line the user has never seen.
+2. `id = await workspace.open(path)`. It returns the id of a file already
+   open, so there is nothing to check first. A `null` (unreadable, a folder,
+   too large) → return false; the workspace has already reported why through
+   its error event, and a second notification would only repeat it.
+3. `text = workspace.textOf(id)`, `from = offsetAt(text, range.start)`,
+   `to = offsetAt(text, range.end)` with `from ≤ to` enforced so an inverted
+   range from a server cannot become a backwards selection, then
+   `workspace.setSelection(id, { ranges: [[from, to]], main: 0 })` — which
+   dispatches to the pane showing the buffer and otherwise updates the
+   buffer's own state, so the pane's swap carries the cursor in. It inherits
+   that method's clamping and its `scrollIntoView`. Return true. The
+   identifier is selected, not merely pointed at — the shape every editor
+   uses for this jump, and it makes the landing visible on a line the user
+   has never seen.
+
+While a server is still initializing, `capabilitiesFor` reports nothing —
+only `running` sessions count — so the command is disabled rather than
+erroring; the error path in step 3 is reachable only if the server dies
+between opening the palette and running it.
 
 The keybinding is `F12` in the default keymap beside `F3`. Nothing else
 claims it, and it is what every other editor uses.
@@ -105,9 +115,12 @@ claims it, and it is what every other editor uses.
   same-file jump (selection lands on the range); cross-file jump (the other
   file becomes active and the selection lands); no result (a notification,
   the cursor unmoved); many results (first taken, notification names the
-  count); command disabled without a provider. Each mutation-checked: the
-  cross-file test must fail when `revealLocation` stops opening the file,
-  the same-file test when the selection dispatch is removed.
+  count); command disabled without a provider. Each mutation-checked:
+  cross-file fails when `workspace.open` is skipped; same-file fails when
+  `workspace.setSelection` is removed; no-result fails when the notification
+  is removed; failed-request fails when the catch's notification is removed.
+  The fake server answers a throwing handler with a JSON-RPC error, which is
+  what makes that last path testable.
 - `tests/lsp-integration.test.ts`: one case against the real
   `typescript-language-server` — definition of a use of `answer` resolves to
   its declaration's `uri` and `range`, and `definitionTargets` reads what it

@@ -7,7 +7,9 @@ import type { LanguageServerProcess } from '../../src/platform/types';
  * is the platform's job and never reaches here. `initialize` is answered
  * with whatever capabilities the test asked for; any other request is
  * answered by a `handle`r if one is registered, and otherwise left pending,
- * which is what a slow server looks like from the outside.
+ * which is what a slow server looks like from the outside. A handler that
+ * throws becomes a JSON-RPC error reply, which the transport turns back into
+ * a rejected `request()`.
  *
  * Buffered until a handler is attached, per the contract on
  * `LanguageServerProcess.onMessage`.
@@ -39,8 +41,16 @@ export class FakeLanguageServer implements LanguageServerProcess {
     } else if (parsed.method === 'shutdown') {
       this.say({ jsonrpc: '2.0', id: parsed.id, result: null });
     } else if (parsed.id !== undefined && parsed.method && this.#handlers.has(parsed.method)) {
-      const result = this.#handlers.get(parsed.method)!(parsed.params);
-      this.say({ jsonrpc: '2.0', id: parsed.id, result });
+      try {
+        const result = this.#handlers.get(parsed.method)!(parsed.params);
+        this.say({ jsonrpc: '2.0', id: parsed.id, result });
+      } catch (error) {
+        this.say({
+          jsonrpc: '2.0',
+          id: parsed.id,
+          error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
+        });
+      }
     }
   }
 

@@ -16,8 +16,9 @@ import { FakeLanguageServer } from './support/fake-lsp-process';
  *
  * Mutation-checked on 2026-08-19 against `src/app.ts`: the cross-file test
  * fails when `revealLocation` stops calling `workspace.open`; the same-file
- * test fails when the selection dispatch is removed; the "no definition" test
- * fails when the notification is removed.
+ * test fails when `workspace.setSelection` is removed; the "no definition"
+ * test fails when the notification is removed; the failed-request test fails
+ * when the catch's notification is removed.
  */
 
 const MAIN = '/w/main.ts';
@@ -113,7 +114,7 @@ describe('the jump', () => {
     expect(from).toBe(LIB_DOC.indexOf('total'));
   });
 
-  it('moves within the same file without reopening it', async () => {
+  it('moves within the same file', async () => {
     const { app, server, view, id } = await paneWithServer();
     // Pretend the import binding is the definition.
     server.handle('textDocument/definition', () => ({
@@ -166,6 +167,34 @@ describe('the jump', () => {
     await app.commands.execute('lsp.goToDefinition');
 
     expect(messages(app)).toContain('Definition is not in a file Nox can open');
+    expect(app.workspace.activeSnapshot()?.path).toBe(MAIN);
+  });
+
+  it('reports a server error rather than throwing', async () => {
+    const { app, server } = await paneWithServer();
+    server.handle('textDocument/definition', () => {
+      throw new Error('boom');
+    });
+
+    // The command owns the failure: a rejection here would reach the keymap.
+    await expect(app.commands.execute('lsp.goToDefinition')).resolves.toBe(true);
+
+    expect(messages(app)).toContain('Go to definition failed');
+    expect(app.workspace.activeSnapshot()?.path).toBe(MAIN);
+  });
+
+  it('says nothing about a count it could not honour', async () => {
+    const { app, server } = await paneWithServer();
+    server.handle('textDocument/definition', () => [
+      { uri: 'untitled:scratch', range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } },
+      { uri: pathToUri(LIB), range: { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } } },
+    ]);
+
+    await app.commands.execute('lsp.goToDefinition');
+    flush();
+
+    expect(messages(app)).toContain('Definition is not in a file Nox can open');
+    expect(messages(app).some((m) => /definitions — went to the first/.test(m))).toBe(false);
     expect(app.workspace.activeSnapshot()?.path).toBe(MAIN);
   });
 });
