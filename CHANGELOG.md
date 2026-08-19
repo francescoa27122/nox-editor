@@ -6,6 +6,24 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Find References.** `Shift+F12`, or the command from the palette, lists
+  every place the symbol under the cursor is used — in a **References** view
+  in the sidebar, one row per file and one per use showing the line it is
+  on. Click a row, or arrow to it and press Enter, and Nox goes there,
+  opening the file if it has to. The declaration is in the list too, so you
+  never need Go to Definition to complete it. The cursor stays where it was
+  when the list opens: twenty places is a choice, and the editor should not
+  make it for you.
+
+### Changed
+
+- **Go to Definition with several answers** now goes to the first and lists
+  them all in the References view, instead of going to the first and saying
+  how many there were. Same jump, no more guessing which of the others you
+  wanted.
+
 ## [0.4.2] — 2026-08-19
 
 ### Added

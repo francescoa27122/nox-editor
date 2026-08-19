@@ -20,7 +20,7 @@ export type OverlayKind =
   | 'keybindings';
 
 /** Which panel the sidebar is showing. */
-export type SidebarView = 'explorer' | 'search' | 'notes' | 'answers' | 'problems';
+export type SidebarView = 'explorer' | 'search' | 'notes' | 'answers' | 'problems' | 'references';
 
 export interface PromptRequest {
   title: string;
