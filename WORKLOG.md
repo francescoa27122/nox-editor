@@ -10,9 +10,10 @@ are knowledge.**
 
 ## 2026-08-18 (later still) — The apt step that hangs
 
-On branch `ci-apt-mirror-stall`, not pushed. The `rust (ubuntu-22.04)` job's
-dependency install hung five times in one day, 10-26 minutes against ~1.8
-minutes healthy, each time needing a human to cancel and `gh run rerun`.
+On branch `ci-apt-mirror-stall`, merged to `main` as #34. The
+`rust (ubuntu-22.04)` job's dependency install hung five times in one day,
+10-26 minutes against ~1.8 minutes healthy, each time needing a human to
+cancel and `gh run rerun`.
 
 What it actually is, from the run logs rather than from the symptom:
 
@@ -76,24 +77,28 @@ branch (32184094506 cold, 32184425793 warm), all ten jobs green:
 - `--no-install-recommends` is worth more on the runner than in the container:
   137 packages and 55.6 MB become 122 and 52.8 MB. Fewer serial requests is
   the axis that matters, since the stall is per-request.
+- **A PR run reads caches from its base branch, not from a sibling.** PR #34's
+  own check therefore ran cold; the cache only starts serving PRs once `main`
+  has run once and saved it. Confirmed afterwards on PR #35: `Cache hit`,
+  `Seeded 122`, `Need to get 0 B/52.8 MB` on someone else's branch.
+- The repo was at 9.8 GB of its 10 GB Actions cache limit, 7.71 GB of it stale
+  `v0.4.1-*-test` tag caches. Cleared — a 50 MB apt cache was otherwise a
+  plausible eviction, which would have quietly undone all of this.
 - actionlint clean over both workflows, which is the only check `release.yml`
   gets — it runs on tags, so the `extra-packages: patchelf` wiring is
   structurally verified but has not executed.
 
 Next:
 
-- Open the PR. CI does not run on a branch push here (`push` is `main` only),
-  so a PR is also what makes the check appear on the PR itself.
+- `release.yml` still has not executed — it only runs on tags, so the
+  `extra-packages: patchelf` path is verified by actionlint and by sharing one
+  action with CI, but nothing has run it. A throwaway `v0.4.1-*` tag would.
 - Watch whether a stall ever recurs on a *cold* cache. That is the only path
   still exposed, and it is now bounded at three 5-minute attempts rather than
   open-ended.
 
 Blocked:
 
-- `lsp-hover` carries a copy of these four files, swept in by a parallel
-  session's `git add -A` while both were in this worktree. Merging it would
-  bring this change in twice. Left alone: it is someone else's branch in
-  flight.
 - `Acquire::ForceIPv4` is a hypothesis, not a measurement. Constant
   size-independent per-request latency is what a failed IPv6 connect followed
   by IPv4 fallback looks like, but the runner logs do not say so outright. It
