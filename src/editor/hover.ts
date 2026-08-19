@@ -78,8 +78,10 @@ export function createLspHoverSource(
     // the pointer around.
     if (blocks.length === 0) return null;
 
-    // The server's own range where it gave one, so the highlight covers the
-    // symbol rather than the character the pointer happened to be over.
+    // The server's own range where it gave one. CodeMirror draws nothing for
+    // it — `pos`/`end` decide when the tooltip *closes*: it stays while the
+    // pointer is anywhere over the symbol, not only the character it was
+    // over when the timer fired.
     const range = response?.range;
 
     return {

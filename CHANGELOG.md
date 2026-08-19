@@ -9,7 +9,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **Hover.** Rest the pointer on a symbol and Nox shows its type and
-  documentation, underlining exactly the span the server is talking about.
+  documentation. The tooltip stays while the pointer is anywhere over the
+  span the server names, and goes when it leaves.
 
   The server's markdown is shown as text rather than rendered as HTML. A
   language server is a program you configured Nox to run, and what it says
