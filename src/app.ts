@@ -14,8 +14,11 @@ import {
 } from '@codemirror/commands';
 import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
+import { definitionTargets, type LspLocation } from '@core/lsp-definition';
+import { offsetAt, positionAt } from '@core/lsp-position';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
+import { pathToUri, uriToPath } from '@core/uri';
 import { addCursorAbove, addCursorBelow, goToLine } from '@editor/commands';
 import {
   foldAll,
@@ -1963,6 +1966,18 @@ export class NoxApp {
         },
       },
       {
+        id: 'lsp.goToDefinition',
+        title: 'Go to Definition',
+        category: 'Language',
+        keywords: ['definition', 'declaration', 'jump', 'lsp'],
+        enabled: () => {
+          const snapshot = this.workspace.activeSnapshot();
+          if (!snapshot?.path) return false;
+          return Boolean(this.lsp.capabilitiesFor(snapshot.languageId)?.definitionProvider);
+        },
+        run: () => this.#goToDefinition(),
+      },
+      {
         id: 'agents.reloadConfig',
         title: 'Reload Agent Configuration',
         category: 'Agents',
@@ -2715,6 +2730,9 @@ export class NoxApp {
       'Mod+Alt+Shift+[': 'edit.foldAll',
       'Mod+Alt+Shift+]': 'edit.unfoldAll',
 
+      // Language. F12 is the convention everywhere; it needs no chord.
+      F12: 'lsp.goToDefinition',
+
       // View
       'Mod+B': 'view.toggleExplorer',
       'Alt+Z': 'view.toggleWordWrap',
@@ -2801,6 +2819,76 @@ export class NoxApp {
   goToLine(line: number, column = 1): void {
     const view = this.view.get();
     if (view) goToLine(view, line, column);
+  }
+
+  async #goToDefinition(): Promise<void> {
+    const view = this.view.get();
+    const snapshot = this.workspace.activeSnapshot();
+    if (!view || !snapshot?.path) return;
+
+    const text = view.state.doc.toString();
+    let response: unknown;
+    try {
+      response = await this.lsp.requestFor(snapshot.languageId, 'textDocument/definition', {
+        textDocument: { uri: pathToUri(snapshot.path) },
+        position: positionAt(text, view.state.selection.main.head),
+      });
+    } catch (error) {
+      this.notifications.error(
+        'Go to definition failed',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const targets = definitionTargets(response);
+    if (targets.length === 0) {
+      this.notifications.info('No definition found');
+      return;
+    }
+
+    const landed = await this.revealLocation(targets[0]!);
+    if (landed && targets.length > 1) {
+      // One picker for many is a list UI; find references brings it, and
+      // this command will use it. Until then, say what was skipped.
+      this.notifications.info(`${targets.length} definitions — went to the first`);
+    }
+  }
+
+  /**
+   * Open the file a location names and select the range. Returns whether the
+   * selection was set: the caller may have something to say about the jump,
+   * and must not say it after one that did not happen. Public because find
+   * references lands the same way.
+   */
+  async revealLocation(location: LspLocation): Promise<boolean> {
+    let path: string;
+    try {
+      path = uriToPath(location.uri);
+    } catch {
+      this.notifications.info('Definition is not in a file Nox can open', location.uri);
+      return false;
+    }
+
+    // `open` returns the id of a file already open, so there is nothing to
+    // save by checking first. A null means it already said why through the
+    // workspace's error event; a second toast here would only repeat it.
+    const id = await this.workspace.open(path);
+    if (!id) return false;
+
+    const text = this.workspace.textOf(id);
+    if (text === undefined) return false;
+
+    // Through the workspace, not the view: `setSelection` dispatches to the
+    // pane showing the buffer and otherwise updates the buffer's own state,
+    // so it is right whether or not a pane has swapped to the target yet. It
+    // inherits the workspace's clamping and its scrollIntoView.
+    const from = offsetAt(text, location.range.start);
+    // A server that hands back an inverted range must not become a backwards
+    // selection.
+    const to = Math.max(from, offsetAt(text, location.range.end));
+    this.workspace.setSelection(id, { ranges: [[from, to]], main: 0 });
+    return true;
   }
 
   /**
