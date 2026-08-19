@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { LanguageServerProcess } from '../src/platform/types';
 import { MemoryPlatform } from '../src/platform/memory';
 import { LspService } from '../src/services/lsp';
 import { SERVERS_FILE, ServerRegistry } from '../src/services/lsp/registry';
 import { WorkspaceService } from '../src/services/workspace';
+import { FakeLanguageServer } from './support/fake-lsp-process';
 
 /**
  * Diagnostics, held by URI and checked against the text they describe.
@@ -12,58 +12,6 @@ import { WorkspaceService } from '../src/services/workspace';
  * which is what lets a crash, a stale batch and a restart cap all be staged
  * here rather than hoped for against a real server.
  */
-
-class FakeServer implements LanguageServerProcess {
-  readonly written: { id?: number; method?: string }[] = [];
-  #messages: ((message: string) => void)[] = [];
-  #stderr: ((line: string) => void)[] = [];
-  #exits: ((code: number | null) => void)[] = [];
-  #buffered: string[] = [];
-  #exited: { code: number | null } | null = null;
-
-  async send(message: string): Promise<void> {
-    const parsed = JSON.parse(message) as { id?: number; method?: string };
-    this.written.push(parsed);
-    if (parsed.method === 'initialize') {
-      this.say({ jsonrpc: '2.0', id: parsed.id, result: { capabilities: {} } });
-    }
-    if (parsed.method === 'shutdown') {
-      this.say({ jsonrpc: '2.0', id: parsed.id, result: null });
-    }
-  }
-
-  onMessage(handler: (message: string) => void): void {
-    this.#messages.push(handler);
-    for (const message of this.#buffered.splice(0)) handler(message);
-  }
-  onStderr(handler: (line: string) => void): void {
-    this.#stderr.push(handler);
-  }
-  onExit(handler: (code: number | null) => void): void {
-    this.#exits.push(handler);
-    if (this.#exited) handler(this.#exited.code);
-  }
-  async kill(): Promise<void> {}
-
-  say(message: unknown): void {
-    const raw = JSON.stringify(message);
-    if (this.#messages.length === 0) this.#buffered.push(raw);
-    else for (const handler of this.#messages) handler(raw);
-  }
-
-  publish(uri: string, diagnostics: unknown[], version?: number): void {
-    this.say({
-      jsonrpc: '2.0',
-      method: 'textDocument/publishDiagnostics',
-      params: { uri, diagnostics, ...(version === undefined ? {} : { version }) },
-    });
-  }
-
-  die(code: number | null = 1): void {
-    this.#exited = { code };
-    for (const handler of this.#exits) handler(code);
-  }
-}
 
 const ERROR = {
   range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
@@ -85,11 +33,11 @@ async function setup(options: { servers?: number } = {}) {
   const registry = new ServerRegistry(platform);
   await registry.load();
 
-  const spawned: FakeServer[] = [];
+  const spawned: FakeLanguageServer[] = [];
   const service = new LspService(workspace, registry, {
     rootPath: () => '/w',
     open: async () => {
-      const server = new FakeServer();
+      const server = new FakeLanguageServer();
       spawned.push(server);
       return server;
     },
@@ -224,11 +172,11 @@ describe('configuration', () => {
     const registry = new ServerRegistry(platform);
     await registry.load();
 
-    const spawned: FakeServer[] = [];
+    const spawned: FakeLanguageServer[] = [];
     const service = new LspService(workspace, registry, {
       rootPath: () => '/w',
       open: async () => {
-        const server = new FakeServer();
+        const server = new FakeLanguageServer();
         spawned.push(server);
         return server;
       },

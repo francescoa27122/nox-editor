@@ -3,6 +3,10 @@
 Resting the pointer on a symbol shows its type and documentation.
 
 Status: approved 2026-08-18. Implementation follows in a separate plan.
+Superseded in part, 2026-08-19: §3's "the highlight covers the symbol" is
+not what CodeMirror does — nothing is drawn for a tooltip's range;
+`pos`/`end` decide when it closes. See
+2026-08-19-lsp-rendering-verification-design.md §4.
 
 The third feature on the request door completion opened, and the cheapest —
 it needs no picker, no keymap and no insertion logic. What it does need is a

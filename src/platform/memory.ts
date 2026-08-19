@@ -5,6 +5,7 @@ import {
   type DirEntry,
   type FileStat,
   type JsonLinesSpec,
+  type LanguageServerProcess,
   type LanguageServerSpec,
   type Platform,
   type PlatformCapabilities,
@@ -434,18 +435,22 @@ export class MemoryPlatform implements Platform {
   }
 
   /**
-   * No processes in memory.
+   * Where a language server comes from, when one can.
    *
-   * Refusing loudly for the same reason as `spawnAgent`: a server that
-   * silently produced nothing would be indistinguishable from one that is
-   * merely slow to start.
-   *
-   * The parameter is declared, as `streamJsonLines`'s is and unlike
-   * `spawnAgent`'s bare `()`, so a caller holding the concrete
-   * `MemoryPlatform` type can still call this with the real argument list
-   * under `strict`.
+   * There is no process in memory, so by default this platform refuses —
+   * loudly, for the reason `spawnAgent` gives: a server that silently
+   * produced nothing would be indistinguishable from one merely slow to
+   * start. A test installs a factory here to hand the app an in-memory
+   * server (see `tests/support/fake-lsp-process.ts`), which is what lets the
+   * real `LspService`, `EditorPane` and CodeMirror be driven end to end
+   * without a process. `capabilities.languageServers` stays `false` even
+   * then: that flag says what the build can do for a user, and the browser
+   * target still cannot start one.
    */
-  async startLanguageServer(_spec: LanguageServerSpec): Promise<never> {
+  languageServerFactory: ((spec: LanguageServerSpec) => LanguageServerProcess) | null = null;
+
+  async startLanguageServer(spec: LanguageServerSpec): Promise<LanguageServerProcess> {
+    if (this.languageServerFactory) return this.languageServerFactory(spec);
     throw new PlatformError('this build cannot start language servers', 'unsupported');
   }
 

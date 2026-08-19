@@ -114,7 +114,11 @@ worthless, in a component suite exactly as it was everywhere else.
 Component suites are named after the component and grouped by component, not
 split per behaviour: one jsdom file costs roughly half a second of environment
 setup, against a suite that otherwise runs in about a second total, so a new
-file is worth it only when it tests a different component. Mount through
+file is worth it when it tests a different component — or when it covers a
+distinct, named concern over the same one, which costs a second jsdom
+environment, a quarter to half a second. `tests/lsp-paint-target.test.ts` and
+`tests/lsp-rendering.test.ts` both mount `EditorPane` on that footing: one is
+a named regression, the other the LSP surfaces. Mount through
 `mountComponent` in `tests/support/component.ts`, which puts a real app in
 context the way `App.svelte` does; see its doc comment for what it does and
 does not support.
