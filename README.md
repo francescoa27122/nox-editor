@@ -245,11 +245,12 @@ actually able to change.
 ## Status
 
 **v0.4.** It's young, and it's a personal project rather than a product, but
-it's real software with 855 tests and I use it. Expect rough edges, and open an
+it's real software with 1092 tests and I use it. Expect rough edges, and open an
 issue if you hit one.
 
-Not there yet: no LSP, no Git integration, no plugins. Those are next, in
-roughly that order. See [ROADMAP.md](ROADMAP.md).
+Language servers landed in 0.4.2 — diagnostics, completion, hover and go to
+definition, from a `servers.json` you write. Not there yet: no Git integration,
+no plugins. Those are next, in that order. See [ROADMAP.md](ROADMAP.md).
 
 ## Under the hood
 
