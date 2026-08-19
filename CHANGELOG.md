@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-08-19
+
 ### Added
 
 - **Find References.** `Shift+F12`, or the command from the palette, lists
@@ -846,7 +848,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/francescoa27122/nox-editor/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/francescoa27122/nox-editor/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/francescoa27122/nox-editor/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francescoa27122/nox-editor/compare/v0.3.0...v0.4.0

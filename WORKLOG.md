@@ -8,6 +8,52 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, release) — Cut v0.4.3
+
+On branch `release-0.4.3`, off `main` at `f3de46c`. The section this tags:
+find references, the definitions list, rename symbol, Format Document and
+Format on Save — the release whose point is that language intelligence is
+finished.
+
+Shipped:
+
+- The three version files (`package.json`, `src-tauri/tauri.conf.json`,
+  `src-tauri/Cargo.toml`) and both lockfiles at 0.4.3. `Cargo.lock` edited
+  by hand — the `nox` entry's version line only — because this PC has no
+  Rust toolchain; the gate job cross-checks all three and the Rust CI job
+  builds with the lockfile, so a hand edit that lied would fail there.
+- CHANGELOG: `[Unreleased]` → `[0.4.3] — 2026-08-19`, compare links.
+- README: 1092 → 1162 tests; the status paragraph now says language
+  servers *finished* in 0.4.3 and names all seven surfaces.
+
+Verified:
+
+- `npm test` 1162/1162 (66 files), `npm run check` 437 files 0 errors,
+  `npm run build` green, versions agree (checked with the gate's own
+  commands locally).
+
+Next:
+
+- Merge, tag `v0.4.3` on the merge commit, push the tag; the Release
+  workflow builds the seven installers into a draft. Then the thing this
+  tag exists for: **the desktop pass** — references list, definitions
+  list, rename prompt + review, Shift+Alt+F, format-on-save, F12/Shift+F12/
+  F2 on a real keyboard — recorded here. Then publish (human), and Git
+  gutter starts.
+- The **v0.4.2 draft** is superseded by this; delete it rather than
+  publish both (Francesco's call).
+
+Blocked:
+
+- Publishing the release is his; the tag build is not.
+
+Confidence:
+
+- High; the release procedure was re-derived from 8b622d3 and the gate
+  re-run locally.
+
+---
+
 ## 2026-08-19 (PC, night) — Formatting: on demand and on save
 
 On branch `lsp-format`, stacked on `lsp-rename` (#42). Design in
