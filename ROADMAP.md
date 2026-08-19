@@ -169,6 +169,37 @@ reason to build them before the agent exists.
 
 ---
 
+## 1.0 — What the number means
+
+*Proposed 2026-08-19, after 0.4.2. Edit the bar; don't let it drift silently.*
+
+1.0 is not a milestone with features in it. It is the point at which Nox can
+be recommended to someone who did not build it, without an apology attached.
+That is a claim about trust and finish, so the bar is written in those terms:
+
+| Bar | Where it stands | What it takes |
+|---|---|---|
+| **Installs like software.** A download opens without a terminal command or a SmartScreen click-through, and the app tells you when a newer one exists. | Every release needs `xattr -dr` on macOS and "Run anyway" on Windows; there is no updater. | An Apple Developer ID and a Windows code-signing certificate — both cost money, so this is the operator's call, not the roadmap's. Tauri's updater and its signing key are free and can land first; unsigned builds can still self-update. |
+| **Language intelligence is complete.** Diagnostics, completion, hover and go to definition ship today; an editor that can jump to a definition but not list its uses, or rename it, has stopped halfway. | Four of the v0.4 rows are ✅. | Find references (and the picker go to definition is waiting on), rename symbol, formatting on save. Tree-sitter is an evaluation, not a 1.0 gate. |
+| **Version control is present.** Not a Git client; the gutter, a diff, stage-and-commit. The README has said "no Git integration" since 0.2.0. | Nothing. The diff engine and hunk review exist (M6). | The v0.5 table, in its order. Blame can follow 1.0. |
+| **A keyboard-first editor lets you change the keys.** | Bindings are data with no UI. | The keybinding editor, and workspace settings so a project can carry its own. The first two rows of v0.6; plugins are explicitly *not* a 1.0 gate — a plugin API is a compatibility promise, and 1.0 should not make one it has not lived with. |
+| **It holds up at scale.** | Search and replace are jobs; the explorer is a flat list that renders every node. | Explorer virtualisation, from the v0.2 table. The only trust-row item whose absence a larger project would feel every day. |
+| **Nothing in the release notes says "unverified".** | Each of the last three work-log entries names a surface seen only in a test. | A pass on a real keyboard over the LSP commands, the terminal and the dialogs, recorded in the work log, before the 1.0 tag — not a feature, a ritual. |
+
+Everything in the v0.2–v0.7 tables that is not named above is 1.x. In
+particular, out of 1.0 on purpose: the plugin API, Vim and Emacs modes,
+Tree-sitter, dragging files out, renaming several files at once, the same file
+in two panes, nested splits. Each is a good idea; none is what keeps someone
+from recommending the editor.
+
+Order of work, by what each thing unblocks rather than by size: find
+references → rename → format on save → Git gutter and diff → stage/commit →
+keybinding editor → workspace settings → explorer virtualisation → the keyboard
+pass → tag. Signing and the updater run alongside, because one half of them is
+a purchase and the other half is a workflow change that nothing else waits on.
+
+---
+
 ## Not planned
 
 - A light theme. Nox is a dark editor; that is the product.

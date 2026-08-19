@@ -8,6 +8,62 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC) — The 1.0 bar, and the Problems-panel race closed
+
+On branch `v1-bar`, on the Windows PC, after pulling #36–#38 (main at
+`39d3999`, tag `v0.4.2`). The v0.4.2 GitHub release is still a **draft** with
+all seven assets attached — publishing it is a human act, not done here.
+
+Shipped:
+
+- `ROADMAP.md` — a **1.0** section: what the number means (installs without a
+  workaround and self-updates; find references / rename / format on save;
+  Git gutter, diff, stage-and-commit; keybinding editor + workspace settings;
+  explorer virtualisation; a recorded real-keyboard pass), what is 1.x on
+  purpose (plugins, modal editing, Tree-sitter, the rest), and the order of
+  work. Written as a proposal to edit, not a decree.
+- `tests/problems-panel-open.test.ts` — the follow-up the previous entry left
+  open ("if the pane's swap can ever run after `open()`'s continuation, the
+  cursor lands on the previous buffer") is now **measured, not argued**: a
+  real `ProblemsPanel` over the same app as a real `EditorPane`, a diagnostic
+  in a file never opened, a click on the row. Cursor lands in the named file
+  on both the fresh-open and the already-open branches, and the showing
+  buffer is untouched. Mutation-checked: moving `goToLine` ahead of the
+  `await` turns all three red.
+- `README.md` — `npm test` comment said 779 tests (Status said 1092); now
+  points at Status. The Status paragraph now says *how* `servers.json` comes
+  to exist (**Configure Language Servers** writes a working template,
+  **Reload Language Servers** picks up edits) and that Nox starts no server
+  you did not list.
+- This repo's local `user.email` read `frncescoa27122` — one letter short of
+  the noreply address, so a commit from this PC would not have attributed to
+  the account. Fixed in `.git/config`; nothing in history carries it.
+
+Verified:
+
+- `npm ci` then `npm test` — 1092 passed before the new file; 1095 after,
+  60 files. `npm run check` — 427 files, 0 errors, 0 warnings. Windows,
+  Node 24.15.0.
+
+Next:
+
+- **Find references.** First on the 1.0 order, and go to definition's
+  "several results" case is waiting on its picker. Same door as definition:
+  `requestFor('textDocument/references')`, a results list, `revealLocation`.
+- Publish the v0.4.2 draft (human). Decide on signing — a purchase.
+
+Blocked:
+
+- Nothing technical. Not pushed, no PR — by instruction.
+
+Confidence:
+
+- High on the test and the doc fixes; each claim in the 1.0 table was checked
+  against the file it describes, and the "Git next" line was traced to 0.2.0.
+- The 1.0 bar itself is a judgement call, labelled as one.
+
+---
+
 ## 2026-08-19 (later) — Go to definition
 
 On branch `lsp-definition`, stacked on `lsp-render-verify` (it needs the
