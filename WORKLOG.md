@@ -8,6 +8,98 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 — The three unseen surfaces, seen in a DOM
+
+On branch `lsp-render-verify`, in a **worktree** at `../nox-verify` (own
+`npm ci` — the shared `node_modules` predated the desktop's
+`typescript-language-server` devDependency, and the integration suite failed
+9/9 until it was reinstalled). Not pushed.
+
+The gap: diagnostics, completion and hover each had a wire test and no
+rendering test — the sources were exercised against `{ state } as
+EditorView`, and nothing proved the pane's `lspCompartment` delivered them
+into a live view. Closed by measuring what jsdom can drive rather than
+arguing about it; the measurements and the decision are in
+`docs/superpowers/specs/2026-08-19-lsp-rendering-verification-design.md`.
+
+Shipped:
+
+- `tests/lsp-rendering.test.ts` — the real `EditorPane` over a real `NoxApp`
+  whose real `LspService` runs against an in-memory server. Seven tests: a
+  published diagnostic paints `.cm-lintRange-error` under exactly `total`
+  plus a gutter mark, and clears on an empty batch; typing `.` sends
+  `textDocument/completion` for the pane's URI and the picker lists the
+  server's labels, with `completionItem/resolve` documentation shown for the
+  highlighted item; resting the pointer sends `textDocument/hover` and the
+  tooltip carries the code block and prose as text — `<script>` in the
+  server's markdown is characters, not an element — and leaves with the
+  pointer.
+- `tests/support/fake-lsp-process.ts` — the fake that `lsp-service.test.ts`
+  kept privately, extracted and taught `handle(method, fn)`.
+- `MemoryPlatform.languageServerFactory` — a test installs a server there;
+  `capabilities.languageServers` stays false because the browser build still
+  cannot start one.
+- `tests/support/jsdom-layout.ts` — jsdom's `Range` has no `getClientRects`,
+  and CodeMirror's `HoverPlugin` calls `coordsAtPos` from a bare `setTimeout`,
+  so hover threw before the source was asked. Filled with one all-zero
+  rectangle. **The rectangle's existence is invented; its numbers are
+  jsdom's.** Consequence, written where the polyfill lives: `posAtCoords` is
+  always 0, so the suite proves the request and the DOM, never which symbol
+  was under the pointer.
+
+Verified:
+
+- `npm test` — 1074 passed, 57 files. `npm run check` — 423 files, 0 errors.
+- Every rendering test mutation-checked against `EditorPane.svelte`: dropping
+  `lspHoverExtension` reddens all three hover tests, dropping
+  `lspCompletionExtension` both completion tests, no-op'ing
+  `applyDiagnostics` both diagnostic tests. Recorded in the suite's docblock.
+
+Found by looking, before a line was written:
+
+- **CodeMirror's `hoverTooltip` underlines nothing.** `pos`/`end` on the
+  returned tooltip decide when it *closes*; no decoration is applied.
+  `CHANGELOG.md` `[Unreleased]` said "underlining exactly the span the server
+  is talking about", `ROADMAP.md` said "highlighting the span", and
+  `hover.ts` said "the highlight covers the symbol". All three corrected to
+  what happens (the tooltip stays while the pointer is anywhere over the
+  span), and the 2026-08-18 hover design note marked superseded on that
+  point. Nobody had seen the tooltip, so nobody had seen that it did not.
+
+Decided, and why (short form; the spec has the long one):
+
+- **jsdom, not Playwright.** Two of three surfaces render under jsdom with no
+  polyfill and the third with a one-rectangle one; zero new dependencies.
+  Playwright against `npm run dev` would need a fake server injected into
+  the web build, a browser download on every CI push, and still would not
+  reach the WebView where both real rendering bugs lived. The next four v0.4
+  features are wiring and text, which this harness reaches. Revisit —
+  as vitest browser mode, which reuses the new seam — at the first feature
+  whose *claim* is geometric.
+- `ARCHITECTURE.md` §7's "Components embedding CodeMirror are untested" row
+  was already false (`lsp-paint-target.test.ts` mounted `EditorPane`) and now
+  states the real boundary. `CONTRIBUTING.md` allows a second jsdom file over
+  the same component for a distinct named concern.
+
+Next:
+
+- Merge this, then the release ([Unreleased] holds hover, completion and the
+  language-server support). Both need a push, which needs a human.
+- Go to definition on the same door; then find references, rename.
+
+Blocked:
+
+- Nothing technical. Not pushed, no PR — by instruction.
+
+Confidence:
+
+- High on what the suite proves, because each test was made to fail first.
+- Unverified, and now written down as such rather than as a gap: tooltip
+  placement, and pointer→symbol mapping. Both are CodeMirror's.
+
+---
+
+
 ## 2026-08-18 (later still) — Hover, and a shared-checkout collision
 
 Shipped, on branch `lsp-hover`, in a **worktree** at `../nox-hover`:
