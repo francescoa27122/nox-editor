@@ -32,20 +32,23 @@ Verified:
   `npm run build` green, versions agree (checked with the gate's own
   commands locally).
 
+Done after the entry above was first written: #44 merged (`87d4d48`),
+tag `v0.4.3` pushed, Release run 32312237740 green on all four builders —
+**draft release up with all seven installers.**
+
 Next:
 
-- Merge, tag `v0.4.3` on the merge commit, push the tag; the Release
-  workflow builds the seven installers into a draft. Then the thing this
-  tag exists for: **the desktop pass** — references list, definitions
-  list, rename prompt + review, Shift+Alt+F, format-on-save, F12/Shift+F12/
-  F2 on a real keyboard — recorded here. Then publish (human), and Git
-  gutter starts.
-- The **v0.4.2 draft** is superseded by this; delete it rather than
-  publish both (Francesco's call).
+- The thing this tag exists for: **the desktop pass** — references list,
+  definitions list, rename prompt + review, Shift+Alt+F, format-on-save,
+  F12 / Shift+F12 / F2 on a real keyboard — recorded here. The MacBook has
+  the toolchain; `git pull`, install the dmg from the draft (or
+  `npm run app`), ten minutes. Then publish (human), and Git gutter starts.
+- The **v0.4.2 draft** is superseded; delete it rather than publish both
+  (Francesco's call).
 
 Blocked:
 
-- Publishing the release is his; the tag build is not.
+- Publishing the release is his; the tag build was not, and is done.
 
 Confidence:
 
