@@ -17,6 +17,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when the list opens: twenty places is a choice, and the editor should not
   make it for you.
 
+- **Rename Symbol.** `F2`, or the command from the palette, asks for a new
+  name and then shows you every edit the language server proposes — in
+  every file, as a diff in the review panel — before a single one is
+  written. Apply, and it lands as one change: one undo takes the whole
+  rename back across every file, and a file you typed in while reviewing is
+  refused rather than overwritten. Where the server can say so, a keyword or
+  a library symbol gets "nothing to rename here" instead of a prompt. The
+  files it touched are opened and left unsaved, like every reviewed change;
+  **Save All** writes them.
+
 ### Changed
 
 - **Go to Definition with several answers** now goes to the first and lists

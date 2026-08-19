@@ -7,6 +7,7 @@ import { LspSession } from '../src/services/lsp/session';
 import { hoverBlocks } from '../src/core/lsp-hover';
 import { definitionTargets } from '../src/core/lsp-definition';
 import { referenceTargets } from '../src/core/lsp-references';
+import { prepareRenameSeed, renameEdits } from '../src/core/lsp-rename';
 import { spawnLanguageServer } from './support/lsp-child';
 
 /**
@@ -443,6 +444,65 @@ describe('references from a real typescript-language-server', () => {
     expect(ranges).toEqual([
       [0, 6, 12],
       [1, 15, 21],
+    ]);
+  }, 90_000);
+});
+
+describe('rename from a real typescript-language-server', () => {
+  it('prepares on the identifier and edits both occurrences', async () => {
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    expect(session.status.get(), `stderr: ${session.stderr.join(' | ')}`).toBe('running');
+    const provider = (session.capabilities.get() as Record<string, unknown>).renameProvider;
+    expect(provider).toBeTruthy();
+
+    const source = 'const answer: number = 42;\nexport default answer;\n';
+    const textDocument = { uri: pathToUri(filePath) };
+    await session.notify('textDocument/didOpen', {
+      textDocument: { ...textDocument, languageId: 'typescript', version: 1, text: source },
+    });
+    // On the `answer` in `export default answer`.
+    const position = { line: 1, character: 17 };
+
+    // tsserver offers prepare; recorded so a change reads as a failing test.
+    expect((provider as Record<string, unknown>).prepareProvider).toBe(true);
+    const prepared = await session.request<unknown>('textDocument/prepareRename', {
+      textDocument,
+      position,
+    });
+    // It sends a bare `Range` — no placeholder — naming the identifier under
+    // the cursor. Asserted, so a change to `{ range, placeholder }` is a
+    // failing test and not a silent change in where the seed comes from.
+    expect(prepared).toEqual({
+      start: { line: 1, character: 15 },
+      end: { line: 1, character: 21 },
+    });
+    const seed = prepareRenameSeed(prepared, 'fallback', (range) =>
+      source.split('\n')[range.start.line]!.slice(range.start.character, range.end.character),
+    );
+    expect(seed).toBe('answer');
+
+    const response = await session.request<unknown>('textDocument/rename', {
+      textDocument,
+      position,
+      newName: 'result',
+    });
+    await session.stop();
+
+    const plan = renameEdits(response);
+    expect(plan.unsupported).toEqual([]);
+    expect(plan.files).toHaveLength(1);
+    expect(plan.files[0]!.uri).toBe(pathToUri(filePath));
+    const edits = plan.files[0]!.edits
+      .map((e) => [e.range.start.line, e.range.start.character, e.range.end.character, e.newText])
+      .sort((a, b) => (a[0] as number) - (b[0] as number));
+    expect(edits).toEqual([
+      [0, 6, 12, 'result'],
+      [1, 15, 21, 'result'],
     ]);
   }, 90_000);
 });

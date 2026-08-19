@@ -252,7 +252,7 @@ Language servers landed in 0.4.2 — diagnostics, completion, hover and go to
 definition, from a `servers.json` you write. Run **Configure Language Servers**
 from the palette and Nox creates it with a working `typescript-language-server`
 entry to start from; **Reload Language Servers** picks up your edits. Nox never
-starts a server you did not list there. Not there yet: rename,
+starts a server you did not list there. Not there yet:
 Git integration, plugins. Those are next, in that order. See
 [ROADMAP.md](ROADMAP.md).
 
