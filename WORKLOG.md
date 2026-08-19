@@ -12,7 +12,8 @@ are knowledge.**
 
 On branch `lsp-definition`, stacked on `lsp-render-verify` (it needs the
 fake-server seam and the jsdom harness that branch adds). Same worktree,
-`../nox-verify`. Not pushed.
+`../nox-verify`. Pushed as #37, on top of #36; the 0.4.2 bump is #38 on top
+of that. Merge in order, then tag `v0.4.2`.
 
 Shipped:
 
@@ -64,9 +65,9 @@ to depend on the answer.
 
 Next:
 
+- Merge #36 → #37 → #38, push the tag `v0.4.2`, publish the draft.
 - Find references — the results list, and the "several definitions" picker
   with it. Then rename symbol.
-- Both branches need a push and a PR; ask.
 
 Confidence:
 
@@ -83,7 +84,7 @@ Confidence:
 On branch `lsp-render-verify`, in a **worktree** at `../nox-verify` (own
 `npm ci` — the shared `node_modules` predated the desktop's
 `typescript-language-server` devDependency, and the integration suite failed
-9/9 until it was reinstalled). Not pushed.
+9/9 until it was reinstalled). Pushed as #36.
 
 The gap: diagnostics, completion and hover each had a wire test and no
 rendering test — the sources were exercised against `{ state } as
