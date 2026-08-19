@@ -8,6 +8,76 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (later) — Go to definition
+
+On branch `lsp-definition`, stacked on `lsp-render-verify` (it needs the
+fake-server seam and the jsdom harness that branch adds). Same worktree,
+`../nox-verify`. Not pushed.
+
+Shipped:
+
+- `src/core/lsp-definition.ts` — `Location | Location[] | LocationLink[] |
+  null` reduced to `{ uri, range }[]`; links land on `targetSelectionRange`
+  (the identifier) over `targetRange` (the declaration); malformed entries
+  dropped, negative positions refused, duplicates removed.
+- `lsp.goToDefinition` — **Go to Definition**, `F12`, category Language.
+  Enabled only when the active buffer has a path and its server advertises
+  `definitionProvider`, so a server still initializing greys the command
+  rather than erroring. `NoxApp.revealLocation(location)` is public because
+  find references will land the same way: `workspace.open(path)` (returns
+  the existing id when already open) then `workspace.setSelection`, which
+  dispatches to the pane showing the buffer and otherwise updates the
+  buffer's own state so the pane's swap carries the cursor. Several results
+  take the first and say how many; a picker is find references' list.
+- CHANGELOG `[Unreleased]` and the ROADMAP row.
+
+Verified:
+
+- `npm test` — 1092 passed, 59 files. `npm run check` — 426 files, 0 errors.
+- `tests/lsp-go-to-definition.test.ts` (jsdom, real pane + real app + fake
+  server): enabled/disabled, the request's uri and position, cross-file
+  jump, same-file jump, no result, many results, unopenable URI, a server
+  error, and a count message that must not follow a failed reveal. Four
+  mutations recorded in the docblock, each seen red.
+- Against the real `typescript-language-server`: it sends `Location[]`, not
+  links, and points at the identifier (line 0, 6-12). Asserted, so a change
+  is a failing test.
+
+Two things worth carrying forward:
+
+- **`workspace.open` on an open path returns the existing id and re-reports
+  nothing**, and every `null` it returns has already gone through `#fail` →
+  `notifications.error`. A caller that checks "is it already active" first,
+  or toasts on `null`, is doing something already done. The first version
+  here did both; the review caught it.
+- **`FakeLanguageServer` now answers a throwing handler with a JSON-RPC
+  error**, which is what makes a request's failure path testable through
+  the real service. Hover, completion and rename can use the same trick.
+
+Follow-up worth a look, not a bug claim: `ProblemsPanel.open()` does
+`await workspace.open(path)` then `app.goToLine(...)` on `this.view.get()`.
+If the pane's state swap can ever run after that continuation, the cursor
+lands on the previous buffer. Svelte flushes effects in a microtask queued
+before `open()`'s continuation, so it is probably fine — but nothing proves
+it, and `revealLocation` deliberately went through `setSelection` so as not
+to depend on the answer.
+
+Next:
+
+- Find references — the results list, and the "several definitions" picker
+  with it. Then rename symbol.
+- Both branches need a push and a PR; ask.
+
+Confidence:
+
+- High on the command and the normaliser; each test was made to fail first,
+  and the real server agreed with the fixtures.
+- Unverified: F12 on a real keyboard in the desktop build. The keymap parses
+  it exactly as it parses F3, which is bound and used, so the risk is small
+  and named.
+
+---
+
 ## 2026-08-19 — The three unseen surfaces, seen in a DOM
 
 On branch `lsp-render-verify`, in a **worktree** at `../nox-verify` (own
