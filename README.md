@@ -249,8 +249,12 @@ it's real software with 1092 tests and I use it. Expect rough edges, and open an
 issue if you hit one.
 
 Language servers landed in 0.4.2 — diagnostics, completion, hover and go to
-definition, from a `servers.json` you write. Not there yet: no Git integration,
-no plugins. Those are next, in that order. See [ROADMAP.md](ROADMAP.md).
+definition, from a `servers.json` you write. Run **Configure Language Servers**
+from the palette and Nox creates it with a working `typescript-language-server`
+entry to start from; **Reload Language Servers** picks up your edits. Nox never
+starts a server you did not list there. Not there yet: find references, rename,
+Git integration, plugins. Those are next, in that order. See
+[ROADMAP.md](ROADMAP.md).
 
 ## Under the hood
 
@@ -269,7 +273,7 @@ Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 filesystem and project search. The editor itself lives in the renderer.
 
 ```bash
-npm test          # 779 unit tests
+npm test          # the unit suite (the count is in Status above)
 npm run check     # TypeScript + Svelte
 npm run app:build # a distributable, ~4 MB on macOS
 ```
