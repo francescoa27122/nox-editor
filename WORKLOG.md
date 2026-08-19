@@ -8,6 +8,78 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, later) — Find references
+
+On branch `lsp-references`, stacked on `v1-bar` (#39) — it continues that
+branch's WORKLOG entry, so merge #39 first. Design in
+`docs/superpowers/specs/2026-08-19-lsp-references-design.md`.
+
+Shipped:
+
+- `src/core/lsp-references.ts` — `referenceTargets` (the definition
+  normaliser under the name of the question asked; `Location[] | null` is a
+  subset of what it reads) and `locationRows(locations, texts, root)`: file
+  rows over location rows, files by label, locations by position, the
+  location row's label the trimmed line text, a non-file URI dropped.
+- `NoxApp.locations: Signal<LocationList | null>` and
+  `showLocations(title, subject, locations)` — reads each file's text once
+  (open buffer from the workspace, otherwise `platform.readTextFile`, a
+  failure becoming an empty line), builds the rows, shows the view.
+- `lsp.findReferences` — **Find References**, `Shift+F12`, category
+  Language, enabled on `referencesProvider`. Sends
+  `context: { includeDeclaration: true }`. Empty → "No references found"
+  and the previous list is left alone. The cursor does **not** move.
+- `references.focus` — **Show References**, reopens the view without
+  re-asking.
+- `src/ui/ReferencesPanel.svelte`, the `references` sidebar view (rail icon
+  `search`), rows/focused keyboard shape copied from `ProblemsPanel`; a
+  location row lands through `revealLocation`, a file row opens the file.
+- `lsp.goToDefinition` with several results now reveals the first **and**
+  lists them all as "Definitions" in the same view; the "went to the first"
+  notification is gone.
+- CHANGELOG `[Unreleased]`, the ROADMAP row, README's "not there yet".
+
+Verified:
+
+- `npm test` — 1119 passed, 62 files (was 1095/60). `npm run check` — 431
+  files, 0 errors. `npm run build` green.
+- `tests/lsp-references.test.ts` (node, 11) and
+  `tests/lsp-find-references.test.ts` (jsdom, 11: real pane + real
+  `ReferencesPanel` over one app + fake server). Five mutations recorded in
+  the docblock, each seen red: `includeDeclaration` dropped, `showView`
+  removed, the panel landing through `workspace.open` instead of
+  `revealLocation`, the no-result notification removed, the platform read
+  replaced by ''.
+- Against the real `typescript-language-server`: references to `answer`
+  come back as `Location[]` naming the declaration (0:6-12) and the use
+  (1:15-21). Asserted.
+- Browser build (`npm run dev`): the References rail button renders and
+  activates, the empty state reads as written, both commands appear in the
+  palette with `Shift+F12`, no console errors. The list itself cannot show
+  in the browser — no language server there — so, like every LSP surface
+  before it, the populated panel has been seen in jsdom and not on a screen.
+
+Next:
+
+- **Rename symbol.** `textDocument/rename` → a `WorkspaceEdit` → one change
+  set through the review panel (M6), so every edit is seen before it is
+  written. `prepareRename` first where the server offers it.
+- Merge #39 then this; the populated References view wants a tag build and
+  a human.
+
+Blocked:
+
+- Nothing technical.
+
+Confidence:
+
+- High on the wire and the rows; the real server agreed with the fixtures
+  and each test was made to fail.
+- Unverified: the panel's look with real rows, and `Shift+F12` on a real
+  keyboard (`Shift+F3` is bound and used, same parser).
+
+---
+
 ## 2026-08-19 (PC) — The 1.0 bar, and the Problems-panel race closed
 
 On branch `v1-bar`, on the Windows PC, after pulling #36–#38 (main at

@@ -143,7 +143,7 @@ describe('the jump', () => {
     expect(app.workspace.activeSnapshot()?.path).toBe(MAIN);
   });
 
-  it('takes the first of many and says how many there were', async () => {
+  it('takes the first of many and lists them all in the References view', async () => {
     const { app, server } = await paneWithServer();
     server.handle('textDocument/definition', () => [
       { uri: pathToUri(LIB), range: { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } } },
@@ -154,7 +154,25 @@ describe('the jump', () => {
     flush();
 
     expect(app.workspace.activeSnapshot()?.path).toBe(LIB);
-    expect(messages(app)).toContain('2 definitions — went to the first');
+    const list = app.locations.get();
+    expect(list?.title).toBe('Definitions');
+    expect(list?.subject).toBe('total');
+    expect(list?.total).toBe(2);
+    expect(list?.files).toBe(2);
+    expect(app.ui.sidebarView.get()).toBe('references');
+  });
+
+  it('does not open the list for a single definition', async () => {
+    const { app, server } = await paneWithServer();
+    server.handle('textDocument/definition', () => [
+      { uri: pathToUri(LIB), range: { start: { line: 0, character: 13 }, end: { line: 0, character: 18 } } },
+    ]);
+
+    await app.commands.execute('lsp.goToDefinition');
+    flush();
+
+    expect(app.locations.get()).toBeNull();
+    expect(app.ui.sidebarView.get()).not.toBe('references');
   });
 
   it('reports a definition it cannot open rather than throwing', async () => {

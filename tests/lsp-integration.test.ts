@@ -6,6 +6,7 @@ import { pathToUri } from '../src/core/uri';
 import { LspSession } from '../src/services/lsp/session';
 import { hoverBlocks } from '../src/core/lsp-hover';
 import { definitionTargets } from '../src/core/lsp-definition';
+import { referenceTargets } from '../src/core/lsp-references';
 import { spawnLanguageServer } from './support/lsp-child';
 
 /**
@@ -403,5 +404,45 @@ describe('definition from a real typescript-language-server', () => {
       start: { line: 0, character: 6 },
       end: { line: 0, character: 12 },
     });
+  }, 90_000);
+});
+
+describe('references from a real typescript-language-server', () => {
+  it('names the declaration and the use, as Location[]', async () => {
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    expect(session.status.get(), `stderr: ${session.stderr.join(' | ')}`).toBe('running');
+
+    const source = 'const answer: number = 42;\nexport default answer;\n';
+
+    await session.notify('textDocument/didOpen', {
+      textDocument: { uri: pathToUri(filePath), languageId: 'typescript', version: 1, text: source },
+    });
+
+    const response = await session.request<unknown>('textDocument/references', {
+      textDocument: { uri: pathToUri(filePath) },
+      // On the `answer` in `export default answer`.
+      position: { line: 1, character: 17 },
+      context: { includeDeclaration: true },
+    });
+    await session.stop();
+
+    // `Location[]`, by the specification — asserted like definition's shape,
+    // so a change reads as a failing test rather than a bug report.
+    expect(Array.isArray(response)).toBe(true);
+    const targets = referenceTargets(response);
+    const ranges = targets
+      .map((t) => [t.range.start.line, t.range.start.character, t.range.end.character])
+      .sort((a, b) => a[0]! - b[0]!);
+    expect(targets.every((t) => t.uri === pathToUri(filePath))).toBe(true);
+    // The declaration (line 0, `answer` at 6-12) and the use (line 1, 15-21).
+    expect(ranges).toEqual([
+      [0, 6, 12],
+      [1, 15, 21],
+    ]);
   }, 90_000);
 });
