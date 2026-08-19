@@ -3,6 +3,7 @@ import { completionStatus } from '@codemirror/autocomplete';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import EditorPane from '../src/ui/EditorPane.svelte';
+import { HOVER_TIME_MS } from '../src/editor/hover';
 import { pathToUri } from '../src/core/uri';
 import { SERVERS_FILE } from '../src/services/lsp/registry';
 import { flush, mountComponent, type Mounted } from './support/component';
@@ -36,17 +37,17 @@ installRangeRects();
 
 const FILE = '/w/main.ts';
 const URI = pathToUri(FILE);
-const DOC = 'const answer: number = 42;\nanswer';
-
-/** CodeMirror's hover delay, as `src/editor/hover.ts` names it; waits below allow a few multiples. */
-const HOVER_TIME_MS = 300;
+const DOC = 'const total: number = 42;\nanswer';
 
 let mounted: Mounted | null = null;
 
 afterEach(async () => {
-  await mounted?.app.lsp.stop();
-  mounted?.unmount();
-  mounted = null;
+  try {
+    await mounted?.app.lsp.stop();
+  } finally {
+    mounted?.unmount();
+    mounted = null;
+  }
 });
 
 /**
@@ -59,7 +60,7 @@ async function paneWithServer(capabilities: Record<string, unknown>) {
   const { app, platform, container } = mounted;
 
   const server = new FakeLanguageServer({ capabilities });
-  platform.languageServers = () => server;
+  platform.languageServerFactory = () => server;
   await platform.writeConfigFile(
     SERVERS_FILE,
     JSON.stringify({ servers: [{ languages: ['typescript'], command: 'fake' }] }),
@@ -77,7 +78,7 @@ async function paneWithServer(capabilities: Record<string, unknown>) {
 
   const view = EditorView.findFromDOM(container)!;
   expect(view).not.toBeNull();
-  return { app, server, view, container };
+  return { server, view };
 }
 
 function requestsFor(server: FakeLanguageServer, method: string) {
@@ -88,10 +89,10 @@ describe('a diagnostic the server publishes', () => {
   it('is drawn under exactly the text its range names, with a gutter mark', async () => {
     const { server, view } = await paneWithServer({});
 
-    // `answer` on the first line: characters 6-12.
+    // `total` on the first line: characters 6-11.
     server.publish(URI, [
       {
-        range: { start: { line: 0, character: 6 }, end: { line: 0, character: 12 } },
+        range: { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } },
         severity: 1,
         message: "Type 'string' is not assignable to type 'number'.",
       },
@@ -100,13 +101,13 @@ describe('a diagnostic the server publishes', () => {
 
     const squiggles = view.dom.querySelectorAll('.cm-lintRange-error');
     expect(squiggles).toHaveLength(1);
-    expect(squiggles[0]!.textContent).toBe('answer');
+    expect(squiggles[0]!.textContent).toBe('total');
     expect(view.dom.querySelectorAll('.cm-gutter-lint .cm-lint-marker-error')).toHaveLength(1);
   });
 
   it('is taken down when the server publishes an empty batch', async () => {
     const { server, view } = await paneWithServer({});
-    const range = { start: { line: 0, character: 6 }, end: { line: 0, character: 12 } };
+    const range = { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } };
 
     server.publish(URI, [{ range, severity: 1, message: 'no' }]);
     flush();
@@ -121,7 +122,7 @@ describe('a diagnostic the server publishes', () => {
 describe('completion', () => {
   const PROVIDER = { completionProvider: { triggerCharacters: ['.'], resolveProvider: true } };
 
-  it("opens the picker with the server's items when a trigger character is typed", async () => {
+  it("opens the picker with the server's items when a trigger character is inserted", async () => {
     const { server, view } = await paneWithServer(PROVIDER);
     server.handle('textDocument/completion', () => ({
       isIncomplete: false,
@@ -189,10 +190,13 @@ describe('completion', () => {
 describe('hover', () => {
   const HOVER = { hoverProvider: true };
   const MARKDOWN =
-    '```typescript\nconst answer: number\n```\nThe **answer**. <script>alert(1)</script>';
+    '```typescript\nconst total: number\n```\nThe **answer**. <script>alert(1)</script>';
 
   function rest(view: EditorView): void {
     const line = view.contentDOM.querySelector('.cm-line')!;
+    // Pointer (0,0) is the only coordinate that survives `startHover`'s check
+    // of the pointer against the rectangle `coordsAtPos` returns, which is all
+    // zeros here — see `tests/support/jsdom-layout.ts`.
     line.dispatchEvent(new MouseEvent('mousemove', { clientX: 0, clientY: 0, bubbles: true }));
   }
 
@@ -200,7 +204,7 @@ describe('hover', () => {
     const { server, view } = await paneWithServer(HOVER);
     server.handle('textDocument/hover', () => ({
       contents: { kind: 'markdown', value: MARKDOWN },
-      range: { start: { line: 0, character: 6 }, end: { line: 0, character: 12 } },
+      range: { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } },
     }));
 
     rest(view);
@@ -211,7 +215,7 @@ describe('hover', () => {
     );
 
     const tooltip = view.dom.querySelector('.cm-tooltip-hover .cm-tooltip-lsp-hover')!;
-    expect(tooltip.querySelector('pre')?.textContent).toBe('const answer: number');
+    expect(tooltip.querySelector('pre')?.textContent).toBe('const total: number');
     expect(tooltip.querySelector('p')?.textContent).toBe(
       'The **answer**. <script>alert(1)</script>',
     );
@@ -221,7 +225,13 @@ describe('hover', () => {
 
     const asked = requestsFor(server, 'textDocument/hover');
     expect(asked).toHaveLength(1);
-    expect(asked[0]!.params).toMatchObject({ textDocument: { uri: URI } });
+    // The position is the polyfill's degeneracy, asserted on purpose: if it
+    // ever stops being 0,0, the caveat in `tests/support/jsdom-layout.ts` is
+    // stale and someone should read it.
+    expect(asked[0]!.params).toEqual({
+      textDocument: { uri: URI },
+      position: { line: 0, character: 0 },
+    });
   });
 
   it('shows nothing when the server has nothing to say', async () => {

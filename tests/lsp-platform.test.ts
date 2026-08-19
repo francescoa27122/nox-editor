@@ -24,19 +24,12 @@ describe('language servers on a platform that has none', () => {
   it('has nothing to stop', async () => {
     await expect(new MemoryPlatform().stopAllLanguageServers()).resolves.toBeUndefined();
   });
-});
-
-describe('MemoryPlatform.startLanguageServer', () => {
-  it('refuses when nothing is installed, as the browser build does', async () => {
-    const platform = new MemoryPlatform();
-    await expect(platform.startLanguageServer({ command: 'x' })).rejects.toThrow(/cannot start language servers/);
-  });
 
   it('returns what the installed factory makes, and hands it the spec', async () => {
     const platform = new MemoryPlatform();
     const made: FakeLanguageServer[] = [];
     const specs: unknown[] = [];
-    platform.languageServers = (spec) => {
+    platform.languageServerFactory = (spec) => {
       specs.push(spec);
       const server = new FakeLanguageServer();
       made.push(server);

@@ -443,14 +443,14 @@ export class MemoryPlatform implements Platform {
    * start. A test installs a factory here to hand the app an in-memory
    * server (see `tests/support/fake-lsp-process.ts`), which is what lets the
    * real `LspService`, `EditorPane` and CodeMirror be driven end to end
-   * without a process. `capabilities.languageServers` stays `false`: that
-   * flag says what the build can do for a user, and the browser target
-   * still cannot start one.
+   * without a process. `capabilities.languageServers` stays `false` even
+   * then: that flag says what the build can do for a user, and the browser
+   * target still cannot start one.
    */
-  languageServers: ((spec: LanguageServerSpec) => LanguageServerProcess) | null = null;
+  languageServerFactory: ((spec: LanguageServerSpec) => LanguageServerProcess) | null = null;
 
   async startLanguageServer(spec: LanguageServerSpec): Promise<LanguageServerProcess> {
-    if (this.languageServers) return this.languageServers(spec);
+    if (this.languageServerFactory) return this.languageServerFactory(spec);
     throw new PlatformError('this build cannot start language servers', 'unsupported');
   }
 

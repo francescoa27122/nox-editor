@@ -13,7 +13,7 @@ import type { CompletionDeps } from './completion';
  */
 
 /** CodeMirror's default; named because the design refers to it. */
-const HOVER_TIME_MS = 300;
+export const HOVER_TIME_MS = 300;
 
 interface HoverResponse {
   contents?: unknown;

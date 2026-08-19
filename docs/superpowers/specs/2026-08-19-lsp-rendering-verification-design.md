@@ -74,14 +74,18 @@ and a `mouseleave` removed the tooltip.
 
 The component-harness design (§7, 2026-08-16) rejected stubbing
 `getBoundingClientRect` because "every measurement would be a number invented
-here". That still holds, and this is different in one specific way: jsdom's
-`Element.getBoundingClientRect` already returns all zeros, so the polyfill
-supplies a *missing method* with the *same values jsdom gives everywhere
-else*. Nothing is invented; a hole in jsdom's `Range` is filled with jsdom's
-own geometry. The consequence is that `posAtCoords` resolves to offset 0 for
-any pointer position — the tests therefore never claim anything about
-*which* symbol was hovered, only that hovering causes a request for the
-pane's document and that the answer reaches the DOM as text.
+here". That still holds for the *numbers*: jsdom's
+`Element.getBoundingClientRect` already returns all zeros, and the polyfill
+gives a `Range` the same zeros jsdom gives everywhere else. What is invented
+is the *existence* of a rectangle. `TextTile.coordsIn` returns null on an
+empty rect list, and jsdom's `Element.getClientRects()` is empty — so a
+polyfill honest about cardinality would make `coordsAtPos` return null and
+the hover source would never be asked. One rectangle where jsdom offers none
+is the single made-up fact, and it is written where the polyfill lives. The
+consequence is that `posAtCoords` resolves to offset 0 for any pointer
+position — the tests therefore never claim anything about *which* symbol was
+hovered, only that hovering causes a request for the pane's document and that
+the answer reaches the DOM as text.
 
 The polyfill lives in one named module, `tests/support/jsdom-layout.ts`,
 with this argument in its docblock, so the next person sees the boundary
@@ -119,9 +123,17 @@ because:
    panel; rename edits buffers; format-on-save rewrites text. jsdom reaches
    every one through the harness this design extends.
 
+The third option is **vitest browser mode**, and it is the shape a browser
+runner should take here. It mounts components the way `mountComponent` does
+and would reuse the `MemoryPlatform.languageServerFactory` seam this branch
+adds, so objection 1 does not apply to it: no production seam is needed.
+Objection 2 does — its Playwright or WebdriverIO provider downloads a browser
+in CI on every push. So does objection 3: it runs Chromium or Firefox, not
+the Tauri WebView. `ARCHITECTURE.md`'s row names it for that reason.
+
 **When to revisit:** the first feature whose *claim* is geometric — a
 tooltip that must sit beside the pointer, an inlay hint that must not shift
-the line — is the point at which Playwright earns its cost. Write it into
+the line — is the point at which a browser runner earns its cost. Write it into
 `ARCHITECTURE.md` §7 rather than into a plan nobody reads.
 
 ## 3. What gets built
@@ -129,7 +141,7 @@ the line — is the point at which Playwright earns its cost. Write it into
 Small. Three pieces plus corrections.
 
 1. **A fake server the app can start.** `MemoryPlatform` gains an optional
-   `languageServers` factory; when set, `startLanguageServer` returns what it
+   `languageServerFactory`; when set, `startLanguageServer` returns what it
    makes instead of throwing. Capabilities stay `languageServers: false` — the
    flag describes what the *build* can do for a user, and the browser target
    still cannot start a process. The `FakeServer` currently private to
