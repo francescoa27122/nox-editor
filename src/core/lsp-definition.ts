@@ -20,11 +20,10 @@ export interface LspLocation {
 }
 
 function isPosition(value: unknown): value is LspPosition {
+  if (typeof value !== 'object' || value === null) return false;
+  const { line, character } = value as LspPosition;
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as LspPosition).line === 'number' &&
-    typeof (value as LspPosition).character === 'number'
+    Number.isInteger(line) && line >= 0 && Number.isInteger(character) && character >= 0
   );
 }
 
@@ -70,7 +69,7 @@ export function definitionTargets(response: unknown): LspLocation[] {
     if (!location) continue;
 
     const { start, end } = location.range;
-    const key = `${location.uri}:${start.line}:${start.character}-${end.line}:${end.character}`;
+    const key = JSON.stringify([location.uri, start.line, start.character, end.line, end.character]);
     if (seen.has(key)) continue;
     seen.add(key);
     targets.push(location);

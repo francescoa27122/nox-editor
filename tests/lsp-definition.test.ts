@@ -62,6 +62,15 @@ describe('what a server can get wrong', () => {
     ).toEqual([{ uri: 'file:///w/b.ts', range: RANGE }]);
   });
 
+  it('drops an entry with a negative position and keeps a valid sibling', () => {
+    expect(
+      definitionTargets([
+        { uri: 'file:///w/a.ts', range: { start: { line: -1, character: 0 }, end: { line: 0, character: 3 } } },
+        { uri: 'file:///w/b.ts', range: RANGE },
+      ]),
+    ).toEqual([{ uri: 'file:///w/b.ts', range: RANGE }]);
+  });
+
   it('removes duplicates by uri and range', () => {
     expect(
       definitionTargets([
