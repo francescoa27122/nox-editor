@@ -8,6 +8,82 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, evening) — Rename symbol
+
+On branch `lsp-rename`, off `main` at `cfe3db4` (#39, #40, #41 merged).
+Design in `docs/superpowers/specs/2026-08-19-lsp-rename-design.md`.
+
+Shipped:
+
+- `src/core/lsp-rename.ts` — `renameEdits(WorkspaceEdit)` reads `changes`
+  or `documentChanges` (the latter wins when both are present), merges
+  entries per URI, drops malformed edits, and lists resource operations as
+  `unsupported`; `prepareRenameSeed` reduces the four prepare shapes to a
+  prompt seed or null.
+- `lsp.renameSymbol` — **Rename Symbol**, `F2`, category Language, enabled
+  on `renameProvider`. `prepareRename` first when offered (null → "Nothing
+  to rename here", no prompt); the prompt is seeded from the
+  placeholder / range / word; the rename is sent with `newName`; every
+  touched file is opened (one unopenable file stops the whole rename before
+  anything is staged; a resource op refuses it whole); the edits are
+  converted against each buffer's current text and staged as **one change
+  set** through `review.stage`, so the review panel shows every hunk and
+  `review.apply` lands it as one transaction — one undo across all files,
+  stale buffers refused. The file the command was run from is made active
+  again afterwards, since opening activates. Applied buffers stay dirty,
+  by design (spec §4).
+- `session.ts` now declares `textDocument.rename.prepareSupport: true` —
+  without it tsserver advertises `renameProvider: true` and the prepare
+  path would never have fired against the server the feature was built for.
+  Found by the integration test, which asserts the shape it now sends: a
+  bare `Range`, no placeholder.
+- CHANGELOG `[Unreleased]`, ROADMAP row ✅, README's "not there yet".
+
+Verified:
+
+- `npm test` — 1144 passed, 64 files (was 1119/62). `npm run check` — 434
+  files, 0 errors. `npm run build` green.
+- `tests/lsp-rename.test.ts` (node, 10), `tests/lsp-rename-symbol.test.ts`
+  (jsdom, 14: real pane, real review service, prompt resolved through
+  `ui.prompt`). Mutations seen red: prepare skipped, `unsupported` check
+  removed, rename sent on cancel, `setActive` not restored, unopenable file
+  `continue`d instead of stopping. **One mutation survived and changed the
+  code**: dropping the `baseRevisions` the command passed to `stage` changed
+  nothing, because `ReviewService.stage` records revisions itself and
+  `apply` refuses a moved buffer. The dead argument was removed and the
+  stale test now documents whose guard it is.
+- Against the real `typescript-language-server`: `renameProvider` is
+  `{ prepareProvider: true }` once asked, `prepareRename` returns the
+  identifier's range, `rename` returns a `WorkspaceEdit` editing 0:6-12 and
+  1:15-21 to `result`. Asserted.
+- Browser build: "Language: Rename Symbol F2" in the palette (disabled,
+  rightly — no server there), no console errors. The prompt, the review
+  panel full of a rename, and F2 on a keyboard: not seen on a screen. Same
+  gap as the rest of the LSP surfaces; a desktop build closes it.
+
+Next:
+
+- **Formatting on save** — the last v0.4 row before Git on the 1.0 order.
+  `textDocument/formatting` → `TextEdit[]` → one change set applied before
+  the write; a configured external command as the alternative the row
+  names. Decide whether it goes through review (no — a format is not a
+  proposal) and how `documents.ts`'s didSave interacts.
+- A tag build (`v0.4.3`?) so the four LSP surfaces since 0.4.2 are seen on
+  a screen before anything else stacks on them.
+
+Blocked:
+
+- Nothing technical.
+
+Confidence:
+
+- High on the wire, the normaliser and the review path; the real server
+  agreed and each claim was mutation-checked.
+- Medium on the prompt ergonomics (seed selected whole, validation text) —
+  unseen.
+
+---
+
 ## 2026-08-19 (PC, later) — Find references
 
 On branch `lsp-references`, stacked on `v1-bar` (#39) — it continues that

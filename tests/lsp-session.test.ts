@@ -114,6 +114,10 @@ describe('starting', () => {
     // cheaper than discovering a server chose otherwise.
     expect(initialize?.params?.capabilities).toMatchObject({
       general: { positionEncodings: ['utf-16'] },
+      // Without this tsserver advertises `renameProvider: true` and never
+      // offers `prepareRename`; the integration suite records that it does
+      // once asked.
+      textDocument: { rename: { prepareSupport: true } },
     });
   });
 

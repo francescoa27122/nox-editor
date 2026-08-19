@@ -16,6 +16,7 @@ import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
 import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
+import { prepareRenameSeed, renameEdits } from '@core/lsp-rename';
 import { offsetAt, positionAt } from '@core/lsp-position';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
@@ -79,6 +80,7 @@ import { TerminalService } from '@services/terminal';
 import { UIService } from '@services/ui';
 import { FileWatcherService } from '@services/watcher';
 import { WorkspaceService } from '@services/workspace';
+import type { ChangeSetSpec } from '@services/transactions';
 
 export interface CursorReadout {
   line: number;
@@ -1997,6 +1999,19 @@ export class NoxApp {
         run: () => this.#findReferences(),
       },
       {
+        id: 'lsp.renameSymbol',
+        title: 'Rename Symbol',
+        category: 'Language',
+        keywords: ['rename', 'refactor', 'symbol', 'lsp'],
+        capabilities: ['buffer.edit'],
+        enabled: () => {
+          const snapshot = this.workspace.activeSnapshot();
+          if (!snapshot?.path) return false;
+          return Boolean(this.lsp.capabilitiesFor(snapshot.languageId)?.renameProvider);
+        },
+        run: () => this.#renameSymbol(),
+      },
+      {
         id: 'references.focus',
         title: 'Show References',
         category: 'Language',
@@ -2762,6 +2777,7 @@ export class NoxApp {
       // Language. F12 is the convention everywhere; it needs no chord.
       F12: 'lsp.goToDefinition',
       'Shift+F12': 'lsp.findReferences',
+      F2: 'lsp.renameSymbol',
 
       // View
       'Mod+B': 'view.toggleExplorer',
@@ -2918,6 +2934,151 @@ export class NoxApp {
     // The cursor stays. Twenty places is a choice, and choosing for the user
     // is what "went to the first" was apologising for.
     await this.showLocations('References', wordAt(view), targets);
+  }
+
+  /**
+   * Rename the symbol under the cursor everywhere the server says it is —
+   * staged in the review panel, never written blind.
+   *
+   * Every file the edit touches is opened first: the review needs a buffer,
+   * and after apply the tab is where the result is seen and saved from. One
+   * file that cannot be opened stops the whole rename before anything is
+   * staged, because a rename applied to eleven of twelve files is a
+   * half-rename nobody asked for. Applied buffers are left dirty, as every
+   * reviewed change set is; Save All is one command away. The design doc
+   * says why.
+   */
+  async #renameSymbol(): Promise<void> {
+    const view = this.view.get();
+    const snapshot = this.workspace.activeSnapshot();
+    if (!view || !snapshot?.path) return;
+
+    const { languageId, path } = snapshot;
+    const text = view.state.doc.toString();
+    const position = positionAt(text, view.state.selection.main.head);
+    const textDocument = { uri: pathToUri(path) };
+    const subject = wordAt(view);
+
+    // Ask first where the server offers it: a keyword, whitespace or a
+    // library symbol gets "nothing to rename" instead of a prompt that can
+    // only fail.
+    let seed = subject;
+    const provider = this.lsp.capabilitiesFor(languageId)?.renameProvider as
+      | boolean
+      | { prepareProvider?: boolean }
+      | undefined;
+    if (typeof provider === 'object' && provider?.prepareProvider) {
+      let prepared: unknown;
+      try {
+        prepared = await this.lsp.requestFor(languageId, 'textDocument/prepareRename', {
+          textDocument,
+          position,
+        });
+      } catch (error) {
+        this.notifications.error(
+          'Rename failed',
+          error instanceof Error ? error.message : String(error),
+        );
+        return;
+      }
+      const prepareSeed = prepareRenameSeed(prepared, subject, (range) =>
+        text.slice(offsetAt(text, range.start), offsetAt(text, range.end)),
+      );
+      if (prepareSeed === null) {
+        this.notifications.info('Nothing to rename here');
+        return;
+      }
+      seed = prepareSeed;
+    }
+
+    const newName = await this.ui.askForText({
+      title: 'Rename Symbol',
+      label: 'New name',
+      initialValue: seed,
+      selectTo: seed.length,
+      confirmLabel: 'Rename',
+      validate: (value) => {
+        if (value.trim().length === 0) return 'A name is required';
+        if (value === seed) return 'That is the current name';
+        return null;
+      },
+    });
+    if (newName === null) return;
+
+    let response: unknown;
+    try {
+      response = await this.lsp.requestFor(languageId, 'textDocument/rename', {
+        textDocument,
+        position,
+        newName,
+      });
+    } catch (error) {
+      // The server's message, because it is the one that knows why — the
+      // usual reason is that it refused the new name.
+      this.notifications.error(
+        'Rename failed',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const plan = renameEdits(response);
+    if (plan.unsupported.length > 0) {
+      this.notifications.warn(
+        'Rename needs file operations Nox does not perform',
+        `The server asked to ${[...new Set(plan.unsupported)].join(', ')} a file. Nothing was changed.`,
+      );
+      return;
+    }
+    if (plan.files.length === 0) {
+      this.notifications.info('Nothing to rename');
+      return;
+    }
+
+    // Open everything before staging anything. The positions the server sent
+    // are against the text it was sent — an open buffer's, or the disk's —
+    // and opening reads the disk, so once every file is open each buffer's
+    // text is what the server saw. A keystroke after staging is caught by
+    // the review's own revision guard at apply time, not here.
+    const edits: ChangeSetSpec['edits'] = [];
+    for (const file of plan.files) {
+      let filePath: string;
+      try {
+        filePath = uriToPath(file.uri);
+      } catch {
+        this.notifications.warn('Rename touches a file Nox cannot open', `${file.uri} — nothing was changed.`);
+        return;
+      }
+      const id = await this.workspace.open(filePath);
+      if (!id) {
+        // The workspace has already said why, through its error event.
+        this.notifications.warn('Rename stopped', `${basename(filePath)} could not be opened, so nothing was changed.`);
+        return;
+      }
+      const bufferText = this.workspace.textOf(id);
+      if (bufferText === undefined) return;
+      edits.push({
+        bufferId: id,
+        changes: file.edits.map((edit) => {
+          const from = offsetAt(bufferText, edit.range.start);
+          const to = Math.max(from, offsetAt(bufferText, edit.range.end));
+          return { from, to, insert: edit.newText };
+        }),
+      });
+    }
+    // Opening activates, and the user asked from `snapshot`'s file: the
+    // review panel is what they look at next, and the file they were in is
+    // what they should find behind it.
+    this.workspace.setActive(snapshot.id);
+
+    const staged = this.review.stage({
+      description: `Rename ${subject || 'symbol'} → ${newName}`,
+      author: { kind: 'user' },
+      edits,
+    });
+    if (!staged) {
+      this.notifications.info('Nothing to rename', 'The server’s edit would change nothing.');
+    }
   }
 
   /**

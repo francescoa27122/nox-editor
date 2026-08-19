@@ -157,6 +157,9 @@ export class LspSession {
           textDocument: {
             synchronization: { dynamicRegistration: false },
             publishDiagnostics: { relatedInformation: false },
+            // Rename Symbol asks `prepareRename` first when the server offers
+            // it; tsserver offers it only to a client that says it will ask.
+            rename: { prepareSupport: true },
           },
         },
         // Nox advertises what it implements and nothing else. Claiming a
