@@ -14,8 +14,11 @@ import {
 } from '@codemirror/commands';
 import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
+import { definitionTargets, type LspLocation } from '@core/lsp-definition';
+import { offsetAt, positionAt } from '@core/lsp-position';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
+import { pathToUri, uriToPath } from '@core/uri';
 import { addCursorAbove, addCursorBelow, goToLine } from '@editor/commands';
 import {
   foldAll,
@@ -1963,6 +1966,18 @@ export class NoxApp {
         },
       },
       {
+        id: 'lsp.goToDefinition',
+        title: 'Go to Definition',
+        category: 'Language',
+        keywords: ['definition', 'declaration', 'jump', 'lsp'],
+        enabled: () => {
+          const snapshot = this.workspace.activeSnapshot();
+          if (!snapshot?.path) return false;
+          return Boolean(this.lsp.capabilitiesFor(snapshot.languageId)?.definitionProvider);
+        },
+        run: () => this.#goToDefinition(),
+      },
+      {
         id: 'agents.reloadConfig',
         title: 'Reload Agent Configuration',
         category: 'Agents',
@@ -2708,6 +2723,8 @@ export class NoxApp {
       'Mod+Shift+G': 'edit.findPrevious',
       F3: 'edit.findNext',
       'Shift+F3': 'edit.findPrevious',
+      // Language. F12 is the convention everywhere; it needs no chord.
+      F12: 'lsp.goToDefinition',
       'Mod+Shift+L': 'edit.selectAllMatches',
       // ⌘⇧[ / ⌘⇧] already switch tabs, so folding takes the ⌥ variants.
       'Mod+Alt+[': 'edit.fold',
@@ -2801,6 +2818,76 @@ export class NoxApp {
   goToLine(line: number, column = 1): void {
     const view = this.view.get();
     if (view) goToLine(view, line, column);
+  }
+
+  async #goToDefinition(): Promise<void> {
+    const view = this.view.get();
+    const snapshot = this.workspace.activeSnapshot();
+    if (!view || !snapshot?.path) return;
+
+    const text = view.state.doc.toString();
+    let response: unknown;
+    try {
+      response = await this.lsp.requestFor(snapshot.languageId, 'textDocument/definition', {
+        textDocument: { uri: pathToUri(snapshot.path) },
+        position: positionAt(text, view.state.selection.main.head),
+      });
+    } catch (error) {
+      this.notifications.error(
+        'Go to definition failed',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const targets = definitionTargets(response);
+    if (targets.length === 0) {
+      this.notifications.info('No definition found');
+      return;
+    }
+
+    await this.revealLocation(targets[0]!);
+    if (targets.length > 1) {
+      // One picker for many is a list UI; find references brings it, and
+      // this command will use it. Until then, say what was skipped.
+      this.notifications.info(`${targets.length} definitions — went to the first`);
+    }
+  }
+
+  /**
+   * Open the file a location names, if it is not the active one, and select
+   * the range. Public because find references lands the same way.
+   */
+  async revealLocation(location: LspLocation): Promise<void> {
+    let path: string;
+    try {
+      path = uriToPath(location.uri);
+    } catch {
+      this.notifications.info('Definition is not in a file Nox can open', location.uri);
+      return;
+    }
+
+    const active = this.workspace.activeSnapshot();
+    let id = active?.path === path ? active.id : null;
+    if (!id) {
+      id = await this.workspace.open(path);
+      if (!id) {
+        this.notifications.error('Could not open', path);
+        return;
+      }
+    }
+
+    // Through the workspace, not the view: the pane swaps the view's state
+    // in an effect that has not run yet when `open` resolves, so a dispatch
+    // on the view here would land on the *previous* buffer. `setSelection`
+    // dispatches to the view when it is showing the buffer and updates the
+    // buffer's own state when it is not — the pane then swaps that state
+    // in, cursor included. It is the path session restore uses.
+    const text = this.workspace.textOf(id) ?? '';
+    const from = Math.min(offsetAt(text, location.range.start), text.length);
+    const to = Math.min(Math.max(from, offsetAt(text, location.range.end)), text.length);
+    this.workspace.setSelection(id, { ranges: [[from, to]], main: 0 });
+    this.view.get()?.focus();
   }
 
   /**
