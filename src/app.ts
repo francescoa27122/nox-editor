@@ -15,6 +15,7 @@ import {
 import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
+import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
 import { offsetAt, positionAt } from '@core/lsp-position';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
@@ -132,6 +133,12 @@ export class NoxApp {
 
   /** Set by EditorPane once a view exists. Null when no tab is open. */
   readonly view = new Signal<EditorView | null>(null);
+  /**
+   * The most recent answer to "where is this used" or "where is this
+   * defined", as the References view shows it. One signal for both, because
+   * the view is one panel and the last question asked is the one wanted.
+   */
+  readonly locations = new Signal<LocationList | null>(null);
   readonly homeDir = new Signal<string | null>(null);
   /** Cursor/selection readout for the status bar, updated by EditorPane. */
   readonly cursor = new Signal<CursorReadout>({
@@ -1978,6 +1985,28 @@ export class NoxApp {
         run: () => this.#goToDefinition(),
       },
       {
+        id: 'lsp.findReferences',
+        title: 'Find References',
+        category: 'Language',
+        keywords: ['references', 'usages', 'uses', 'lsp'],
+        enabled: () => {
+          const snapshot = this.workspace.activeSnapshot();
+          if (!snapshot?.path) return false;
+          return Boolean(this.lsp.capabilitiesFor(snapshot.languageId)?.referencesProvider);
+        },
+        run: () => this.#findReferences(),
+      },
+      {
+        id: 'references.focus',
+        title: 'Show References',
+        category: 'Language',
+        keywords: ['references', 'usages', 'definitions', 'lsp'],
+        run: () => {
+          this.config.set('workbench.showExplorer', true);
+          this.ui.showView('references');
+        },
+      },
+      {
         id: 'agents.reloadConfig',
         title: 'Reload Agent Configuration',
         category: 'Agents',
@@ -2732,6 +2761,7 @@ export class NoxApp {
 
       // Language. F12 is the convention everywhere; it needs no chord.
       F12: 'lsp.goToDefinition',
+      'Shift+F12': 'lsp.findReferences',
 
       // View
       'Mod+B': 'view.toggleExplorer',
@@ -2849,10 +2879,90 @@ export class NoxApp {
 
     const landed = await this.revealLocation(targets[0]!);
     if (landed && targets.length > 1) {
-      // One picker for many is a list UI; find references brings it, and
-      // this command will use it. Until then, say what was skipped.
-      this.notifications.info(`${targets.length} definitions — went to the first`);
+      // The common case is one, and a jump that sometimes does not jump is
+      // worse than one that goes to the first and shows the rest.
+      await this.showLocations('Definitions', wordAt(view), targets);
     }
+  }
+
+  /** Every place the symbol under the cursor is used, listed in the sidebar. */
+  async #findReferences(): Promise<void> {
+    const view = this.view.get();
+    const snapshot = this.workspace.activeSnapshot();
+    if (!view || !snapshot?.path) return;
+
+    const text = view.state.doc.toString();
+    let response: unknown;
+    try {
+      response = await this.lsp.requestFor(snapshot.languageId, 'textDocument/references', {
+        textDocument: { uri: pathToUri(snapshot.path) },
+        position: positionAt(text, view.state.selection.main.head),
+        // A list of uses that leaves out the declaration sends the reader to
+        // go to definition to find it; including it costs one row.
+        context: { includeDeclaration: true },
+      });
+    } catch (error) {
+      this.notifications.error(
+        'Find references failed',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const targets = referenceTargets(response);
+    if (targets.length === 0) {
+      this.notifications.info('No references found');
+      return;
+    }
+
+    // The cursor stays. Twenty places is a choice, and choosing for the user
+    // is what "went to the first" was apologising for.
+    await this.showLocations('References', wordAt(view), targets);
+  }
+
+  /**
+   * Fill the References view with `locations` and show it.
+   *
+   * The line each row shows is read once, here: an open buffer's text from
+   * the workspace, anything else from disk, a failed read becoming an empty
+   * line. The panel is a snapshot of an answer, and the answer was already
+   * a snapshot.
+   */
+  async showLocations(title: string, subject: string, locations: readonly LspLocation[]): Promise<void> {
+    const texts = new Map<string, string>();
+    for (const location of locations) {
+      let path: string;
+      try {
+        path = uriToPath(location.uri);
+      } catch {
+        continue;
+      }
+      if (texts.has(path)) continue;
+      const open = this.workspace.findByPath(path);
+      const text = open ? this.workspace.textOf(open.id) : undefined;
+      if (text !== undefined) {
+        texts.set(path, text);
+        continue;
+      }
+      try {
+        texts.set(path, await this.platform.readTextFile(path));
+      } catch {
+        texts.set(path, '');
+      }
+    }
+
+    const rows = locationRows(locations, texts, this.workspace.rootPath.get());
+    this.locations.set({
+      title,
+      subject,
+      rows,
+      files: rows.filter((row) => row.kind === 'file').length,
+      total: rows.length - rows.filter((row) => row.kind === 'file').length,
+    });
+    // Otherwise the view is set and nothing shows, the trap `problems.focus`
+    // documents.
+    this.config.set('workbench.showExplorer', true);
+    this.ui.showView('references');
   }
 
   /**
@@ -2940,6 +3050,13 @@ export class NoxApp {
 }
 
 /** Length of the trailing `.ext`, used to pre-select the stem in Save As. */
+/** The word at the main cursor, or '' when the cursor is not on one. */
+function wordAt(view: EditorView): string {
+  const { head } = view.state.selection.main;
+  const word = view.state.wordAt(head);
+  return word ? view.state.sliceDoc(word.from, word.to) : '';
+}
+
 function extLength(path: string): number {
   const name = basename(path);
   const index = name.lastIndexOf('.');
