@@ -29,14 +29,15 @@ import { foldingExtension } from './folding';
 import { lspDiagnosticsExtension } from './lsp';
 
 /**
- * Holds the language-server completion source.
+ * Holds every language-server editor extension.
  *
- * Its own compartment because the source needs the *pane's* current buffer,
- * and `buildExtensions` is a workspace-level factory that has no idea which
- * one that is. `EditorPane` reconfigures it, the way it already does for the
- * grammar.
+ * One compartment rather than one per feature: they all need the *pane's*
+ * current buffer, and `buildExtensions` is a workspace-level factory that has
+ * no idea which one that is. `EditorPane` reconfigures it, the way it already
+ * does for the grammar — so the next feature on this door is an entry in an
+ * array rather than another wiring path.
  */
-export const completionCompartment = new Compartment();
+export const lspCompartment = new Compartment();
 import { languageCompartment } from './languages';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
 import { searchHighlighter } from './search-highlight';
@@ -238,8 +239,8 @@ export function buildExtensions(settings: Settings): Extension[] {
     // so nothing here is conditional on a server being configured — with none
     // running there are simply no diagnostics, and the gutter stays empty.
     lspDiagnosticsExtension(),
-    // Empty until a pane fills it in; see `completionCompartment`.
-    completionCompartment.of([]),
+    // Empty until a pane fills it in; see `lspCompartment`.
+    lspCompartment.of([]),
     // Empty until the grammar resolves; see `editor/languages.ts`.
     languageCompartment.of([]),
   ];

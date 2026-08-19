@@ -3,11 +3,12 @@
   import { onMount } from 'svelte';
   import { cursorInfo } from '@editor/commands';
   import {
-    completionCompartment,
+    lspCompartment,
     reconfigureAllEffects,
     reconfigureEffects,
   } from '@editor/extensions';
   import { lspCompletionExtension } from '@editor/completion';
+  import { lspHoverExtension } from '@editor/hover';
   import { cachedLanguage, hasGrammar, languageCompartment, loadLanguage } from '@editor/languages';
   import { applyDiagnostics } from '@editor/lsp';
   import { pathToUri } from '@core/uri';
@@ -48,7 +49,7 @@
    * holding. Keyed off `currentId` rather than the app-wide active id, for
    * the reason the diagnostics paint is — they are not the same question.
    */
-  const completion = lspCompletionExtension({
+  const lspDeps = {
     lsp,
     documentOf: () => {
       if (!currentId) return null;
@@ -56,7 +57,8 @@
       if (!buffer?.path) return null;
       return { uri: pathToUri(buffer.path), languageId: buffer.languageId };
     },
-  });
+  };
+  const lspExtensions = [lspCompletionExtension(lspDeps), lspHoverExtension(lspDeps)];
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {
@@ -181,7 +183,7 @@
         languageCompartment.reconfigure(cachedLanguage(languageId) ?? []),
         // `setState` resets every compartment to the state's own
         // configuration, so this is re-applied on each swap rather than once.
-        completionCompartment.reconfigure(completion),
+        lspCompartment.reconfigure(lspExtensions),
       ],
       // `setState` resets the scroll to the top of the document, so without
       // this a tab switch — or a session restored mid-file — lands nowhere

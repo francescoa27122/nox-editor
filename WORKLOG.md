@@ -8,6 +8,63 @@ are knowledge.**
 
 ---
 
+## 2026-08-18 (later still) — Hover, and a shared-checkout collision
+
+Shipped, on branch `lsp-hover`, in a **worktree** at `../nox-hover`:
+
+- `src/core/lsp-hover.ts` — the three shapes of LSP `contents` reduced to
+  ordered code/prose blocks. Pure.
+- `src/editor/hover.ts` — the `hoverTooltip` source and its DOM.
+- `completionCompartment` renamed `lspCompartment` and widened to hold both
+  editor extensions, so the next feature is an array entry.
+
+Verified:
+
+- `npm test` — 1063 passed, 55 files. `npm run check` — 419 files, 0 errors.
+- The no-HTML guard was checked by breaking it: swapping one `textContent`
+  for `innerHTML` produces a live `<img onerror>` and a `<script>` element,
+  and two tests fail. That is the assertion the design's §4 rests on.
+- The language-tagged `MarkedString` branch was checked the same way; two
+  tests fail, which is what renders a type signature as a paragraph.
+- Against the real server: tsserver sends `MarkupContent` markdown **and**
+  names a range. Both design assumptions held — unlike diagnostics, where the
+  equivalent test found no `version` and turned a safeguard into dead code.
+
+**Two sessions shared this checkout, and it went wrong three times.** Worth
+writing down properly, because the lesson sharpened at each step:
+
+1. My commit landed on the other session's branch, and `git add -A` swept its
+   uncommitted work into mine.
+2. It happened again with `git add <named files>` — nothing of theirs was
+   captured, but it caught them with work *staged*.
+3. Then the real lesson: **`git add <file>` scopes what you add; `git commit`
+   commits the whole index.** A commit of mine carried four of their files
+   purely because they were staged when I ran it. Found by auditing
+   `git show --name-only` over every commit on the branch, and fixed by
+   rebuilding it from the last clean commit — nothing had been pushed.
+
+The fix that actually works: `git worktree add ../nox-hover lsp-hover`, plus
+a **directory junction** for `node_modules` so there is no second install
+(`New-Item -ItemType Junction`). The suite runs unchanged in it. Do this the
+moment a second session starts, not after the third incident.
+
+Next:
+
+- **The tooltip has never been seen.** Same gap as the picker and the squiggle.
+  A tag build and a human.
+- Then go-to-definition, which is the same door and needs no new rendering.
+
+Blocked:
+
+- Nothing. Not pushed.
+
+Confidence:
+
+- High on the conversion and the source, both mutation-checked.
+- Unverified: the tooltip rendering on a real hover.
+
+---
+
 ## 2026-08-18 (later still) — The apt step that hangs
 
 On branch `ci-apt-mirror-stall`, merged to `main` as #34. The

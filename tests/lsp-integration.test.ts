@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pathToUri } from '../src/core/uri';
 import { LspSession } from '../src/services/lsp/session';
+import { hoverBlocks } from '../src/core/lsp-hover';
 import { spawnLanguageServer } from './support/lsp-child';
 
 /**
@@ -286,5 +287,79 @@ describe('completion from a real typescript-language-server', () => {
     // The measured answer: none of them carry documentation, which is what
     // makes `completionItem/resolve` load-bearing rather than optional.
     expect(withDocs).toHaveLength(0);
+  }, 90_000);
+});
+
+describe('hover from a real typescript-language-server', () => {
+  it('describes the symbol under the cursor', async () => {
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    expect(session.status.get(), `stderr: ${session.stderr.join(' | ')}`).toBe('running');
+
+    const source = 'const answer: number = 42;\nexport default answer;\n';
+    await session.notify('textDocument/didOpen', {
+      textDocument: {
+        uri: pathToUri(filePath),
+        languageId: 'typescript',
+        version: 1,
+        text: source,
+      },
+    });
+
+    const response = await session.request<{ contents?: unknown; range?: unknown }>(
+      'textDocument/hover',
+      {
+        textDocument: { uri: pathToUri(filePath) },
+        // On `answer` in the declaration.
+        position: { line: 0, character: 8 },
+      },
+    );
+    await session.stop();
+
+    const blocks = hoverBlocks(response?.contents);
+    expect(blocks.length).toBeGreaterThan(0);
+    // The type is the thing worth showing, and it should be code rather than
+    // prose — the whole reason a language-tagged block is treated as code.
+    expect(blocks.some((b) => b.kind === 'code' && b.text.includes('number'))).toBe(true);
+  }, 90_000);
+
+  it('reports which shape of contents it sends, and whether it names a range', async () => {
+    // Recorded rather than assumed. The design handles three shapes; this
+    // says which one the primary server actually uses, so a change to it is
+    // a failure someone reads rather than a silent behaviour shift.
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    const source = 'const answer: number = 42;\nexport default answer;\n';
+    await session.notify('textDocument/didOpen', {
+      textDocument: {
+        uri: pathToUri(filePath),
+        languageId: 'typescript',
+        version: 1,
+        text: source,
+      },
+    });
+
+    const response = await session.request<{
+      contents?: { kind?: string; value?: string };
+      range?: { start: { line: number; character: number } };
+    }>('textDocument/hover', {
+      textDocument: { uri: pathToUri(filePath) },
+      position: { line: 0, character: 8 },
+    });
+    await session.stop();
+
+    // MarkupContent, not one of the two legacy shapes.
+    expect(response?.contents?.kind).toBe('markdown');
+    // And it names the range, so the highlight can cover the symbol rather
+    // than the character the pointer was over.
+    expect(response?.range?.start).toBeDefined();
   }, 90_000);
 });
