@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pathToUri } from '../src/core/uri';
 import { LspSession } from '../src/services/lsp/session';
 import { hoverBlocks } from '../src/core/lsp-hover';
+import { definitionTargets } from '../src/core/lsp-definition';
 import { spawnLanguageServer } from './support/lsp-child';
 
 /**
@@ -361,5 +362,46 @@ describe('hover from a real typescript-language-server', () => {
     // And it names the range, so the highlight can cover the symbol rather
     // than the character the pointer was over.
     expect(response?.range?.start).toBeDefined();
+  }, 90_000);
+});
+
+describe('definition from a real typescript-language-server', () => {
+  it('resolves a use to its declaration, and says which shape it sends', async () => {
+    const session = new LspSession(
+      () => spawnLanguageServer(SERVER, SERVER_ARGS, { cwd: workspace }),
+      { name: 'typescript-language-server', rootUri: pathToUri(workspace), timeoutMs: 30_000 },
+    );
+
+    await session.start();
+    expect(session.status.get(), `stderr: ${session.stderr.join(' | ')}`).toBe('running');
+
+    const source = 'const answer: number = 42;\nexport default answer;\n';
+    await session.notify('textDocument/didOpen', {
+      textDocument: { uri: pathToUri(filePath), languageId: 'typescript', version: 1, text: source },
+    });
+
+    const response = await session.request<unknown>('textDocument/definition', {
+      textDocument: { uri: pathToUri(filePath) },
+      // On the `answer` in `export default answer`.
+      position: { line: 1, character: 17 },
+    });
+    await session.stop();
+
+    // Nox does not advertise linkSupport, so a conforming server sends
+    // Location(s). Asserted, like hover's contents shape: if this ever
+    // changes, someone reads a failing test rather than a bug report.
+    expect(Array.isArray(response)).toBe(true);
+    const first = (response as unknown[])[0] as Record<string, unknown>;
+    expect(typeof first.uri).toBe('string');
+    expect(first.targetUri).toBeUndefined();
+
+    const targets = definitionTargets(response);
+    expect(targets).toHaveLength(1);
+    expect(targets[0]!.uri).toBe(pathToUri(filePath));
+    // The declaration's identifier: line 0, `answer` at characters 6-12.
+    expect(targets[0]!.range).toEqual({
+      start: { line: 0, character: 6 },
+      end: { line: 0, character: 12 },
+    });
   }, 90_000);
 });

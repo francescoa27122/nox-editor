@@ -8,6 +8,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Go to Definition.** `F12`, or the command from the palette, asks the
+  language server where the symbol under the cursor is defined and takes you
+  there — opening the file first if it is another one, and selecting the
+  name so the landing is visible on a line you have never seen. When the
+  server offers several places, Nox goes to the first and says how many
+  there were; a list to choose from arrives with find references, which
+  needs the same one.
+
 - **Hover.** Rest the pointer on a symbol and Nox shows its type and
   documentation. The tooltip stays while the pointer is anywhere over the
   span the server names, and goes when it leaves.
