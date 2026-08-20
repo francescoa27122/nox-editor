@@ -841,6 +841,11 @@ export class MemoryPlatform implements Platform {
  * always uses git's clean-tree wording ("nothing to commit, working tree
  * clean") even when unstaged changes exist; only the clean case is
  * exercised, and one message keeps the model small.
+ *
+ * Mutation check (task 10): disabling the `clobbered.length > 0` guard in
+ * `gitSwitch` — the refusal itself — turned
+ * 'refuses to switch over a dirty conflicting file, and touches nothing'
+ * red (`tests/git-platform.test.ts`); restored, suite green.
  */
 interface FakeGitRepo {
   branch: string;

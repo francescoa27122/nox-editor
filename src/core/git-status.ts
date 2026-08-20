@@ -14,6 +14,13 @@
  * unrecognised degrades to M for the same reason.
  *
  * See docs/superpowers/specs/2026-08-19-git-stage-commit-design.md §4.
+ *
+ * Mutation check (task 10): reading `records[i]` instead of `records[++i]`
+ * for a rename's original path — the record consumed without advancing the
+ * cursor — turned both origPath assertions
+ * ('reads a rename with its NUL-separated original path',
+ * 'maps porcelain C (copied) to R with origPath') red in
+ * `tests/git-status.test.ts`; restored, suite green.
  */
 
 export type GitStatusLetter = 'M' | 'A' | 'D' | 'R' | 'U';

@@ -263,6 +263,13 @@ export class GitService {
    * time, and any number of requests arriving meanwhile queue exactly one
    * more — the second answer is already computed from the state the burst
    * produced, so a third would learn nothing.
+   *
+   * Mutation check (task 10): disabling `this.#statusQueued = true` — a
+   * concurrent call arriving while one is in flight no longer queues a
+   * follow-up — turned
+   * 'coalesces concurrent refreshes: one in flight, one queued, not N' red
+   * (`tests/git-service.test.ts`, expected 2 calls, got 1); restored, suite
+   * green.
    */
   async refreshStatus(): Promise<void> {
     if (this.#statusInFlight) {

@@ -8,6 +8,138 @@ are knowledge.**
 
 ---
 
+## 2026-08-20 (PC, v0.5) — Stage, commit, branch
+
+Branch `git-stage-commit`, off `main` at `ca44580`, ten tasks per
+`docs/superpowers/specs/2026-08-19-git-stage-commit-design.md`. No
+subagents this session — every task built and verified directly. This
+entry is the doc pass (task 10) and the only WORKLOG entry the branch
+gets; tasks 1-9 shipped without one.
+
+Shipped:
+
+- **The panel.** A **Git** view in the sidebar (`GitPanel.svelte`): a
+  branch line, staged and unstaged file lists each with an S/U toggle, a
+  commit message box, **Commit**. Reads only `GitService.status` — nothing
+  in the view asks git directly. **Show Git** in the palette and a rail
+  icon open it.
+- **The read.** `core/git-status.ts` parses `git status --porcelain=v2
+  --branch -z` (NUL-terminated, so a rename's original path is the next
+  token, not a delimiter inside this one); porcelain's `C` (copied) maps
+  to `R`, an unmerged `u` record lands in unstaged as `M` rather than
+  vanishing.
+- **The six writes and reads** in `git.rs`, all argv-fixed, `-C <root>`,
+  `--literal-pathspecs`, no shell: `status`, `branches`, `stage`,
+  `unstage`, `commit`, `switch`. A refusal is git's own stderr (or stdout,
+  where git prints "nothing to commit" there) verbatim, `io:`-prefixed,
+  never translated.
+- **Unstage is `git reset -- <pathspec>`, not `restore --staged`** — the
+  deviation from the spec's first instinct, kept because it is provably
+  the safer choice rather than merely the one that shipped. Verified
+  live against a real repo: `restore --staged` fails on an unborn branch
+  (right after `git init`, no commits yet) with "could not resolve HEAD";
+  pathspec-limited `reset` does not, and it costs nothing against the
+  envelope's "no discard" promise despite `reset`'s reputation elsewhere —
+  limited to a pathspec it takes no `--hard`/`--soft` and is index-only by
+  construction, never touching HEAD or the working tree.
+- **The commit message travels over stdin** (`--file=-`), never argv.
+  **Branch names are validated with `git check-ref-format` before any
+  write** reaches them, and switching over a file the target would
+  overwrite is refused rather than forced.
+- **`GitService`**: a coalesced `refreshStatus` (one call in flight, any
+  number arriving meanwhile collapse to one queued follow-up, not N), and
+  a **branch picker with no prefix of its own** in the command palette —
+  `mode === 'git-branch'` locks `effectiveMode`, so `>` or `~` typed while
+  filtering branch names cannot switch the picker into another mode.
+  **Create branch…** is pinned first.
+- **`.git`'s `HEAD` and index are now watched directly** — a second,
+  targeted, non-recursive watch on `<root>/.git`, filtered to `HEAD`,
+  `index` and their `.lock` shadows, debounced. This closes the blind
+  spot the gutter's own docs have named since it shipped: a stage,
+  unstage, commit or switch made in a terminal now reaches both the panel
+  and the gutter unasked. The recursive workspace watch keeps its
+  `.git` DENY unchanged — this is a second watcher, not a hole in the
+  first one's filter.
+- `platform/memory.ts` grew a small honest fake repository — stage copies
+  working text into the index, commit snapshots it and refuses on a clean
+  index or a blank message, switch refuses over a dirty conflict — rather
+  than scripted replies, so the TS service tests exercise real sequences.
+  Refusal wording mirrors git's own and is cross-checked against the Rust
+  tests, which run the phrases against real git.
+- Mutation checks recorded in the relevant docblocks, as the previous two
+  rows did: `core/git-status.ts` (a rename's original path read without
+  advancing past it), `services/git.ts` (the queued-refresh flag
+  disabled), `platform/memory.ts` (the switch-refusal guard disabled) —
+  each turned its test red during this task's verification, then
+  reverted.
+- CHANGELOG `[Unreleased]`, ROADMAP's v0.5 row, this ARCHITECTURE.md
+  entry (module map: `core/git-status.ts`, `git.rs`, the grown
+  `watcher.rs`; the envelope's headline — six fixed commands, no generic
+  git seam, refusals verbatim — stated once so a future reader does not
+  quietly build a seventh).
+
+Deferred, stated rather than dropped silently:
+
+- **Hunk-level staging.** Phase 2, its own PR and its own envelope read —
+  it is the one place this feature would construct input for git
+  (`apply --cached`) rather than name files, which is a materially
+  different trust boundary than the six commands here.
+- **The status-bar branch indicator.** Phase C (2026-08-19) named this as
+  waiting on the stage/commit row's status read; that read exists now
+  (`GitService.status`), so the indicator is a five-line follow-up, not a
+  redesign — a signal subscription and a status-bar item, the same shape
+  the problems indicator already uses. Not built here because the spec
+  names only the panel's branch line, and this task stayed inside it.
+
+Verified:
+
+- `npm test` — 1306 passed, 79 files, on the run this commit stands on
+  (was 1257/76 at the start of this branch). `npm run check` — 460 files,
+  0 errors. `folding.test.ts` flaked twice across five full-suite runs
+  this session (1305/1306, one file failing on `foldLinesAtLevel`'s
+  budget-dependent assertion) and passed on the other three — the same
+  CPU-load sensitivity CHANGELOG's 0.2.0 entry names, not a regression:
+  neither `folding.ts` nor its test has changed since that release. Run
+  in isolation twice (`npx vitest run tests/folding.test.ts`), it was
+  10/10 green both times — the flake needs the full suite's load to show
+  at all.
+- `cargo test`, run locally in `src-tauri/` (not just declared unrun) —
+  **61 passed**, 0 failed, across the lib suite plus the two integration
+  files. CI's three-platform run is still the authority this claims
+  none of: this PC is one platform, and the `#[cfg(windows)]` paths in
+  `git.rs` and `watcher.rs` are unexercised here by construction.
+- Three mutation checks this task, each confirmed red then reverted (see
+  Shipped above for exactly which line and which test).
+- **Not verified: the panel on a screen.** Every git surface in this
+  branch — the panel, the branch picker, the commit flow, the `.git`
+  watch actually reaching a live app — has been seen in jsdom
+  (`tests/git-panel.test.ts`) and nowhere else. The desktop pass this
+  cycle keeps growing (Phases A-C, the gutter, the diff view, now this)
+  and still has not happened.
+
+Next:
+
+- **The desktop pass.** Everything UI-phase-C through this row, on a real
+  keyboard: the tab menu, EOL switch, the four primitives' look, the git
+  panel, the branch picker, a real stage/commit/switch cycle against a
+  real repo.
+- The status-bar branch indicator, now a small follow-up rather
+  than blocked on anything.
+- Blame — the last unchecked v0.5 row.
+
+Blocked:
+
+- Nothing technical. Not pushed, no PR, no subagents — by instruction.
+
+Confidence:
+
+- High on the TS and Rust layers: mutation-checked (this task's three
+  plus the ones tasks 1-9 recorded in their own docblocks), and `reset`
+  vs `restore --staged` was settled by running both against a real repo
+  rather than by reading git's docs.
+- Medium-low on the panel's look and the branch picker's ergonomics —
+  unseen outside jsdom, same gap as every LSP and UI surface before it.
+
 ## 2026-08-20 (PC, updater) — The auto-updater, seven tasks in
 
 Branch `auto-updater`, worktree `nox-worktrees/auto-updater`. Built the
