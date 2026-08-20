@@ -93,6 +93,17 @@ async function settle(): Promise<void> {
   flush();
 }
 
+describe('focusing the panel', () => {
+  it('puts the keyboard in the list when the command runs — the audit found it never did', async () => {
+    await setup();
+    await pane!.app.commands.execute('problems.focus');
+    flush();
+    const list = panel!.container.querySelector('.list');
+    expect(list).not.toBeNull();
+    expect(document.activeElement).toBe(list);
+  });
+});
+
 describe('opening a problem', () => {
   it('moves the cursor in the file the problem names, not the one that was showing', async () => {
     const { container } = await setup();

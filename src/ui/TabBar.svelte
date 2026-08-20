@@ -27,7 +27,7 @@
     const id = activeId;
     if (!id || !strip) return;
     queueMicrotask(() => {
-      strip?.querySelector(`[data-tab="${id}"]`)?.scrollIntoView({
+      strip?.querySelector(`[data-tab="${id}"]`)?.scrollIntoView?.({
         block: 'nearest',
         inline: 'nearest',
       });
@@ -85,6 +85,7 @@
   <div
     class="strip nox-scroll"
     role="presentation"
+    class:drop-end={$tabDrag?.overGroupId === groupId && $tabDrag.overIndex === buffers.length}
     ondragover={(event) => onDragOver(event, buffers.length)}
     ondrop={(event) => onDrop(event, buffers.length)}
   >
@@ -133,6 +134,7 @@
 
         <button
           class="close"
+          class:dirty={buffer.isDirty}
           aria-label="Close {buffer.name}"
           title="Close"
           onclick={(event) => {
@@ -253,6 +255,19 @@
     background: var(--nox-accent);
   }
 
+  /* Dropping past the last tab targets index buffers.length, which matches
+     no tab — so the most common drop, "to the end", drew nothing at all.
+     The indicator hangs off the last tab's right edge. */
+  .strip.drop-end .tab:last-child::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--nox-accent);
+  }
+
   .label {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -296,8 +311,15 @@
     transition: opacity var(--nox-dur-fast) var(--nox-ease);
   }
 
-  .tab:hover .close :global(svg),
-  .tab.active .close :global(svg),
+  /* On a clean tab, hovering anywhere on the tab reveals the ✕. On a dirty
+     tab the dot holds the slot until the pointer is over the button itself —
+     hiding the only "unsaved" signal at the exact moment the user aims at a
+     close that will prompt was the audit's sharpest catch. Same rule keeps
+     the dot and the ✕ from rendering on top of each other on active dirty
+     tabs, which the old rules allowed. */
+  .tab:hover .close:not(.dirty) :global(svg),
+  .tab.active .close:not(.dirty) :global(svg),
+  .close:hover :global(svg),
   .close:focus-visible :global(svg) {
     opacity: 1;
   }
@@ -317,7 +339,7 @@
     transition: opacity var(--nox-dur-fast) var(--nox-ease);
   }
 
-  .tab:hover .dot,
+  .close:hover .dot,
   .close:focus-visible .dot {
     opacity: 0;
   }

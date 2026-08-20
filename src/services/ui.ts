@@ -50,7 +50,9 @@ export type FocusZone =
   | 'overlay'
   | 'terminal'
   | 'notes'
-  | 'answers';
+  | 'answers'
+  | 'problems'
+  | 'references';
 
 export class UIService {
   readonly overlay = new Signal<OverlayKind | null>(null);
@@ -120,6 +122,10 @@ export class UIService {
   readonly focusNotesRequest = new Signal(0);
   /** Bumped to ask the answers panel to take focus. */
   readonly focusAnswersRequest = new Signal(0);
+  /** Bumped to ask the problems list to take focus. */
+  readonly focusProblemsRequest = new Signal(0);
+  /** Bumped to ask the references list to take focus. */
+  readonly focusReferencesRequest = new Signal(0);
 
   openOverlay(kind: OverlayKind): void {
     this.overlay.set(kind);
@@ -198,6 +204,8 @@ export class UIService {
     else if (view === 'notes') this.focusNotes();
     else if (view === 'answers') this.focusAnswers();
     else if (view === 'explorer') this.focusExplorer();
+    else if (view === 'problems') this.focusProblems();
+    else if (view === 'references') this.focusReferences();
     else this.sidebarView.set(view);
   }
 
@@ -223,6 +231,22 @@ export class UIService {
     this.sidebarView.set('answers');
     this.focusZone.set('answers');
     this.focusAnswersRequest.update((n) => n + 1);
+  }
+
+  // These two were the panels the focus model forgot: `showView` fell to the
+  // bare `sidebarView.set`, no request signal existed, and the lists' arrow
+  // handlers were unreachable until a mouse click. Found by the 2026-08-19
+  // UI audit.
+  focusProblems(): void {
+    this.sidebarView.set('problems');
+    this.focusZone.set('problems');
+    this.focusProblemsRequest.update((n) => n + 1);
+  }
+
+  focusReferences(): void {
+    this.sidebarView.set('references');
+    this.focusZone.set('references');
+    this.focusReferencesRequest.update((n) => n + 1);
   }
 
   /**

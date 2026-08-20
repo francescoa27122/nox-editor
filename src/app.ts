@@ -2927,6 +2927,10 @@ export class NoxApp {
       'Mod+R': 'nav.goToSymbol',
       'Mod+Shift+F': 'search.focus',
       'Mod+Shift+N': 'notes.focus',
+      // The problems list is the panel most worth a hotkey, and ⌘⇧M is the
+      // convention everywhere. References keeps no chord of its own: its
+      // natural entry is Shift+F12, which already fills and shows the view.
+      'Mod+Shift+M': 'problems.focus',
       'Mod+Shift+A': 'answers.focus',
 
       // Edit

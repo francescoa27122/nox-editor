@@ -8,6 +8,51 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, UI) — Audit, then Phase A
+
+Two pieces. First, a **full UI audit** (three parallel source auditors +
+live computed-style measurement), published as an artifact for Francesco:
+verdict "strong foundation, drifting consistency", ~40 findings, a 4-phase
+plan. The audit's method paid off: it found four genuine rendering bugs,
+two of them in code this very session had shipped (DiffView referenced
+`--nox-border-subtle`, which never existed, and styled none of its
+buttons).
+
+Then **Phase A on branch `ui-phase-a`** — the bug fixes:
+
+- `--nox-border-subtle` defined for real (both themes); `--nox-bg-hover`
+  call sites renamed to the real `--nox-hover`. Seven silently-dropped
+  rules now render — ReviewPanel's hunk borders had never been seen.
+- DiffView's header buttons styled (ReviewPanel's shape, knowingly
+  duplicated until Phase B's `.nox-button` extraction).
+- Problems/References joined the focus model: `FocusZone` members, focus
+  request signals, `showView` routing, panel `$effect`s, `⌘⇧M` for
+  Problems (References rides Shift+F12, which already opens it). Plus
+  hover states, `--nox-selected` instead of the editor-selection token,
+  guarded `scrollIntoView`, path truncation, and `title` on rows.
+- TabBar: dirty dot survives tab hover (swaps only on the close button
+  itself — and the old rules could draw dot and ✕ on top of each other on
+  active dirty tabs); the end-of-strip drop indicator exists.
+- ConfirmDialog focuses the first safe choice when any choice is danger.
+- Notifications: sticky (error) toasts can no longer be evicted by a
+  burst of transients; transients still cap at 4; toast messages wrap.
+- Swept four pre-existing unguarded `scrollIntoView` calls (jsdom throws).
+
+Verified: `npm test` 1233/1233 (72 files, +9+2 in-suite), `npm run check`
+448 files 0 errors, build green, browser boots clean, `--nox-border-subtle`
+resolves live. Mutations: slice(-4) revert, unconditional focus, drop-end
+binding removal, focus-effect removal — all red. One claim was withdrawn
+honestly: the evicted-timer cleanup is unobservable (dismiss self-heals),
+so it is documented as hygiene and no test pretends otherwise.
+
+Next: Phase B (the four primitives + token sweep) when Francesco says go —
+or back to v0.5 stage/commit; his call which thread runs first.
+
+Confidence: high on behavior (mutation-checked); the visual half of these
+fixes still wants the desktop pass like everything else this cycle.
+
+---
+
 ## 2026-08-19 (PC, spec) — Stage/commit/branch, specified
 
 On branch `git-stage-spec`, off `main` at `fa2caaf`. Spec only, no code:

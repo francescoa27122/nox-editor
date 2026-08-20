@@ -272,7 +272,7 @@
 
   function scrollSelectionIntoView() {
     queueMicrotask(() => {
-      listElement?.querySelector('.row.lead')?.scrollIntoView({ block: 'nearest' });
+      listElement?.querySelector('.row.lead')?.scrollIntoView?.({ block: 'nearest' });
     });
   }
 

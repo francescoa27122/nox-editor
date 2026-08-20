@@ -27,6 +27,11 @@
   --nox-selected-strong: rgba(139, 125, 245, 0.22);
 
   /* --- Borders ---------------------------------------------------------- */
+  /* Subtle: a rule inside a card or under a panel header — visible against
+     bg-panel but quieter than the surface-separating border below. Added
+     2026-08-19; it had been referenced for weeks without existing, and every
+     rule using it was silently dropped. */
+  --nox-border-subtle: #12161e;
   --nox-border: #171c26;
   --nox-border-strong: #242b39;
   --nox-border-accent: rgba(125, 211, 224, 0.35);
@@ -169,6 +174,7 @@
   --nox-bg-editor: #000000;
   --nox-bg-raised: #0c0e12;
   --nox-bg-inset: #000000;
+  --nox-border-subtle: #101318;
   --nox-border: #14171d;
   --nox-border-strong: #262b34;
   --nox-text: #d6dde8;

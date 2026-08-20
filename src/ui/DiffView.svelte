@@ -231,6 +231,10 @@
     margin: 0 0 2px;
   }
 
+  .heading {
+    min-width: 0;
+  }
+
   .heading p {
     display: flex;
     align-items: center;
@@ -261,9 +265,31 @@
     flex: none;
   }
 
+  /* ReviewPanel's button shape, duplicated knowingly: the audit's Phase B
+     extracts a shared .nox-button and both copies die then. Until that
+     lands, these were bare unstyled text — base.css strips all button
+     chrome and nothing here put any back. */
+  .actions button {
+    font: inherit;
+    font-size: var(--nox-fs-xs);
+    padding: var(--nox-sp-2) var(--nox-sp-3);
+    border-radius: var(--nox-r-sm);
+    border: 1px solid var(--nox-border);
+    background: var(--nox-bg-raised);
+    color: var(--nox-text);
+    cursor: pointer;
+    transition: background var(--nox-dur-fast) var(--nox-ease);
+  }
+
+  .actions button:hover {
+    background: var(--nox-hover);
+    color: var(--nox-text-bright);
+  }
+
   .actions .active {
     color: var(--nox-accent);
     background: var(--nox-active);
+    border-color: var(--nox-border-accent);
   }
 
   .body {

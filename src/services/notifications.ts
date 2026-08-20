@@ -39,8 +39,25 @@ export class NotificationService {
     const notification: Notification = { id, kind, message, timeout };
     if (options.detail) notification.detail = options.detail;
 
-    // Keep the stack short; the oldest is the least relevant.
-    this.items.update((list) => [...list, notification].slice(-4));
+    // Keep the stack short — but only the auto-dismissing kinds compete for
+    // the four slots. A sticky notification (timeout 0, i.e. an error) was
+    // shown sticky precisely because it must be read; four routine successes
+    // arriving in a burst used to evict it silently, and its orphaned timer
+    // kept ticking against an id that no longer existed.
+    this.items.update((list) => {
+      const next = [...list, notification];
+      const transient = next.filter((n) => n.timeout > 0);
+      const evict = new Set(transient.slice(0, Math.max(0, transient.length - 4)));
+      // Hygiene, not behavior: a ghost timer's dismiss would be a no-op and
+      // the map self-heals when it fires. Cleared anyway so the map never
+      // holds an id the list doesn't.
+      for (const gone of evict) {
+        const timer = this.#timers.get(gone.id);
+        if (timer) clearTimeout(timer);
+        this.#timers.delete(gone.id);
+      }
+      return next.filter((n) => !evict.has(n));
+    });
 
     if (timeout > 0) {
       this.#timers.set(

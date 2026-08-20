@@ -191,6 +191,20 @@ describe('the command', () => {
 });
 
 describe('the panel', () => {
+  it('takes keyboard focus through references.focus — the audit found it never did', async () => {
+    const { app, server } = await setup();
+    server.handle('textDocument/references', () => ALL);
+    await app.commands.execute('lsp.findReferences');
+    flush();
+
+    await app.commands.execute('references.focus');
+    flush();
+    const list = panel!.container.querySelector('.list');
+    expect(list).not.toBeNull();
+    expect(document.activeElement).toBe(list);
+  });
+
+
   it('shows how to fill it when nothing has been asked', async () => {
     await setup();
     expect(panel!.container.textContent).toContain('Find References');

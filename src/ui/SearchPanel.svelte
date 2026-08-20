@@ -83,7 +83,7 @@
   $effect(() => {
     void $focused;
     queueMicrotask(() => {
-      listElement?.querySelector('.row.focused')?.scrollIntoView({ block: 'nearest' });
+      listElement?.querySelector('.row.focused')?.scrollIntoView?.({ block: 'nearest' });
     });
   });
 
