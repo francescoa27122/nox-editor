@@ -530,7 +530,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--nox-sp-2);
-    height: var(--nox-tabbar-h);
+    height: var(--nox-panelbar-h);
     flex: none;
     padding: 0 var(--nox-sp-2) 0 var(--nox-sp-5);
     border-bottom: 1px solid var(--nox-border);
@@ -716,7 +716,7 @@
     border-radius: var(--nox-r-full);
     border: 1px solid var(--nox-border-strong);
     border-top-color: var(--nox-accent);
-    animation: nox-spin 620ms linear infinite;
+    animation: nox-spin var(--nox-dur-spin) linear infinite;
     flex: none;
   }
 

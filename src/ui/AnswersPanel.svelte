@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PanelEmpty from './PanelEmpty.svelte';
+  import PanelHeader from './PanelHeader.svelte';
   import { untrack } from 'svelte';
   import {
     answerFreshness,
@@ -173,13 +175,13 @@
 </script>
 
 <div class="panel" bind:this={panel} tabindex="-1">
-  <div class="header"><span class="title">Answers</span></div>
+  <PanelHeader title="Answers" />
 
   {#if answers.length === 0}
-    <p class="empty">
+    <PanelEmpty>
       Select some code and run <strong>Explain Selection</strong>, or
       <strong>Ask About Selection…</strong> to ask something else.
-    </p>
+    </PanelEmpty>
   {:else}
     <ol class="list">
       {#each answers as session (session.id)}
@@ -228,32 +230,6 @@
      keyboard can scroll it. */
   .panel:focus-visible {
     box-shadow: none;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    gap: var(--nox-sp-2);
-    flex: none;
-    height: var(--nox-tabbar-h);
-    padding: 0 var(--nox-sp-3) 0 var(--nox-sp-4);
-    border-bottom: 1px solid var(--nox-border);
-  }
-
-  .title {
-    font-size: var(--nox-fs-2xs);
-    font-weight: var(--nox-fw-semibold);
-    letter-spacing: var(--nox-tracking-wide);
-    text-transform: uppercase;
-    color: var(--nox-text-muted);
-  }
-
-  .empty {
-    margin: 0;
-    padding: var(--nox-sp-5) var(--nox-sp-4);
-    font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
-    line-height: var(--nox-lh-ui);
   }
 
   .list {

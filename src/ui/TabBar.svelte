@@ -145,7 +145,7 @@
           {#if buffer.isDirty}
             <span class="dot" aria-hidden="true"></span>
           {/if}
-          <Icon name="close" size={11} strokeWidth={1.6} />
+          <Icon name="close" size={11} />
         </button>
       </div>
     {/each}

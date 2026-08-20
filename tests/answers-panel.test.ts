@@ -45,9 +45,9 @@ describe('the answers panel with nothing in it', () => {
     const { container, unmount } = mountComponent(AnswersPanel);
     flush();
 
-    expect(container.querySelector('.empty')).not.toBeNull();
+    expect(container.querySelector('.panel-empty')).not.toBeNull();
     expect(container.querySelector('.list')).toBeNull();
-    expect(container.querySelector('.empty')?.textContent).toContain('Explain Selection');
+    expect(container.querySelector('.panel-empty')?.textContent).toContain('Explain Selection');
 
     unmount();
   });
@@ -219,7 +219,7 @@ describe('which sessions the answers panel is for', () => {
     await settle(ordinary);
     flush();
 
-    expect(container.querySelector('.empty')).not.toBeNull();
+    expect(container.querySelector('.panel-empty')).not.toBeNull();
     expect(textsOf(container, '.question')).toEqual([]);
 
     unmount();

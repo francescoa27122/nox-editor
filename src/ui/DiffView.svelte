@@ -131,23 +131,23 @@
     </div>
     <div class="actions">
       <button
-        class="ghost small"
-        class:active={layout === 'side-by-side'}
+        class="nox-button small"
+        class:on={layout === 'side-by-side'}
         aria-pressed={layout === 'side-by-side'}
         onclick={() => setLayout('side-by-side')}
       >
         Side by side
       </button>
       <button
-        class="ghost small"
-        class:active={layout === 'inline'}
+        class="nox-button small"
+        class:on={layout === 'inline'}
         aria-pressed={layout === 'inline'}
         onclick={() => setLayout('inline')}
       >
         Inline
       </button>
       <button
-        class="ghost"
+        class="nox-button ghost small"
         onclick={() => ui.diffOpen.set(false)}
         title="Back to the editor (Esc)"
       >
@@ -263,33 +263,6 @@
     gap: var(--nox-sp-2);
     margin-left: auto;
     flex: none;
-  }
-
-  /* ReviewPanel's button shape, duplicated knowingly: the audit's Phase B
-     extracts a shared .nox-button and both copies die then. Until that
-     lands, these were bare unstyled text — base.css strips all button
-     chrome and nothing here put any back. */
-  .actions button {
-    font: inherit;
-    font-size: var(--nox-fs-xs);
-    padding: var(--nox-sp-2) var(--nox-sp-3);
-    border-radius: var(--nox-r-sm);
-    border: 1px solid var(--nox-border);
-    background: var(--nox-bg-raised);
-    color: var(--nox-text);
-    cursor: pointer;
-    transition: background var(--nox-dur-fast) var(--nox-ease);
-  }
-
-  .actions button:hover {
-    background: var(--nox-hover);
-    color: var(--nox-text-bright);
-  }
-
-  .actions .active {
-    color: var(--nox-accent);
-    background: var(--nox-active);
-    border-color: var(--nox-border-accent);
   }
 
   .body {

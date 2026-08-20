@@ -1,5 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import PanelEmpty from './PanelEmpty.svelte';
+  import PanelHeader from './PanelHeader.svelte';
   import { useApp } from './context';
 
   /**
@@ -68,20 +70,22 @@
 </script>
 
 <div class="panel">
-  <header>
-    <h2>{$list?.title ?? 'References'}</h2>
+  <PanelHeader title={$list?.title ?? 'References'} {summary}>
     {#if $list?.subject}<code class="subject">{$list.subject}</code>{/if}
-    <span class="summary">{summary}</span>
-  </header>
+  </PanelHeader>
 
   {#if rows.length === 0}
-    <p class="empty">
-      Nothing yet. Put the cursor on a symbol and run <strong>Find References</strong>
-      from the palette to list every place it is used.
-    </p>
+    <PanelEmpty
+      action={{
+        label: 'Find References',
+        run: () => void app.commands.execute('lsp.findReferences'),
+      }}
+    >
+      Nothing yet. Put the cursor on a symbol and find every place it is used.
+    </PanelEmpty>
   {:else}
     <div
-      class="list"
+      class="list nox-scroll"
       role="listbox"
       tabindex="0"
       aria-label={$list?.title ?? 'References'}
@@ -121,24 +125,8 @@
     flex: 1;
   }
 
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 8px 10px;
-    min-width: 0;
-  }
-
-  h2 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin: 0;
-    color: var(--nox-text-muted);
-  }
-
   .subject {
-    font-size: 11px;
+    font-size: var(--nox-fs-xs);
     color: var(--nox-text);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -146,22 +134,7 @@
     min-width: 0;
   }
 
-  .summary {
-    font-size: 11px;
-    color: var(--nox-text-muted);
-    margin-left: auto;
-    flex: none;
-  }
-
-  .empty {
-    padding: 0 10px;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--nox-text-muted);
-  }
-
   .list {
-    overflow-y: auto;
     min-height: 0;
     flex: 1;
   }
@@ -169,9 +142,9 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 10px;
-    font-size: 12px;
+    gap: var(--nox-sp-3);
+    padding: var(--nox-sp-1) var(--nox-sp-5);
+    font-size: var(--nox-fs-sm);
     cursor: default;
     white-space: nowrap;
   }
@@ -186,7 +159,7 @@
   }
 
   .row:not(.file) {
-    padding-left: 20px;
+    padding-left: var(--nox-sp-7);
   }
 
   .row.file .path {

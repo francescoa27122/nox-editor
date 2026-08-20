@@ -63,6 +63,7 @@
     <input
       bind:this={input}
       bind:value
+      class="nox-input mono"
       type="text"
       spellcheck="false"
       autocomplete="off"
@@ -110,28 +111,12 @@
     white-space: nowrap;
   }
 
+  /* The field is the global .nox-input primitive (mono); only its placement
+     is local. Focus and validation borders come from the primitive — the
+     chrome disables text selection globally, so re-enable it here. */
   input {
-    width: 100%;
-    height: 32px;
     margin-top: var(--nox-sp-5);
-    padding: 0 var(--nox-sp-4);
-    background: var(--nox-bg-inset);
-    border: 1px solid var(--nox-border-strong);
-    border-radius: var(--nox-r-md);
-    color: var(--nox-text-bright);
-    font-family: var(--nox-font-mono);
-    font-size: var(--nox-fs-sm);
-    outline: none;
     user-select: text;
-    transition: border-color var(--nox-dur-fast) var(--nox-ease);
-  }
-
-  input:focus {
-    border-color: var(--nox-border-accent);
-  }
-
-  input[aria-invalid='true'] {
-    border-color: var(--nox-danger);
   }
 
   .error {

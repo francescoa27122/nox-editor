@@ -120,14 +120,14 @@
     </div>
 
     <div class="actions">
-      <button class="ghost" onclick={() => void commands.execute('agents.configure')}>
+      <button class="nox-button small" onclick={() => void commands.execute('agents.configure')}>
         Configure
       </button>
-      <button class="ghost" onclick={() => ui.agentsOpen.set(false)} title="Back to the editor (Esc)">
+      <button class="nox-button small" onclick={() => ui.agentsOpen.set(false)} title="Back to the editor (Esc)">
         Close
       </button>
       <button
-        class="primary"
+        class="nox-button small primary"
         disabled={runnable.length === 0}
         onclick={() => void commands.execute('agents.run')}
       >
@@ -239,32 +239,6 @@
     flex-shrink: 0;
   }
 
-  .actions button {
-    font-size: var(--nox-fs-xs);
-    padding: var(--nox-sp-2) var(--nox-sp-3);
-    border-radius: var(--nox-r-sm);
-    border: 1px solid var(--nox-border);
-    background: var(--nox-bg-raised);
-    color: var(--nox-text);
-  }
-
-  .actions button:hover:not(:disabled) {
-    background: var(--nox-hover);
-    color: var(--nox-text-bright);
-  }
-
-  .actions button.primary {
-    background: var(--nox-accent);
-    border-color: var(--nox-accent);
-    color: var(--nox-bg-base);
-    font-weight: 600;
-  }
-
-  .actions button:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
   .empty {
     /* Prose, so it gets a measure rather than the full window width. */
     max-width: 62ch;
@@ -307,16 +281,8 @@
     border-bottom: 1px solid var(--nox-border-subtle);
   }
 
-  button {
-    font: inherit;
-    border: 0;
-    background: none;
-    color: inherit;
-    cursor: pointer;
-    padding: 0;
-  }
-
   .head {
+    cursor: pointer;
     display: flex;
     align-items: center;
     gap: var(--nox-sp-2);
@@ -359,6 +325,7 @@
   }
 
   .undo {
+    cursor: pointer;
     color: var(--nox-text-muted);
     text-decoration: underline;
     text-underline-offset: 2px;

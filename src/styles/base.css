@@ -89,12 +89,12 @@ button {
 }
 
 :hover::-webkit-scrollbar-thumb {
-  background: #232b39;
+  background: var(--nox-border-strong);
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #33405a;
+  background: var(--nox-scrollbar-hover);
   background-clip: content-box;
 }
 
@@ -145,4 +145,115 @@ button {
   color: var(--nox-text-faint);
   font-size: var(--nox-fs-sm);
   text-align: center;
+}
+
+/* --- The button primitive -------------------------------------------------
+   One button, four variants. Before this existed, four editor-area panels
+   each hand-rolled the same shape (and one — DiffView — rolled nothing and
+   shipped bare text), `.ghost` was a class no stylesheet defined, and the
+   primary variant spelled its text colour as `--nox-bg-base` instead of the
+   token that exists for exactly that. Sizes: default, and `.small` for
+   header rows. */
+.nox-button {
+  font: inherit;
+  font-size: var(--nox-fs-xs);
+  padding: var(--nox-sp-2) var(--nox-sp-3);
+  border-radius: var(--nox-r-sm);
+  border: 1px solid var(--nox-border);
+  background: var(--nox-bg-raised);
+  color: var(--nox-text);
+  cursor: pointer;
+  transition:
+    background var(--nox-dur-fast) var(--nox-ease),
+    color var(--nox-dur-fast) var(--nox-ease);
+}
+
+.nox-button:hover:not(:disabled) {
+  background: var(--nox-hover);
+  color: var(--nox-text-bright);
+}
+
+.nox-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.nox-button.small {
+  padding: var(--nox-sp-1) var(--nox-sp-3);
+  font-size: var(--nox-fs-2xs);
+}
+
+/* Quiet: borderless until hovered. For actions that must not compete with
+   the content beside them. */
+.nox-button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--nox-text-muted);
+}
+
+.nox-button.ghost:hover:not(:disabled) {
+  background: var(--nox-hover);
+  color: var(--nox-text-bright);
+}
+
+.nox-button.primary {
+  background: var(--nox-accent);
+  border-color: var(--nox-accent);
+  color: var(--nox-text-on-accent);
+  font-weight: var(--nox-fw-semibold);
+}
+
+.nox-button.primary:hover:not(:disabled) {
+  background: var(--nox-accent-bright, var(--nox-accent));
+  color: var(--nox-text-on-accent);
+}
+
+.nox-button.danger {
+  border-color: color-mix(in srgb, var(--nox-danger) 45%, transparent);
+  color: var(--nox-danger);
+}
+
+.nox-button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nox-danger) 12%, transparent);
+  color: var(--nox-danger);
+}
+
+/* A toggle in a small group (the diff view's layout switch). */
+.nox-button.on {
+  color: var(--nox-accent);
+  background: var(--nox-active);
+  border-color: var(--nox-border-accent);
+}
+
+/* --- The input primitive ---------------------------------------------------
+   One text field. Before this existed there were five hand-rolled wells at
+   four heights with two border tokens and mixed font families for the same
+   semantic role. Callers add `.mono` when the content is code-like (find
+   queries, rename seeds). */
+.nox-input {
+  width: 100%;
+  height: var(--nox-input-h);
+  padding: 0 var(--nox-sp-3);
+  border-radius: var(--nox-r-sm);
+  border: 1px solid var(--nox-border);
+  background: var(--nox-bg-inset);
+  color: var(--nox-text);
+  font-size: var(--nox-fs-sm);
+  transition: border-color var(--nox-dur-fast) var(--nox-ease);
+}
+
+.nox-input::placeholder {
+  color: var(--nox-text-faint);
+}
+
+.nox-input:focus {
+  border-color: var(--nox-border-accent);
+}
+
+.nox-input.mono {
+  font-family: var(--nox-font-mono);
+}
+
+.nox-input[aria-invalid='true'] {
+  border-color: var(--nox-danger);
 }

@@ -52,14 +52,14 @@
       </div>
 
       <div class="actions">
-        <button class="ghost" onclick={() => review.setAllAccepted(!allAccepted)}>
+        <button class="nox-button small" onclick={() => review.setAllAccepted(!allAccepted)}>
           {allAccepted ? 'Reject all' : 'Keep all'}
         </button>
-        <button class="ghost" onclick={() => ui.reviewOpen.set(false)} title="Keep the review and go back to the editor (Esc)">
+        <button class="nox-button small" onclick={() => ui.reviewOpen.set(false)} title="Keep the review and go back to the editor (Esc)">
           Close
         </button>
-        <button class="ghost" onclick={() => review.discard()}>Discard</button>
-        <button class="primary" disabled={counts.hunks === 0} onclick={() => app.applyReview()}>
+        <button class="nox-button small" onclick={() => review.discard()}>Discard</button>
+        <button class="nox-button small primary" disabled={counts.hunks === 0} onclick={() => app.applyReview()}>
           Apply {counts.hunks > 0 ? counts.hunks : ''}
         </button>
       </div>
@@ -76,7 +76,7 @@
             <span class="spacer"></span>
             <span class="tally">{kept}/{file.hunks.length}</span>
             <button
-              class="ghost small"
+              class="nox-button small"
               onclick={() => review.setFileAccepted(file.bufferId, kept !== file.hunks.length)}
             >
               {kept === file.hunks.length ? 'Reject file' : 'Keep file'}
@@ -155,39 +155,6 @@
     flex-shrink: 0;
   }
 
-  button {
-    font: inherit;
-    font-size: var(--nox-fs-xs);
-    padding: var(--nox-sp-2) var(--nox-sp-3);
-    border-radius: var(--nox-r-sm);
-    border: 1px solid var(--nox-border);
-    background: var(--nox-bg-raised);
-    color: var(--nox-text);
-    cursor: pointer;
-    transition: background var(--nox-dur-fast) var(--nox-ease);
-  }
-
-  button:hover:not(:disabled) {
-    background: var(--nox-hover);
-    color: var(--nox-text-bright);
-  }
-
-  button.primary {
-    background: var(--nox-accent);
-    border-color: var(--nox-accent);
-    color: var(--nox-bg-base);
-    font-weight: 600;
-  }
-
-  button.primary:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  button.small {
-    padding: 2px var(--nox-sp-2);
-  }
-
   .files {
     flex: 1;
     min-height: 0;
@@ -240,6 +207,7 @@
   }
 
   .toggle {
+    cursor: pointer;
     display: flex;
     align-items: center;
     gap: var(--nox-sp-2);

@@ -204,10 +204,10 @@
     {/if}
 
     <span class="nox-terminal-actions">
-      <button type="button" onclick={() => void restart()} title="Restart the shell">
+      <button type="button" class="nox-button ghost small" onclick={() => void restart()} title="Restart the shell">
         Restart
       </button>
-      <button type="button" onclick={() => ui.hideTerminal()} title="Hide the terminal">
+      <button type="button" class="nox-button ghost small" onclick={() => ui.hideTerminal()} title="Hide the terminal">
         Hide
       </button>
     </span>
@@ -242,9 +242,9 @@
   .nox-terminal-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--nox-sp-4);
     padding: 0 10px;
-    height: 28px;
+    height: var(--nox-railbar-h);
     flex: 0 0 auto;
     background: var(--nox-bg-panel);
     border-bottom: 1px solid var(--nox-border);
@@ -255,7 +255,7 @@
   .nox-terminal-title {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--nox-sp-3);
     color: var(--nox-text-muted);
     text-transform: uppercase;
     letter-spacing: var(--nox-tracking-wide);
@@ -273,39 +273,18 @@
   .nox-terminal-actions {
     margin-left: auto;
     display: inline-flex;
-    gap: 4px;
-  }
-
-  .nox-terminal-actions button {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    padding: 2px 8px;
-    color: var(--nox-text-muted);
-    font: inherit;
-    cursor: pointer;
-    transition: color var(--nox-dur-fast) var(--nox-ease);
-  }
-
-  .nox-terminal-actions button:hover {
-    color: var(--nox-text-bright);
-    background: var(--nox-hover);
-  }
-
-  .nox-terminal-actions button:focus-visible {
-    outline: none;
-    box-shadow: var(--nox-focus-ring);
+    gap: var(--nox-sp-2);
   }
 
   .nox-terminal-host {
     flex: 1 1 auto;
     min-height: 0;
-    padding: 6px 8px;
+    padding: var(--nox-sp-3) var(--nox-sp-4);
   }
 
   .nox-terminal-unavailable {
     margin: 0;
-    padding: 16px;
+    padding: var(--nox-sp-6);
     color: var(--nox-text-muted);
     font-family: var(--nox-font-ui);
     font-size: var(--nox-fs-sm);

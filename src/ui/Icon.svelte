@@ -2,7 +2,7 @@
   /**
    * The Nox icon set.
    *
-   * Hand-drawn on a 16×16 grid with a 1.5px stroke so everything shares one
+   * Hand-drawn on a 16×16 grid with a 1.4px stroke so everything shares one
    * optical weight. Geometric and minimal — no rounded "friendly" shapes, no
    * filled glyphs except where a filled mark reads better at 16px.
    */

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PanelEmpty from './PanelEmpty.svelte';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
 
@@ -322,9 +323,9 @@
   </div>
 
   {#if !$rootPath}
-    <div class="nox-empty">
-      <p>Open a folder to search it.</p>
-    </div>
+    <PanelEmpty action={{ label: 'Open Folder', run: () => void app.commands.execute('file.openFolder') }}>
+      Open a folder to search it.
+    </PanelEmpty>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <div
