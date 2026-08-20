@@ -184,7 +184,7 @@ That is a claim about trust and finish, so the bar is written in those terms:
 | **Version control is present.** Not a Git client; the gutter, a diff, stage-and-commit. The README has said "no Git integration" since 0.2.0. | Nothing. The diff engine and hunk review exist (M6). | The v0.5 table, in its order. Blame can follow 1.0. |
 | **A keyboard-first editor lets you change the keys.** ✅ | Both rows landed 2026-08-20: the keybinding editor (rebind, unassign, reset, `keybindings.json`) and workspace settings (`.nox/settings.json`, an eight-key allowlist). | Nothing. Plugins are explicitly *not* a 1.0 gate — a plugin API is a compatibility promise, and 1.0 should not make one it has not lived with. |
 | **It holds up at scale.** ✅ | Search and replace are jobs; the explorer renders a window (2026-08-20). | Nothing. |
-| **Nothing in the release notes says "unverified".** | Each of the last three work-log entries names a surface seen only in a test. | A pass on a real keyboard over the LSP commands, the terminal and the dialogs, recorded in the work log, before the 1.0 tag — not a feature, a ritual. |
+| **Nothing in the release notes says "unverified".** | Partly closed 2026-08-20: the keybinding editor, `inert`, the row-height contract and explorer windowing over 609 nodes were all driven in Chromium via the browser target and recorded in the work log. | The Tauri-only half — the terminal, the dialogs, the title bar, the git panel against a real repo, the LSP commands — on a real keyboard, before the 1.0 tag. Not a feature, a ritual. |
 
 Everything in the v0.2–v0.7 tables that is not named above is 1.x. In
 particular, out of 1.0 on purpose: the plugin API, Vim and Emacs modes,

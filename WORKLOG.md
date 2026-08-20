@@ -8,6 +8,65 @@ are knowledge.**
 
 ---
 
+## 2026-08-20 (PC, 1.0 bar) — The browser pass over all three
+
+Not a feature. The three commits below each closed with "not verified on a
+screen", and `npm run dev` runs the browser target on this PC — so the claim
+was cheaper to close than to keep writing down. Chromium via the preview
+tools, driven through `window.nox` and real `KeyboardEvent`s at the window,
+which is the same door `KeymapService.attach` listens on.
+
+What is now verified in a real engine, not jsdom:
+
+- **The keybinding editor, end to end.** ⌃⌥K opened it: **151 application
+  rows, 92 of them Unassigned, 18 read-only Editor rows with zero edit
+  buttons**. Recorded F9 onto *Toggle Explorer*, accepted — the row redrew as
+  F9, the customised dot and both resets appeared. Then, with the overlay
+  closed: **F9 toggled the explorer and Ctrl+B did nothing**, which is the
+  only assertion that actually matters. `localStorage` held exactly the two
+  rules the design says it should — one `remove`, one addition. `resetAll()`
+  emptied the file and Ctrl+B came back.
+- **`inert` reflects to an attribute** (`inertReflects: true`,
+  `'inert' in HTMLElement.prototype`). That was the one claim the workspace-
+  settings entry called *reasoned rather than exercised*, because jsdom does
+  not implement `inert` at all. It is now exercised.
+- **The row-height contract holds in the real engine**: the tree's
+  `--nox-tree-row-h` computes to `23px` and a row's painted height is `23px`.
+  That is the whole point of moving the number into TS, and it had never been
+  checked against an actual layout.
+- **Windowing, on 609 nodes** (600 files written into the demo workspace
+  through `platform.writeTextFile`): **42 rows rendered**, spacers of
+  2116px + 10925px, and `42 × 23 + 13041 = 14007 = 609 × 23` **exactly**. At
+  `scrollTop = 6900` the first rendered row was index **292** — `floor(6900/23)
+  − OVERSCAN` — carrying `aria-posinset="293"` and `aria-setsize="609"`. The
+  keyboard path put a lead 200 rows above the window back on screen and
+  rendered it.
+- Zero console errors across the whole session.
+
+**One trap worth naming, because it looks exactly like a bug.** Setting
+`tree.scrollTop` programmatically did *not* update the window at first, and a
+scroll listener installed for the test counted **zero** events. The cause is
+the harness, not the app: the Browser pane was not displayed, so the page
+composites no frames, and **scroll events are frame-driven**. Dispatching one
+by hand produced the exactly-correct window above. This is the same class of
+artifact as the desktop pass's BUG-1 (an invisible harness window eating
+clicks) — if a future pass sees a "dead" scroll handler, display the pane
+before filing anything.
+
+Still unverified, and now the honest remainder: everything a keyboard and a
+pair of eyes decide rather than a DOM query — whether overscan 8 avoids a
+flash on a fast flick, whether "Rebind, and unassign" fits beside a long
+command name, and every Tauri-only surface (the terminal, the dialogs, the
+title bar, the git panel against a real repo).
+
+Verified: the numbers above, plus `npm test` 1421/1421, `npm run check` 473
+files 0 errors, `npm run build` green at the tree these three commits stand on.
+
+Next: unchanged — the real-keyboard desktop pass on a Mac, then the tag.
+
+Confidence: high, and higher than it was three entries ago on exactly the
+things a browser can settle.
+
 ## 2026-08-20 (PC, 1.0 bar) — Explorer virtualisation
 
 Branch `keybinding-editor`, third commit. The last **code** row of the 1.0
@@ -63,10 +122,10 @@ Verified:
   2. Slicing from `0` instead of `firstIndex` survived against the
      initial-render test, because at scroll offset 0 those are the same
      expression. Re-aimed at the scrolled test, where it dies.
-- **Not verified on a screen.** Every claim here is jsdom over a stubbed
-  `clientHeight`. The thing a real browser would settle and this cannot:
-  whether the overscan of 8 is enough to avoid a flash of blank rows on a
-  fast flick.
+- At the time of this commit: jsdom over a stubbed `clientHeight` only.
+  Closed the same day against Chromium and 609 real nodes — see the
+  browser-pass entry above. What a browser still cannot settle from a DOM
+  query: whether overscan 8 avoids a flash of blank rows on a fast flick.
 
 Next:
 
@@ -175,10 +234,9 @@ Confidence:
 
 - High on the layering and the scope boundary: ten mutations, and the scope
   list has a test that names the keys that must stay out of it.
-- Medium on the panel: the badge, the switched-off control and the footer
-  action are asserted in jsdom and have been seen by nothing with eyes. The
-  `inert` behaviour in particular is only *reasoned* to work in the real
-  webviews, since jsdom cannot exercise it.
+- Medium on the panel at the time of writing; the `inert` half was closed
+  the same day in Chromium (see the browser-pass entry above), the badge
+  and footer still want eyes.
 - One thing deliberately not built: `.nox/keybindings.json`. The rule format
   is already layerable, but a repository supplying keystrokes is its own
   trust question and wants its own §0.
@@ -256,8 +314,8 @@ Verified:
   auto-updater merge added `@tauri-apps/plugin-process` and
   `plugin-updater` to `package.json`, and this PC's `node_modules`
   predated it. Not a repo defect — but the 3 errors look exactly like one.
-- **Not verified: any of it on a screen.** jsdom only, same growing debt
-  the last three entries name.
+- Verified in a real browser afterwards — see the browser-pass entry above.
+  At the time of this commit it was jsdom only.
 
 Next:
 
