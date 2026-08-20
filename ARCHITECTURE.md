@@ -129,7 +129,7 @@ src/
 │  ├─ keymap.ts          Chord parsing, resolution, display formatting;
 │  │                     the default table plus the user rules over it
 │  ├─ config/schema.ts   THE settings schema — types derived from it
-│  ├─ config/index.ts    ConfigService: load, coerce, persist
+│  ├─ config/index.ts    ConfigService: the three layers, coerce, persist
 │  ├─ workspace.ts       Buffers, tabs, dirty tracking, file operations,
 │  │                     change-set application and grouped undo
 │  ├─ transactions.ts    ChangeSet, Author, the transaction log
@@ -222,6 +222,19 @@ leaves the tab marked dirty.
 category. From it we derive the `Settings` type, the persisted-JSON validator,
 and the entire settings UI. Adding a preference is a one-line change there and
 nowhere else. **No component may hardcode a default.**
+
+**Three layers, and the top one is untrusted.** Effective settings are the
+schema's defaults, then the user's `settings.json`, then the open project's
+`.nox/settings.json`. That last file arrives with a cloned repository, so the
+keys it may supply are an **allowlist on the schema** (`workspace: true`),
+eight wide, holding only facts about the code — indentation, trimming, format
+on save, what to hide. `terminal.shell` is the name that makes the rule
+concrete: a repository that could set it would run a binary of its author's
+choosing the first time you opened a terminal. Nothing naming a program, a
+path or an address goes in the list. Every write still lands in the *user*
+layer; the panel refuses to offer a control for a key the project owns, and
+points at the file instead. Design:
+`docs/superpowers/specs/2026-08-20-workspace-settings-design.md`.
 
 Only non-default values are written to `settings.json`, so upgrading Nox picks
 up new defaults instead of freezing whatever shipped first.

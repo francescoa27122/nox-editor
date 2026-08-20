@@ -18,8 +18,19 @@
    */
 
   const app = useApp();
-  const { config, ui } = app;
+  const { config, ui, workspace } = app;
   const settings = config.settings;
+  const rootPath = workspace.rootPath;
+
+  /**
+   * Which keys the open project sets.
+   *
+   * Straight off `config.workspaceScope`, not derived from `$settings`: the
+   * settings signal stays quiet when a reload changes nothing effective, and
+   * a project that sets a key to the value you already had still owns it.
+   */
+  const workspaceScope = config.workspaceScope;
+  const workspaceKeys = $derived($workspaceScope);
 
   const CATEGORIES: SettingCategory[] = ['Editor', 'Text', 'Files', 'Workbench', 'Terminal'];
 
@@ -58,6 +69,11 @@
   });
 
   function update(key: SettingKey, value: unknown) {
+    // `inert` on the control is the visible half; this is the load-bearing
+    // half. A write that lands in the user layer while the workspace shadows
+    // it changes a file and nothing on screen, which is the one outcome this
+    // row must not produce — so refuse it here, not only in the DOM.
+    if (workspaceKeys.has(key)) return;
     config.set(key, value as never);
   }
 </script>
@@ -66,7 +82,16 @@
   <header>
     <div class="heading">
       <h2>Settings</h2>
-      <p>Stored in <code>settings.json</code>. Only changed values are written.</p>
+      <p>
+        Stored in <code>settings.json</code>. Only changed values are written.
+        {#if workspaceKeys.size > 0}
+          <span class="ws-note">
+            {workspaceKeys.size}
+            {workspaceKeys.size === 1 ? 'setting is' : 'settings are'} set by this project's
+            <code>.nox/settings.json</code>.
+          </span>
+        {/if}
+      </p>
     </div>
     <button class="close" aria-label="Close settings" onclick={() => ui.closeOverlay()}>
       <Icon name="close" size={14} />
@@ -106,11 +131,16 @@
         <h3>{category}</h3>
         {#each keys as key (key)}
           {@const descriptor = SETTINGS_SCHEMA[key]}
-          <div class="setting">
+          {@const fromWorkspace = workspaceKeys.has(key)}
+          <div class="setting" class:locked={fromWorkspace} data-setting={key}>
             <div class="meta">
               <label for="setting-{key}">
                 {descriptor.label}
-                {#if !config.isDefault(key)}
+                {#if fromWorkspace}
+                  <span class="badge" title="Set by this project's .nox/settings.json">
+                    Workspace
+                  </span>
+                {:else if !config.isDefault(key)}
                   <button
                     class="reset"
                     title="Reset to default"
@@ -124,7 +154,10 @@
               <p>{descriptor.description}</p>
             </div>
 
-            <div class="control">
+            <!-- A control that cannot change the effective value is worse than
+                 no control: the workspace layer wins, so the row is disabled
+                 and the footer points at the file instead. -->
+            <div class="control" inert={fromWorkspace}>
               {#if descriptor.kind === 'boolean'}
                 <button
                   id="setting-{key}"
@@ -188,6 +221,17 @@
     <button class="link" onclick={() => ui.openOverlay('keybindings')}>
       Keyboard shortcuts
     </button>
+    {#if $rootPath}
+      <button
+        class="link workspace-settings"
+        onclick={() => {
+          ui.closeOverlay();
+          void app.commands.execute('prefs.openWorkspaceSettings');
+        }}
+      >
+        Workspace settings
+      </button>
+    {/if}
     <span class="version">Nox {__APP_VERSION__}</span>
   </footer>
 </div>
@@ -358,6 +402,30 @@
     font-size: var(--nox-fs-xs);
     color: var(--nox-text-faint);
     line-height: 1.5;
+  }
+
+  .ws-note {
+    display: block;
+    margin-top: var(--nox-sp-1);
+    color: var(--nox-text-muted);
+  }
+
+  .badge {
+    margin-left: var(--nox-sp-2);
+    padding: 1px var(--nox-sp-2);
+    border: 1px solid var(--nox-border);
+    border-radius: var(--nox-r-sm);
+    font-size: var(--nox-fs-2xs);
+    font-weight: var(--nox-fw-semibold);
+    text-transform: uppercase;
+    letter-spacing: var(--nox-tracking-wide);
+    color: var(--nox-text-faint);
+    vertical-align: middle;
+  }
+
+  /* Reads as "not yours to change here", not as broken. */
+  .setting.locked .control {
+    opacity: 0.45;
   }
 
   .reset {

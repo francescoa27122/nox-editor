@@ -126,7 +126,7 @@ The MVP: a real editor you can work in.
 | **Custom themes from JSON** | Themes are already token overrides; expose them as user files. |
 | **Snippets** | |
 | **Plugin API** | Commands, panels, status items, editor extensions. Design gate: plugins must not be able to block the typing path. |
-| **Workspace settings** | `.nox/settings.json` layered over user settings. |
+| **Workspace settings** ✅ | `.nox/settings.json` layered over user settings — three layers, defaults under yours under the project's. The scope is an **allowlist on the schema**, eight keys wide, because that file arrives with a cloned repository: only facts about the code (indentation, trimming, format on save, what to hide) can come from it, never a font, a theme or `terminal.shell`. Read-only from the Settings panel on purpose — an overridden row wears a badge and switches its control off, and the footer points at the file, because a second write path is a way to commit a personal preference into a shared repository by accident. Watched, so an edit applies without a reload. |
 | **Tasks** | Run project commands, capture output. |
 
 ---
@@ -182,7 +182,7 @@ That is a claim about trust and finish, so the bar is written in those terms:
 | **Installs like software.** A download opens without a terminal command or a SmartScreen click-through, and the app tells you when a newer one exists. | The updater is built and waits on the operator's key ceremony; once a signed release is published, updating never repeats the ritual. First installs still need `xattr -dr` on macOS and "Run anyway" on Windows — that half is the certificates'. | An Apple Developer ID and a Windows code-signing certificate — both cost money, so this is the operator's call, not the roadmap's. |
 | **Language intelligence is complete.** Diagnostics, completion, hover and go to definition ship today; an editor that can jump to a definition but not list its uses, or rename it, has stopped halfway. | Four of the v0.4 rows are ✅. | Find references (and the picker go to definition is waiting on), rename symbol, formatting on save. Tree-sitter is an evaluation, not a 1.0 gate. |
 | **Version control is present.** Not a Git client; the gutter, a diff, stage-and-commit. The README has said "no Git integration" since 0.2.0. | Nothing. The diff engine and hunk review exist (M6). | The v0.5 table, in its order. Blame can follow 1.0. |
-| **A keyboard-first editor lets you change the keys.** | The keybinding editor is ✅ (2026-08-20): rebind, unassign, reset, persisted in `keybindings.json`. | Workspace settings, so a project can carry its own. Plugins are explicitly *not* a 1.0 gate — a plugin API is a compatibility promise, and 1.0 should not make one it has not lived with. |
+| **A keyboard-first editor lets you change the keys.** ✅ | Both rows landed 2026-08-20: the keybinding editor (rebind, unassign, reset, `keybindings.json`) and workspace settings (`.nox/settings.json`, an eight-key allowlist). | Nothing. Plugins are explicitly *not* a 1.0 gate — a plugin API is a compatibility promise, and 1.0 should not make one it has not lived with. |
 | **It holds up at scale.** | Search and replace are jobs; the explorer is a flat list that renders every node. | Explorer virtualisation, from the v0.2 table. The only trust-row item whose absence a larger project would feel every day. |
 | **Nothing in the release notes says "unverified".** | Each of the last three work-log entries names a surface seen only in a test. | A pass on a real keyboard over the LSP commands, the terminal and the dialogs, recorded in the work log, before the 1.0 tag — not a feature, a ritual. |
 
@@ -195,7 +195,9 @@ from recommending the editor.
 Order of work, by what each thing unblocks rather than by size: find
 references → rename → format on save → Git gutter and diff → stage/commit →
 keybinding editor → workspace settings → explorer virtualisation → the keyboard
-pass → tag. Signing and the updater run alongside, because one half of them is
+pass → tag. **Everything up to and including workspace settings is done
+(2026-08-20).** What is left of 1.0 is explorer virtualisation, the keyboard
+pass, and the certificates. Signing and the updater run alongside, because one half of them is
 a purchase and the other half is a workflow change that nothing else waits on.
 
 ---
