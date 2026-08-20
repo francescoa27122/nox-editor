@@ -104,7 +104,7 @@
     </button>
   </header>
 
-  <div class="search">
+  <div class="search nox-input">
     <Icon name="search" size={13} />
     <input
       bind:this={searchInput}
@@ -189,17 +189,16 @@
     color: var(--nox-text-bright);
   }
 
+  /* Well = the global .nox-input primitive on the wrapper, so the icon
+     lives inside the border. width: auto because the primitive's 100%
+     would ignore the side margins; icon colour stays local. */
   .search {
     display: flex;
     align-items: center;
     gap: var(--nox-sp-3);
     flex: none;
     margin: 0 var(--nox-sp-6) var(--nox-sp-4);
-    height: 30px;
-    padding: 0 var(--nox-sp-4);
-    background: var(--nox-bg-inset);
-    border: 1px solid var(--nox-border);
-    border-radius: var(--nox-r-md);
+    width: auto;
     color: var(--nox-text-faint);
   }
 

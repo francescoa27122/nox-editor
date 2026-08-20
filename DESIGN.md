@@ -17,8 +17,10 @@ everywhere else. It is emphatically not a gaming UI: no glows on chrome, no
 saturated gradients, no neon outlines.
 
 The mark is a **crescent formed by subtracting an offset disc from a disc** —
-one geometric operation, one path, legible at 16 px. It appears exactly twice
-in the app (title bar and welcome screen), and it is the only element allowed
+one geometric operation, one path, legible at 16 px. It appears exactly three
+times in the app (title bar, welcome screen, and the empty-pane placeholder —
+the third arrived with split panes and this line was late to notice), and it
+is the only element allowed
 to carry a bloom.
 
 ---

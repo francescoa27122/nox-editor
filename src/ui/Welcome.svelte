@@ -82,7 +82,7 @@
     background:
       radial-gradient(
         ellipse 60% 50% at 50% 0%,
-        rgba(139, 125, 245, 0.05),
+        color-mix(in srgb, var(--nox-violet) 5%, transparent),
         transparent 70%
       ),
       var(--nox-bg-editor);

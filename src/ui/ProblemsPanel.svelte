@@ -2,6 +2,8 @@
   import { untrack } from 'svelte';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
+  import PanelEmpty from './PanelEmpty.svelte';
+  import PanelHeader from './PanelHeader.svelte';
   import { problemRows, problemTotals } from './problems';
 
   /**
@@ -84,19 +86,20 @@
 </script>
 
 <div class="panel">
-  <header>
-    <h2>Problems</h2>
-    <span class="summary">{summary}</span>
-  </header>
+  <PanelHeader title="Problems" summary={rows.length === 0 ? '' : summary} />
 
   {#if rows.length === 0}
-    <p class="empty">
-      Nothing to report. Problems appear here once a language server is running —
-      run <strong>Configure Language Servers</strong> from the palette to set one up.
-    </p>
+    <PanelEmpty
+      action={{
+        label: 'Configure Language Servers',
+        run: () => void app.commands.execute('lsp.configure'),
+      }}
+    >
+      Nothing to report. Problems appear here once a language server is running.
+    </PanelEmpty>
   {:else}
     <div
-      class="list"
+      class="list nox-scroll"
       role="listbox"
       tabindex="0"
       aria-label="Problems"
@@ -137,36 +140,7 @@
     flex: 1;
   }
 
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 8px 10px;
-  }
-
-  h2 {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin: 0;
-    color: var(--nox-text-muted);
-  }
-
-  .summary {
-    font-size: 11px;
-    color: var(--nox-text-muted);
-    margin-left: auto;
-  }
-
-  .empty {
-    padding: 0 10px;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--nox-text-muted);
-  }
-
   .list {
-    overflow-y: auto;
     min-height: 0;
     flex: 1;
   }
@@ -174,9 +148,9 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 10px;
-    font-size: 12px;
+    gap: var(--nox-sp-3);
+    padding: var(--nox-sp-1) var(--nox-sp-5);
+    font-size: var(--nox-fs-sm);
     cursor: default;
     white-space: nowrap;
   }
@@ -192,7 +166,7 @@
   }
 
   .row:not(.file) {
-    padding-left: 20px;
+    padding-left: var(--nox-sp-7);
   }
 
   .row.file .path {

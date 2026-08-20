@@ -270,7 +270,9 @@
     height: 6px;
     border-radius: var(--nox-r-full);
     background: var(--nox-accent);
-    animation: nox-pulse 1.4s var(--nox-ease) infinite;
+    /* Token-driven so prefers-reduced-motion (which zeroes the token) stops
+       the one infinite animation in the app for the users who asked. */
+    animation: nox-pulse var(--nox-dur-pulse) var(--nox-ease) infinite;
   }
 
   @keyframes nox-pulse {

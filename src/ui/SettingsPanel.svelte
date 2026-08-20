@@ -74,7 +74,7 @@
   </header>
 
   <div class="controls">
-    <div class="search">
+    <div class="search nox-input">
       <Icon name="search" size={13} />
       <input
         bind:this={searchInput}
@@ -140,7 +140,7 @@
               {:else if descriptor.kind === 'number'}
                 <input
                   id="setting-{key}"
-                  class="number"
+                  class="number nox-input"
                   type="number"
                   min={descriptor.min}
                   max={descriptor.max}
@@ -151,6 +151,7 @@
               {:else if descriptor.kind === 'enum'}
                 <select
                   id="setting-{key}"
+                  class="nox-input"
                   value={$settings[key]}
                   onchange={(event) => update(key, event.currentTarget.value)}
                 >
@@ -163,7 +164,7 @@
               {:else}
                 <input
                   id="setting-{key}"
-                  class="text"
+                  class="text nox-input mono"
                   type="text"
                   placeholder={descriptor.placeholder ?? ''}
                   value={$settings[key]}
@@ -255,18 +256,14 @@
     border-bottom: 1px solid var(--nox-border);
   }
 
+  /* Well = the global .nox-input primitive on the wrapper, so the icon
+     lives inside the border; interior layout and icon colour stay local. */
   .search {
     display: flex;
     align-items: center;
     gap: var(--nox-sp-3);
     flex: 1;
-    height: 30px;
-    padding: 0 var(--nox-sp-4);
-    background: var(--nox-bg-inset);
-    border: 1px solid var(--nox-border);
-    border-radius: var(--nox-r-md);
     color: var(--nox-text-faint);
-    transition: border-color var(--nox-dur-fast) var(--nox-ease);
   }
 
   .search:focus-within {
@@ -418,40 +415,23 @@
     background: var(--nox-accent);
   }
 
-  .number,
-  .text,
-  select {
-    height: 28px;
-    padding: 0 var(--nox-sp-3);
-    background: var(--nox-bg-inset);
-    border: 1px solid var(--nox-border-strong);
-    border-radius: var(--nox-r-md);
-    color: var(--nox-text-bright);
-    font-size: var(--nox-fs-sm);
-    outline: none;
-    user-select: text;
-    transition: border-color var(--nox-dur-fast) var(--nox-ease);
-  }
-
-  .number:focus,
-  .text:focus,
-  select:focus {
-    border-color: var(--nox-border-accent);
-  }
-
+  /* The wells are the global .nox-input primitive; only per-widget sizing
+     survives here (the primitive is width: 100%; the chrome disables text
+     selection globally, so the editable wells re-enable it). */
   .number {
     width: 76px;
     font-variant-numeric: tabular-nums;
+    user-select: text;
   }
 
   .text {
-    width: 100%;
     min-width: 220px;
-    font-family: var(--nox-font-mono);
     font-size: var(--nox-fs-xs);
+    user-select: text;
   }
 
   select {
+    width: auto;
     min-width: 132px;
     cursor: default;
   }

@@ -2,6 +2,8 @@
   import { untrack } from 'svelte';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
+  import PanelEmpty from './PanelEmpty.svelte';
+  import PanelHeader from './PanelHeader.svelte';
 
   /**
    * The notes panel: a list, and the selected note's body.
@@ -52,9 +54,8 @@
 </script>
 
 <div class="notes-panel">
-  <div class="header">
-    <span class="title">Notes</span>
-    <div class="header-actions">
+  <PanelHeader title="Notes">
+    {#snippet actions()}
       <button
         class="icon-button"
         title="New Note"
@@ -72,11 +73,14 @@
       >
         <Icon name="trash" size={14} />
       </button>
-    </div>
-  </div>
+    {/snippet}
+  </PanelHeader>
 
   {#if $list.length === 0}
-    <p class="empty">No notes yet.</p>
+    <PanelEmpty action={{ label: 'New Note', run: () => void commands.execute('notes.new') }}>
+      No notes yet. A note is yours, not the workspace's — it survives
+      switching folders.
+    </PanelEmpty>
   {:else}
     <ul class="list">
       {#each $list as note (note.id)}
@@ -121,30 +125,6 @@
     min-height: 0;
   }
 
-  .header {
-    display: flex;
-    align-items: center;
-    gap: var(--nox-sp-2);
-    flex: none;
-    height: var(--nox-tabbar-h);
-    padding: 0 var(--nox-sp-3) 0 var(--nox-sp-4);
-    border-bottom: 1px solid var(--nox-border);
-  }
-
-  .title {
-    font-size: var(--nox-fs-2xs);
-    font-weight: var(--nox-fw-semibold);
-    letter-spacing: var(--nox-tracking-wide);
-    text-transform: uppercase;
-    color: var(--nox-text-muted);
-  }
-
-  .header-actions {
-    display: flex;
-    gap: var(--nox-sp-1);
-    margin-left: auto;
-  }
-
   .icon-button {
     display: grid;
     place-items: center;
@@ -164,13 +144,6 @@
 
   .icon-button:disabled {
     opacity: 0.4;
-  }
-
-  .empty {
-    margin: 0;
-    padding: var(--nox-sp-5) var(--nox-sp-4);
-    font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
   }
 
   /* Capped so the body always has room: the list is for picking, not reading. */

@@ -66,7 +66,7 @@
 
   <div class="fields">
     <div class="row">
-      <div class="field" class:invalid={Boolean($status.invalidPattern)}>
+      <div class="field nox-input" aria-invalid={$status.invalidPattern ? 'true' : undefined}>
         <Icon name="search" size={13} class="field-icon" />
         <input
           bind:this={queryInput}
@@ -168,7 +168,7 @@
 
     {#if $replaceMode}
       <div class="row">
-        <div class="field">
+        <div class="field nox-input">
           <Icon name="replace" size={13} class="field-icon" />
           <input
             type="text"
@@ -252,6 +252,10 @@
     min-width: 0;
   }
 
+  /* The well is the global .nox-input primitive, carried on the wrapper so
+     the Sublime-style toggles live inside the border. Only the interior
+     layout is local; the invalid red comes from the primitive's
+     [aria-invalid='true'] rule. */
   .field {
     display: flex;
     align-items: center;
@@ -259,20 +263,15 @@
     flex: 1;
     min-width: 0;
     max-width: 620px;
-    height: 26px;
-    padding: 0 var(--nox-sp-2) 0 var(--nox-sp-3);
-    background: var(--nox-bg-inset);
-    border: 1px solid var(--nox-border);
-    border-radius: var(--nox-r-md);
-    transition: border-color var(--nox-dur-fast) var(--nox-ease);
+    /* Toggles sit closer to the edge than the primitive's text padding. */
+    padding-right: var(--nox-sp-2);
   }
 
-  .field:focus-within {
+  /* Focus lives on the inner <input>, which the primitive's :focus cannot
+     see from the wrapper — mirror it, but let aria-invalid keep the red
+     border while typing a bad pattern. */
+  .field:focus-within:not([aria-invalid='true']) {
     border-color: var(--nox-border-accent);
-  }
-
-  .field.invalid {
-    border-color: var(--nox-danger);
   }
 
   .field :global(.field-icon) {

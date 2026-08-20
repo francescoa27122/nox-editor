@@ -8,6 +8,63 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, UI 2) — Phase B: the primitives
+
+Branch `ui-phase-b`. The extraction phase of the audit: two adoption
+agents (inputs; buttons + takeover panels) over disjoint files while I
+built the primitives, converted the sidebar panels and swept tokens.
+
+Shipped:
+
+- `base.css`: **`.nox-button`** (default/small/ghost/primary/danger/on)
+  and **`.nox-input`** (+`.mono`, `aria-invalid` styling, `--nox-input-h`).
+  Primary text now uses `--nox-text-on-accent` (two panels had spelled it
+  `--nox-bg-base`). `.ghost` is a real variant at last.
+- **`PanelHeader.svelte`** (real `h2` landmark, DESIGN §4 type, summary +
+  actions slots, `--nox-panelbar-h`) and **`PanelEmpty.svelte`** (one tone,
+  optional one-click action) — adopted in Problems, References, Notes,
+  Answers; Search's no-folder state gained an **Open Folder** button,
+  Problems' empty gained **Configure Language Servers**, Notes' gained
+  **New Note**.
+- Adoption by agents: Find/Settings/Keybindings/Prompt on `.nox-input`
+  (five wells at four heights → one, ~70 lines of local CSS deleted);
+  DiffView/Review/Agent/Terminal on `.nox-button` (~137 lines deleted;
+  DiffView's toggle binding `active`→`on`).
+- Token sweep: dead tokens deleted (sidebar ×3, z-editor, shadow-sm);
+  `--nox-border-subtle` documented; `--nox-scrollbar-hover` replaces the
+  two raw hexes in base.css; `--nox-panelbar-h`/`--nox-railbar-h` name the
+  two previously hardcoded chrome heights; **`--nox-dur-pulse`/`-spin`**
+  route the app's two infinite animations through the reduced-motion
+  block; Welcome's raw violet → `color-mix` on the token; tokens.css's
+  motion comment now agrees with DESIGN.md (190 ms); Icon doc says the
+  1.4 px the code always defaulted to and TabBar's lone 1.6 override is
+  gone; DESIGN.md's crescent count is now honest (three, and why).
+- Problems/References/Terminal layout px → tokens; the two result panels
+  use `.nox-scroll` like their siblings.
+
+Deliberately NOT done, stated: chrome-height *values* stay 36/35/28/24 —
+now all tokenized, but collapsing them to a rhythm changes pixels nobody
+has eyeballed on a desktop yet; `code { 0.92em }` stays (relative inline
+code is legitimate; the audit's "11.96px" was its computed value);
+`--nox-lh-tight` left in tokens though unused (harmless, may earn use).
+
+Verified: `npm test` 1233/1233 → +2 primitives tests = 72 files green
+after fixing the one seam my own conversion broke (answers test queried
+`.empty`; the agent proved the breakage was mine by stash-bisect before I
+saw it). svelte-check 450 files 0/0. Build green. Live: PanelHeader h2 at
+10px uppercase, empty-action button rendered and styled, `.nox-input` at
+28px token border, rail on the token, zero console errors. Mutations:
+span-for-h2 and dropped action button, both red.
+
+Next: Phase C (status-bar problems/branch/pickers, tab context menu +
+overflow, rail badges + collapse-survival, palette MRU, toast actions) on
+Francesco's go — or v0.5 stage/commit. The desktop pass keeps growing in
+value: A+B changed real pixels.
+
+Confidence: high on structure (tests+checks), medium on look until seen.
+
+---
+
 ## 2026-08-19 (PC, UI) — Audit, then Phase A
 
 Two pieces. First, a **full UI audit** (three parallel source auditors +

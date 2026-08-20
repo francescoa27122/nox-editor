@@ -6,6 +6,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **One visual language across the panels.** The sidebar panels now share
+  one header (a real heading, sized and tracked the way the design system
+  always said) and one empty-state shape — and an empty state that has a
+  one-click way out now shows the button: Problems offers *Configure
+  Language Servers*, Search offers *Open Folder*, Notes offers *New Note*.
+  Buttons and text fields across the review panel, diff view, agent panel,
+  terminal bar, find, settings and prompts share one style each instead of
+  nine hand-rolled variants. The status bar's activity pulse and the
+  explorer's refresh spinner now respect reduced-motion settings.
+
 ### Fixed
 
 - A round of paper cuts from a full UI audit: review hunk cards and the

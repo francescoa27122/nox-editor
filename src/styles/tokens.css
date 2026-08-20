@@ -19,6 +19,9 @@
   --nox-bg-raised: #12161f; /* palette, menus, inputs, popovers */
   --nox-bg-inset: #080a0e; /* wells, code blocks inside panels */
   --nox-scrim: rgba(4, 5, 8, 0.6);
+  /* The scrollbar thumb's hover step sits between border-strong and text-faint
+     on purpose: bright enough to grab, too dull to read as content. */
+  --nox-scrollbar-hover: #33405a;
 
   /* --- Interaction states ---------------------------------------------- */
   --nox-hover: rgba(125, 211, 224, 0.055);
@@ -131,31 +134,43 @@
   --nox-r-full: 999px;
 
   /* --- Elevation ---------------------------------------------------------- */
-  --nox-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --nox-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
   --nox-shadow-lg:
     0 24px 60px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--nox-border-strong);
 
   /* --- Motion ------------------------------------------------------------- */
-  /* Budget: nothing over 160ms, nothing on the typing path. */
+  /* Budget: nothing over 190ms (DESIGN.md §6), nothing on the typing path.
+     The two ambient loops (status pulse, explorer spinner) are exempt from
+     the budget but not from reduced motion — they run on the tokens below
+     so the media block can stop them. */
   --nox-dur-fast: 90ms;
   --nox-dur-base: 130ms;
   --nox-dur-slow: 190ms;
   --nox-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* Ambient loop durations. Zeroed under prefers-reduced-motion, which is
+     the whole reason they are tokens: a hardcoded `1.4s infinite` kept
+     pulsing for exactly the users who asked it not to. */
+  --nox-dur-pulse: 1.4s;
+  --nox-dur-spin: 620ms;
 
   /* --- Layout metrics ------------------------------------------------------ */
   --nox-titlebar-h: 36px;
   --nox-tabbar-h: 35px;
+  --nox-input-h: 28px;
+  /* Sidebar panel headers share the tab bar's height on purpose: the two
+     columns keep one baseline at the seam. Named separately so changing
+     tab height is a decision about tabs, not a silent retune of panels. */
+  --nox-panelbar-h: 35px;
+  /* The short chrome strips: the sidebar rail and the terminal's bar. */
+  --nox-railbar-h: 28px;
   --nox-statusbar-h: 24px;
-  --nox-sidebar-w: 248px;
-  --nox-sidebar-min-w: 150px;
-  --nox-sidebar-max-w: 520px;
+  /* The sidebar width tokens that used to sit here were dead — the real
+     numbers live in config (workbench.explorerWidth) and App.svelte. */
 
   /* --- Focus ---------------------------------------------------------------- */
   --nox-focus-ring: 0 0 0 1px var(--nox-bg-base), 0 0 0 3px var(--nox-accent-glow);
 
   /* --- Z-index scale --------------------------------------------------------- */
-  --nox-z-editor: 1;
   --nox-z-panel: 10;
   --nox-z-dropdown: 100;
   --nox-z-overlay: 1000;
@@ -187,5 +202,7 @@
     --nox-dur-fast: 0ms;
     --nox-dur-base: 0ms;
     --nox-dur-slow: 0ms;
+    --nox-dur-pulse: 0s;
+    --nox-dur-spin: 0s;
   }
 }

@@ -104,7 +104,7 @@
     align-items: center;
     gap: var(--nox-sp-1);
     flex: none;
-    height: 28px;
+    height: var(--nox-railbar-h);
     padding: var(--nox-sp-2) var(--nox-sp-3) 0;
   }
 
