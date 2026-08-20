@@ -8,6 +8,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The explorer stays fast in a big project.** It now renders only the rows
+  on screen, so a folder with tens of thousands of entries scrolls like one
+  with thirty. Nothing about using it changes: the same rows, the same
+  keyboard, the same drag and drop, and the scrollbar still describes the
+  whole tree. Small folders are rendered whole exactly as before — below a
+  couple of hundred rows the bookkeeping would cost more than it saves.
+  - Arrowing to a row that is off screen scrolls to it by arithmetic rather
+    than by asking the browser to scroll an element into view, which is what
+    lets it work for a row that is not currently drawn at all.
+  - Screen readers are told the size of the *tree*, not the size of the
+    window — every row now carries its true position in the whole list.
+
 - **A project can carry its own conventions.** Nox now reads
   `.nox/settings.json` from the folder you have open and layers it over your
   own settings, so a repository that indents with four spaces indents with

@@ -278,6 +278,26 @@ descendant element could see it. While capturing, every key is swallowed and
 handed to the recorder, and nothing runs. Design:
 `docs/superpowers/specs/2026-08-20-keybinding-editor-design.md`.
 
+### The explorer renders a window, and the model never knew
+
+`FileTreeService` has exposed the tree as a flat ordered list since v0.1, with
+a header saying why: flat is what the renderer wants, and it leaves the door
+open for windowing. `ExplorerPanel` now walks through that door alone — no
+service, no test and no `FlatNode` changed. It renders the slice of `nodes`
+the viewport covers plus an overscan, between two `role="presentation"`
+spacers that stand in for the rest, so the scrollbar describes the whole tree
+and every row keeps its true offset. Spacers rather than a transform: the
+container is also the drop target and the keyboard surface, and a transformed
+child changes what `contains()` and `getBoundingClientRect()` mean for both.
+
+Two rules make it safe. **The row height has one home** — a TS constant that
+the stylesheet reads back through `--nox-tree-row-h`, because windowing by
+index breaks silently if the painted height and the arithmetic disagree. And
+**what cannot be measured is not windowed**: a viewport height of zero (before
+layout, or under jsdom) renders every row, since windowing an unmeasured
+viewport would render nothing. Design:
+`docs/superpowers/specs/2026-08-20-explorer-virtualisation-design.md`.
+
 ### Nox draws its own find UI
 
 CodeMirror's search *engine* is excellent and its panel looks nothing like Nox.

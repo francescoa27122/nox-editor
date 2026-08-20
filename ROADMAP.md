@@ -43,7 +43,7 @@ The MVP: a real editor you can work in.
 | **Drag files out of Nox** | Dragging a tree entry into another app. Requires a native drag source on the Rust side. |
 | **Rename several files at once** | Multi-select exists; renaming many needs a find/replace-style pattern UI, not a single prompt. |
 | **Untitled buffer language picker** | Status bar click to set the language before a first save. |
-| **Explorer virtualisation** | The flat-node model already anticipates this; needed past a few thousand entries. |
+| **Explorer virtualisation** ✅ | The flat-node model anticipated it since v0.1 and the model did not change: the panel renders a window of rows plus two spacers, so the scrollbar still describes the whole tree. Below ~200 rows nothing is windowed, which keeps small folders exactly as they were. Scrolling to the lead row became arithmetic on its index rather than `scrollIntoView` on an element that may no longer exist — strictly better, since it never needed the row to be drawn. `aria-setsize`/`aria-posinset` arrived with it, not after: rows leaving the DOM makes them mandatory. |
 
 ### ✅ Shipped *(M1–M7 of [AGENT-PLATFORM.md](AGENT-PLATFORM.md) — released in 0.2.0, except the local model in 0.3.0)*
 
@@ -183,7 +183,7 @@ That is a claim about trust and finish, so the bar is written in those terms:
 | **Language intelligence is complete.** Diagnostics, completion, hover and go to definition ship today; an editor that can jump to a definition but not list its uses, or rename it, has stopped halfway. | Four of the v0.4 rows are ✅. | Find references (and the picker go to definition is waiting on), rename symbol, formatting on save. Tree-sitter is an evaluation, not a 1.0 gate. |
 | **Version control is present.** Not a Git client; the gutter, a diff, stage-and-commit. The README has said "no Git integration" since 0.2.0. | Nothing. The diff engine and hunk review exist (M6). | The v0.5 table, in its order. Blame can follow 1.0. |
 | **A keyboard-first editor lets you change the keys.** ✅ | Both rows landed 2026-08-20: the keybinding editor (rebind, unassign, reset, `keybindings.json`) and workspace settings (`.nox/settings.json`, an eight-key allowlist). | Nothing. Plugins are explicitly *not* a 1.0 gate — a plugin API is a compatibility promise, and 1.0 should not make one it has not lived with. |
-| **It holds up at scale.** | Search and replace are jobs; the explorer is a flat list that renders every node. | Explorer virtualisation, from the v0.2 table. The only trust-row item whose absence a larger project would feel every day. |
+| **It holds up at scale.** ✅ | Search and replace are jobs; the explorer renders a window (2026-08-20). | Nothing. |
 | **Nothing in the release notes says "unverified".** | Each of the last three work-log entries names a surface seen only in a test. | A pass on a real keyboard over the LSP commands, the terminal and the dialogs, recorded in the work log, before the 1.0 tag — not a feature, a ritual. |
 
 Everything in the v0.2–v0.7 tables that is not named above is 1.x. In
@@ -195,9 +195,8 @@ from recommending the editor.
 Order of work, by what each thing unblocks rather than by size: find
 references → rename → format on save → Git gutter and diff → stage/commit →
 keybinding editor → workspace settings → explorer virtualisation → the keyboard
-pass → tag. **Everything up to and including workspace settings is done
-(2026-08-20).** What is left of 1.0 is explorer virtualisation, the keyboard
-pass, and the certificates. Signing and the updater run alongside, because one half of them is
+pass → tag. **Every code row is done (2026-08-20).** What is left of 1.0 is the
+real-keyboard pass and the certificates — a ritual and a purchase. Signing and the updater run alongside, because one half of them is
 a purchase and the other half is a workflow change that nothing else waits on.
 
 ---

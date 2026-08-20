@@ -8,6 +8,89 @@ are knowledge.**
 
 ---
 
+## 2026-08-20 (PC, 1.0 bar) — Explorer virtualisation
+
+Branch `keybinding-editor`, third commit. The last **code** row of the 1.0
+bar; what remains of 1.0 after this is a real-keyboard pass and two
+certificates. Spec:
+`docs/superpowers/specs/2026-08-20-explorer-virtualisation-design.md`.
+
+Shipped:
+
+- **The panel renders a window; the model never noticed.** `FlatNode`,
+  `#flatten`, `FileTreeService` and every service test are untouched —
+  the flat list has said since v0.1 that it exists to make this possible,
+  and this is the whole of collecting on it. The rendered slice sits
+  between two `role="presentation"` spacers, so the scrollbar still
+  describes the whole tree and every row keeps its true offset.
+- **Spacers rather than a transform**, deliberately: the container is also
+  the drop target and the keyboard surface, and a transformed child changes
+  what `contains()` and `getBoundingClientRect()` mean for both.
+- **The row height has one home.** It was `height: 23px` in the stylesheet;
+  it is now a TS constant the CSS reads through `--nox-tree-row-h`.
+  Windowing by index fails silently if the painted height and the
+  arithmetic disagree, so they cannot be two numbers.
+- **What cannot be measured is not windowed.** Viewport height 0 — before
+  layout, and jsdom, which has no layout at all — renders every row.
+  Windowing an unmeasured viewport renders *nothing*, which is a much worse
+  failure than rendering too much; it also keeps every other jsdom suite
+  seeing the tree it always saw.
+- **`scrollIntoView` is gone, and its replacement is strictly better.**
+  `scrollSelectionIntoView` used to query `.row.lead` and call
+  `scrollIntoView` on it — impossible once the lead can be outside the
+  window, which is exactly when it matters. It is now arithmetic on the
+  lead's index: no row required in the DOM, and no `scrollIntoView`, which
+  jsdom does not implement and which the old line had to guard with `?.`
+  for that reason.
+- **`aria-setsize` / `aria-posinset` arrived with the change, not after.**
+  Rows leaving the DOM makes them mandatory: without them a screen reader
+  would be told the tree is exactly as long as the window.
+- Shift+F10's menu still measures a real row, because a menu needs real
+  coordinates — it reveals the lead, `await tick()`, then measures, and
+  keeps its old fixed fallback.
+
+Verified:
+
+- `npm test` — **1421 passed, 88 files** (1412/87 at the previous commit;
+  +9). `npm run check` — 473 files, 0 errors. `npm run build` — green.
+- **Eight mutation checks, all red after one round of re-aiming.** Two
+  survived the first pass and both were *test* faults rather than code
+  faults, which is the useful part:
+  1. Killing `revealLead`'s scroll-**up** branch survived, because the only
+     keyboard test at the time arrowed **down**. The suite had one
+     direction; the code had two. Added "arrowing above the top edge
+     scrolls back up", and both branches now have a killer.
+  2. Slicing from `0` instead of `firstIndex` survived against the
+     initial-render test, because at scroll offset 0 those are the same
+     expression. Re-aimed at the scrolled test, where it dies.
+- **Not verified on a screen.** Every claim here is jsdom over a stubbed
+  `clientHeight`. The thing a real browser would settle and this cannot:
+  whether the overscan of 8 is enough to avoid a flash of blank rows on a
+  fast flick.
+
+Next:
+
+- **The 1.0 keyboard pass**, on a real machine — the bar's own last row
+  ("nothing in the release notes says unverified"). It now covers a full
+  cycle's worth of surfaces: UI phases A-C, the git panel and branch picker,
+  the keybinding editor's recording flow, a project's `.nox/settings.json`,
+  and a large folder in the explorer.
+- Then the 1.0 tag, once the certificates are a decision.
+
+Blocked:
+
+- Not pushed, no PR — the standing rule. Three commits sit on
+  `keybinding-editor`.
+- Code signing is a purchase; the desktop pass wants a Mac. Neither is this
+  machine's to close.
+
+Confidence:
+
+- High on the arithmetic: eight mutations, and the two survivors were caught
+  and converted rather than explained away.
+- Medium on the feel. Overscan, scroll smoothness and the drag-over
+  behaviour near a window edge have been reasoned about and not seen.
+
 ## 2026-08-20 (PC, v0.6) — Workspace settings
 
 Branch `keybinding-editor`, second commit. Chosen because the 1.0 bar's own
