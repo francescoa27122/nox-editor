@@ -8,6 +8,81 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, v0.5 begins) — Git gutter
+
+On branch `git-gutter`, off `main` at `1000921`. Design in
+`docs/superpowers/specs/2026-08-19-git-gutter-design.md`. Built with three
+Explore agents mapping the seams in parallel, then two build agents
+(`git.rs`, the pure core) alongside my own middle layer — the first
+multi-agent feature in this repo, and the split held: no file conflicts.
+
+Shipped:
+
+- `src-tauri/src/git.rs` — `nox_git_file_base(path)`: repo root via
+  `rev-parse --show-toplevel`, index content via `--literal-pathspecs show
+  :0:<relpath>`, `CREATE_NO_WINDOW` on Windows, **None for everything that
+  is not content** (no repo / untracked / no git / binary). The codebase's
+  first `Command::output()` capture. Inline tests against a real temp repo
+  (staged-vs-working divergence, untracked, no-repo, subdirectory).
+  **Reviewed by eye, never compiled here — no cargo on this PC; CI is
+  where it first builds.** My review caught one real hazard in the agent's
+  draft: the textual repo-root prefix match breaks under macOS's
+  `/var → /private/var` symlink and Windows runners' 8.3 short paths;
+  fixed by canonicalizing the file and stripping the `\?\` prefix.
+- Platform: `capabilities.gitState` (4 literals) + `gitFileBase(path)`;
+  MemoryPlatform fakes it as a seedable lookup (`seedGitBase`).
+- `src/core/git-gutter.ts` (agent-built, mutation-checked by its builder):
+  `gutterLines(hunks)` maps before-space hunks to current-space 1-based
+  marks with cumulative offsets; `normalizeGitBase` mirrors `decode`
+  (BOM/CRLF), else a CRLF repo marks every line.
+- `src/services/git.ts` — per-buffer hunks signal, 300 ms per-buffer
+  debounce off `workspace.buffers`, base refetch on open/save/reset/
+  external-change/activation (2 s throttle)/`refreshAll`, 2 MB size guard.
+- `src/editor/git-gutter.ts` + wiring: StateField (static — survives the
+  settings toggle) mapping marks through keystrokes; gutter rendering in a
+  `gitGutter` compartment behind **`editor.gitGutter`** (on by default);
+  theme bars green/amber + red deletion tick; pane paints keyed off
+  `currentId` and after every state swap.
+- `git.refreshGutter` — **Refresh Git Gutter**, palette-only.
+- CHANGELOG `[Unreleased]`, ROADMAP row ✅.
+
+Verified:
+
+- `npm test` 1196/1196, 69 files (was 1162/66: +20 core, +8 service,
+  +6 render). `npm run check` 443 files 0 errors. Build green.
+- Mutations seen red: core offset (agent's own), service ×5 (normalize,
+  debounce, close-drop, size guard, save-refetch), render ×4 — including
+  one that **survived and taught something**: removing the repaint after
+  the state swap passed the original swap test because marks persist in
+  each buffer's own EditorState; the killer is hunks that change while
+  the buffer is in the background (stage in terminal, swap back), and
+  that test now exists.
+- NOT verified: the Rust module has never compiled (no cargo here) and no
+  real repo has been diffed end-to-end — MemoryPlatform seeds stand in.
+  CI's three-platform `cargo test` is the compile and the real-git proof;
+  the desktop pass sees the pixels.
+
+Next:
+
+- Push, watch CI — expect possible iteration on `git.rs` (first compile).
+  Then the **diff view** (v0.5 row 2): the hunk-review panel and line diff
+  already exist; it is git wiring plus a second layout.
+- The v0.4.3 desktop pass on the MacBook still stands, now with the gutter
+  added to the checklist.
+
+Blocked:
+
+- Nothing technical.
+
+Confidence:
+
+- High on the TS layers (mutation-checked locally). Medium on git.rs until
+  CI compiles it — the risk is concentrated in the `#[cfg(windows)]` lines
+  and path canonicalization, and the tests there are the ones that would
+  catch it.
+
+---
+
 ## 2026-08-19 (PC, release) — Cut v0.4.3
 
 On branch `release-0.4.3`, off `main` at `f3de46c`. The section this tags:

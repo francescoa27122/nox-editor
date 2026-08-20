@@ -71,6 +71,7 @@ export class TauriPlatform implements Platform {
     terminals: true,
     localModels: true,
     languageServers: true,
+    gitState: true,
     // Windows is the only desktop target that hides its decorations — see
     // `lib.rs`'s setup hook. macOS keeps its traffic lights over an overlay
     // title bar and must not draw a second set beside them.
@@ -83,6 +84,10 @@ export class TauriPlatform implements Platform {
 
   async readTextFile(path: string): Promise<string> {
     return call<string>('nox_read_text_file', { path });
+  }
+
+  async gitFileBase(path: string): Promise<string | null> {
+    return call<string | null>('nox_git_file_base', { path });
   }
 
   async writeTextFile(path: string, contents: string): Promise<void> {

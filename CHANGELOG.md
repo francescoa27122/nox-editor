@@ -6,6 +6,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Git gutter.** Lines that differ from what git holds are marked beside
+  the code: green for a new line, amber for a changed one, a red tick where
+  lines were deleted. The comparison is against the index — what `git add`
+  would leave alone — and the marks follow your typing between refreshes.
+  Nothing watches `.git` yet, so after a commit or stage made in a terminal
+  the gutter catches up when you switch back to the file, or on **Refresh
+  Git Gutter** from the palette. Turn it off with *Git Gutter* in Settings.
+  No repository, an untracked file, or no git installed simply means no
+  marks — never an error.
+
 ## [0.4.3] — 2026-08-19
 
 ### Added

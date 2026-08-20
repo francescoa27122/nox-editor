@@ -51,6 +51,8 @@ export interface PlatformCapabilities {
   localModels: boolean;
   /** True when `startLanguageServer` can start a language server. */
   languageServers: boolean;
+  /** True when `gitFileBase` can ask a real git for a file's index version. */
+  gitState: boolean;
   /**
    * True when the window has no OS chrome and the title bar must draw its own
    * minimise / maximise / close.
@@ -263,6 +265,17 @@ export interface Platform {
   homeDir(): Promise<string | null>;
 
   readTextFile(path: string): Promise<string>;
+
+  /**
+   * The version of `path` that git's index holds, or null.
+   *
+   * Null is the answer to everything that is not content — no repository,
+   * an untracked file, git not installed, a binary blob. A missing gutter
+   * is the correct degraded state, so none of those may become an error.
+   * Check `capabilities.gitState` before expecting real answers.
+   */
+  gitFileBase(path: string): Promise<string | null>;
+
   writeTextFile(path: string, contents: string): Promise<void>;
   /** Directory children, already sorted: directories first, then by name. */
   readDir(path: string): Promise<DirEntry[]>;

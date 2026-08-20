@@ -7,6 +7,7 @@
 
 mod agent;
 mod fs;
+mod git;
 mod http;
 mod lsp;
 mod pty;
@@ -63,6 +64,7 @@ pub fn run() {
             fs::nox_config_dir,
             fs::nox_read_config,
             fs::nox_write_config,
+            git::nox_git_file_base,
             http::nox_http_stream,
             http::nox_http_cancel,
             watcher::nox_watch,

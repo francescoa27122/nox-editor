@@ -80,6 +80,7 @@ import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
 import { UIService } from '@services/ui';
 import { FileWatcherService } from '@services/watcher';
+import { GitService } from '@services/git';
 import { WorkspaceService, type BufferId } from '@services/workspace';
 import type { ChangeSetSpec } from '@services/transactions';
 
@@ -140,6 +141,8 @@ export class NoxApp {
   /** The running servers, and the diagnostics they publish. */
   readonly lsp: LspService;
   readonly terminal: TerminalService;
+  /** What git holds for each open file, for the gutter. */
+  readonly git: GitService;
   /** The user's own notes — not workspace files. See `notes.ts`. */
   readonly notes: NotesService;
 
@@ -222,6 +225,11 @@ export class NoxApp {
       jobs: this.jobs,
     });
     this.notes = new NotesService(platform);
+    this.git = new GitService(platform, this.workspace);
+    // Behind the capability: over a platform without git every base would
+    // be null and the subscriptions pure overhead. Tests start it directly
+    // over a MemoryPlatform with seeded bases — the language-server pattern.
+    if (platform.capabilities.gitState) this.git.start();
 
     this.#wireServices();
     this.#registerCommands();
@@ -2156,6 +2164,17 @@ export class NoxApp {
           this.config.set('workbench.showExplorer', true);
           this.ui.showView('references');
         },
+      },
+      {
+        id: 'git.refreshGutter',
+        title: 'Refresh Git Gutter',
+        category: 'Editor',
+        keywords: ['git', 'gutter', 'diff', 'refresh'],
+        // Nothing watches .git, so a commit or stage made in the terminal
+        // changes the base behind the gutter's back; this re-asks for every
+        // open file at once.
+        enabled: () => this.platform.capabilities.gitState,
+        run: () => void this.git.refreshAll(),
       },
       {
         id: 'agents.reloadConfig',

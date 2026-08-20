@@ -42,6 +42,8 @@ export class MemoryPlatform implements Platform {
     terminals: false,
     localModels: false,
     languageServers: false,
+    // No git in a browser tab; tests seed bases with `seedGitBase`.
+    gitState: false,
     // A browser tab's chrome is the browser's. Nothing to hide, nothing to
     // draw in its place.
     customWindowControls: false,
@@ -81,6 +83,14 @@ export class MemoryPlatform implements Platform {
       }
       this.#nodes.set(current, null);
     }
+  }
+
+  /** path -> the text a fake git index holds for it. See `gitFileBase`. */
+  #gitBases = new Map<string, string>();
+
+  /** Give the fake git an index version of `path`, for tests. */
+  seedGitBase(path: string, contents: string): void {
+    this.#gitBases.set(normalize(path), contents);
   }
 
   /** Install a file without emitting a watch event — for fixtures and seeds. */
@@ -152,6 +162,15 @@ export class MemoryPlatform implements Platform {
     if (node === undefined) throw new PlatformError(`File not found: ${p}`, 'not-found', p);
     if (node === null) throw new PlatformError(`Is a directory: ${p}`, 'io', p);
     return node;
+  }
+
+  /**
+   * Answers from whatever a test seeded, null otherwise — a lookup is a
+   * legitimate fake, unlike a process spawn. The real build's null means
+   * "no repo / untracked / no git", and unseeded means exactly that here.
+   */
+  async gitFileBase(path: string): Promise<string | null> {
+    return this.#gitBases.get(normalize(path)) ?? null;
   }
 
   async writeTextFile(path: string, contents: string): Promise<void> {

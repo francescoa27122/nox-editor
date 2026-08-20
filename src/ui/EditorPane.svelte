@@ -10,6 +10,8 @@
   import { lspCompletionExtension } from '@editor/completion';
   import { lspHoverExtension } from '@editor/hover';
   import { cachedLanguage, hasGrammar, languageCompartment, loadLanguage } from '@editor/languages';
+  import { setGitGutter } from '@editor/git-gutter';
+  import { gutterLines } from '@core/git-gutter';
   import { applyDiagnostics } from '@editor/lsp';
   import { pathToUri } from '@core/uri';
   import { useApp } from './context';
@@ -105,6 +107,8 @@
     // diagnostics into the previously-active buffer's state, and
     // `dispatchTransactions` recorded them there permanently.
     const offDiagnostics = lsp.diagnostics.subscribe(() => paintDiagnostics());
+    // Same trap, same fix: keyed off `currentId`, painted from the pane.
+    const offGit = app.git.hunks.subscribe(() => paintGitGutter());
 
     syncToBuffer(activeId);
 
@@ -123,6 +127,7 @@
       offConfig();
       offDispatcher();
       offDiagnostics();
+      offGit();
       if (autosaveTimer) clearTimeout(autosaveTimer);
       app.unregisterGroupView(groupId);
       view?.destroy();
@@ -151,6 +156,14 @@
    * Draw the diagnostics belonging to the buffer this view is actually
    * showing. Keyed off `currentId`, never off the app-wide active id.
    */
+  function paintGitGutter() {
+    if (!view || !currentId) return;
+    const entry = app.git.hunks.get().get(currentId);
+    // No entry clears: the buffer may have just lost its last hunk, or the
+    // view may still carry the previous buffer's marks after a swap.
+    view.dispatch({ effects: setGitGutter.of(entry ? gutterLines(entry.hunks) : []) });
+  }
+
   function paintDiagnostics() {
     if (!view || !currentId) return;
 
@@ -195,6 +208,7 @@
     // anything painted first is discarded, and anything painted while the old
     // state is still loaded lands on the wrong buffer.
     paintDiagnostics();
+    paintGitGutter();
 
     publishCursor();
     find.attach(view);

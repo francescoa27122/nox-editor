@@ -33,6 +33,9 @@ export class WebPlatform extends MemoryPlatform {
     // Inherited refusals from MemoryPlatform cover the methods; this is the
     // flag callers are told to check first.
     languageServers: false,
+    // No git binary in a browser tab. `MemoryPlatform.gitFileBase` still
+    // answers from whatever a test seeded, which is a lookup, not a lie.
+    gitState: false,
     customWindowControls: false,
   };
 
