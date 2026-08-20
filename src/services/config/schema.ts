@@ -83,6 +83,12 @@ export const SETTINGS_SCHEMA = {
     category: 'Workbench',
     advanced: true,
   }),
+  'workbench.diffLayout': pick(['side-by-side', 'inline'], 'side-by-side', {
+    label: 'Diff Layout',
+    description: 'How Show Changes lays out a file against its git base.',
+    category: 'Workbench',
+    optionLabels: { 'side-by-side': 'Side by side', inline: 'Inline' },
+  }),
   'workbench.splitOrientation': pick(['vertical', 'horizontal'], 'vertical', {
     label: 'Split Direction',
     description: 'Whether split editor panes sit side by side or stacked.',

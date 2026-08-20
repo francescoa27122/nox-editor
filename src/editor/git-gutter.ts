@@ -1,4 +1,4 @@
-import { RangeSet, RangeValue, StateEffect, StateField, type Extension } from '@codemirror/state';
+import { Facet, RangeSet, RangeValue, StateEffect, StateField, type Extension } from '@codemirror/state';
 import { gutter, GutterMarker } from '@codemirror/view';
 import type { GutterLine, GutterLineKind } from '@core/git-gutter';
 
@@ -25,6 +25,15 @@ class GitLineValue extends RangeValue {
 
 /** Replace every mark in the buffer with `lines`, as `GitService` computed them. */
 export const setGitGutter = StateEffect.define<readonly GutterLine[]>();
+
+/**
+ * What a mousedown on the gutter should do — the pane provides "open the
+ * diff view". A facet rather than a callback parameter, because this
+ * extension is built from settings alone and must stay app-free; events on
+ * a gutter also never bubble to the content element, so the view-level
+ * `domEventHandlers` cannot catch them.
+ */
+export const onGitGutterClick = Facet.define<() => void>();
 
 export const gitGutterField = StateField.define<RangeSet<GitLineValue>>({
   create: () => RangeSet.empty,
@@ -79,6 +88,13 @@ export function gitGutter(): Extension {
   return [
     gutter({
       class: 'cm-gitGutter',
+      domEventHandlers: {
+        mousedown(view) {
+          const handlers = view.state.facet(onGitGutterClick);
+          for (const handler of handlers) handler();
+          return handlers.length > 0;
+        },
+      },
       lineMarker(view, line) {
         // Collected rather than assigned, because TypeScript does not see a
         // closure assignment as a narrowing event.

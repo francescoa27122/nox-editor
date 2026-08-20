@@ -8,6 +8,72 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, later) — Diff view
+
+On branch `git-diff-view`, off `main` at `d888bbd`. Design in
+`docs/superpowers/specs/2026-08-19-git-diff-view-design.md`. Same split as
+the gutter: one Explore agent mapped ReviewPanel/editor-area conventions,
+one build agent wrote the pure row model, I built the surface.
+
+Shipped:
+
+- `src/core/diff-view.ts` (agent-built, 17 tests): one paired-row model —
+  context / paired change rows / folds with counts — serving both layouts;
+  after-side numbers by running offset; folds only when at least 2 lines
+  hide; the change-rows-separated invariant the inline regrouping leans on.
+- `src/ui/DiffView.svelte` — **Show Changes**: side-by-side and inline
+  (regrouped from the same rows, no second differ), layout toggle writing
+  `workbench.diffLayout` (new setting), fold click = expand all, honest
+  empty states (no file / untitled / asking git / no base / too large /
+  no changes). Read-only on purpose.
+- `ui.diffOpen`, layered **below** review and agents: staging over an open
+  diff shows the review, Escape uncovers the diff. Survives tab switches —
+  the deliberate deviation from review/agents, which close on activeId.
+- `GitService.baseFor(path)` plus a `baseRevision` signal (a clean file's
+  base arrival is otherwise invisible — hunks stay silent when nothing
+  changed); the bump is pinned at the service after a survived mutation
+  showed the folder-open reset was masking it in the UI test.
+- `onGitGutterClick` facet: gutter mousedown opens Show Changes. The first
+  draft used pane-level `EditorView.domEventHandlers` and never fired —
+  those listen on the content element and gutters are siblings; the jsdom
+  suite caught it, plus the pre-existing jsdom `Range.getClientRects` gap
+  the gutter's measure path trips (installRangeRects, as lsp-format does).
+- `git.showDiff` and `git.refreshGutter` both category **Git**; enabled on
+  `git.started` (the service, not the capability — the LSP pattern; the
+  capability gate was untestable and wrong for the same reason).
+
+Verified:
+
+- `npm test` 1224/1224, 71 files (+17 core, +10 view, +1 service).
+  `npm run check` 447 files 0 errors 0 warnings. Build green. Browser
+  build boots with all five gutters registered, no console errors.
+- Mutations: core x2 (agent's own), view x5 — two survivors did real
+  work: the gutter-click one exposed the sibling-element bug above, and
+  the baseRevision one exposed that the UI test was passing because of
+  the folder-open reset bump (now isolated at the service and red under
+  mutation).
+- NOT verified on a screen: everything (jsdom only). The desktop-pass
+  checklist now carries the gutter and this view.
+
+Next:
+
+- **Stage, commit, branch** (v0.5 row 3): a focused panel. Wants the
+  `.git` watching the gutter deferred, hunk staging with the revert/stage
+  confirmation shape, and the first write-path git commands — a real
+  capability step, so the spec comes first and should be short-listed for
+  a human read before building.
+
+Blocked:
+
+- Nothing technical.
+
+Confidence:
+
+- High on the row model and the surface (mutation-checked); medium on the
+  visuals until a human sees them.
+
+---
+
 ## 2026-08-19 (PC, v0.5 begins) — Git gutter
 
 On branch `git-gutter`, off `main` at `1000921`. Design in

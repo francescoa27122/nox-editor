@@ -8,6 +8,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Show Changes.** The active file against its git base, side by side or
+  inline — pick in the view or in Settings under *Diff Layout*. Open it
+  from the palette or by clicking any mark in the git gutter. Long
+  unchanged stretches fold to a count; click one to see the whole file.
+  The view follows you between tabs, and it is read-only on purpose:
+  editing belongs in the editor, and putting hunks back belongs to
+  staging, which is next.
+
+### Added
+
 - **Git gutter.** Lines that differ from what git holds are marked beside
   the code: green for a new line, amber for a changed one, a red tick where
   lines were deleted. The comparison is against the index — what `git add`

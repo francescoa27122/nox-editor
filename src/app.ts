@@ -336,6 +336,9 @@ export class NoxApp {
     this.workspace.activeId.subscribe(() => {
       if (this.ui.reviewOpen.get()) this.ui.reviewOpen.set(false);
       if (this.ui.agentsOpen.get()) this.ui.agentsOpen.set(false);
+      // `diffOpen` deliberately survives: the diff view is a lens on
+      // whichever file is active, and switching tabs while it is open
+      // should show the new file's changes, not put the view away.
     });
 
     // Servers are per workspace, so they start when one opens and stop when it
@@ -2166,14 +2169,25 @@ export class NoxApp {
         },
       },
       {
+        id: 'git.showDiff',
+        title: 'Show Changes',
+        category: 'Git',
+        keywords: ['diff', 'changes', 'compare', 'git'],
+        // On the service, not the platform flag: the service only starts
+        // where the capability holds, and tests start it over a memory
+        // platform — the language-server pattern.
+        enabled: () => this.git.started && Boolean(this.workspace.activeSnapshot()?.path),
+        run: () => this.ui.showDiff(),
+      },
+      {
         id: 'git.refreshGutter',
         title: 'Refresh Git Gutter',
-        category: 'Editor',
+        category: 'Git',
         keywords: ['git', 'gutter', 'diff', 'refresh'],
         // Nothing watches .git, so a commit or stage made in the terminal
         // changes the base behind the gutter's back; this re-asks for every
         // open file at once.
-        enabled: () => this.platform.capabilities.gitState,
+        enabled: () => this.git.started,
         run: () => void this.git.refreshAll(),
       },
       {

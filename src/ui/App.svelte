@@ -8,6 +8,7 @@
   import StatusBar from './StatusBar.svelte';
   import AgentPanel from './AgentPanel.svelte';
   import TerminalPanel from './TerminalPanel.svelte';
+  import DiffView from './DiffView.svelte';
   import ReviewPanel from './ReviewPanel.svelte';
   import Welcome from './Welcome.svelte';
   import Overlays from './Overlays.svelte';
@@ -35,6 +36,8 @@
   const reviewOpen = app.ui.reviewOpen;
   // svelte-ignore state_referenced_locally
   const agentsOpen = app.ui.agentsOpen;
+  // svelte-ignore state_referenced_locally
+  const diffOpen = app.ui.diffOpen;
 
   // svelte-ignore state_referenced_locally
   const terminalOpen = app.ui.terminalOpen;
@@ -142,6 +145,8 @@
           <ReviewPanel />
         {:else if $agentsOpen}
           <AgentPanel />
+        {:else if $diffOpen}
+          <DiffView />
         {:else if hasBuffers}
           <EditorArea />
         {:else}
