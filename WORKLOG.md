@@ -8,6 +8,54 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, spec) — Stage/commit/branch, specified
+
+On branch `git-stage-spec`, off `main` at `fa2caaf`. Spec only, no code:
+`docs/superpowers/specs/2026-08-19-git-stage-commit-design.md`. It is the
+first write-path git work, so the spec leads with the envelope — the six
+things the feature will never do — and that section (§0) is the part
+worth Francesco's read before step 1 of the build order starts. Merged as
+a spec so the MacBook session can read it in-repo; building has not
+begun, and the ROADMAP row stays unchecked.
+
+The decisions someone might re-litigate, and why they went this way:
+
+- **No discard, no stash** — the README's first promise is "It does not
+  lose your work. Ever.", and `checkout -- file` is the canonical way to
+  lose it. Discard waits for a recovery story, as its own decision.
+- **Unstage is `restore --staged`, not `reset`** — the working tree is
+  untouchable by construction of the command chosen.
+- **Commit message via stdin** (`--file=-`), never argv.
+- **Branch names validated by `git check-ref-format` before any write.**
+- **MemoryPlatform grows a small honest repo model**, not scripted
+  replies — service tests then exercise sequences, and the refusal texts
+  are asserted against real git in the Rust tests so fake and real
+  cannot drift silently.
+- **`.git` meta-watch lands here** (targeted, non-recursive, HEAD+index
+  only), closing the gutter's documented blind spot; the recursive
+  workspace watch keeps its DENY.
+- **Hunk staging is phase 2**, separate PR and its own envelope read —
+  it is the one place the feature would construct input for git
+  (`apply --cached`) rather than naming files.
+
+Next:
+
+- Francesco reads §0. Then build order §7, step 1: the porcelain v2
+  parser, the status read, the read-only panel.
+
+Blocked:
+
+- Nothing — building can start on the standing authority; the §0 read is
+  requested, not required, and the envelope is enforced by the spec
+  either way.
+
+Confidence:
+
+- High that the envelope is the right shape; medium on porcelain v2
+  parsing edge cases until the fixtures exist.
+
+---
+
 ## 2026-08-19 (PC, later) — Diff view
 
 On branch `git-diff-view`, off `main` at `d888bbd`. Design in
