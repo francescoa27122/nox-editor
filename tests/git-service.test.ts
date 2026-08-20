@@ -138,3 +138,96 @@ describe('the git service', () => {
     expect(entry.hunks).toEqual([{ fromLine: 1, removed: [], added: ['two\n', 'three\n'] }]);
   });
 });
+
+describe('the status signal', () => {
+  it('is populated after a folder with a repo opens', async () => {
+    platform.seedGitRepo('/w');
+    platform.seedFile(FILE, BASE);
+    await app.workspace.openFolder('/w');
+    await vi.runAllTimersAsync();
+
+    const status = app.git.status.get()!;
+    expect(status.branch).toBe('main');
+    expect(status.unstaged).toContainEqual({ path: 'main.ts', status: 'U' });
+  });
+
+  it('is null over a folder that is not a repository', async () => {
+    platform.seedFile('/plain/a.txt', 'x\n');
+    await app.workspace.openFolder('/plain');
+    await vi.runAllTimersAsync();
+    expect(app.git.status.get()).toBeNull();
+  });
+
+  it('coalesces concurrent refreshes: one in flight, one queued, not N', async () => {
+    platform.seedGitRepo('/w');
+    platform.seedFile(FILE, BASE);
+    await app.workspace.openFolder('/w');
+    await vi.runAllTimersAsync();
+
+    let calls = 0;
+    const real = platform.gitStatus.bind(platform);
+    platform.gitStatus = async (root: string) => {
+      calls++;
+      return real(root);
+    };
+
+    void app.git.refreshStatus();
+    void app.git.refreshStatus();
+    void app.git.refreshStatus();
+    void app.git.refreshStatus();
+    await vi.runAllTimersAsync();
+
+    // The first call was in flight; the other three collapsed to one queued.
+    expect(calls).toBe(2);
+  });
+
+  it('refreshes after a save, the way bases already do', async () => {
+    platform.seedGitRepo('/w');
+    const id = await openSeeded('one\nTWO\nthree\n');
+    expect(app.git.status.get()!.unstaged).toContainEqual({ path: 'main.ts', status: 'M' });
+
+    // The index moves behind our back; the save-triggered refresh sees it.
+    await platform.gitStage('/w', [FILE]);
+    await app.workspace.save(id);
+    await vi.runAllTimersAsync();
+    expect(app.git.status.get()!.staged).toContainEqual({ path: 'main.ts', status: 'M' });
+  });
+
+  it('lists branches, parsed', async () => {
+    // openFolder requires the directory to exist on disk; seedGitRepo alone
+    // only builds the fake repo model, the way tests/git-platform.test.ts
+    // already documents with its own explicit mkdirp before seedGitRepo.
+    platform.mkdirp('/w');
+    platform.seedGitRepo('/w');
+    await app.workspace.openFolder('/w');
+    await vi.runAllTimersAsync();
+    await platform.gitSwitch('/w', 'feature', true);
+    expect((await app.git.listBranches()).sort()).toEqual(['feature', 'main']);
+  });
+
+  it('shows a staged-then-re-modified file in both staged and unstaged (porcelain MM)', async () => {
+    // Deferred finding from Task 2's review: a file staged and then edited
+    // again in the worktree is neither purely staged nor purely unstaged —
+    // porcelain reports both halves on the same record, and the panel needs
+    // both lists to carry it so neither section silently drops the file.
+    platform.seedGitRepo('/w');
+    // Committed base, then a worktree edit: unstaged M to start.
+    await openSeeded('one\nTWO\nthree\n');
+    await app.git.refreshStatus();
+    await vi.runAllTimersAsync();
+    expect(app.git.status.get()!.unstaged).toContainEqual({ path: 'main.ts', status: 'M' });
+
+    // Stage that edit: the index now differs from HEAD (staged M), and the
+    // worktree matches the index (nothing unstaged) — the ordinary case.
+    await platform.gitStage('/w', [FILE]);
+    // Re-modify in the worktree after staging: the worktree now differs
+    // from the index too, while the index still differs from HEAD — MM.
+    platform.seedFile(FILE, 'one\nTWO\nTHREE\n');
+    await app.git.refreshStatus();
+    await vi.runAllTimersAsync();
+
+    const status = app.git.status.get()!;
+    expect(status.staged).toContainEqual({ path: 'main.ts', status: 'M' });
+    expect(status.unstaged).toContainEqual({ path: 'main.ts', status: 'M' });
+  });
+});

@@ -1,7 +1,9 @@
 import { diffText, type Hunk } from '@core/diff';
 import { normalizeGitBase } from '@core/git-gutter';
+import { parseGitBranches, parseGitStatus, type GitStatus } from '@core/git-status';
 import { Signal } from '@core/signal';
 import type { Platform } from '@platform/types';
+import type { NotificationService } from './notifications';
 import type { BufferId, WorkspaceService } from './workspace';
 
 /**
@@ -47,8 +49,16 @@ export class GitService {
    */
   readonly baseRevision = new Signal(0);
 
+  /**
+   * The working state: branch, staged, unstaged. Null before the first
+   * answer, over no root, and over a folder that is not a repository — the
+   * panel words each of those from its own context.
+   */
+  readonly status = new Signal<GitStatus | null>(null);
+
   #platform: Platform;
   #workspace: WorkspaceService;
+  #notifications: NotificationService | undefined;
   /** path -> normalized index text, or null when git has nothing for it. */
   #bases = new Map<string, string | null>();
   /** What each buffer was last computed at, to skip no-op recomputes. */
@@ -58,10 +68,16 @@ export class GitService {
   #refetched = new Map<string, number>();
   #unsubscribes: (() => void)[] = [];
   #started = false;
+  #statusInFlight = false;
+  #statusQueued = false;
 
-  constructor(platform: Platform, workspace: WorkspaceService) {
+  constructor(platform: Platform, workspace: WorkspaceService, notifications?: NotificationService) {
     this.#platform = platform;
     this.#workspace = workspace;
+    this.#notifications = notifications;
+    // Read for real by the stage/commit/switch write paths (Task 6+); this
+    // line keeps noUnusedLocals honest until then — delete it when they land.
+    void this.#notifications;
   }
 
   /** Whether `start()` has run — what the commands gate on, LSP-style. */
@@ -87,16 +103,25 @@ export class GitService {
       // exactly the cadence a gutter needs — debounced per buffer below.
       workspace.buffers.subscribe(() => this.#reconcile()),
       workspace.events.on('buffer-opened', ({ id }) => void this.#refresh(id)),
-      workspace.events.on('saved', ({ id }) => void this.#refresh(id)),
+      workspace.events.on('saved', ({ id }) => {
+        void this.#refresh(id);
+        void this.refreshStatus();
+      }),
       workspace.events.on('buffer-reset', ({ id }) => void this.#refresh(id)),
-      workspace.events.on('external-change', ({ id }) => void this.#refresh(id)),
+      workspace.events.on('external-change', ({ id }) => {
+        void this.#refresh(id);
+        void this.refreshStatus();
+      }),
       workspace.events.on('buffer-closed', ({ id }) => this.#drop(id)),
       // "Committed in the terminal, tabbed back" — nothing watches .git, so
       // the moment a buffer is looked at again is the moment to re-ask.
       workspace.activeId.subscribe((id) => {
         if (id) void this.#refetchOnActivation(id);
       }),
-      workspace.rootPath.subscribe(() => this.#reset()),
+      workspace.rootPath.subscribe(() => {
+        this.#reset();
+        void this.refreshStatus();
+      }),
     );
   }
 
@@ -140,6 +165,7 @@ export class GitService {
     this.#refetched.clear();
     this.hunks.set(new Map());
     this.baseRevision.update((n) => n + 1);
+    this.status.set(null);
   }
 
   #drop(id: BufferId): void {
@@ -198,7 +224,52 @@ export class GitService {
     const now = Date.now();
     if (now - last < ACTIVATION_REFETCH_MS) return;
     this.#refetched.set(path, now);
+    void this.refreshStatus();
     await this.#refresh(id);
+  }
+
+  /**
+   * Re-ask git for the working state. Coalesced: one refresh in flight at a
+   * time, and any number of requests arriving meanwhile queue exactly one
+   * more — the second answer is already computed from the state the burst
+   * produced, so a third would learn nothing.
+   */
+  async refreshStatus(): Promise<void> {
+    if (this.#statusInFlight) {
+      this.#statusQueued = true;
+      return;
+    }
+    this.#statusInFlight = true;
+    try {
+      const root = this.#workspace.rootPath.get();
+      if (!root) {
+        this.status.set(null);
+        return;
+      }
+      const raw = await this.#platform.gitStatus(root);
+      this.status.set(parseGitStatus(raw));
+    } catch {
+      // Not a repository (or git absent). For a *read*, absence is the
+      // honest degraded state — refusals only matter for writes.
+      this.status.set(null);
+    } finally {
+      this.#statusInFlight = false;
+      if (this.#statusQueued) {
+        this.#statusQueued = false;
+        void this.refreshStatus();
+      }
+    }
+  }
+
+  /** Local branches, parsed. Empty when git has no answer. */
+  async listBranches(): Promise<string[]> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return [];
+    try {
+      return parseGitBranches(await this.#platform.gitBranches(root));
+    } catch {
+      return [];
+    }
   }
 
   #pathOf(id: BufferId): string | null {
