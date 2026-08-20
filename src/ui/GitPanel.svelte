@@ -18,17 +18,38 @@
    */
 
   const app = useApp();
-  const { git, ui, workspace } = app;
+  const { git, ui, workspace, notifications } = app;
   const status = git.status;
   const focusRequest = ui.focusGitRequest;
 
-  let panelEl = $state<HTMLElement | null>(null);
+  let messageEl = $state<HTMLTextAreaElement | null>(null);
 
-  // `git.focus` (and the rail) land here; give the keyboard somewhere real.
+  // `git.focus` (and the rail) land here; the one interactive text control
+  // is where focus is useful.
   $effect(() => {
     void $focusRequest;
-    untrack(() => panelEl)?.focus();
+    untrack(() => messageEl)?.focus();
   });
+
+  let message = $state('');
+  const canCommit = $derived(($status?.staged.length ?? 0) > 0 && message.trim().length > 0);
+  let committing = $state(false);
+
+  async function commit(): Promise<void> {
+    if (!canCommit || committing) return;
+    committing = true;
+    try {
+      const result = await git.commit(message);
+      if (result !== null) {
+        message = '';
+        // The success names the short hash and subject — `result` is
+        // exactly `git log -1 --format=%h %s`.
+        notifications.success(`Committed ${result}`);
+      }
+    } finally {
+      committing = false;
+    }
+  }
 
   const branchLabel = $derived.by(() => {
     const s = $status;
@@ -91,7 +112,7 @@
   </div>
 {/snippet}
 
-<div class="panel" bind:this={panelEl} tabindex="-1">
+<div class="panel" tabindex="-1">
   <PanelHeader title="Git" {summary} />
 
   {#if !$status && !git.started}
@@ -132,7 +153,24 @@
       </section>
     </div>
 
-    <!-- The commit box lands in the commit task. -->
+    <div class="commit">
+      <textarea
+        class="nox-input"
+        rows="3"
+        placeholder="Commit message (first line becomes the subject)"
+        bind:value={message}
+        bind:this={messageEl}
+        onkeydown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault();
+            void commit();
+          }
+        }}
+      ></textarea>
+      <button class="nox-button primary small" disabled={!canCommit || committing} onclick={() => void commit()}>
+        Commit
+      </button>
+    </div>
   {/if}
 </div>
 
@@ -246,5 +284,21 @@
 
   .letter-R {
     color: var(--nox-info);
+  }
+
+  .commit {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nox-sp-2);
+    padding: var(--nox-sp-3) var(--nox-sp-5) var(--nox-sp-4);
+    border-top: 1px solid var(--nox-border);
+    flex: none;
+  }
+
+  .commit textarea {
+    height: auto;
+    resize: vertical;
+    font-family: var(--nox-font-ui);
+    line-height: 1.4;
   }
 </style>

@@ -145,3 +145,79 @@ describe('stage and unstage', () => {
     expect(container.querySelector('.section.staged')).toBeNull();
   });
 });
+
+describe('commit', () => {
+  it('is disabled with nothing staged, and with a blank message', async () => {
+    const { container, platform, app } = await setup();
+    const button = () => container.querySelector('.commit button') as HTMLButtonElement;
+    const box = () => container.querySelector('.commit textarea') as HTMLTextAreaElement;
+
+    // Nothing staged: disabled even with a message.
+    box().value = 'a message';
+    box().dispatchEvent(new Event('input'));
+    flush();
+    expect(button().disabled).toBe(true);
+
+    await platform.gitStage('/w', ['/w/edited.ts']);
+    await app.git.refreshStatus();
+    await settle();
+
+    // Staged but blank message: still disabled.
+    box().value = '   ';
+    box().dispatchEvent(new Event('input'));
+    flush();
+    expect(button().disabled).toBe(true);
+
+    box().value = 'a message';
+    box().dispatchEvent(new Event('input'));
+    flush();
+    expect(button().disabled).toBe(false);
+  });
+
+  it('clears the staged list and the box, bumps the log, and names the commit', async () => {
+    const { container, platform, app } = await setup();
+    await platform.gitStage('/w', ['/w/edited.ts']);
+    await app.git.refreshStatus();
+    await settle();
+
+    const box = container.querySelector('.commit textarea') as HTMLTextAreaElement;
+    box.value = 'Widen the edit\n\nWith a body.';
+    box.dispatchEvent(new Event('input'));
+    flush();
+    (container.querySelector('.commit button') as HTMLElement).click();
+    await settle();
+    await settle();
+
+    expect(container.querySelector('.section.staged')).toBeNull();
+    expect((container.querySelector('.commit textarea') as HTMLTextAreaElement).value).toBe('');
+    const state = platform.gitRepoState('/w')!;
+    expect(state.commits.at(-1)!.subject).toBe('Widen the edit');
+    const toast = app.notifications.items.get().find((n) => n.kind === 'success')!;
+    expect(toast.message).toMatch(/[0-9a-f]{7} Widen the edit/);
+  });
+
+  it('surfaces a refusal verbatim and keeps the staged list', async () => {
+    const { container, platform, app } = await setup();
+    await platform.gitStage('/w', ['/w/edited.ts']);
+    await app.git.refreshStatus();
+    await settle();
+    platform.gitCommit = async () => {
+      throw new Error('Aborting commit due to empty commit message.');
+    };
+
+    const box = container.querySelector('.commit textarea') as HTMLTextAreaElement;
+    box.value = 'doomed';
+    box.dispatchEvent(new Event('input'));
+    flush();
+    (container.querySelector('.commit button') as HTMLElement).click();
+    await settle();
+    await settle();
+
+    expect(
+      app.notifications.items.get().some((n) => n.kind === 'error' && n.message.includes('empty commit message')),
+    ).toBe(true);
+    // The box keeps the message — a failed commit must not eat the words.
+    expect((container.querySelector('.commit textarea') as HTMLTextAreaElement).value).toBe('doomed');
+    expect(container.querySelector('.section.staged')!.textContent).toContain('edited.ts');
+  });
+});

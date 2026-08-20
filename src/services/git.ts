@@ -301,6 +301,21 @@ export class GitService {
     await this.#write(() => this.#platform.gitUnstage(root, paths));
   }
 
+  /**
+   * `git commit --file=-` — commits the index, never `-a`, never pathspecs
+   * (envelope §5): the staged list on screen is the commit preview. Returns
+   * `"<short-hash> <subject>"`, or null after a refusal (already surfaced).
+   */
+  async commit(message: string): Promise<string | null> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return null;
+    let result: string | null = null;
+    const ok = await this.#write(async () => {
+      result = await this.#platform.gitCommit(root, message);
+    });
+    return ok ? result : null;
+  }
+
   #pathOf(id: BufferId): string | null {
     return this.#workspace.buffers.get().find((b) => b.id === id)?.path ?? null;
   }
