@@ -15,6 +15,8 @@
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "dialog:allow-open",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

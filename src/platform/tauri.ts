@@ -3,6 +3,8 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { relaunch as processRelaunch } from '@tauri-apps/plugin-process';
+import { check as checkUpdate, type Update } from '@tauri-apps/plugin-updater';
 import { sortEntries } from './memory';
 import {
   PlatformError,
@@ -26,6 +28,7 @@ import {
   type TerminalSpec,
   type Unwatch,
   type UpdateInfo,
+  type UpdateProgress,
   type WatchEvent,
 } from './types';
 
@@ -57,6 +60,8 @@ export class TauriPlatform implements Platform {
   static #nextStream = 0;
   /** Distinguishes one load of the window from the next. */
   static #instance = Math.random().toString(36).slice(2, 8);
+  /** The update the last successful check found, held for `installUpdate`. */
+  #pendingUpdate: Update | null = null;
 
   readonly id = 'tauri' as const;
   readonly capabilities: PlatformCapabilities = {
@@ -230,18 +235,54 @@ export class TauriPlatform implements Platform {
   }
 
   async checkForUpdate(): Promise<UpdateInfo | null> {
-    // Wired to the updater plugin in the desktop-wiring task. Absence is
-    // the honest interim answer, and also the permanent one when no
-    // latest.json is published (spec envelope §4).
-    return null;
+    try {
+      const update = await checkUpdate();
+      if (!update) {
+        this.#pendingUpdate = null;
+        return null;
+      }
+      this.#pendingUpdate = update;
+      return {
+        version: update.version,
+        currentVersion: update.currentVersion,
+        notes: update.body ?? null,
+      };
+    } catch {
+      // No latest.json published, feed unreachable, this platform absent
+      // from it (Linux ships no AppImage, so the plugin's TargetNotFound
+      // lands here) — all the same answer. Absence is a state, not a
+      // failure. See the spec's envelope §4.
+      this.#pendingUpdate = null;
+      return null;
+    }
   }
 
-  async installUpdate(): Promise<void> {
-    throw new PlatformError('no update in hand — check first', 'not-found');
+  async installUpdate(onProgress?: (event: UpdateProgress) => void): Promise<void> {
+    const update = this.#pendingUpdate;
+    if (!update) {
+      throw new PlatformError('no update in hand — check first', 'not-found');
+    }
+    try {
+      await update.downloadAndInstall((event) => {
+        if (!onProgress) return;
+        if (event.event === 'Started') {
+          onProgress({ phase: 'started', totalBytes: event.data.contentLength ?? null });
+        } else if (event.event === 'Progress') {
+          onProgress({ phase: 'progress', chunkBytes: event.data.chunkLength });
+        } else {
+          onProgress({ phase: 'finished' });
+        }
+      });
+      this.#pendingUpdate = null;
+    } catch (error) {
+      // The plugin throws strings as readily as Errors; normalize so the
+      // service's failure toast always carries words.
+      throw new PlatformError(error instanceof Error ? error.message : String(error), 'io');
+    }
   }
 
   async relaunch(): Promise<void> {
-    /* Nothing to relaunch into until installUpdate can install. */
+    await processRelaunch();
   }
 
   /**

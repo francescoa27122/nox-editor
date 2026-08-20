@@ -16,6 +16,12 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# Self-update: checks the signed latest.json on the newest published GitHub
+# release and swaps the binary. All network traffic and all signature
+# verification live in this plugin — the renderer only ever sees the result.
+tauri-plugin-updater = "2"
+# One call: relaunch after an install. The capability grants restart only.
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Raw notify rather than a debouncer crate: coalescing lives in the renderer

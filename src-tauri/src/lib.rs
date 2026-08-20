@@ -42,6 +42,8 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(agent::AgentState::default())
         .manage(watcher::WatcherState::default())
         .manage(search::SearchState::default())
