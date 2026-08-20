@@ -292,6 +292,43 @@ export interface Platform {
    */
   gitFileBase(path: string): Promise<string | null>;
 
+  /**
+   * Raw `git status --porcelain=v2 --branch -z` output for the repository at
+   * `root`. Parsing lives in `core/git-status.ts`, where it is testable
+   * without a repo. Rejects with git's own words when git refuses — the one
+   * git surface where failure is an error, not a null: a missing gutter is a
+   * fine degraded state, but a write surface built on a silent non-answer
+   * would act on stale truth. Check `capabilities.gitState` first.
+   */
+  gitStatus(root: string): Promise<string>;
+
+  /** Raw `git branch --list --format=%(refname:short)` output. */
+  gitBranches(root: string): Promise<string>;
+
+  /** `git add --literal-pathspecs -- <paths>`. Absolute paths in; the platform relativizes. */
+  gitStage(root: string, paths: string[]): Promise<void>;
+
+  /**
+   * `git restore --staged --literal-pathspecs -- <paths>`. Touches the index
+   * only — the working tree is untouchable by construction of the command.
+   */
+  gitUnstage(root: string, paths: string[]): Promise<void>;
+
+  /**
+   * `git commit --file=-` with the message on stdin (messages contain
+   * quotes, dashes, anything — never argv). Resolves to `git log -1
+   * --format=%h %s`. Rejects with git's own words: nothing staged, no
+   * identity, a failing hook — all verbatim, never overridden.
+   */
+  gitCommit(root: string, message: string): Promise<string>;
+
+  /**
+   * `git switch <name>` / `git switch -c <name>`, the name validated first
+   * with `git check-ref-format --branch`. Rejects with git's own words —
+   * a switch that would overwrite dirty files is git's refusal to make.
+   */
+  gitSwitch(root: string, name: string, create: boolean): Promise<void>;
+
   writeTextFile(path: string, contents: string): Promise<void>;
   /** Directory children, already sorted: directories first, then by name. */
   readDir(path: string): Promise<DirEntry[]>;

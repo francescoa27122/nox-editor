@@ -98,6 +98,30 @@ export class TauriPlatform implements Platform {
     return call<string | null>('nox_git_file_base', { path });
   }
 
+  async gitStatus(root: string): Promise<string> {
+    return call<string>('nox_git_status', { root });
+  }
+
+  async gitBranches(root: string): Promise<string> {
+    return call<string>('nox_git_branches', { root });
+  }
+
+  async gitStage(root: string, paths: string[]): Promise<void> {
+    await call<void>('nox_git_stage', { root, paths });
+  }
+
+  async gitUnstage(root: string, paths: string[]): Promise<void> {
+    await call<void>('nox_git_unstage', { root, paths });
+  }
+
+  async gitCommit(root: string, message: string): Promise<string> {
+    return call<string>('nox_git_commit', { root, message });
+  }
+
+  async gitSwitch(root: string, name: string, create: boolean): Promise<void> {
+    await call<void>('nox_git_switch', { root, name, create });
+  }
+
   async writeTextFile(path: string, contents: string): Promise<void> {
     await call<void>('nox_write_text_file', { path, contents });
   }
