@@ -87,6 +87,11 @@ fall out of that, and both are load-bearing:
 
 When Tauri's API changes, exactly one file changes: `platform/tauri.ts`.
 
+The updater follows the same rule: its network request, signature
+verification and file replacement all happen in the Rust plugin, behind
+`checkForUpdate` and `installUpdate` on `Platform`. The renderer sees
+`UpdateInfo | null` and nothing else — absence is never an error.
+
 **2. Every user action is a `Command`.**
 Menus, the palette, keybindings and buttons all dispatch the same `commandId`.
 The payoff is that the command palette and keybinding customisation are
@@ -143,7 +148,9 @@ src/
 │  ├─ notes.ts           The user's own notes. No workspace, by construction.
 │  ├─ ui.ts              Overlay/focus state; owns "what does Escape close"
 │  ├─ notifications.ts   Toasts
-│  └─ search.ts          Project search: query, options, streamed results
+│  ├─ search.ts          Project search: query, options, streamed results
+│  └─ updates.ts         Checks for and installs newer releases; one click
+│                        consents to download, install and restart
 │
 ├─ editor/               Everything CodeMirror-shaped
 │  ├─ theme.ts           Nox theme + syntax highlight style

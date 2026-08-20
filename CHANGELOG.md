@@ -8,6 +8,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Nox can update itself.** Ten seconds after launch (behind a new
+  Workbench setting), or on *Check for Updates…*, Nox asks the newest
+  published release whether a newer build exists and offers it in a
+  toast. Nothing downloads or installs without the click — which also
+  restarts into the new version with your tabs and unsaved work
+  restored. Updates skip the macOS quarantine ritual; first installs
+  still need it until code signing arrives. Settings now shows the
+  running version in its footer. Requires the operator's one-time key
+  ceremony before releases carry update artifacts.
 - **The conveniences your hands expect.** Right-click a tab: Close Others,
   Close to the Right, Close Saved, Copy Path, Reveal in Explorer, Split —
   and closing never discards silently; dirty tabs get their save prompt.

@@ -33,7 +33,12 @@ describe('JobRunner', () => {
     });
 
     expect(runner.active.get()).toEqual([
-      { id: job.id, title: 'Walk', progress: { done: 3, total: 10, message: 'src/main.ts' } },
+      {
+        id: job.id,
+        title: 'Walk',
+        progress: { done: 3, total: 10, message: 'src/main.ts' },
+        cancellable: true,
+      },
     ]);
 
     gate.resolve();
@@ -187,6 +192,38 @@ describe('JobRunner', () => {
     job.cancel();
 
     await expect(job.result).resolves.toEqual({ status: 'cancelled' });
+  });
+
+  it('reports cancellable: true by default', async () => {
+    const runner = new JobRunner();
+    const gate = deferred<void>();
+    const job = runner.run({ title: 'Walk' }, async () => {
+      await gate.promise;
+    });
+    expect(runner.active.get()).toEqual([
+      { id: job.id, title: 'Walk', progress: { done: 0 }, cancellable: true },
+    ]);
+    gate.resolve();
+  });
+
+  it('refuses to cancel a job started with cancellable: false', async () => {
+    const runner = new JobRunner();
+    const gate = deferred<void>();
+
+    const job = runner.run({ title: 'Updating', cancellable: false }, async () => {
+      await gate.promise;
+      return 'installed';
+    });
+
+    expect(runner.active.get()[0]?.cancellable).toBe(false);
+    job.cancel();
+    // Not merely "not yet acted on" — still running, unaborted, and the
+    // click did nothing, exactly as if it had never happened.
+    expect(job.status.get()).toBe('running');
+    expect(runner.active.get()).toHaveLength(1);
+
+    gate.resolve();
+    await expect(job.result).resolves.toEqual({ status: 'done', value: 'installed' });
   });
 
   it('cancels everything in flight at once', async () => {

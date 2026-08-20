@@ -110,6 +110,12 @@ export const SETTINGS_SCHEMA = {
     description: 'Reopen the last workspace and tabs on launch.',
     category: 'Workbench',
   }),
+  'workbench.checkForUpdates': bool(true, {
+    label: 'Check for Updates on Launch',
+    description:
+      'Look for a newer Nox shortly after launch. Finding one only notifies — nothing downloads or installs without your say-so.',
+    category: 'Workbench',
+  }),
 
   // --- Terminal ----------------------------------------------------------
   'terminal.shell': str('', {

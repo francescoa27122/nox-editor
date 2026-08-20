@@ -188,6 +188,7 @@
     <button class="link" onclick={() => ui.openOverlay('keybindings')}>
       Keyboard shortcuts
     </button>
+    <span class="version">Nox {__APP_VERSION__}</span>
   </footer>
 </div>
 
@@ -453,5 +454,12 @@
 
   .link:hover {
     color: var(--nox-accent);
+  }
+
+  .version {
+    margin-left: auto;
+    font-size: var(--nox-fs-xs);
+    color: var(--nox-text-faint);
+    font-variant-numeric: tabular-nums;
   }
 </style>

@@ -36,6 +36,8 @@ export class WebPlatform extends MemoryPlatform {
     // No git binary in a browser tab. `MemoryPlatform.gitFileBase` still
     // answers from whatever a test seeded, which is a lookup, not a lie.
     gitState: false,
+    // A browser tab cannot replace itself; the inherited model answers absence.
+    selfUpdate: false,
     customWindowControls: false,
   };
 

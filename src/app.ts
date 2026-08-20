@@ -79,6 +79,7 @@ import { SearchService } from '@services/search';
 import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
 import { UIService } from '@services/ui';
+import { UpdateService } from '@services/updates';
 import { FileWatcherService } from '@services/watcher';
 import { GitService } from '@services/git';
 import { WorkspaceService, type BufferId } from '@services/workspace';
@@ -145,6 +146,8 @@ export class NoxApp {
   readonly git: GitService;
   /** The user's own notes — not workspace files. See `notes.ts`. */
   readonly notes: NotesService;
+  /** Checks for, and installs, newer releases. See `updates.ts`. */
+  readonly updates: UpdateService;
 
   /** Set by EditorPane once a view exists. Null when no tab is open. */
   readonly view = new Signal<EditorView | null>(null);
@@ -230,6 +233,23 @@ export class NoxApp {
     // be null and the subscriptions pure overhead. Tests start it directly
     // over a MemoryPlatform with seeded bases — the language-server pattern.
     if (platform.capabilities.gitState) this.git.start();
+
+    this.updates = new UpdateService(
+      platform,
+      this.config,
+      this.notifications,
+      this.jobs,
+      // What quit flushes, in quit's order (see dispose()): the restart an
+      // install ends in must not cost a keystroke.
+      async () => {
+        await this.notes.flush();
+        await this.config.flush();
+        await this.session.save();
+      },
+    );
+    // Behind the capability, like git: a platform that cannot replace
+    // itself would make every check a no-op. Tests start it directly.
+    if (platform.capabilities.selfUpdate) this.updates.start();
 
     this.#wireServices();
     this.#registerCommands();
@@ -2325,10 +2345,12 @@ export class NoxApp {
         title: 'Cancel Background Task',
         category: 'View',
         keywords: ['stop', 'abort', 'search', 'replace', 'job'],
-        enabled: () => this.jobs.active.get().length > 0,
+        // A job with room for exactly one offered here — same as the
+        // status bar — must be one this can actually stop.
+        enabled: () => (this.jobs.foremost()?.cancellable ?? false),
         run: () => {
           const job = this.jobs.foremost();
-          if (!job) return;
+          if (!job || !job.cancellable) return;
           this.jobs.cancel(job.id);
           this.notifications.info(`Cancelled ${job.title}`);
         },
@@ -2935,6 +2957,20 @@ export class NoxApp {
           }
         },
       },
+
+      // --- Application ------------------------------------------------------
+      {
+        id: 'app.checkForUpdates',
+        title: 'Check for Updates…',
+        category: 'Application',
+        keywords: ['update', 'upgrade', 'version', 'release', 'new'],
+        // On the service, not the platform flag — the git.showDiff argument:
+        // tests start the service over a memory platform.
+        enabled: () => this.updates.started,
+        // Returned, not voided: execute() awaits run's return value, and a
+        // caller (or test) that awaits the command should see the check done.
+        run: () => this.updates.checkNow({ manual: true }),
+      },
     ];
 
     this.commands.registerAll(commands);
@@ -3407,6 +3443,7 @@ export class NoxApp {
     this.#disposeCloseListener = null;
     this.keymap.detach();
     this.watcher.stop();
+    this.updates.stop();
     // Notes first: settings and session each have an on-disk original to
     // fall back on if their flush is lost, but a note does not.
     // Before the flushes: a reload does not kill the processes the renderer

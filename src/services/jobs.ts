@@ -33,6 +33,8 @@ export interface JobSnapshot {
   id: JobId;
   title: string;
   progress: JobProgress;
+  /** Whether the UI may offer to cancel this job. See `JobOptions.cancellable`. */
+  cancellable: boolean;
 }
 
 /**
@@ -85,13 +87,30 @@ export interface JobOptions {
    * more chances to forget a check.
    */
   key?: string;
+  /**
+   * Whether cancellation is offered at all. Default `true`.
+   *
+   * Cancellation here is cooperative and best-effort (see the module doc):
+   * it settles the *result* as `cancelled`, but a body that polls nothing —
+   * or one wrapping an operation with no abort path of its own, like a
+   * platform install already underway — keeps running regardless. For a job
+   * like that, offering to cancel is worse than not offering: the click
+   * shows silence while the real thing proceeds unseen. `false` here keeps
+   * `cancel()` from doing anything to this job at all, so nothing — the
+   * status bar, a keybinding, a command — can act like it worked when it
+   * didn't.
+   */
+  cancellable?: boolean;
 }
 
 export class JobRunner {
   /** Jobs currently running, oldest first. Finished ones drop off. */
   readonly active = new Signal<JobSnapshot[]>([]);
 
-  #jobs = new Map<JobId, { job: Job<unknown>; controller: AbortController }>();
+  #jobs = new Map<
+    JobId,
+    { job: Job<unknown>; controller: AbortController; cancellable: boolean }
+  >();
   #byKey = new Map<string, JobId>();
   #nextId = 1;
 
@@ -102,6 +121,7 @@ export class JobRunner {
     }
 
     const id: JobId = `job-${this.#nextId++}`;
+    const cancellable = options.cancellable ?? true;
     const controller = new AbortController();
     const progress = new Signal<JobProgress>({ done: 0 });
     const status = new Signal<JobStatus>('running');
@@ -179,7 +199,7 @@ export class JobRunner {
       result,
     };
 
-    this.#jobs.set(id, { job: job as Job<unknown>, controller });
+    this.#jobs.set(id, { job: job as Job<unknown>, controller, cancellable });
     if (options.key) this.#byKey.set(options.key, id);
     this.#publish();
     return job;
@@ -188,6 +208,10 @@ export class JobRunner {
   cancel(id: JobId): void {
     const entry = this.#jobs.get(id);
     if (!entry || entry.controller.signal.aborted) return;
+    // Guarded here, not only in the UI: this is the one place every caller
+    // — the status bar's click, the palette command, a keybinding — funnels
+    // through, so it is the one place that has to hold.
+    if (!entry.cancellable) return;
     entry.job.status.set('cancelled');
     entry.controller.abort();
     // Dropped from the active list now rather than when the body notices:
@@ -219,10 +243,11 @@ export class JobRunner {
 
   #publish(): void {
     this.active.set(
-      [...this.#jobs.values()].map(({ job }) => ({
+      [...this.#jobs.values()].map(({ job, cancellable }) => ({
         id: job.id,
         title: job.title,
         progress: job.progress.get(),
+        cancellable,
       })),
     );
   }

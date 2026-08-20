@@ -8,6 +8,91 @@ are knowledge.**
 
 ---
 
+## 2026-08-20 (PC, updater) — The auto-updater, seven tasks in
+
+Branch `auto-updater`, worktree `nox-worktrees/auto-updater`. Built the
+free half of the 1.0 "Installs like software" row end to end: platform
+boundary, service, app wiring, Settings footer, plugin registration, a
+conditional-signing release workflow, and this write-up.
+
+Shipped:
+
+- `platform/types.ts` — `UpdateInfo`, `UpdateProgress`, `checkForUpdate`,
+  `installUpdate` on `Platform`. Web and memory targets report updates
+  unavailable; only `tauri.ts` talks to the plugin.
+- `services/updates.ts` — `UpdateService`: a signal the UI reads, a
+  10-second post-launch check gated on `workbench.checkForUpdates`, a
+  manual `checkNow`, and `installUpdate` flushing dirty buffers before it
+  restarts.
+- App wiring and the *Check for Updates…* command; a toast with an
+  Install and Restart action.
+- The Settings footer now shows the running version.
+- `src-tauri` — the updater and process plugins registered, capabilities
+  granted, `updater.conf.json` set for `createUpdaterArtifacts` (the
+  public key itself lives in `tauri.conf.json`'s `bundle.updater.pubkey`,
+  not there) and no private key committed anywhere.
+  `cargo check` run locally: clean, exit 0. (The plan's Global
+  Constraints section says no cargo was on this machine — that was
+  stale by the time Task 5 landed; what's still CI-only is the
+  three-platform build and the workflow itself, not the type-check.)
+- `.github/workflows/release.yml` — builds and uploads installers on
+  every tag; signs and attaches `latest.json` only when
+  `TAURI_SIGNING_PRIVATE_KEY` is present as a secret, so a repo without
+  the key still ships unsigned installers instead of failing the build.
+- `ROADMAP.md`, `ARCHITECTURE.md`, `CHANGELOG.md` updated for all of the
+  above.
+
+Verified:
+
+- `npm run check` — 463 files, 0 errors.
+- `npm test` — 1280 passed, 80 files, one clean run (no `folding.test.ts`
+  flake this time).
+- Not verified here: the Rust actually compiling on CI, and the release
+  workflow itself — neither has run once, on any commit, on any
+  platform. The first tag is the first time either executes.
+
+Next:
+
+- The operator's key ceremony (spec §8): `tauri signer generate`, the
+  two secrets in GitHub Actions. Human-only, out of scope for any task.
+- The first signed tag. One open risk left to watch on that run, not
+  executed anywhere yet: `tauri-action`'s cross-matrix `latest.json`
+  assembly — each matrix leg's platform entry merging into one
+  `latest.json` on the release, asserted from the action's
+  `uploadUpdaterJson` docs but never run. The first signed tag is the
+  real test of it.
+- **Closed** since this entry was first written: the empty updater
+  pubkey at plugin init. Task 5 flagged it and feared it might throw
+  before the app boots rather than degrade to "no update available" —
+  and named the fix as a guard in `tauri.ts`'s plugin registration,
+  which was wrong twice over: registration happens in `lib.rs`, not
+  `tauri.ts`, and no guard turns out to be needed. Verified against the
+  `tauri-plugin-updater` 2.10.1 source: `Builder::build()`'s setup hook
+  only clones the pubkey string into the plugin's managed config —
+  no parsing, no early exit either way. It is first decoded in
+  `verify_signature`, called from `Update::download`, i.e. the download
+  half of `downloadAndInstall`, not `check()`. So an empty pubkey lets
+  `check()` report an update same as always; `PublicKey::decode` on the
+  empty string then fails there, `?`-propagated as `Error::Minisign` —
+  never a panic — which `installUpdate()` normalizes into the same
+  `PlatformError` any other install failure produces. Fails closed,
+  never an unverified install.
+
+Blocked:
+
+- Nothing technical. The private key was never generated, printed, or
+  committed by any step here — §8 stays a human runbook. Nothing
+  pushed, no PR opened, by instruction.
+
+Confidence:
+
+- High on the TypeScript and Svelte surface: tested, type-checked, and
+  the platform boundary keeps every non-desktop target untouched.
+- Unverified on purpose on the Rust and CI surface — that's what CI is
+  for, and no task here claims otherwise.
+
+---
+
 ## 2026-08-19 (PC, UI 3) — Phase C: the conventions
 
 Branch `ui-phase-c`. Three-way split: tabs agent (context menu, overflow,

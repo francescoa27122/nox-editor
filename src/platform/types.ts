@@ -53,6 +53,8 @@ export interface PlatformCapabilities {
   languageServers: boolean;
   /** True when `gitFileBase` can ask a real git for a file's index version. */
   gitState: boolean;
+  /** True when `checkForUpdate` can find a newer build and `installUpdate` can replace this one. */
+  selfUpdate: boolean;
   /**
    * True when the window has no OS chrome and the title bar must draw its own
    * minimise / maximise / close.
@@ -257,6 +259,20 @@ export interface SaveDialogOptions {
   defaultName?: string;
 }
 
+/** A newer build the release feed offers. */
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  /** Release notes from the manifest, when it carries any. */
+  notes: string | null;
+}
+
+/** Progress of an update download, as the platform reports it. */
+export type UpdateProgress =
+  | { phase: 'started'; totalBytes: number | null }
+  | { phase: 'progress'; chunkBytes: number }
+  | { phase: 'finished' };
+
 export interface Platform {
   readonly id: 'tauri' | 'web';
   readonly capabilities: PlatformCapabilities;
@@ -451,6 +467,31 @@ export interface Platform {
    * stale the first time any of those is used.
    */
   onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void>;
+
+  /**
+   * Ask the release feed whether a newer build exists.
+   *
+   * Never rejects: null is the answer to everything that is not an
+   * installable newer version — no feed published, feed unreachable, this
+   * platform absent from it, already current. Absence of an update is a
+   * state, not a failure (the `gitFileBase` argument). Check
+   * `capabilities.selfUpdate` before expecting real answers.
+   */
+  checkForUpdate(): Promise<UpdateInfo | null>;
+
+  /**
+   * Download, verify and install the update the last successful
+   * `checkForUpdate` found. Throws `PlatformError('not-found')` with
+   * nothing in hand, and a real error when the download or its signature
+   * fails — the user asked for this one, so failure must say why.
+   *
+   * Installing may exit the process (the Windows installer closes the app
+   * to replace its files), so callers flush everything worth keeping first.
+   */
+  installUpdate(onProgress?: (event: UpdateProgress) => void): Promise<void>;
+
+  /** Restart the app the way the OS would start it. Used after an install. */
+  relaunch(): Promise<void>;
 }
 
 /** Thrown for every platform failure so services can present one error shape. */

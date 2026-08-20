@@ -15,6 +15,8 @@ import {
   type SearchRequest,
   type SearchSummary,
   type Unwatch,
+  type UpdateInfo,
+  type UpdateProgress,
   type WatchEvent,
   type WatchEventKind,
 } from './types';
@@ -44,6 +46,8 @@ export class MemoryPlatform implements Platform {
     languageServers: false,
     // No git in a browser tab; tests seed bases with `seedGitBase`.
     gitState: false,
+    // A browser tab and a test cannot replace themselves. Tests seed offers with seedUpdate.
+    selfUpdate: false,
     // A browser tab's chrome is the browser's. Nothing to hide, nothing to
     // draw in its place.
     customWindowControls: false,
@@ -91,6 +95,17 @@ export class MemoryPlatform implements Platform {
   /** Give the fake git an index version of `path`, for tests. */
   seedGitBase(path: string, contents: string): void {
     this.#gitBases.set(normalize(path), contents);
+  }
+
+  /** What `checkForUpdate` will offer. Null until a test seeds one. */
+  #update: UpdateInfo | null = null;
+  /** Version handed to `installUpdate`, for tests. Null until then. */
+  installedUpdate: string | null = null;
+  /** Whether `relaunch` was called, for tests. */
+  relaunched = false;
+
+  seedUpdate(info: UpdateInfo): void {
+    this.#update = info;
   }
 
   /** Install a file without emitting a watch event — for fixtures and seeds. */
@@ -171,6 +186,29 @@ export class MemoryPlatform implements Platform {
    */
   async gitFileBase(path: string): Promise<string | null> {
     return this.#gitBases.get(normalize(path)) ?? null;
+  }
+
+  async checkForUpdate(): Promise<UpdateInfo | null> {
+    // Absence is the default truth here, not an error — a test simply has
+    // no newer Nox unless one was seeded.
+    return this.#update;
+  }
+
+  async installUpdate(onProgress?: (event: UpdateProgress) => void): Promise<void> {
+    const update = this.#update;
+    if (!update) {
+      throw new PlatformError('no update in hand — check first', 'not-found');
+    }
+    // The real platform streams; the model replays the smallest honest
+    // sequence, so a service that mishandles any phase fails here.
+    onProgress?.({ phase: 'started', totalBytes: 3 });
+    onProgress?.({ phase: 'progress', chunkBytes: 3 });
+    onProgress?.({ phase: 'finished' });
+    this.installedUpdate = update.version;
+  }
+
+  async relaunch(): Promise<void> {
+    this.relaunched = true;
   }
 
   async writeTextFile(path: string, contents: string): Promise<void> {
