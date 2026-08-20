@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { tabLabels } from '@core/tab-labels';
   import { useApp } from './context';
+  import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -12,6 +14,7 @@
   const { workspace, commands, ui } = app;
 
   const groups = workspace.groups;
+  const rootPath = workspace.rootPath;
   const tabDrag = ui.tabDrag;
 
   const group = $derived($groups.find((candidate) => candidate.id === groupId) ?? null);
@@ -20,7 +23,13 @@
   const isActiveGroup = $derived(group?.isActive ?? false);
   const canClose = $derived($groups.length > 1);
 
+  // Two open `index.ts` need telling apart; every other tab keeps its name.
+  // Disambiguation spans every open buffer, not just this group's, so the
+  // same file wears the same label in both panes of a split.
+  const labels = $derived(tabLabels($groups.flatMap((candidate) => candidate.tabs)));
+
   let strip = $state<HTMLElement | null>(null);
+  let scroller = $state<HTMLElement | null>(null);
 
   // Keep the active tab on screen when it changes from a keyboard command.
   $effect(() => {
@@ -33,6 +42,118 @@
       });
     });
   });
+
+  // --- Overflow affordance ------------------------------------------------
+  // The strip hides its scrollbar, so when tabs overflow, edge fades say
+  // "there is more": left once scrolled, right while more remains.
+  let scrolledLeft = $state(false);
+  let scrolledRight = $state(false);
+
+  function updateOverflow() {
+    const el = scroller;
+    if (!el) return;
+    scrolledLeft = el.scrollLeft > 0;
+    scrolledRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+  }
+
+  $effect(() => {
+    const el = scroller;
+    if (!el) return;
+    updateOverflow();
+    // jsdom has no ResizeObserver; there the fades are scroll-driven only.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+
+  $effect(() => {
+    // Tabs opening or closing change scrollWidth without resizing the strip,
+    // which is exactly the case a ResizeObserver on the strip cannot see.
+    void buffers;
+    queueMicrotask(updateOverflow);
+  });
+
+  // --- Context menu ---------------------------------------------------------
+  let menu = $state<{
+    anchor: MenuAnchor;
+    bufferId: string;
+    returnTo: HTMLElement | null;
+  } | null>(null);
+
+  const menuBuffer = $derived(
+    menu ? (buffers.find((buffer) => buffer.id === menu?.bufferId) ?? null) : null,
+  );
+
+  const menuItems = $derived.by<MenuItem[]>(() => {
+    const target = menuBuffer;
+    if (!target) return [];
+    const index = buffers.findIndex((buffer) => buffer.id === target.id);
+    return [
+      { id: 'close', label: 'Close', hint: app.keymap.displayFor('file.close') ?? undefined },
+      { id: 'closeOthers', label: 'Close Others', disabled: buffers.length < 2 },
+      { id: 'closeToRight', label: 'Close to the Right', disabled: index >= buffers.length - 1 },
+      {
+        id: 'closeSaved',
+        label: 'Close Saved',
+        disabled: !buffers.some((buffer) => !buffer.isDirty),
+      },
+      { id: 'copyPath', label: 'Copy Path', separatorBefore: true, disabled: !target.path },
+      { id: 'reveal', label: 'Reveal in Explorer', disabled: !target.path || !$rootPath },
+      {
+        id: 'split',
+        label: 'Split Editor',
+        separatorBefore: true,
+        hint: app.keymap.displayFor('view.splitEditor') ?? undefined,
+      },
+    ];
+  });
+
+  function openTabMenu(event: MouseEvent, id: string) {
+    event.preventDefault();
+    event.stopPropagation();
+    workspace.focusGroup(groupId);
+    menu = {
+      anchor: { x: event.clientX, y: event.clientY },
+      bufferId: id,
+      returnTo: event.currentTarget as HTMLElement,
+    };
+  }
+
+  function openTabMenuFromKeyboard(event: KeyboardEvent, id: string) {
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    menu = { anchor: { x: rect.left + 12, y: rect.bottom }, bufferId: id, returnTo: target };
+  }
+
+  function runMenuItem(itemId: string) {
+    const target = menuBuffer;
+    menu = null;
+    if (!target) return;
+    switch (itemId) {
+      case 'close':
+        void app.closeBuffer(target.id);
+        break;
+      case 'closeOthers':
+        void commands.execute('file.closeOthers', target.id);
+        break;
+      case 'closeToRight':
+        void commands.execute('file.closeToRight', target.id);
+        break;
+      case 'closeSaved':
+        void commands.execute('file.closeSaved', target.id);
+        break;
+      case 'copyPath':
+        if (target.path) void app.copyToClipboard(target.path, 'path');
+        break;
+      case 'reveal':
+        if (target.path) void app.revealInExplorer(target.path);
+        break;
+      case 'split':
+        void commands.execute('view.splitEditor');
+        break;
+    }
+  }
 
   function externalTitle(buffer: { path: string | null; name: string; externalState: string }) {
     const location = buffer.path ?? buffer.name;
@@ -82,73 +203,84 @@
   bind:this={strip}
   onfocusin={() => workspace.focusGroup(groupId)}
 >
-  <div
-    class="strip nox-scroll"
-    role="presentation"
-    class:drop-end={$tabDrag?.overGroupId === groupId && $tabDrag.overIndex === buffers.length}
-    ondragover={(event) => onDragOver(event, buffers.length)}
-    ondrop={(event) => onDrop(event, buffers.length)}
-  >
-    {#each buffers as buffer, index (buffer.id)}
-      <div
-        class="tab"
-        class:active={buffer.id === activeId}
-        class:dirty={buffer.isDirty}
-        class:drop-before={$tabDrag?.overGroupId === groupId &&
-            $tabDrag.overIndex === index &&
-            $tabDrag.bufferId !== buffer.id}
-        class:external={buffer.externalState !== 'none'}
-        class:deleted={buffer.externalState === 'deleted'}
-        data-tab={buffer.id}
-        role="tab"
-        tabindex={buffer.id === activeId ? 0 : -1}
-        aria-selected={buffer.id === activeId}
-        title={externalTitle(buffer)}
-        draggable="true"
-        onclick={() => workspace.setActive(buffer.id)}
-        onmousedown={(event) => onPointerDown(event, buffer.id)}
-        onkeydown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            workspace.setActive(buffer.id);
-          }
-        }}
-        ondragstart={(event) => onDragStart(event, buffer.id)}
-        ondragover={(event) => onDragOver(event, index)}
-        ondrop={(event) => onDrop(event, index)}
-        ondragend={() => ui.tabDrag.set(null)}
-      >
-        {#if buffer.externalState !== 'none'}
-          <span
-            class="external-mark"
-            aria-hidden="true"
-            title={buffer.externalState === 'deleted'
-              ? 'Deleted on disk'
-              : 'Changed on disk'}
-          >
-            <Icon name={buffer.externalState === 'deleted' ? 'error' : 'warning'} size={11} />
-          </span>
-        {/if}
-
-        <span class="label">{buffer.name}</span>
-
-        <button
-          class="close"
+  <div class="strip-wrap">
+    <div
+      class="strip nox-scroll"
+      role="presentation"
+      class:drop-end={$tabDrag?.overGroupId === groupId && $tabDrag.overIndex === buffers.length}
+      bind:this={scroller}
+      onscroll={updateOverflow}
+      ondragover={(event) => onDragOver(event, buffers.length)}
+      ondrop={(event) => onDrop(event, buffers.length)}
+    >
+      {#each buffers as buffer, index (buffer.id)}
+        <div
+          class="tab"
+          class:active={buffer.id === activeId}
           class:dirty={buffer.isDirty}
-          aria-label="Close {buffer.name}"
-          title="Close"
-          onclick={(event) => {
-            event.stopPropagation();
-            void app.closeBuffer(buffer.id);
+          class:drop-before={$tabDrag?.overGroupId === groupId &&
+              $tabDrag.overIndex === index &&
+              $tabDrag.bufferId !== buffer.id}
+          class:external={buffer.externalState !== 'none'}
+          class:deleted={buffer.externalState === 'deleted'}
+          data-tab={buffer.id}
+          role="tab"
+          tabindex={buffer.id === activeId ? 0 : -1}
+          aria-selected={buffer.id === activeId}
+          title={externalTitle(buffer)}
+          draggable="true"
+          onclick={() => workspace.setActive(buffer.id)}
+          onmousedown={(event) => onPointerDown(event, buffer.id)}
+          oncontextmenu={(event) => openTabMenu(event, buffer.id)}
+          onkeydown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              workspace.setActive(buffer.id);
+            } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+              event.preventDefault();
+              openTabMenuFromKeyboard(event, buffer.id);
+            }
           }}
+          ondragstart={(event) => onDragStart(event, buffer.id)}
+          ondragover={(event) => onDragOver(event, index)}
+          ondrop={(event) => onDrop(event, index)}
+          ondragend={() => ui.tabDrag.set(null)}
         >
-          {#if buffer.isDirty}
-            <span class="dot" aria-hidden="true"></span>
+          {#if buffer.externalState !== 'none'}
+            <span
+              class="external-mark"
+              aria-hidden="true"
+              title={buffer.externalState === 'deleted'
+                ? 'Deleted on disk'
+                : 'Changed on disk'}
+            >
+              <Icon name={buffer.externalState === 'deleted' ? 'error' : 'warning'} size={11} />
+            </span>
           {/if}
-          <Icon name="close" size={11} />
-        </button>
-      </div>
-    {/each}
+
+          <span class="label">{labels.get(buffer.id) ?? buffer.name}</span>
+
+          <button
+            class="close"
+            class:dirty={buffer.isDirty}
+            aria-label="Close {buffer.name}"
+            title="Close"
+            onclick={(event) => {
+              event.stopPropagation();
+              void app.closeBuffer(buffer.id);
+            }}
+          >
+            {#if buffer.isDirty}
+              <span class="dot" aria-hidden="true"></span>
+            {/if}
+            <Icon name="close" size={11} />
+          </button>
+        </div>
+      {/each}
+    </div>
+
+    <div class="fade left" class:show={scrolledLeft} aria-hidden="true"></div>
+    <div class="fade right" class:show={scrolledRight} aria-hidden="true"></div>
   </div>
 
   <button
@@ -175,6 +307,19 @@
   {/if}
 </div>
 
+{#if menu}
+  <!-- Keyed so each invocation is a fresh menu with its own initial state. -->
+  {#key `${menu.anchor.x}:${menu.anchor.y}:${menu.bufferId}`}
+    <ContextMenu
+      items={menuItems}
+      anchor={menu.anchor}
+      onSelect={runMenuItem}
+      onDismiss={() => (menu = null)}
+      returnFocusTo={menu.returnTo}
+    />
+  {/key}
+{/if}
+
 <style>
   /* An unfocused pane's strip recedes so the active one is unmistakable. */
   .nox-tabbar.inactive .tab.active {
@@ -194,6 +339,14 @@
     border-bottom: 1px solid var(--nox-border);
   }
 
+  /* Holds the strip and its two edge fades; the fades must not scroll. */
+  .strip-wrap {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-width: 0;
+  }
+
   .strip {
     display: flex;
     align-items: stretch;
@@ -201,11 +354,55 @@
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
+    /* Firefox cannot draw a 4px scrollbar, so it gets none; the edge fades
+       still say "there is more", and the wheel still scrolls. */
     scrollbar-width: none;
   }
 
+  /* A 4px sliver of base.css's ghostly scrollbar: the track is always
+     reserved so the thumb's appearance on hover cannot reflow the tabs. */
   .strip::-webkit-scrollbar {
-    height: 0;
+    height: 4px;
+  }
+
+  .strip::-webkit-scrollbar-thumb {
+    background: transparent;
+    border: 0;
+    border-radius: var(--nox-r-full);
+    background-clip: border-box;
+  }
+
+  .strip:hover::-webkit-scrollbar-thumb {
+    background: var(--nox-border-strong);
+  }
+
+  .strip::-webkit-scrollbar-thumb:hover {
+    background: var(--nox-scrollbar-hover);
+  }
+
+  .fade {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 28px;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity var(--nox-dur-fast) var(--nox-ease);
+  }
+
+  .fade.left {
+    left: 0;
+    background: linear-gradient(90deg, var(--nox-bg-panel), transparent);
+  }
+
+  .fade.right {
+    right: 0;
+    background: linear-gradient(-90deg, var(--nox-bg-panel), transparent);
+  }
+
+  .fade.show {
+    opacity: 1;
   }
 
   .tab {

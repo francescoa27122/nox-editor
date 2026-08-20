@@ -23,6 +23,21 @@
         {#if item.detail}
           <p class="detail">{item.detail}</p>
         {/if}
+        {#if item.actions?.length}
+          <div class="actions">
+            {#each item.actions as action (action.label)}
+              <button
+                class="nox-button small"
+                onclick={() => {
+                  action.run();
+                  app.notifications.dismiss(item.id);
+                }}
+              >
+                {action.label}
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
       <button
         class="dismiss"
@@ -66,6 +81,12 @@
       opacity: 0;
       transform: translateX(12px);
     }
+  }
+
+  .actions {
+    display: flex;
+    gap: var(--nox-sp-2);
+    margin-top: var(--nox-sp-3);
   }
 
   .toast :global(.toast-icon) {

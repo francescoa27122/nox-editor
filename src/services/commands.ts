@@ -73,12 +73,23 @@ export type CommandGuard = (
   resource: string | undefined,
 ) => Promise<void>;
 
+/** How many recently-executed command ids `recentCommands` keeps. */
+const RECENT_LIMIT = 8;
+
 export class CommandRegistry {
   #commands = new Map<string, Command>();
   #guard: CommandGuard | null = null;
   /** Bumped whenever the set of commands changes, so the palette can react. */
   readonly version = new Signal(0);
   readonly lastExecuted = new Signal<string | null>(null);
+  /**
+   * Recently executed command ids, most recent first, deduplicated, capped at
+   * {@link RECENT_LIMIT}. Session-scoped on purpose — like the buffer
+   * switcher's recency, it is not persisted across restarts. A plain array
+   * rather than a signal: the palette remounts on every opening and executing
+   * a command closes it, so there is no open view to invalidate.
+   */
+  #recent: string[] = [];
 
   register(command: Command): () => void {
     if (this.#commands.has(command.id)) {
@@ -113,6 +124,11 @@ export class CommandRegistry {
   /** Commands eligible for the palette, in registration order. */
   palette(): Command[] {
     return this.all().filter((c) => !c.hidden);
+  }
+
+  /** Recently executed command ids, most recent first. See {@link #recent}. */
+  recentCommands(): readonly string[] {
+    return this.#recent;
   }
 
   isEnabled(id: string): boolean {
@@ -157,6 +173,7 @@ export class CommandRegistry {
     }
 
     this.lastExecuted.set(id);
+    this.#recent = [id, ...this.#recent.filter((r) => r !== id)].slice(0, RECENT_LIMIT);
     try {
       await command.run(arg);
     } catch (error) {
