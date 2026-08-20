@@ -173,7 +173,7 @@ export class NoxApp {
   constructor(platform: Platform) {
     this.platform = platform;
     this.config = new ConfigService(platform);
-    this.keymap = new KeymapService(this.commands);
+    this.keymap = new KeymapService(this.commands, platform);
     // Buffers are created with the current settings and no grammar; the
     // grammar is reconfigured in once it resolves. See EditorPane.
     this.workspace = new WorkspaceService(platform, () =>
@@ -268,6 +268,9 @@ export class NoxApp {
   async #boot(): Promise<void> {
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
+    // After the constructor, so `#registerKeybindings` has already recorded
+    // the defaults these rules are layered over.
+    await this.keymap.loadUserRules();
     await this.agentConfig.load();
     await this.serverRegistry.load();
     await this.notes.load();

@@ -8,6 +8,28 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **You can change the keys.** *Keyboard Shortcuts* (⌘⌥K) is no longer a
+  reference — it is an editor. Every command has a row, including the ones
+  with no key at all, which read *Unassigned* until you give them one. Hover
+  a row and press the keyboard button, then press the chord you want: the
+  panel shows it back to you, `↵` accepts, `Esc` cancels.
+  - **A key already in use is named before you take it.** The well says
+    which command holds it, and the button reads *Rebind, and unassign* —
+    accepting takes the key away from the old owner rather than quietly
+    shadowing it, so what the list shows is always what runs.
+  - **Reset is per command, and only appears where something changed.**
+    *Reset all* shows in the header once anything is customised and
+    disappears when nothing is.
+  - Customisations live in **`keybindings.json`** beside `settings.json`, as
+    rules layered over the defaults rather than a copy of them — so a Nox
+    that ships a new default key picks it up, and a corrupt file costs your
+    rebinds rather than the editor's boot. The file is hand-editable:
+    `{ "chord": "…", "command": "…" }` adds one, `"remove": true` takes a
+    default away.
+  - The **Editor** section — undo, cut, paste, multi-cursor — stays
+    read-only and now says why: those keys are CodeMirror's, and binding
+    them in two places would mean two owners racing for the same keystroke.
+
 - **Stage, commit, branch.** A Git panel in the sidebar — a focused view, not
   a full client. Files you have touched are listed staged and unstaged, each
   with a stage/unstage button (+/−); write a commit message and **Commit**

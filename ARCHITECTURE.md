@@ -126,7 +126,8 @@ src/
 │
 ├─ services/             Application logic. Framework-free.
 │  ├─ commands.ts        Command registry
-│  ├─ keymap.ts          Chord parsing, resolution, display formatting
+│  ├─ keymap.ts          Chord parsing, resolution, display formatting;
+│  │                     the default table plus the user rules over it
 │  ├─ config/schema.ts   THE settings schema — types derived from it
 │  ├─ config/index.ts    ConfigService: load, coerce, persist
 │  ├─ workspace.ts       Buffers, tabs, dirty tracking, file operations,
@@ -245,6 +246,24 @@ other owns, so there is never a race over `preventDefault`.
 `Escape` is the interesting case: it is bound at app level with a guard
 (`when: () => ui.hasDismissible()`), so it closes an overlay when one is open
 and otherwise falls through to CodeMirror to collapse multi-cursors.
+
+The application layer has **two tiers**: the defaults `app.ts`'s
+`#registerKeybindings` builds with `bind()`, and a list of `KeybindingRule`s
+read from `keybindings.json`. A rule is *applied over* the defaults — the
+default table is never edited — which is what makes resetting a customisation a
+deletion rather than a remembered original. `#rebuild()` replays the defaults
+minus every `(chord, command)` pair a `remove` rule names, then applies the
+additions; additions go last, and `#add` unshifts, so a user binding beats a
+default on the same chord with no extra precedence machinery. `when` cannot be
+serialised and `arg` usually is not, so both are inherited from the command's
+own default — rebinding Escape keeps its guard.
+
+Recording a new chord is a **mode of the service** (`beginCapture` /
+`endCapture`), not a listener in the panel: the service already resolves on the
+window's capture phase, so a claimed chord would be handled before any
+descendant element could see it. While capturing, every key is swallowed and
+handed to the recorder, and nothing runs. Design:
+`docs/superpowers/specs/2026-08-20-keybinding-editor-design.md`.
 
 ### Nox draws its own find UI
 
