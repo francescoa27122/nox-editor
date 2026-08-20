@@ -214,6 +214,11 @@ export const SETTINGS_SCHEMA = {
     description: 'Show fold arrows in the gutter. Needs a grammar for the language.',
     category: 'Text',
   }),
+  'editor.gitGutter': bool(true, {
+    label: 'Git Gutter',
+    description: 'Mark lines that differ from what git has for the file.',
+    category: 'Text',
+  }),
   'editor.stickyScroll': bool(true, {
     label: 'Sticky Scroll',
     description: 'Keep the enclosing function or class pinned above the editor.',

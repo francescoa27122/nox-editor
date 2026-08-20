@@ -26,6 +26,7 @@ import {
 import type { Settings } from '@services/config/schema';
 import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
+import { gitGutter, gitGutterField } from './git-gutter';
 import { lspDiagnosticsExtension } from './lsp';
 
 /**
@@ -67,6 +68,7 @@ const compartments = {
   autoIndent: new Compartment(),
   folding: new Compartment(),
   provenance: new Compartment(),
+  gitGutter: new Compartment(),
   sticky: new Compartment(),
 } as const;
 
@@ -92,6 +94,7 @@ const SETTING_TO_COMPARTMENTS: Partial<Record<keyof Settings, CompartmentName[]>
   'editor.autoIndent': ['autoIndent'],
   'editor.codeFolding': ['folding'],
   'workbench.showChangeMarks': ['provenance'],
+  'editor.gitGutter': ['gitGutter'],
   'editor.stickyScroll': ['sticky'],
 };
 
@@ -165,6 +168,8 @@ function compartmentContent(name: CompartmentName, s: Settings): Extension {
       return foldingExtension(s['editor.codeFolding']);
     case 'provenance':
       return s['workbench.showChangeMarks'] ? [provenanceGutter(), provenanceTooltip()] : [];
+    case 'gitGutter':
+      return s['editor.gitGutter'] ? gitGutter() : [];
     case 'sticky':
       return stickyScrollExtension(s['editor.stickyScroll']);
   }
@@ -221,6 +226,8 @@ function staticExtensions(): Extension[] {
     // removing a StateField destroys the state it holds — so gating the field
     // on the setting would throw every mark away the moment it was toggled off.
     provenanceField,
+    // Same split, same reason: the hunks survive a settings toggle.
+    gitGutterField,
   ];
 }
 

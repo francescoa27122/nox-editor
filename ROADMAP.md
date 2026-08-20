@@ -111,7 +111,7 @@ The MVP: a real editor you can work in.
 
 | | Why |
 |---|---|
-| **Git gutter** | Added / modified / removed marks per line. |
+| **Git gutter** ✅ | Added / modified / removed per line, against the **index** — the gutter's question is "what have I changed that git doesn't hold yet". Marks map through keystrokes between 300 ms recomputes; the base refetches on save, on external change, on activation and on an explicit palette refresh, because the watcher deliberately ignores `.git` and a commit emits no event. Degrades to absence: no repo, untracked, binary, no git — no marks, never an error. The first one-shot process capture in the Rust layer (`git.rs`); real `.git` watching arrives with stage/commit, which needs it anyway. |
 | **Diff view** | Side-by-side and inline. The line diff and the hunk-review panel already exist (M6); this is Git wiring plus a second layout. |
 | **Stage, commit, branch** | A focused panel — not a full Git client. |
 | **Blame** | On demand, not always on. |

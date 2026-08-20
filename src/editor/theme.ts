@@ -159,6 +159,30 @@ export function noxTheme(options: ThemeOptions): Extension {
         background: 'var(--nox-violet-dim)',
       },
 
+      // --- Git gutter -------------------------------------------------------
+      '.cm-gitGutter': {
+        width: '3px',
+        padding: '0',
+      },
+      '.cm-gitGutter .nox-git-marker': {
+        display: 'block',
+        width: '2px',
+        height: '100%',
+      },
+      '.cm-gitGutter .nox-git-marker-added': {
+        background: 'var(--nox-success)',
+      },
+      '.cm-gitGutter .nox-git-marker-modified': {
+        background: 'var(--nox-warning)',
+      },
+      // A removal is a point, not a range: a short thick mark at the top of
+      // the line below where the lines used to be.
+      '.cm-gitGutter .nox-git-marker-removed': {
+        width: '3px',
+        height: '6px',
+        background: 'var(--nox-danger)',
+      },
+
       // --- Active line ----------------------------------------------------
       '.cm-activeLine': {
         backgroundColor: 'var(--nox-line-active)',
