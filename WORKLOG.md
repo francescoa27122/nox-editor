@@ -62,9 +62,12 @@ Verified:
   CI's three-platform `cargo test` is the compile and the real-git proof;
   the desktop pass sees the pixels.
 
+Done after this entry was first written: PR #45 CI green on the first
+compile — all three platforms, real-git tests included — and merged.
+
 Next:
 
-- Push, watch CI — expect possible iteration on `git.rs` (first compile).
+- (was: push and watch CI — no iteration was needed).
   Then the **diff view** (v0.5 row 2): the hunk-review panel and line diff
   already exist; it is git wiring plus a second layout.
 - The v0.4.3 desktop pass on the MacBook still stands, now with the gutter
