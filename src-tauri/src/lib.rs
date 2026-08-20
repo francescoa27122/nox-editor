@@ -46,6 +46,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(agent::AgentState::default())
         .manage(watcher::WatcherState::default())
+        .manage(watcher::GitMetaWatcherState::default())
         .manage(search::SearchState::default())
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
@@ -67,10 +68,18 @@ pub fn run() {
             fs::nox_read_config,
             fs::nox_write_config,
             git::nox_git_file_base,
+            git::nox_git_status,
+            git::nox_git_branches,
+            git::nox_git_stage,
+            git::nox_git_unstage,
+            git::nox_git_commit,
+            git::nox_git_switch,
             http::nox_http_stream,
             http::nox_http_cancel,
             watcher::nox_watch,
             watcher::nox_unwatch,
+            watcher::nox_git_meta_watch,
+            watcher::nox_git_meta_unwatch,
             search::nox_search_start,
             search::nox_search_cancel,
             agent::nox_agent_spawn,

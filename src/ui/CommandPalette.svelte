@@ -48,20 +48,27 @@
     if (kind === 'buffers') return '~';
     if (kind === 'go-to-line') return ':';
     if (kind === 'go-to-symbol') return '@';
+    if (kind === 'git-branch') return '';
     return '';
   }
 
   /** The active mode, which the prefix can change without reopening. */
-  const effectiveMode = $derived.by<'commands' | 'files' | 'buffers' | 'line' | 'symbols'>(() => {
-    if (text.startsWith('>')) return 'commands';
-    if (text.startsWith('~')) return 'buffers';
-    if (text.startsWith(':')) return 'line';
-    if (text.startsWith('@')) return 'symbols';
-    return 'files';
-  });
+  const effectiveMode = $derived.by<'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches'>(
+    () => {
+      // The branch picker is a picker, not the multiplexed palette: no prefix
+      // may switch it into another mode, because "?" or ">" are legal in what
+      // the user might type while filtering.
+      if (mode === 'git-branch') return 'branches';
+      if (text.startsWith('>')) return 'commands';
+      if (text.startsWith('~')) return 'buffers';
+      if (text.startsWith(':')) return 'line';
+      if (text.startsWith('@')) return 'symbols';
+      return 'files';
+    },
+  );
 
   const term = $derived(
-    effectiveMode === 'files' ? text.trim() : text.slice(1).trim(),
+    effectiveMode === 'files' || effectiveMode === 'branches' ? text.trim() : text.slice(1).trim(),
   );
 
   const placeholder = $derived.by(() => {
@@ -74,6 +81,8 @@
         return 'Go to line:column…';
       case 'symbols':
         return 'Go to a symbol in this file…';
+      case 'branches':
+        return 'Switch to a branch, or create one…';
       default:
         return 'Search files by name…';
     }
@@ -89,6 +98,8 @@
         return 'arrow-down';
       case 'symbols':
         return 'dot';
+      case 'branches':
+        return 'branch';
       default:
         return 'search';
     }
@@ -100,6 +111,16 @@
    * mount is exactly the lifetime the file being looked at has.
    */
   const symbolsFor = createSymbolCache();
+
+  // Fetched once per opening: the palette remounts per opening (Overlays
+  // keys on the mode), which is exactly the freshness a picker needs.
+  let branches = $state<string[] | null>(null);
+  $effect(() => {
+    if (mode !== 'git-branch') return;
+    void app.git.listBranches().then((list) => {
+      branches = list;
+    });
+  });
 
   interface Row {
     key: string;
@@ -136,6 +157,7 @@
     if (effectiveMode === 'buffers') return bufferRows(term);
     if (effectiveMode === 'line') return lineRows(term);
     if (effectiveMode === 'symbols') return symbolRows(term);
+    if (effectiveMode === 'branches') return branchRows(term);
     return fileRows(term);
   });
   const rows = $derived(result.rows);
@@ -316,6 +338,61 @@
     scored.sort((a, b) => b.score - a.score || a.order - b.order);
     // No display cap here: every open buffer is shown, so total === rows.
     return { rows: scored.map((s) => s.row), total: scored.length };
+  }
+
+  /**
+   * Local branches, "Create branch…" pinned first (the spec's §1 order).
+   * The current branch is shown but inert — switching to where you stand
+   * is a no-op git would also shrug at.
+   */
+  function branchRows(query: string): RowsResult {
+    const current = app.git.status.get()?.branch ?? null;
+    const rows: Row[] = [
+      {
+        key: 'create-branch',
+        title: 'Create branch…',
+        positions: [],
+        icon: 'plus',
+        accept: () => {
+          ui.closeOverlay();
+          void ui
+            .askForText({
+              title: 'Create Branch',
+              initialValue: '',
+              placeholder: 'branch name',
+              confirmLabel: 'Create',
+            })
+            .then((name) => {
+              // Validation is git's: check-ref-format runs before the write,
+              // and its refusal arrives verbatim (envelope §4).
+              if (name) void app.git.switch(name.trim(), true);
+            });
+        },
+      },
+    ];
+
+    const scored: { row: Row; score: number }[] = [];
+    for (const branch of branches ?? []) {
+      const match = query.length === 0 ? { score: 0, positions: [] as number[] } : fuzzyMatch(query, branch);
+      if (!match) continue;
+      const isCurrent = branch === current;
+      scored.push({
+        score: match.score,
+        row: {
+          key: `branch:${branch}`,
+          title: branch,
+          positions: match.positions,
+          icon: 'branch',
+          ...(isCurrent ? { badge: 'current', disabled: true } : {}),
+          accept: () => {
+            ui.closeOverlay();
+            if (!isCurrent) void app.git.switch(branch, false);
+          },
+        },
+      });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return { rows: [...rows, ...scored.map((s) => s.row)], total: 1 + scored.length };
   }
 
   /** With an empty query, show recents first — that is what people want. */

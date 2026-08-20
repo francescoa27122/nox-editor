@@ -110,7 +110,8 @@ src/
 │  │                     zero imports and runs in Node.
 │  ├─ path.ts            POSIX + Windows path handling
 │  ├─ fuzzy.ts           O(pattern × text) DP matcher for palette/quick-open
-│  ├─ diff.ts            Myers line diff; hunks for review and, later, Git
+│  ├─ diff.ts            Myers line diff; hunks for review and Git
+│  ├─ git-status.ts      Porcelain v2 → branch, staged/unstaged, renames
 │  ├─ replace.ts         Replacement computation and expansion
 │  ├─ languages.ts       Language identity (no parsers)
 │  ├─ symbols.ts         Named structure in a file, read from a parse tree
@@ -177,7 +178,10 @@ src-tauri/src/
 ├─ lsp.rs                Supervises language servers; Content-Length framing
 ├─ pty.rs                Terminal sessions on a real pty
 ├─ search.rs             Parallel, gitignore-aware project search
-└─ watcher.rs            Recursive notify watcher; filters and forwards events
+├─ git.rs                Index file bases (gutter), and the six stage/
+│                        commit/branch commands
+└─ watcher.rs            Recursive workspace watch, plus a second, targeted
+                         watch on `.git`'s HEAD and index
 ```
 
 ---
@@ -1282,6 +1286,37 @@ a byte-order mark are recorded on the buffer and reapplied on save (`decode` /
 `encode` in `workspace.ts`). Every editing command, the search layer, dirty
 comparison and project replace therefore see exactly one shape of text, and a
 CRLF file does not produce a whole-file diff the moment it is saved.
+
+### Git writes are six fixed commands, never a shell
+
+Stage, commit, branch touches git through exactly six Rust commands — status,
+branches, stage, unstage, commit, switch — each `git -C <root>` run with a
+hand-picked, literal argv (`--literal-pathspecs`, `--` before every pathspec)
+and no shell in the middle to reinterpret a `*` in a filename or a branch
+name. **There is no generic seam that takes an arbitrary git subcommand or
+flag.** A future capability means a new, equally fixed command, on purpose —
+so the argv a feature runs is always the one `git.rs` shows, never one
+assembled from parts a caller chose. The corollary a future reader would
+otherwise undo: **a git failure is shown verbatim, never translated.**
+`git_error` returns git's own stderr — or stdout, where git prints "nothing
+to commit" there instead — with an `io:` prefix and nothing rewritten, so
+what the panel reports is what a terminal would have said.
+
+The six were also chosen defensively, not for convenience. Unstage runs `git
+reset -- <pathspec>`, not the more obviously-named `restore --staged`,
+because the latter fails on a repository with no commits yet — right after
+`git init` — with "could not resolve HEAD", found by running both against a
+real repo before picking one rather than by reading a man page; pathspec-
+limited `reset` handles that case cleanly and never touches the working
+tree either way. Deliberately absent for the same reason the README leads
+with "It does not lose your work. Ever.": no push, pull or fetch (nothing
+leaves the machine), no rebase, amend or force (history is never rewritten),
+no discard, stash or `checkout --` (the working tree is untouchable by
+construction of the commands chosen — `switch` refuses over a dirty conflict
+rather than forcing through it). Hunk-level staging is deliberately out of
+this set too: it is the one place the feature would construct input for git
+(`apply --cached`) rather than naming files, and it gets its own envelope
+read when it is built.
 
 ---
 

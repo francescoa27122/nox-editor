@@ -8,6 +8,36 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Stage, commit, branch.** A Git panel in the sidebar — a focused view, not
+  a full client. Files you have touched are listed staged and unstaged, each
+  with a stage/unstage button (+/−); write a commit message and **Commit**
+  lands it; the command palette gets a branch picker with no prefix of its
+  own, listing local branches and offering **Create branch…** first. Open it
+  from the palette (**Show Git**) or the rail.
+  - Six git commands underneath, all argv-fixed — `status`, `branch`, `add`,
+    `reset`, `commit`, `switch` — never a shell, and a refusal comes back in
+    git's own words rather than a translated one.
+  - **Unstage runs `git reset -- <pathspec>`**, not `restore --staged`: the
+    latter fails on a repository with no commits yet ("could not resolve
+    HEAD"), found by running both against a real repo. The working tree is
+    never touched either way.
+  - **The commit message goes over stdin**, never argv, so quotes, a lone
+    `--`, or a second paragraph are all safe.
+  - **Switching or creating a branch validates the name first**
+    (`git check-ref-format`), and switching over a file a target branch would
+    overwrite is refused — git's decision, shown as git makes it.
+  - **`.git`'s `HEAD` and index are now watched directly** — targeted,
+    non-recursive, debounced — closing the blind spot the git gutter has
+    documented since it shipped: a stage, unstage or commit made in a
+    terminal now reaches the panel and the gutter on their own, no
+    **Refresh Git Gutter** required.
+  - What this is deliberately not: no push, pull, fetch, rebase, amend or
+    force, and no discard, stash or `checkout --` — the working tree stays
+    untouchable by construction of the commands chosen. Hunk-level staging is
+    its own later step.
+
+### Added
+
 - **Nox can update itself.** Ten seconds after launch (behind a new
   Workbench setting), or on *Check for Updates…*, Nox asks the newest
   published release whether a newer build exists and offers it in a

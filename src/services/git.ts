@@ -1,7 +1,9 @@
 import { diffText, type Hunk } from '@core/diff';
 import { normalizeGitBase } from '@core/git-gutter';
+import { parseGitBranches, parseGitStatus, type GitStatus } from '@core/git-status';
 import { Signal } from '@core/signal';
-import type { Platform } from '@platform/types';
+import type { Platform, Unwatch } from '@platform/types';
+import type { NotificationService } from './notifications';
 import type { BufferId, WorkspaceService } from './workspace';
 
 /**
@@ -47,8 +49,16 @@ export class GitService {
    */
   readonly baseRevision = new Signal(0);
 
+  /**
+   * The working state: branch, staged, unstaged. Null before the first
+   * answer, over no root, and over a folder that is not a repository — the
+   * panel words each of those from its own context.
+   */
+  readonly status = new Signal<GitStatus | null>(null);
+
   #platform: Platform;
   #workspace: WorkspaceService;
+  #notifications: NotificationService | undefined;
   /** path -> normalized index text, or null when git has nothing for it. */
   #bases = new Map<string, string | null>();
   /** What each buffer was last computed at, to skip no-op recomputes. */
@@ -58,10 +68,15 @@ export class GitService {
   #refetched = new Map<string, number>();
   #unsubscribes: (() => void)[] = [];
   #started = false;
+  #statusInFlight = false;
+  #statusQueued = false;
+  #metaUnwatch: Unwatch | null = null;
+  #metaTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(platform: Platform, workspace: WorkspaceService) {
+  constructor(platform: Platform, workspace: WorkspaceService, notifications?: NotificationService) {
     this.#platform = platform;
     this.#workspace = workspace;
+    this.#notifications = notifications;
   }
 
   /** Whether `start()` has run — what the commands gate on, LSP-style. */
@@ -87,16 +102,26 @@ export class GitService {
       // exactly the cadence a gutter needs — debounced per buffer below.
       workspace.buffers.subscribe(() => this.#reconcile()),
       workspace.events.on('buffer-opened', ({ id }) => void this.#refresh(id)),
-      workspace.events.on('saved', ({ id }) => void this.#refresh(id)),
+      workspace.events.on('saved', ({ id }) => {
+        void this.#refresh(id);
+        void this.refreshStatus();
+      }),
       workspace.events.on('buffer-reset', ({ id }) => void this.#refresh(id)),
-      workspace.events.on('external-change', ({ id }) => void this.#refresh(id)),
+      workspace.events.on('external-change', ({ id }) => {
+        void this.#refresh(id);
+        void this.refreshStatus();
+      }),
       workspace.events.on('buffer-closed', ({ id }) => this.#drop(id)),
       // "Committed in the terminal, tabbed back" — nothing watches .git, so
       // the moment a buffer is looked at again is the moment to re-ask.
       workspace.activeId.subscribe((id) => {
         if (id) void this.#refetchOnActivation(id);
       }),
-      workspace.rootPath.subscribe(() => this.#reset()),
+      workspace.rootPath.subscribe((root) => {
+        this.#reset();
+        void this.refreshStatus();
+        void this.#watchMeta(root);
+      }),
     );
   }
 
@@ -121,6 +146,10 @@ export class GitService {
     for (const unsubscribe of this.#unsubscribes.splice(0)) unsubscribe();
     for (const timer of this.#timers.values()) clearTimeout(timer);
     this.#timers.clear();
+    if (this.#metaTimer) clearTimeout(this.#metaTimer);
+    this.#metaTimer = null;
+    this.#metaUnwatch?.();
+    this.#metaUnwatch = null;
     this.#reset();
     this.#started = false;
   }
@@ -140,6 +169,7 @@ export class GitService {
     this.#refetched.clear();
     this.hunks.set(new Map());
     this.baseRevision.update((n) => n + 1);
+    this.status.set(null);
   }
 
   #drop(id: BufferId): void {
@@ -198,7 +228,143 @@ export class GitService {
     const now = Date.now();
     if (now - last < ACTIVATION_REFETCH_MS) return;
     this.#refetched.set(path, now);
+    void this.refreshStatus();
     await this.#refresh(id);
+  }
+
+  /**
+   * The `.git` meta watch — spec §5. Debounced 300 ms (a rebase in the
+   * terminal fires dozens), then status + bases. A watch that cannot be
+   * established is swallowed: this is a fast path, and the activation
+   * refetch and the palette refresh remain the load-bearing ones.
+   */
+  async #watchMeta(root: string | null): Promise<void> {
+    this.#metaUnwatch?.();
+    this.#metaUnwatch = null;
+    if (!root) return;
+    try {
+      this.#metaUnwatch = await this.#platform.watchGitMeta(root, () => this.#onMetaChange());
+    } catch {
+      /* No watcher on this platform or this root; the slow paths remain. */
+    }
+  }
+
+  #onMetaChange(): void {
+    if (this.#metaTimer) clearTimeout(this.#metaTimer);
+    this.#metaTimer = setTimeout(() => {
+      this.#metaTimer = null;
+      void this.refreshStatus();
+      void this.refreshAll();
+    }, DEBOUNCE_MS);
+  }
+
+  /**
+   * Re-ask git for the working state. Coalesced: one refresh in flight at a
+   * time, and any number of requests arriving meanwhile queue exactly one
+   * more — the second answer is already computed from the state the burst
+   * produced, so a third would learn nothing.
+   *
+   * Mutation check (task 10): disabling `this.#statusQueued = true` — a
+   * concurrent call arriving while one is in flight no longer queues a
+   * follow-up — turned
+   * 'coalesces concurrent refreshes: one in flight, one queued, not N' red
+   * (`tests/git-service.test.ts`, expected 2 calls, got 1); restored, suite
+   * green.
+   */
+  async refreshStatus(): Promise<void> {
+    if (this.#statusInFlight) {
+      this.#statusQueued = true;
+      return;
+    }
+    this.#statusInFlight = true;
+    try {
+      const root = this.#workspace.rootPath.get();
+      if (!root) {
+        this.status.set(null);
+        return;
+      }
+      const raw = await this.#platform.gitStatus(root);
+      this.status.set(parseGitStatus(raw));
+    } catch {
+      // Not a repository (or git absent). For a *read*, absence is the
+      // honest degraded state — refusals only matter for writes.
+      this.status.set(null);
+    } finally {
+      this.#statusInFlight = false;
+      if (this.#statusQueued) {
+        this.#statusQueued = false;
+        void this.refreshStatus();
+      }
+    }
+  }
+
+  /** Local branches, parsed. Empty when git has no answer. */
+  async listBranches(): Promise<string[]> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return [];
+    try {
+      return parseGitBranches(await this.#platform.gitBranches(root));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * One write, one shape: try, surface a refusal verbatim as a notification,
+   * refresh regardless — the panel never shows a state its own action made
+   * stale, and after a failure the refresh shows the truth (envelope §6, §4).
+   */
+  async #write(action: () => Promise<void>): Promise<boolean> {
+    let ok = true;
+    try {
+      await action();
+    } catch (error) {
+      ok = false;
+      this.#notifications?.error(error instanceof Error ? error.message : String(error));
+    }
+    await this.refreshStatus();
+    await this.refreshAll();
+    return ok;
+  }
+
+  /** `git add` by name. Absolute paths; the platform relativizes. */
+  async stage(paths: string[]): Promise<void> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return;
+    await this.#write(() => this.#platform.gitStage(root, paths));
+  }
+
+  /** `git reset -- <pathspec>` by name. The index only, by construction. */
+  async unstage(paths: string[]): Promise<void> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return;
+    await this.#write(() => this.#platform.gitUnstage(root, paths));
+  }
+
+  /**
+   * `git commit --file=-` — commits the index, never `-a`, never pathspecs
+   * (envelope §5): the staged list on screen is the commit preview. Returns
+   * `"<short-hash> <subject>"`, or null after a refusal (already surfaced).
+   */
+  async commit(message: string): Promise<string | null> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return null;
+    let result: string | null = null;
+    const ok = await this.#write(async () => {
+      result = await this.#platform.gitCommit(root, message);
+    });
+    return ok ? result : null;
+  }
+
+  /**
+   * `git switch <name>` / `git switch -c <name>` (spec §2). A refusal —
+   * dirty conflicting files, an invalid name — is git's to make and ours to
+   * show verbatim; we never pass -f (envelope §4).
+   */
+  async switch(name: string, create: boolean): Promise<void> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return;
+    await this.#write(() => this.#platform.gitSwitch(root, name, create));
   }
 
   #pathOf(id: BufferId): string | null {

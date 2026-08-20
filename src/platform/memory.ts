@@ -89,12 +89,71 @@ export class MemoryPlatform implements Platform {
     }
   }
 
-  /** path -> the text a fake git index holds for it. See `gitFileBase`. */
-  #gitBases = new Map<string, string>();
+  /** root -> its fake repository. */
+  #repos = new Map<string, FakeGitRepo>();
 
-  /** Give the fake git an index version of `path`, for tests. */
+  /** Create an empty repository at `root`, for tests. */
+  seedGitRepo(root: string, branch = 'main'): void {
+    const r = normalize(root);
+    if (this.#repos.has(r)) return;
+    this.#repos.set(r, {
+      branch,
+      heads: new Map([[branch, new Map()]]),
+      index: new Map(),
+      commits: [],
+    });
+  }
+
+  /**
+   * Give the fake git a committed-and-clean version of `path`, for tests:
+   * both HEAD and the index hold `contents` — "not mid-staging", the state
+   * the gutter's docs call normal. Re-expressed on the repo model; a test
+   * that never made a repo gets one implied at the file's parent, which is
+   * what the pre-model `seedGitBase` behavior amounted to.
+   */
   seedGitBase(path: string, contents: string): void {
-    this.#gitBases.set(normalize(path), contents);
+    const p = normalize(path);
+    if (!this.#repoFor(p)) this.seedGitRepo(dirname(p));
+    const [root, repo] = this.#repoEntryFor(p)!;
+    const rel = relative(root, p);
+    repo.heads.get(repo.branch)!.set(rel, contents);
+    repo.index.set(rel, contents);
+  }
+
+  /** Inspection for tests: the current branch, every branch, the log. */
+  gitRepoState(
+    root: string,
+  ): { branch: string; branches: string[]; commits: { hash: string; subject: string }[] } | null {
+    const repo = this.#repos.get(normalize(root));
+    if (!repo) return null;
+    return { branch: repo.branch, branches: [...repo.heads.keys()].sort(), commits: [...repo.commits] };
+  }
+
+  /** The deepest repo whose root contains `path`, as [root, repo]. */
+  #repoEntryFor(path: string): [string, FakeGitRepo] | null {
+    let best: [string, FakeGitRepo] | null = null;
+    for (const [root, repo] of this.#repos) {
+      if ((path === root || contains(root, path)) && (!best || root.length > best[0].length)) {
+        best = [root, repo];
+      }
+    }
+    return best;
+  }
+
+  #repoFor(path: string): FakeGitRepo | null {
+    return this.#repoEntryFor(path)?.[1] ?? null;
+  }
+
+  #requireRepo(root: string): [string, FakeGitRepo] {
+    const entry = this.#repoEntryFor(normalize(root));
+    if (!entry) {
+      throw new PlatformError(
+        'fatal: not a git repository (or any of the parent directories): .git',
+        'io',
+        root,
+      );
+    }
+    return entry;
   }
 
   /** What `checkForUpdate` will offer. Null until a test seeds one. */
@@ -185,7 +244,11 @@ export class MemoryPlatform implements Platform {
    * "no repo / untracked / no git", and unseeded means exactly that here.
    */
   async gitFileBase(path: string): Promise<string | null> {
-    return this.#gitBases.get(normalize(path)) ?? null;
+    const p = normalize(path);
+    const entry = this.#repoEntryFor(p);
+    if (!entry) return null;
+    const [root, repo] = entry;
+    return repo.index.get(relative(root, p)) ?? null;
   }
 
   async checkForUpdate(): Promise<UpdateInfo | null> {
@@ -209,6 +272,175 @@ export class MemoryPlatform implements Platform {
 
   async relaunch(): Promise<void> {
     this.relaunched = true;
+  }
+
+  async gitStatus(root: string): Promise<string> {
+    const [repoRoot, repo] = this.#requireRepo(root);
+    const head = repo.heads.get(repo.branch)!;
+
+    const paths = new Set<string>([...repo.index.keys(), ...head.keys()]);
+    for (const [node, value] of this.#nodes) {
+      if (value !== null && contains(repoRoot, node)) paths.add(relative(repoRoot, node));
+    }
+
+    const records: string[] = [
+      // Mirrors `nox_git_status`'s own synthetic prefix — the panel joins
+      // entries on this, not the workspace root, so the fake must carry it
+      // too or a workspace-below-repo-root test would only ever pass here.
+      `# git.toplevel ${repoRoot}`,
+      `# branch.oid ${repo.commits.length === 0 ? '(initial)' : fakeOid(repo.commits.length)}`,
+      `# branch.head ${repo.branch}`,
+    ];
+    const zeros = '0'.repeat(40);
+    for (const rel of [...paths].sort()) {
+      const worktree = this.#nodes.get(join(repoRoot, rel));
+      const inWork = typeof worktree === 'string';
+      const inIndex = repo.index.has(rel);
+      const inHead = head.has(rel);
+
+      if (!inIndex && !inHead) {
+        if (inWork) records.push(`? ${rel}`);
+        continue;
+      }
+      const x = !inHead ? 'A' : !inIndex ? 'D' : head.get(rel) === repo.index.get(rel) ? '.' : 'M';
+      const y = !inWork
+        ? inIndex
+          ? 'D'
+          : '.'
+        : !inIndex
+          ? '.'
+          : worktree === repo.index.get(rel)
+            ? '.'
+            : 'M';
+      if (x === '.' && y === '.') continue;
+      records.push(`1 ${x}${y} N... 100644 100644 100644 ${zeros} ${zeros} ${rel}`);
+    }
+    return records.join('\0') + '\0';
+  }
+
+  async gitBranches(root: string): Promise<string> {
+    const [, repo] = this.#requireRepo(root);
+    return [...repo.heads.keys()].sort().join('\n') + '\n';
+  }
+
+  async gitStage(root: string, paths: string[]): Promise<void> {
+    const [repoRoot, repo] = this.#requireRepo(root);
+    for (const path of paths) {
+      const p = normalize(path);
+      const rel = relative(repoRoot, p);
+      const text = this.#nodes.get(p);
+      if (typeof text === 'string') repo.index.set(rel, text);
+      else if (repo.index.has(rel)) repo.index.delete(rel); // staging a deletion
+      else {
+        throw new PlatformError(`fatal: pathspec '${rel}' did not match any files`, 'io', p);
+      }
+    }
+    this.#notifyGitMeta(repoRoot);
+  }
+
+  async gitUnstage(root: string, paths: string[]): Promise<void> {
+    const [repoRoot, repo] = this.#requireRepo(root);
+    const head = repo.heads.get(repo.branch)!;
+    for (const path of paths) {
+      const rel = relative(repoRoot, normalize(path));
+      if (head.has(rel)) repo.index.set(rel, head.get(rel)!);
+      else repo.index.delete(rel);
+    }
+    this.#notifyGitMeta(repoRoot);
+  }
+
+  async gitCommit(root: string, message: string): Promise<string> {
+    const [repoRoot, repo] = this.#requireRepo(root);
+    if (message.trim().length === 0) {
+      throw new PlatformError('Aborting commit due to empty commit message.', 'io');
+    }
+    const head = repo.heads.get(repo.branch)!;
+    const clean =
+      head.size === repo.index.size && [...repo.index].every(([k, v]) => head.get(k) === v);
+    if (clean) {
+      throw new PlatformError('nothing to commit, working tree clean', 'io');
+    }
+    repo.heads.set(repo.branch, new Map(repo.index));
+    const hash = fakeOid(repo.commits.length + 1).slice(0, 7);
+    const subject = message.split('\n', 1)[0]!.trim();
+    repo.commits.push({ hash, subject });
+    this.#notifyGitMeta(repoRoot);
+    return `${hash} ${subject}`;
+  }
+
+  async gitSwitch(root: string, name: string, create: boolean): Promise<void> {
+    const [repoRoot, repo] = this.#requireRepo(root);
+    // The same gate `git check-ref-format --branch` provides: only names git
+    // itself would bless reach a write. ASCII control chars, space, and
+    // git's reserved punctuation are refused with git's wording.
+    if (create) {
+      if (
+        !/^[^\s~^:?*[\\]+$/.test(name) ||
+        name.startsWith('-') ||
+        name.includes('..') ||
+        name.endsWith('/') ||
+        name.endsWith('.lock')
+      ) {
+        throw new PlatformError(`fatal: '${name}' is not a valid branch name`, 'io');
+      }
+      if (repo.heads.has(name)) {
+        throw new PlatformError(`fatal: a branch named '${name}' already exists`, 'io');
+      }
+      repo.heads.set(name, new Map(repo.heads.get(repo.branch)!));
+      repo.branch = name;
+      this.#notifyGitMeta(repoRoot);
+      return;
+    }
+
+    const target = repo.heads.get(name);
+    if (!target) throw new PlatformError(`fatal: invalid reference: ${name}`, 'io');
+    const current = repo.heads.get(repo.branch)!;
+
+    // git's refusal: a file that differs between the two heads and carries
+    // local (worktree or index) changes would be overwritten.
+    const clobbered: string[] = [];
+    for (const rel of new Set([...current.keys(), ...target.keys()])) {
+      if (current.get(rel) === target.get(rel)) continue;
+      const worktree = this.#nodes.get(join(repoRoot, rel));
+      const dirty =
+        repo.index.get(rel) !== current.get(rel) ||
+        (typeof worktree === 'string' ? worktree : undefined) !== repo.index.get(rel);
+      if (dirty) clobbered.push(rel);
+    }
+    if (clobbered.length > 0) {
+      throw new PlatformError(
+        `error: Your local changes to the following files would be overwritten by checkout:\n\t${clobbered.join('\n\t')}\nPlease commit your changes or stash them before you switch branches.\nAborting`,
+        'io',
+      );
+    }
+
+    for (const rel of new Set([...current.keys(), ...target.keys()])) {
+      const path = join(repoRoot, rel);
+      const text = target.get(rel);
+      if (text === undefined) this.externalRemove(path);
+      else if (this.#nodes.get(path) !== text) this.externalWrite(path, text);
+    }
+    repo.index = new Map(target);
+    repo.branch = name;
+    this.#notifyGitMeta(repoRoot);
+  }
+
+  #gitMetaWatchers = new Set<{ root: string; onChange: () => void }>();
+
+  async watchGitMeta(root: string, onChange: () => void): Promise<Unwatch> {
+    const watcher = { root: normalize(root), onChange };
+    this.#gitMetaWatchers.add(watcher);
+    return () => {
+      this.#gitMetaWatchers.delete(watcher);
+    };
+  }
+
+  #notifyGitMeta(root: string): void {
+    for (const watcher of [...this.#gitMetaWatchers]) {
+      if (watcher.root === root || contains(watcher.root, root) || contains(root, watcher.root)) {
+        watcher.onChange();
+      }
+    }
   }
 
   async writeTextFile(path: string, contents: string): Promise<void> {
@@ -597,10 +829,45 @@ export class MemoryPlatform implements Platform {
   }
 }
 
+/**
+ * The fake repository — a small honest model, not scripted replies.
+ *
+ * One per seeded root: what HEAD holds per branch, what the index holds,
+ * the commit log, the current branch. The six git methods behave like
+ * git's — stage copies working text into the index, commit snapshots the
+ * index and refuses when clean or when the message is blank, switch
+ * refuses when a dirty file differs from the target — and the refusal
+ * texts follow git's shape, which the Rust tests assert against real git
+ * so fake and real cannot drift silently. Worktree text always comes from
+ * `#nodes`: the same filesystem the app writes to is the one git sees.
+ *
+ * One deliberate divergence, documented: the clean-index commit refusal
+ * always uses git's clean-tree wording ("nothing to commit, working tree
+ * clean") even when unstaged changes exist; only the clean case is
+ * exercised, and one message keeps the model small.
+ *
+ * Mutation check (task 10): disabling the `clobbered.length > 0` guard in
+ * `gitSwitch` — the refusal itself — turned
+ * 'refuses to switch over a dirty conflicting file, and touches nothing'
+ * red (`tests/git-platform.test.ts`); restored, suite green.
+ */
+interface FakeGitRepo {
+  branch: string;
+  /** branch name -> path (repo-relative) -> text. */
+  heads: Map<string, Map<string, string>>;
+  index: Map<string, string>;
+  commits: { hash: string; subject: string }[];
+}
+
 /** Directories first, then case-insensitive name order. Shared by platforms. */
 export function sortEntries(entries: DirEntry[]): DirEntry[] {
   return entries.sort((a, b) => {
     if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
     return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   });
+}
+
+/** A deterministic 40-hex stand-in for an oid, derived from a counter. */
+function fakeOid(n: number): string {
+  return n.toString(16).padStart(40, '0');
 }

@@ -16,11 +16,19 @@ export type OverlayKind =
   | 'buffers'
   | 'go-to-line'
   | 'go-to-symbol'
+  | 'git-branch'
   | 'settings'
   | 'keybindings';
 
 /** Which panel the sidebar is showing. */
-export type SidebarView = 'explorer' | 'search' | 'notes' | 'answers' | 'problems' | 'references';
+export type SidebarView =
+  | 'explorer'
+  | 'search'
+  | 'notes'
+  | 'answers'
+  | 'problems'
+  | 'references'
+  | 'git';
 
 export interface PromptRequest {
   title: string;
@@ -52,7 +60,8 @@ export type FocusZone =
   | 'notes'
   | 'answers'
   | 'problems'
-  | 'references';
+  | 'references'
+  | 'git';
 
 export class UIService {
   readonly overlay = new Signal<OverlayKind | null>(null);
@@ -126,6 +135,8 @@ export class UIService {
   readonly focusProblemsRequest = new Signal(0);
   /** Bumped to ask the references list to take focus. */
   readonly focusReferencesRequest = new Signal(0);
+  /** Bumped to ask the git panel to take focus. */
+  readonly focusGitRequest = new Signal(0);
 
   openOverlay(kind: OverlayKind): void {
     this.overlay.set(kind);
@@ -206,6 +217,7 @@ export class UIService {
     else if (view === 'explorer') this.focusExplorer();
     else if (view === 'problems') this.focusProblems();
     else if (view === 'references') this.focusReferences();
+    else if (view === 'git') this.focusGit();
     else this.sidebarView.set(view);
   }
 
@@ -247,6 +259,12 @@ export class UIService {
     this.sidebarView.set('references');
     this.focusZone.set('references');
     this.focusReferencesRequest.update((n) => n + 1);
+  }
+
+  focusGit(): void {
+    this.sidebarView.set('git');
+    this.focusZone.set('git');
+    this.focusGitRequest.update((n) => n + 1);
   }
 
   /**

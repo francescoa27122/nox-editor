@@ -52,6 +52,11 @@
     'whole-word': 'M2.5 4.5v7M13.5 4.5v7M5 10.5 7 5.5l2 5M5.6 9h2.8',
     regex: 'M8 4v6M5.4 5.2l5.2 3.6M10.6 5.2 5.4 8.8 M4 12.4h.1',
     keyboard: 'M1.5 4.5h13v7h-13Z M4 7h.1M6.4 7h.1M8.8 7h.1M11.2 7h.1M4.5 9.4h7',
+    // Two commits on a trunk and one on a branch, joined by the curve —
+    // the universal "branch" glyph, drawn in this set's stroke style.
+    branch: 'M5 4.25h.1 M5 6.5v5.25h.1 M11 4.25h.1 M11 6.5c0 3-6 2.25-6 5',
+    // Unstage. `minimize` is the same stroke but means "window control".
+    minus: 'M3.5 8h9',
     logo: '',
   } as const;
 

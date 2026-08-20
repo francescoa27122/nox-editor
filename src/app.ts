@@ -228,7 +228,7 @@ export class NoxApp {
       jobs: this.jobs,
     });
     this.notes = new NotesService(platform);
-    this.git = new GitService(platform, this.workspace);
+    this.git = new GitService(platform, this.workspace, this.notifications);
     // Behind the capability: over a platform without git every base would
     // be null and the subscriptions pure overhead. Tests start it directly
     // over a MemoryPlatform with seeded bases — the language-server pattern.
@@ -2232,6 +2232,16 @@ export class NoxApp {
         },
       },
       {
+        id: 'git.focus',
+        title: 'Show Git',
+        category: 'Git',
+        keywords: ['git', 'stage', 'commit', 'branch', 'changes', 'status'],
+        run: () => {
+          this.config.set('workbench.showExplorer', true);
+          this.ui.showView('git');
+        },
+      },
+      {
         id: 'git.showDiff',
         title: 'Show Changes',
         category: 'Git',
@@ -2251,7 +2261,10 @@ export class NoxApp {
         // changes the base behind the gutter's back; this re-asks for every
         // open file at once.
         enabled: () => this.git.started,
-        run: () => void this.git.refreshAll(),
+        run: () => {
+          void this.git.refreshStatus();
+          void this.git.refreshAll();
+        },
       },
       {
         id: 'agents.reloadConfig',

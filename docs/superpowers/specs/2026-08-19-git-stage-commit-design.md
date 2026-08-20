@@ -105,6 +105,8 @@ Write (each: argv above, nothing interpolated except validated values):
   `git restore --staged --literal-pathspecs -- <paths…>`. Touches the
   index only; the working tree is untouchable by construction of the
   command chosen (this is why it is `restore --staged` and not `reset`).
+  Superseded during build: unstage runs `git reset -- <pathspec>` — see
+  ARCHITECTURE.md for why.
 - `nox_git_commit(root, message) -> Result<String>` — `git commit
   --file=-` with the message on stdin (never argv: messages contain
   quotes, dashes, anything), returning `git log -1 --format=%h %s` on
