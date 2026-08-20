@@ -126,6 +126,80 @@ pub fn nox_unwatch(state: State<'_, WatcherState>) -> Result<(), String> {
     Ok(())
 }
 
+/// The second, targeted watch: `<root>/.git`, non-recursive, delivering
+/// events only for `HEAD` and `index` (their `.lock` shadows included —
+/// git writes via lock-and-rename, and which side of the rename an OS
+/// reports varies). The recursive workspace watch keeps its DENY on `.git`;
+/// this one exists precisely because of it. Debouncing lives in the
+/// renderer's GitService, the one place that can be unit-tested.
+pub struct GitMetaWatcherState(pub Mutex<Option<RecommendedWatcher>>);
+
+impl Default for GitMetaWatcherState {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+fn is_git_meta(path: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(|n| n.to_str()),
+        Some("HEAD" | "index" | "HEAD.lock" | "index.lock")
+    )
+}
+
+/// Watch `<root>/.git`, replacing any previous meta watch. A `.git` that is
+/// a *file* (a linked worktree) is watched as itself — a pointer change
+/// still signals; the richer HEAD/index detail is out of reach there, and
+/// the activation refetch remains the fallback, as §5 requires.
+#[tauri::command]
+pub fn nox_git_meta_watch(
+    app: AppHandle,
+    state: State<'_, GitMetaWatcherState>,
+    root: String,
+) -> Result<(), String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "io: git meta watcher lock poisoned".to_string())?;
+    *guard = None;
+
+    let target = Path::new(&root).join(".git");
+    let watch_dir = target.is_dir();
+
+    let emitter = app.clone();
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else { return };
+        if classify(&event.kind).is_none() {
+            return;
+        }
+        // For a directory watch, only HEAD/index matter; a file watch (the
+        // worktree case) has exactly one path and it is always relevant.
+        if watch_dir && !event.paths.iter().any(|p| is_git_meta(p)) {
+            return;
+        }
+        let _ = emitter.emit("nox://git-meta-change", ());
+    })
+    .map_err(|e| format!("io: could not create git meta watcher ({e})"))?;
+
+    watcher
+        .watch(&target, RecursiveMode::NonRecursive)
+        .map_err(|e| format!("io: could not watch {} ({e})", target.display()))?;
+
+    *guard = Some(watcher);
+    Ok(())
+}
+
+/// Stop the meta watch. Safe when nothing is being watched.
+#[tauri::command]
+pub fn nox_git_meta_unwatch(state: State<'_, GitMetaWatcherState>) -> Result<(), String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "io: git meta watcher lock poisoned".to_string())?;
+    *guard = None;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,5 +279,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(saw_change, "expected a watch event for the nested file write");
+    }
+
+    #[test]
+    fn git_meta_filter_accepts_head_and_index_only() {
+        assert!(is_git_meta(Path::new("/w/.git/HEAD")));
+        assert!(is_git_meta(Path::new("/w/.git/index")));
+        assert!(is_git_meta(Path::new("/w/.git/index.lock")));
+        assert!(!is_git_meta(Path::new("/w/.git/objects/ab/cdef")));
+        assert!(!is_git_meta(Path::new("/w/.git/COMMIT_EDITMSG")));
+    }
+
+    /// A real `git add` through a real non-recursive watch on `.git`:
+    /// the index write must arrive, the object churn must not need to.
+    #[test]
+    fn detects_a_stage_through_a_real_git_meta_watcher() {
+        use std::process::Command;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = std::env::temp_dir().join(format!("nox-gitmeta-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let run = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+                .args(args)
+                .output()
+                .expect("git runs");
+            assert!(output.status.success(), "git {args:?} failed");
+        };
+        run(&["init"]);
+        std::fs::write(dir.join("a.txt"), "one\n").expect("write");
+
+        let (tx, rx) = mpsc::channel::<()>();
+        let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            let Ok(event) = result else { return };
+            if classify(&event.kind).is_none() {
+                return;
+            }
+            if event.paths.iter().any(|p| is_git_meta(p)) {
+                let _ = tx.send(());
+            }
+        })
+        .expect("create watcher");
+        watcher
+            .watch(&dir.join(".git"), RecursiveMode::NonRecursive)
+            .expect("watch .git");
+
+        run(&["add", "a.txt"]);
+
+        let saw = rx.recv_timeout(Duration::from_secs(10)).is_ok();
+        drop(watcher);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(saw, "expected a meta event for the index write");
     }
 }

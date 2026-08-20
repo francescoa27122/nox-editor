@@ -122,6 +122,23 @@ export class TauriPlatform implements Platform {
     await call<void>('nox_git_switch', { root, name, create });
   }
 
+  async watchGitMeta(root: string, onChange: () => void): Promise<Unwatch> {
+    const unlisten = await listen<null>('nox://git-meta-change', () => onChange());
+    try {
+      await call<void>('nox_git_meta_watch', { root });
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      unlisten();
+      void call<void>('nox_git_meta_unwatch', {}).catch(() => undefined);
+    };
+  }
+
   async writeTextFile(path: string, contents: string): Promise<void> {
     await call<void>('nox_write_text_file', { path, contents });
   }

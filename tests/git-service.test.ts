@@ -231,3 +231,51 @@ describe('the status signal', () => {
     expect(status.unstaged).toContainEqual({ path: 'main.ts', status: 'M' });
   });
 });
+
+describe('the .git meta watch', () => {
+  it('a commit made outside the service moves the status and the bases, debounced 300ms', async () => {
+    platform.seedGitRepo('/w');
+    const id = await openSeeded('one\nTWO\nthree\n');
+    expect(app.git.hunks.get().has(id)).toBe(true);
+
+    // "Committed in the terminal": stage + commit straight on the platform,
+    // never through the service — only the watcher can carry the news.
+    await platform.gitStage('/w', [FILE]);
+    await platform.gitCommit('/w', 'terminal commit');
+
+    // Inside the debounce window: the status still shows the pre-mutation
+    // truth (the unstaged edit) — no refresh has run between the stage, the
+    // commit, and now, which is exactly what "unchanged until 300 ms" means.
+    await vi.advanceTimersByTimeAsync(200);
+    expect(app.git.status.get()!.unstaged).toContainEqual({ path: 'main.ts', status: 'M' });
+
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.runAllTimersAsync();
+    expect(app.git.status.get()!.staged).toEqual([]);
+    // The base refetch followed: the index now matches the buffer.
+    expect(app.git.hunks.get().has(id)).toBe(false);
+  });
+
+  it('a burst of meta events collapses to one refresh at the end', async () => {
+    platform.seedGitRepo('/w');
+    platform.seedFile(FILE, BASE);
+    await app.workspace.openFolder('/w');
+    await vi.runAllTimersAsync();
+
+    let calls = 0;
+    const real = platform.gitStatus.bind(platform);
+    platform.gitStatus = async (root: string) => {
+      calls++;
+      return real(root);
+    };
+
+    // A rebase in the terminal fires dozens; the fake fires one per write.
+    await platform.gitStage('/w', [FILE]);
+    await platform.gitCommit('/w', 'one');
+    await platform.gitSwitch('/w', 'burst', true);
+    await vi.runAllTimersAsync();
+
+    // One debounced refresh (plus at most its queued follower) — not three.
+    expect(calls).toBeLessThanOrEqual(2);
+  });
+});

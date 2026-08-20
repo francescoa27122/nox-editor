@@ -2,7 +2,7 @@ import { diffText, type Hunk } from '@core/diff';
 import { normalizeGitBase } from '@core/git-gutter';
 import { parseGitBranches, parseGitStatus, type GitStatus } from '@core/git-status';
 import { Signal } from '@core/signal';
-import type { Platform } from '@platform/types';
+import type { Platform, Unwatch } from '@platform/types';
 import type { NotificationService } from './notifications';
 import type { BufferId, WorkspaceService } from './workspace';
 
@@ -70,6 +70,8 @@ export class GitService {
   #started = false;
   #statusInFlight = false;
   #statusQueued = false;
+  #metaUnwatch: Unwatch | null = null;
+  #metaTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(platform: Platform, workspace: WorkspaceService, notifications?: NotificationService) {
     this.#platform = platform;
@@ -115,9 +117,10 @@ export class GitService {
       workspace.activeId.subscribe((id) => {
         if (id) void this.#refetchOnActivation(id);
       }),
-      workspace.rootPath.subscribe(() => {
+      workspace.rootPath.subscribe((root) => {
         this.#reset();
         void this.refreshStatus();
+        void this.#watchMeta(root);
       }),
     );
   }
@@ -143,6 +146,10 @@ export class GitService {
     for (const unsubscribe of this.#unsubscribes.splice(0)) unsubscribe();
     for (const timer of this.#timers.values()) clearTimeout(timer);
     this.#timers.clear();
+    if (this.#metaTimer) clearTimeout(this.#metaTimer);
+    this.#metaTimer = null;
+    this.#metaUnwatch?.();
+    this.#metaUnwatch = null;
     this.#reset();
     this.#started = false;
   }
@@ -223,6 +230,32 @@ export class GitService {
     this.#refetched.set(path, now);
     void this.refreshStatus();
     await this.#refresh(id);
+  }
+
+  /**
+   * The `.git` meta watch — spec §5. Debounced 300 ms (a rebase in the
+   * terminal fires dozens), then status + bases. A watch that cannot be
+   * established is swallowed: this is a fast path, and the activation
+   * refetch and the palette refresh remain the load-bearing ones.
+   */
+  async #watchMeta(root: string | null): Promise<void> {
+    this.#metaUnwatch?.();
+    this.#metaUnwatch = null;
+    if (!root) return;
+    try {
+      this.#metaUnwatch = await this.#platform.watchGitMeta(root, () => this.#onMetaChange());
+    } catch {
+      /* No watcher on this platform or this root; the slow paths remain. */
+    }
+  }
+
+  #onMetaChange(): void {
+    if (this.#metaTimer) clearTimeout(this.#metaTimer);
+    this.#metaTimer = setTimeout(() => {
+      this.#metaTimer = null;
+      void this.refreshStatus();
+      void this.refreshAll();
+    }, DEBOUNCE_MS);
   }
 
   /**

@@ -329,6 +329,17 @@ export interface Platform {
    */
   gitSwitch(root: string, name: string, create: boolean): Promise<void>;
 
+  /**
+   * Watch the repository metadata under `root` — `<root>/.git`'s `HEAD` and
+   * `index` — calling `onChange` with no detail beyond "repository state
+   * moved"; the subscriber refreshes. A fast path, not a load-bearing one:
+   * the activation refetch and the palette refresh stay, because watchers
+   * miss things (see the watcher service's own docs). Non-recursive on
+   * purpose — a `.git` directory's object churn would flood a recursive
+   * watch, which is why the workspace watcher hard-denies `.git` entirely.
+   */
+  watchGitMeta(root: string, onChange: () => void): Promise<Unwatch>;
+
   writeTextFile(path: string, contents: string): Promise<void>;
   /** Directory children, already sorted: directories first, then by name. */
   readDir(path: string): Promise<DirEntry[]>;

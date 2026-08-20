@@ -421,8 +421,23 @@ export class MemoryPlatform implements Platform {
     this.#notifyGitMeta(repoRoot);
   }
 
-  /** Wired to real watchers in the .git meta-watch task; a no-op until then. */
-  #notifyGitMeta(_root: string): void {}
+  #gitMetaWatchers = new Set<{ root: string; onChange: () => void }>();
+
+  async watchGitMeta(root: string, onChange: () => void): Promise<Unwatch> {
+    const watcher = { root: normalize(root), onChange };
+    this.#gitMetaWatchers.add(watcher);
+    return () => {
+      this.#gitMetaWatchers.delete(watcher);
+    };
+  }
+
+  #notifyGitMeta(root: string): void {
+    for (const watcher of [...this.#gitMetaWatchers]) {
+      if (watcher.root === root || contains(watcher.root, root) || contains(root, watcher.root)) {
+        watcher.onChange();
+      }
+    }
+  }
 
   async writeTextFile(path: string, contents: string): Promise<void> {
     const p = normalize(path);
