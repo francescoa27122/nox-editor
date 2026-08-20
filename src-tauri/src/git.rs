@@ -624,7 +624,13 @@ mod tests {
         // repo root would: the toplevel record must still name the repo
         // root, not the directory `-C` was given.
         let raw = nox_git_status(as_string(&scratch.join("sub"))).unwrap();
-        let top = plain_canonical(&scratch.0).unwrap();
+        // `plain_canonical` speaks the OS's own separators (backslashed on
+        // Windows); `# git.toplevel` speaks git's `--show-toplevel`
+        // vocabulary (forward-slashed everywhere, per the doc comment on
+        // `plain_canonical` above) — the same normalization `relative_to_root`
+        // applies before comparing the two. Elsewhere (macOS, Linux) this is
+        // a no-op: there are no backslashes in those paths to begin with.
+        let top = plain_canonical(&scratch.0).unwrap().replace('\\', "/");
         assert!(
             raw.starts_with(&format!("# git.toplevel {top}\u{0}")),
             "got {raw:?}"
