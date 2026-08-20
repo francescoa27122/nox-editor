@@ -35,13 +35,16 @@ class Thing {
 
 function stateFor(doc: string) {
   const state = EditorState.create({ doc, extensions: [javascript({ typescript: true })] });
-  // The initial parse runs on a time budget, so on a loaded machine the tree
-  // can stop short of the end and a fold below that point is simply not there
-  // yet. Forcing it to finish keeps these assertions about
-  // `foldRangesAtLevel` rather than about how much CPU the runner happened to
-  // get — this suite failed intermittently on exactly that.
-  ensureSyntaxTree(state, state.doc.length, 10_000);
-  return state;
+  // The initial parse runs on a 20ms wall-clock budget, so on a loaded machine
+  // the tree snapshot taken at state creation can stop short of the end.
+  // ensureSyntaxTree finishes the parse, but only in the shared ParseContext —
+  // syntaxTree(state), which foldable() reads, keeps returning the stale
+  // snapshot until a transaction makes the language field re-snapshot it.
+  // Both steps are needed; this suite failed under CPU contention with only
+  // the first.
+  const tree = ensureSyntaxTree(state, state.doc.length, 10_000);
+  if (tree === null) throw new Error('syntax tree did not finish parsing within 10s');
+  return state.update({}).state;
 }
 
 /** 1-based line numbers where a fold at `level` starts. */
