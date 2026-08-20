@@ -109,6 +109,18 @@ export class UpdateService {
       // promise's braces. Absence, never an error (spec envelope §4).
       info = null;
     }
+
+    // A check that started before install() committed can still be running
+    // when it does. Reacting now would clobber `available`/`phase` (possibly
+    // re-enabling the toast — a second install racing the same platform
+    // handle) or, on a null result, read as "nothing to install" when an
+    // install is mid-flight. The result is dropped; what's already in effect
+    // stands.
+    const phase = this.phase.get();
+    if (phase === 'installing' || phase === 'installed') {
+      return this.available.get();
+    }
+
     this.available.set(info);
     this.phase.set(info ? 'available' : 'idle');
     if (info) {
@@ -134,37 +146,63 @@ export class UpdateService {
 
   /** Download, verify, install, restart — the toast's one action. */
   async install(): Promise<void> {
+    // A check already in flight (started before this click landed) can
+    // still touch the platform's own held update after that click — on
+    // `TauriPlatform`, a null result clears it, which would make the
+    // install below fail with "check first" over an update that was, a
+    // moment ago, genuinely in hand. Waiting it out first closes the race;
+    // `#check`'s own phase guard (above) keeps a check that finishes *after*
+    // this point from doing that once `phase` is 'installing'.
+    if (this.#inFlight) await this.#inFlight;
+
     const info = this.available.get();
     const phase = this.phase.get();
     if (!info || phase === 'installing' || phase === 'installed') return;
     this.phase.set('installing');
 
-    // Everything worth keeping, before anything moves: on Windows the
-    // installer closes the app as part of installing. The session records
-    // unsaved work and restores it after the restart — the same no-prompt
-    // philosophy as quit (`app.ts`'s close handler).
-    await this.#flush();
+    try {
+      // Everything worth keeping, before anything moves: on Windows the
+      // installer closes the app as part of installing. The session records
+      // unsaved work and restores it after the restart — the same no-prompt
+      // philosophy as quit (`app.ts`'s close handler).
+      await this.#flush();
+    } catch (error) {
+      this.#failInstall(error);
+      return;
+    }
 
-    const job = this.#jobs.run({ title: `Updating to Nox ${info.version}` }, async (context) => {
-      let received = 0;
-      await this.#platform.installUpdate((event) => {
-        if (event.phase === 'started' && event.totalBytes !== null) {
-          context.report({ done: 0, total: event.totalBytes });
-        } else if (event.phase === 'progress') {
-          received += event.chunkBytes;
-          context.report({ done: received });
-        }
-      });
-    });
+    // Not cancellable: cancellation here is cooperative, and nothing in this
+    // job body polls it — the platform's downloadAndInstall has no abort of
+    // its own. Offering to cancel would show silence while the install kept
+    // going regardless (see `JobOptions.cancellable`'s doc).
+    const job = this.#jobs.run(
+      { title: `Updating to Nox ${info.version}`, cancellable: false },
+      async (context) => {
+        let received = 0;
+        await this.#platform.installUpdate((event) => {
+          if (event.phase === 'started' && event.totalBytes !== null) {
+            context.report({ done: 0, total: event.totalBytes });
+          } else if (event.phase === 'progress') {
+            received += event.chunkBytes;
+            context.report({ done: received });
+          }
+        });
+      },
+    );
 
     const outcome = await job.result;
     if (outcome.status === 'done') {
-      this.phase.set('installed');
-      // Cheap and safe to flush twice; a keystroke may have landed during
-      // the download, and the restart must not cost it.
-      await this.#flush();
-      await this.#platform.relaunch();
-      return;
+      try {
+        this.phase.set('installed');
+        // Cheap and safe to flush twice; a keystroke may have landed during
+        // the download, and the restart must not cost it.
+        await this.#flush();
+        await this.#platform.relaunch();
+        return;
+      } catch (error) {
+        this.#failInstall(error);
+        return;
+      }
     }
 
     // Failed or cancelled: the offer stands — the user can try again.
@@ -176,5 +214,18 @@ export class UpdateService {
         error instanceof Error ? error.message : String(error),
       );
     }
+  }
+
+  /**
+   * A step outside the job — flush or relaunch — threw. Without this, one
+   * unhandled rejection here leaves `phase` stuck at 'installing' forever,
+   * silently disabling both `install()` and `checkNow()` until restart.
+   */
+  #failInstall(error: unknown): void {
+    this.phase.set('available');
+    this.#notifications.error(
+      'The update could not be installed',
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }

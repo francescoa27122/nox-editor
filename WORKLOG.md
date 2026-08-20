@@ -28,7 +28,9 @@ Shipped:
   Install and Restart action.
 - The Settings footer now shows the running version.
 - `src-tauri` — the updater and process plugins registered, capabilities
-  granted, `updater.conf.json` with the public key and no private one.
+  granted, `updater.conf.json` set for `createUpdaterArtifacts` (the
+  public key itself lives in `tauri.conf.json`'s `bundle.updater.pubkey`,
+  not there) and no private key committed anywhere.
   `cargo check` run locally: clean, exit 0. (The plan's Global
   Constraints section says no cargo was on this machine — that was
   stale by the time Task 5 landed; what's still CI-only is the
@@ -53,15 +55,28 @@ Next:
 
 - The operator's key ceremony (spec §8): `tauri signer generate`, the
   two secrets in GitHub Actions. Human-only, out of scope for any task.
-- The first signed tag. Two open risks to watch on that run, neither
-  executed anywhere yet: the empty updater pubkey at plugin init
-  throwing before the app boots, rather than degrading to "no update
-  available" (Task 5 flagged this; if it throws, the fix is a guard in
-  `tauri.ts`'s plugin registration, not in the spec); and
-  `tauri-action`'s cross-matrix `latest.json` assembly — each matrix
-  leg's platform entry merging into one `latest.json` on the release,
-  asserted from the action's `uploadUpdaterJson` docs but never run.
-  The first signed tag is the real test of both.
+- The first signed tag. One open risk left to watch on that run, not
+  executed anywhere yet: `tauri-action`'s cross-matrix `latest.json`
+  assembly — each matrix leg's platform entry merging into one
+  `latest.json` on the release, asserted from the action's
+  `uploadUpdaterJson` docs but never run. The first signed tag is the
+  real test of it.
+- **Closed** since this entry was first written: the empty updater
+  pubkey at plugin init. Task 5 flagged it and feared it might throw
+  before the app boots rather than degrade to "no update available" —
+  and named the fix as a guard in `tauri.ts`'s plugin registration,
+  which was wrong twice over: registration happens in `lib.rs`, not
+  `tauri.ts`, and no guard turns out to be needed. Verified against the
+  `tauri-plugin-updater` 2.10.1 source: `Builder::build()`'s setup hook
+  only clones the pubkey string into the plugin's managed config —
+  no parsing, no early exit either way. It is first decoded in
+  `verify_signature`, called from `Update::download`, i.e. the download
+  half of `downloadAndInstall`, not `check()`. So an empty pubkey lets
+  `check()` report an update same as always; `PublicKey::decode` on the
+  empty string then fails there, `?`-propagated as `Error::Minisign` —
+  never a panic — which `installUpdate()` normalizes into the same
+  `PlatformError` any other install failure produces. Fails closed,
+  never an unverified install.
 
 Blocked:
 

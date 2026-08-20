@@ -174,6 +174,22 @@ describe('install', () => {
     expect(titles).toContain('Updating to Nox 9.9.9');
   });
 
+  it('runs the download as a job that cannot be cancelled', async () => {
+    // Cancellation here is cooperative, and nothing in the install job polls
+    // it — the platform has no abort path once downloadAndInstall starts.
+    // Offering the affordance would show silence while it kept going anyway.
+    const { platform, jobs, service } = make();
+    platform.seedUpdate(INFO);
+    const cancellableFlags: boolean[] = [];
+    jobs.active.subscribe((list) => {
+      for (const job of list) cancellableFlags.push(job.cancellable);
+    });
+    await service.checkNow();
+    await service.install();
+    expect(cancellableFlags).toContain(false);
+    expect(cancellableFlags).not.toContain(true);
+  });
+
   it('a failure says why, and the offer survives for another try', async () => {
     class FailingPlatform extends MemoryPlatform {
       override async installUpdate(): Promise<void> {
@@ -197,5 +213,113 @@ describe('install', () => {
     await service.install();
     expect(flushes).toEqual([]);
     expect(platform.installedUpdate).toBeNull();
+  });
+
+  it('a flush that throws leaves the offer standing, not stuck', async () => {
+    let flushCalls = 0;
+    const platform = new MemoryPlatform();
+    platform.seedUpdate(INFO);
+    const notifications = new NotificationService();
+    const service = new UpdateService(
+      platform,
+      new ConfigService(platform),
+      notifications,
+      new JobRunner(),
+      async () => {
+        flushCalls += 1;
+        if (flushCalls === 1) throw new Error('disk full');
+      },
+    );
+    await service.checkNow();
+
+    // The pre-install flush throws. Without the fix this is an unhandled
+    // rejection and phase sticks at 'installing' forever.
+    await service.install();
+    expect(service.phase.get()).toBe('available');
+    const error = notifications.items.get().find((n) => n.kind === 'error');
+    expect(error?.message).toBe('The update could not be installed');
+    expect(error?.detail).toBe('disk full');
+    expect(platform.installedUpdate).toBeNull();
+
+    // Nothing is stuck: a second attempt, with flush working this time,
+    // completes normally.
+    await service.install();
+    expect(service.phase.get()).toBe('installed');
+    expect(platform.installedUpdate).toBe(INFO.version);
+    expect(platform.relaunched).toBe(true);
+  });
+
+  it('a post-install flush or relaunch failure also recovers instead of sticking', async () => {
+    let flushCalls = 0;
+    const platform = new MemoryPlatform();
+    platform.seedUpdate(INFO);
+    const notifications = new NotificationService();
+    const service = new UpdateService(
+      platform,
+      new ConfigService(platform),
+      notifications,
+      new JobRunner(),
+      async () => {
+        flushCalls += 1;
+        // The second flush is the one after the job succeeds, before relaunch.
+        if (flushCalls === 2) throw new Error('write failed');
+      },
+    );
+    await service.checkNow();
+    await service.install();
+
+    expect(service.phase.get()).toBe('available');
+    // The install itself already succeeded on disk; only the post-install
+    // flush failed, and relaunch was never reached.
+    expect(platform.installedUpdate).toBe(INFO.version);
+    expect(platform.relaunched).toBe(false);
+    const error = notifications.items.get().find((n) => n.kind === 'error');
+    expect(error?.detail).toBe('write failed');
+  });
+});
+
+describe('a check racing an install', () => {
+  it('does not clobber it: no second announce, no phase clobber, install completes once', async () => {
+    let checkCalls = 0;
+    let releaseSecondCheck!: (value: UpdateInfo | null) => void;
+    class SlowSecondCheckPlatform extends MemoryPlatform {
+      override checkForUpdate(): Promise<UpdateInfo | null> {
+        checkCalls += 1;
+        // The first check (the one that seeds the offer) answers normally;
+        // the second — the one racing the install — stays pending until the
+        // test releases it.
+        if (checkCalls === 1) return super.checkForUpdate();
+        return new Promise((resolve) => {
+          releaseSecondCheck = resolve;
+        });
+      }
+    }
+    const platform = new SlowSecondCheckPlatform();
+    platform.seedUpdate(INFO);
+    const { notifications, service } = make(platform);
+
+    await service.checkNow();
+    expect(service.phase.get()).toBe('available');
+
+    // A second, slow manual check starts — still in flight when install is
+    // asked to run. install() must wait it out before doing anything, per
+    // the fix, rather than racing it.
+    const slowCheck = service.checkNow({ manual: true });
+    expect(checkCalls).toBe(2);
+    const installing = service.install();
+
+    releaseSecondCheck(INFO);
+    await slowCheck;
+    await installing;
+
+    expect(service.phase.get()).toBe('installed');
+    expect(platform.installedUpdate).toBe(INFO.version);
+    expect(platform.relaunched).toBe(true);
+
+    // The offer toast was replaced at most once at a time, never stacked —
+    // and the install's own error/second-announce path never fired.
+    const offers = notifications.items.get().filter((n) => n.message.includes('available'));
+    expect(offers).toHaveLength(1);
+    expect(notifications.items.get().some((n) => n.kind === 'error')).toBe(false);
   });
 });

@@ -2345,10 +2345,12 @@ export class NoxApp {
         title: 'Cancel Background Task',
         category: 'View',
         keywords: ['stop', 'abort', 'search', 'replace', 'job'],
-        enabled: () => this.jobs.active.get().length > 0,
+        // A job with room for exactly one offered here — same as the
+        // status bar — must be one this can actually stop.
+        enabled: () => (this.jobs.foremost()?.cancellable ?? false),
         run: () => {
           const job = this.jobs.foremost();
-          if (!job) return;
+          if (!job || !job.cancellable) return;
           this.jobs.cancel(job.id);
           this.notifications.info(`Cancelled ${job.title}`);
         },

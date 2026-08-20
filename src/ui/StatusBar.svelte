@@ -86,7 +86,7 @@
       </button>
     {/if}
 
-    {#if job}
+    {#if job && job.cancellable}
       <button
         class="item job"
         title={`${job.progress.message ?? job.title} — click to cancel`}
@@ -96,6 +96,13 @@
         <span class="job-label">{jobLabel}</span>
         <Icon name="close" size={10} />
       </button>
+    {:else if job}
+      <!-- Not cancellable (e.g. the update install): no click affordance,
+           because clicking would show silence while it kept going anyway. -->
+      <span class="item job" title={job.progress.message ?? job.title}>
+        <span class="pulse" aria-hidden="true"></span>
+        <span class="job-label">{jobLabel}</span>
+      </span>
     {/if}
 
     {#if $indexing}
