@@ -91,6 +91,15 @@ jobs:
             target: x86_64-pc-windows-msvc
             args: ''
 
+    env:
+      # Present only after the operator's key ceremony (spec §8 of the
+      # auto-updater design). Absent, the step below builds without updater
+      # artifacts and without latest.json — a working release, not a failed
+      # one. The values are never echoed; tauri reads them from the
+      # environment directly.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -135,6 +144,31 @@ jobs:
 
       - run: npm ci
 
+      # Updater artifacts are opt-in per build. createUpdaterArtifacts lives
+      # in updater.conf.json rather than tauri.conf.json because with it set,
+      # `tauri build` *fails* when the private key is absent — and a
+      # contributor's local build, and this workflow before the key ceremony,
+      # must keep producing installers.
+      - name: Decide whether this build signs updates
+        id: updater
+        shell: bash
+        run: |
+          set -eu
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            pubkey=$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey")
+            if [ -z "$pubkey" ]; then
+              echo "TAURI_SIGNING_PRIVATE_KEY is set, but plugins.updater.pubkey is empty."
+              echo "Half a keypair signs updates that nothing can verify. Paste the public"
+              echo "key from the key ceremony into src-tauri/tauri.conf.json and retag."
+              exit 1
+            fi
+            echo "args=--config src-tauri/updater.conf.json" >> "$GITHUB_OUTPUT"
+            echo "Signing key present: updater artifacts will be built and signed."
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+            echo "No signing key: installers only, no updater artifacts."
+          fi
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -152,7 +186,7 @@ jobs:
           # fails when they disagree: these are a string, not a manifest.
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} ${{ steps.updater.outputs.args }}
           releaseBody: |
             ## Install
 
