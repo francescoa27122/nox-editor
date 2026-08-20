@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
+import { NoxApp } from '../src/app';
+import { MemoryPlatform } from '../src/platform/memory';
+import App from '../src/ui/App.svelte';
 import DiffView from '../src/ui/DiffView.svelte';
 import EditorPane from '../src/ui/EditorPane.svelte';
 import { flush, mountComponent, type Mounted } from './support/component';
@@ -19,7 +22,10 @@ installRangeRects();
  * the race — the base lands before the first paint); the surface test
  * fails when `showDiff` stops clearing
  * `agentsOpen`; the gutter test fails when the pane's mousedown filter is
- * removed.
+ * removed. Mutation-checked again on 2026-08-20 for the end-to-end block:
+ * the Close-click test fails when the button's `onclick` is emptied, and
+ * the Escape test fails when `app.ts` stops binding Escape to
+ * `view.dismiss`.
  */
 
 const CHANGED = '/w/changed.ts';
@@ -174,6 +180,68 @@ describe('the rendering', () => {
     flush();
 
     expect(body()).toContain('Git has no base for this file');
+  });
+});
+
+/**
+ * The dismissal, end to end through the shell.
+ *
+ * The 2026-08-20 desktop pass reported the view as undismissable (BUG-1).
+ * On real hardware that turned out to be the walk harness, not the app: an
+ * invisible harness window over the top-right of the screen swallowed the
+ * Close clicks, and the harness consumed Escape at the OS level before any
+ * app saw it. But the walk exposed a real hole in the suite — nothing ever
+ * clicked the actual Close button, and nothing drove Escape through the
+ * keymap `App.svelte` attaches. These do both, over the full shell, so the
+ * button → service → shell-swap chain is pinned down end to end.
+ */
+describe('the dismissal, end to end through the shell', () => {
+  async function setupShell() {
+    const app = new NoxApp(new MemoryPlatform());
+    panel = mountComponent(App, { app, props: { app } });
+    const { platform } = panel;
+    app.git.start();
+    platform.seedFile(CHANGED, EDITED);
+    platform.seedGitBase(CHANGED, BASE);
+    await app.workspace.openFolder('/w');
+    const id = (await app.workspace.open(CHANGED))!;
+    app.workspace.setActive(id);
+    await Promise.resolve();
+    await Promise.resolve();
+    flush();
+    await app.commands.execute('git.showDiff');
+    flush();
+    expect(panel!.container.querySelector('section.diff')).not.toBeNull();
+    return { app };
+  }
+
+  it('swaps back to the editor when the header Close button is clicked', async () => {
+    const { app } = await setupShell();
+
+    const close = [
+      ...panel!.container.querySelectorAll<HTMLButtonElement>('section.diff header button'),
+    ].find((button) => button.textContent?.trim() === 'Close')!;
+    close.click();
+    flush();
+
+    expect(app.ui.diffOpen.get()).toBe(false);
+    expect(panel!.container.querySelector('section.diff')).toBeNull();
+    expect(panel!.container.querySelector('.editor-area')).not.toBeNull();
+  });
+
+  it('is dismissed by Escape through the keymap the shell attaches', async () => {
+    const { app } = await setupShell();
+
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }),
+    );
+    // `view.dismiss` goes through the async command executor.
+    await Promise.resolve();
+    flush();
+
+    expect(app.ui.diffOpen.get()).toBe(false);
+    expect(panel!.container.querySelector('section.diff')).toBeNull();
+    expect(panel!.container.querySelector('.editor-area')).not.toBeNull();
   });
 });
 
