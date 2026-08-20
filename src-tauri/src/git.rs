@@ -46,9 +46,26 @@ pub type Result<T> = std::result::Result<T, String>;
 /// spawned (not installed, not on PATH) — to the caller that is the same
 /// non-answer as any other failure. Direct spawn only, no `cmd /C` fallback:
 /// git is a real `.exe`, and the shell route re-splits paths with spaces.
+///
+/// `GIT_OPTIONAL_LOCKS=0`: without it, even a read like `git status` takes and
+/// releases `.git/index.lock` (git's "opportunistic update" of the index's
+/// stat-cache). The meta watch (`watcher.rs`) sees that lock file's
+/// create-and-rename and fires a change event, which debounce-triggers
+/// `refreshStatus`, which runs `git status`, which fires the event again —
+/// a self-sustaining loop that drags `refreshAll` (a `git show` per open
+/// buffer) along every ~300 ms, forever, on a panel nobody touched. Watching
+/// only `HEAD` and `index` (not the whole `.git`) is still correct with the
+/// env var set: a write that actually changes something — `add`, `commit`,
+/// `switch` — renames the real `index` (or `HEAD`) into place regardless of
+/// optional locks, so those events still arrive; only the lock-file churn a
+/// pure read leaves behind is suppressed. Verified live: a non-recursive
+/// `notify` watch on `.git` sees `index.lock` create+remove on every
+/// `git status --porcelain=v2 --branch -z` without this env var, and sees
+/// nothing from repeated `git status` calls with it set (see the
+/// `status_alone_does_not_touch_the_meta_watch` test below).
 fn run_git(dir: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(dir).args(args);
+    command.arg("-C").arg(dir).args(args).env("GIT_OPTIONAL_LOCKS", "0");
 
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -160,12 +177,25 @@ fn repo_relative(toplevel: &str, path: &str) -> Result<String> {
         .ok_or_else(|| format!("io: {path} is not inside the repository"))
 }
 
-/// Raw porcelain v2 status. `-z` because filenames contain anything;
-/// parsing lives in TypeScript where it is testable without a repo.
+/// Raw porcelain v2 status, prefixed with one synthetic record of our own:
+/// `# git.toplevel <path>\0`, ahead of everything git itself prints. The
+/// panel joins status paths (toplevel-relative, per porcelain) onto this
+/// rather than the workspace root, because the two differ whenever a
+/// workspace is opened below the repo root — joining onto the wrong one
+/// silently targets a same-named file elsewhere in the tree. `-z` because
+/// filenames contain anything; parsing (including this prefix) lives in
+/// TypeScript where it is testable without a repo.
+///
+/// `from_utf8_lossy`, not `from_utf8`: one non-UTF-8 filename anywhere in a
+/// large status must not fail the whole call and blank the panel — a
+/// replacement character in one row is the correct degraded state, the same
+/// principle `git_error` already applies to failure messages.
 #[tauri::command]
 pub fn nox_git_status(root: String) -> Result<String> {
+    let top = repo_toplevel(Path::new(&root))?;
     let output = run_git_ok(Path::new(&root), &["status", "--porcelain=v2", "--branch", "-z"])?;
-    String::from_utf8(output.stdout).map_err(|_| "io: git status output was not utf-8".to_string())
+    let raw = String::from_utf8_lossy(&output.stdout);
+    Ok(format!("# git.toplevel {top}\0{raw}"))
 }
 
 /// Raw local branch list, one short refname per line.
@@ -200,6 +230,13 @@ pub fn nox_git_stage(root: String, paths: Vec<String>) -> Result<()> {
 /// `reset` handles that case cleanly.
 #[tauri::command]
 pub fn nox_git_unstage(root: String, paths: Vec<String>) -> Result<()> {
+    // An empty pathspec list after `--` is not "nothing to do" to git — it is
+    // `git reset --`, bare, which resets the *entire* index to HEAD. A caller
+    // passing `[]` (a stage/unstage-all bug, an empty selection) must not
+    // silently escalate into a full unstage.
+    if paths.is_empty() {
+        return Ok(());
+    }
     let top = repo_toplevel(Path::new(&root))?;
     let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "reset".into(), "--".into()];
     for path in &paths {
@@ -223,6 +260,14 @@ pub fn nox_git_commit(root: String, message: String) -> Result<String> {
         .arg("-C")
         .arg(&root)
         .args(["commit", "--file=-"])
+        // Same reasoning as `run_git`'s doc comment: this command builds its
+        // own `Command` (for stdin piping) rather than going through
+        // `run_git`, so it needs its own copy of the env var. A commit is a
+        // real write regardless — `GIT_OPTIONAL_LOCKS` only suppresses the
+        // lock churn a pure *read* would otherwise leave for the meta watch
+        // to see; it does not stop the real `index`/`HEAD` rename a commit
+        // performs, which is what the watch is meant to catch.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -567,4 +612,106 @@ mod tests {
         assert!(raw.contains("# branch.head main"));
         assert!(raw.contains("? a.txt\u{0}"), "got {raw:?}");
     }
+
+    #[test]
+    fn status_leads_with_the_repo_toplevel_record() {
+        let scratch = Scratch::new("git-status-top");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        fs::create_dir_all(scratch.join("sub")).unwrap();
+        fs::write(scratch.join("sub/a.txt"), "one\n").unwrap();
+
+        // Called from a subdirectory, the way a workspace opened below the
+        // repo root would: the toplevel record must still name the repo
+        // root, not the directory `-C` was given.
+        let raw = nox_git_status(as_string(&scratch.join("sub"))).unwrap();
+        let top = plain_canonical(&scratch.0).unwrap();
+        assert!(
+            raw.starts_with(&format!("# git.toplevel {top}\u{0}")),
+            "got {raw:?}"
+        );
+    }
+
+    #[test]
+    fn unstage_of_an_empty_path_list_touches_nothing() {
+        let scratch = Scratch::new("git-unstage-empty");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        let file = scratch.join("a.txt");
+        fs::write(&file, "one\n").unwrap();
+        git_in(&scratch.0, &["add", "a.txt"]);
+
+        // Bare `git reset --` would unstage everything; an empty selection
+        // must be a no-op instead, never an escalation to "unstage all".
+        nox_git_unstage(as_string(&scratch.0), vec![]).unwrap();
+
+        assert!(git_out(&scratch.0, &["status", "--porcelain"]).starts_with("A  a.txt"));
+    }
+
+    /// The Critical-1 probe: reproduces the reviewer's scenario directly —
+    /// a real, non-recursive `notify` watch on `.git` (the same shape
+    /// `nox_git_meta_watch` installs) sitting through repeated
+    /// `nox_git_status` calls. Without `GIT_OPTIONAL_LOCKS=0` a plain
+    /// `git status` still takes and releases `.git/index.lock`, which a
+    /// meta watch sees as a rename event — the self-sustaining refresh loop
+    /// this fix closes. `nox_git_status` (via `run_git`) now sets the env
+    /// var, so a steady-state status must fire nothing at all.
+    #[test]
+    fn status_alone_does_not_touch_the_meta_watch() {
+        use notify::{RecursiveMode, Watcher};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let scratch = Scratch::new("git-status-quiet");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        git_in(&scratch.0, &["commit", "--allow-empty", "-m", "root"]);
+        fs::write(scratch.join("a.txt"), "one\n").unwrap();
+
+        let (tx, rx) = mpsc::channel::<Vec<PathBuf>>();
+        let mut watcher =
+            notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+                let Ok(event) = result else { return };
+                use notify::EventKind;
+                // Same filter nox_git_meta_watch applies: only HEAD/index
+                // (and their .lock shadows) count.
+                let relevant: Vec<PathBuf> = event
+                    .paths
+                    .iter()
+                    .filter(|p| {
+                        matches!(
+                            p.file_name().and_then(|n| n.to_str()),
+                            Some("HEAD" | "index" | "HEAD.lock" | "index.lock")
+                        )
+                    })
+                    .cloned()
+                    .collect();
+                if relevant.is_empty() {
+                    return;
+                }
+                if matches!(event.kind, EventKind::Access(_)) {
+                    return;
+                }
+                let _ = tx.send(relevant);
+            })
+            .expect("create watcher");
+        watcher
+            .watch(&scratch.join(".git"), RecursiveMode::NonRecursive)
+            .expect("watch .git");
+
+        // Steady state: a handful of reads, the way the debounced refresh
+        // loop would run them back to back.
+        for _ in 0..5 {
+            let status = nox_git_status(as_string(&scratch.0)).unwrap();
+            assert!(status.contains("# git.toplevel"));
+        }
+
+        // No event should have arrived — give the watcher a beat to prove a
+        // negative, then check nothing landed.
+        let saw = rx.recv_timeout(Duration::from_millis(800));
+        drop(watcher);
+
+        assert!(
+            saw.is_err(),
+            "expected no meta-watch events from repeated status alone, got {saw:?}"
+        );
+    }
 }
+

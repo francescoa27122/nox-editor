@@ -19,10 +19,10 @@ gets; tasks 1-9 shipped without one.
 Shipped:
 
 - **The panel.** A **Git** view in the sidebar (`GitPanel.svelte`): a
-  branch line, staged and unstaged file lists each with an S/U toggle, a
-  commit message box, **Commit**. Reads only `GitService.status` — nothing
-  in the view asks git directly. **Show Git** in the palette and a rail
-  icon open it.
+  branch line, staged and unstaged file lists each with a stage/unstage
+  button (+/−), a commit message box, **Commit**. Reads only
+  `GitService.status` — nothing in the view asks git directly. **Show Git**
+  in the palette and a rail icon open it.
 - **The read.** `core/git-status.ts` parses `git status --porcelain=v2
   --branch -z` (NUL-terminated, so a rename's original path is the next
   token, not a delimiter inside this one); porcelain's `C` (copied) maps

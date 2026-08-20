@@ -284,6 +284,10 @@ export class MemoryPlatform implements Platform {
     }
 
     const records: string[] = [
+      // Mirrors `nox_git_status`'s own synthetic prefix — the panel joins
+      // entries on this, not the workspace root, so the fake must carry it
+      // too or a workspace-below-repo-root test would only ever pass here.
+      `# git.toplevel ${repoRoot}`,
       `# branch.oid ${repo.commits.length === 0 ? '(initial)' : fakeOid(repo.commits.length)}`,
       `# branch.head ${repo.branch}`,
     ];

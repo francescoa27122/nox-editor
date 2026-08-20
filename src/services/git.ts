@@ -334,7 +334,7 @@ export class GitService {
     await this.#write(() => this.#platform.gitStage(root, paths));
   }
 
-  /** `git restore --staged` by name. The index only, by construction. */
+  /** `git reset -- <pathspec>` by name. The index only, by construction. */
   async unstage(paths: string[]): Promise<void> {
     const root = this.#workspace.rootPath.get();
     if (!root) return;

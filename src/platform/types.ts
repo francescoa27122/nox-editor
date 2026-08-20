@@ -309,8 +309,12 @@ export interface Platform {
   gitStage(root: string, paths: string[]): Promise<void>;
 
   /**
-   * `git restore --staged --literal-pathspecs -- <paths>`. Touches the index
-   * only — the working tree is untouchable by construction of the command.
+   * `git reset --literal-pathspecs -- <paths>` (never `--hard`, never a ref
+   * beyond the implicit `HEAD`). Touches the index only — the working tree
+   * is untouchable by construction of the command. Not `git restore
+   * --staged`: that fails with "could not resolve HEAD" on a repository
+   * with no commits yet, while pathspec-limited `reset` handles it cleanly
+   * — see `src-tauri/src/git.rs`'s `nox_git_unstage` and ARCHITECTURE.md.
    */
   gitUnstage(root: string, paths: string[]): Promise<void>;
 

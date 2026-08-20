@@ -50,7 +50,7 @@ describe('the fake repository', () => {
     const back = await status();
     expect(back.staged).toEqual([]);
     expect(back.unstaged).toContainEqual({ path: 'a.txt', status: 'M' });
-    // restore --staged touches the index only; the worktree is untouched.
+    // `git reset -- <pathspec>` touches the index only; the worktree is untouched.
     expect(await platform.readTextFile('/w/a.txt')).toBe('one\ntwo\n');
   });
 
@@ -138,6 +138,16 @@ describe('the fake repository', () => {
   it('answers gitStatus on a non-repo root with git-shaped refusal', async () => {
     platform.mkdirp('/plain');
     await expect(platform.gitStatus('/plain')).rejects.toThrow(/not a git repository/);
+  });
+
+  it('carries the repo toplevel as a leading synthetic record, mirroring nox_git_status', async () => {
+    expect((await status()).toplevel).toBe(ROOT);
+  });
+
+  it('reports the repo toplevel even when asked from a subdirectory of it', async () => {
+    platform.mkdirp('/w/sub');
+    const nested = parseGitStatus(await platform.gitStatus('/w/sub'));
+    expect(nested.toplevel).toBe(ROOT);
   });
 
   it('keeps seedGitBase working with no explicit repo (a repo is implied at the parent)', async () => {

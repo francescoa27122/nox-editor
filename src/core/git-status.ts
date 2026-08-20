@@ -41,6 +41,16 @@ export interface GitStatus {
   detached: boolean;
   staged: FileEntry[];
   unstaged: FileEntry[];
+  /**
+   * The repository toplevel, absolute — `path` above is relative to this,
+   * not to the workspace root, which differ whenever a workspace is opened
+   * below the repo root. Null only when the raw text carried no
+   * `# git.toplevel` record (a malformed or pre-model input); callers that
+   * join entries onto a filesystem path must treat that as "cannot join",
+   * not fall back to guessing at the workspace root — that guess is exactly
+   * the wrong-file bug this field exists to prevent.
+   */
+  toplevel: string | null;
 }
 
 /** Everything after the nth space — the path field, which may itself contain spaces. */
@@ -61,12 +71,21 @@ function letter(code: string): GitStatusLetter {
 
 export function parseGitStatus(raw: string): GitStatus {
   const records = raw.split('\0');
-  const status: GitStatus = { branch: null, oid: null, detached: false, staged: [], unstaged: [] };
+  const status: GitStatus = {
+    branch: null,
+    oid: null,
+    detached: false,
+    staged: [],
+    unstaged: [],
+    toplevel: null,
+  };
 
   for (let i = 0; i < records.length; i++) {
     const record = records[i]!;
 
-    if (record.startsWith('# branch.oid ')) {
+    if (record.startsWith('# git.toplevel ')) {
+      status.toplevel = record.slice('# git.toplevel '.length);
+    } else if (record.startsWith('# branch.oid ')) {
       const oid = record.slice('# branch.oid '.length);
       status.oid = oid === '(initial)' ? null : oid;
     } else if (record.startsWith('# branch.head ')) {

@@ -65,45 +65,94 @@
     return total === 0 ? 'clean' : `${total} change${total === 1 ? '' : 's'}`;
   });
 
-  function absolute(entry: FileEntry): string {
-    // Status paths are toplevel-relative; the workspace root is the repo
-    // root in every workflow this row supports (spec §8: one root, one repo).
-    const root = workspace.rootPath.get();
-    return root ? join(root, entry.path) : entry.path;
+  /** Explains, to a title attribute, why a row's actions are switched off. */
+  const NO_TOPLEVEL = 'Cannot locate this file: the repository root could not be determined';
+  const DELETED = 'Deleted — nothing to open';
+
+  function absoluteOf(path: string): string | null {
+    // Status paths are toplevel-relative — joined onto the repository
+    // toplevel, never the workspace root: the two differ whenever a
+    // workspace is opened below the repo root, and joining onto the wrong
+    // one can silently target a same-named file elsewhere in the tree.
+    // `null` means "cannot join honestly" — every caller must refuse the
+    // action rather than guess at a path.
+    const top = $status?.toplevel;
+    return top ? join(top, path) : null;
+  }
+
+  function absolute(entry: FileEntry): string | null {
+    return absoluteOf(entry.path);
+  }
+
+  /**
+   * What `git.unstage` should touch for this row. A staged rename is two
+   * index entries under the hood (the old path deleted, the new path
+   * added) that porcelain collapses into one record with `origPath` — reset
+   * only `entry.path` and the old path's deletion stays staged. Both need
+   * resetting for the rename to leave the index cleanly.
+   */
+  function unstageTargets(entry: FileEntry): string[] {
+    const targets: string[] = [];
+    const main = absolute(entry);
+    if (main) targets.push(main);
+    if (entry.origPath) {
+      const orig = absoluteOf(entry.origPath);
+      if (orig) targets.push(orig);
+    }
+    return targets;
   }
 
   async function open(entry: FileEntry): Promise<void> {
-    await workspace.open(absolute(entry));
+    const target = absolute(entry);
+    if (!target) return;
+    await workspace.open(target);
   }
 
   async function view(entry: FileEntry): Promise<void> {
+    const target = absolute(entry);
+    if (!target) return;
     // The diff view is where a change is *looked at*; the row only points.
-    await workspace.open(absolute(entry));
+    await workspace.open(target);
     ui.showDiff();
   }
 </script>
 
 {#snippet row(entry: FileEntry, section: 'staged' | 'unstaged')}
+  {@const target = absolute(entry)}
+  {@const unresolved = target === null}
+  {@const deleted = entry.status === 'D'}
+  {@const actionTitle = (label: string) => (unresolved ? NO_TOPLEVEL : label)}
   <div class="row" title={entry.origPath ? `${entry.origPath} → ${entry.path}` : entry.path}>
     <span class="letter letter-{entry.status}">{entry.status}</span>
-    <button class="open" onclick={() => void open(entry)}>{entry.path}</button>
+    {#if unresolved || deleted}
+      <span class="open disabled" title={unresolved ? NO_TOPLEVEL : DELETED}>{entry.path}</span>
+    {:else}
+      <button class="open" onclick={() => void open(entry)}>{entry.path}</button>
+    {/if}
     <span class="actions">
-      <button class="nox-button ghost small" title="Show Changes" onclick={() => void view(entry)}>
+      <button
+        class="nox-button ghost small"
+        title={actionTitle('Show Changes')}
+        disabled={unresolved}
+        onclick={() => void view(entry)}
+      >
         <Icon name="file" size={11} />
       </button>
       {#if section === 'unstaged'}
         <button
           class="nox-button ghost small"
-          title="Stage"
-          onclick={() => void git.stage([absolute(entry)])}
+          title={actionTitle('Stage')}
+          disabled={unresolved}
+          onclick={() => void git.stage(target ? [target] : [])}
         >
           <Icon name="plus" size={11} />
         </button>
       {:else}
         <button
           class="nox-button ghost small"
-          title="Unstage"
-          onclick={() => void git.unstage([absolute(entry)])}
+          title={actionTitle('Unstage')}
+          disabled={unresolved}
+          onclick={() => void git.unstage(unstageTargets(entry))}
         >
           <Icon name="minus" size={11} />
         </button>
@@ -245,15 +294,27 @@
     color: var(--nox-text);
   }
 
+  .row .open.disabled {
+    color: var(--nox-text-muted);
+  }
+
+  /* opacity, not display:none: a hidden button is unfocusable, which took
+     stage/unstage/view out of the tab order entirely (keyboard users could
+     never reach them). Revealed on hover for pointer users and on
+     :focus-within so Tab still finds them — the house pattern, see
+     ExplorerPanel.svelte's .header-actions. */
   .row .actions {
-    display: none;
+    display: flex;
     align-items: center;
     gap: var(--nox-sp-1);
     flex: none;
+    opacity: 0;
+    transition: opacity var(--nox-dur-base) var(--nox-ease);
   }
 
-  .row:hover .actions {
-    display: flex;
+  .row:hover .actions,
+  .row .actions:focus-within {
+    opacity: 1;
   }
 
   /* The tokens the gutter already uses (editor/theme.ts): added green,

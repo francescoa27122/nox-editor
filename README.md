@@ -254,8 +254,7 @@ formatting, from a `servers.json` you write. Run **Configure Language Servers**
 from the palette and Nox creates it with a working `typescript-language-server`
 entry to start from; **Reload Language Servers** picks up your edits. Nox never
 starts a server you did not list there, and Format on Save is off until you
-turn it on. Not there yet: Git integration, plugins. Those are next, in that
-order. See [ROADMAP.md](ROADMAP.md).
+turn it on. Not there yet: plugins. See [ROADMAP.md](ROADMAP.md).
 
 ## Under the hood
 

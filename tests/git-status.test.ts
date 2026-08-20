@@ -59,6 +59,19 @@ describe('parseGitStatus', () => {
     expect(status.oid).toBe('e11ea47bca5991343e292175cbc91646cab62bd1');
   });
 
+  it('reads the synthetic # git.toplevel record Rust prefixes onto the raw output', () => {
+    const withToplevel = `# git.toplevel /Users/x/repo\0${FIXTURE}`;
+    const status = parseGitStatus(withToplevel);
+    expect(status.toplevel).toBe('/Users/x/repo');
+    // The rest still parses with the prefix present.
+    expect(status.branch).toBe('main');
+    expect(status.staged).toContainEqual({ path: 'a.txt', status: 'M' });
+  });
+
+  it('leaves toplevel null when the record is absent', () => {
+    expect(parseGitStatus(FIXTURE).toplevel).toBeNull();
+  });
+
   it('parses an empty repo status (headers only) to empty lists', () => {
     const status = parseGitStatus('# branch.oid (initial)\0# branch.head main\0');
     expect(status.branch).toBe('main');

@@ -10,10 +10,10 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Stage, commit, branch.** A Git panel in the sidebar — a focused view, not
   a full client. Files you have touched are listed staged and unstaged, each
-  with an S/U toggle; write a commit message and **Commit** lands it; the
-  command palette gets a branch picker with no prefix of its own, listing
-  local branches and offering **Create branch…** first. Open it from the
-  palette (**Show Git**) or the rail.
+  with a stage/unstage button (+/−); write a commit message and **Commit**
+  lands it; the command palette gets a branch picker with no prefix of its
+  own, listing local branches and offering **Create branch…** first. Open it
+  from the palette (**Show Git**) or the rail.
   - Six git commands underneath, all argv-fixed — `status`, `branch`, `add`,
     `reset`, `commit`, `switch` — never a shell, and a refusal comes back in
     git's own words rather than a translated one.

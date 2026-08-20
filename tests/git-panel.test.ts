@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import GitPanel from '../src/ui/GitPanel.svelte';
 import CommandPalette from '../src/ui/CommandPalette.svelte';
+import { parseGitStatus } from '../src/core/git-status';
 import { flush, mountComponent, type Mounted } from './support/component';
 
 /**
@@ -353,5 +355,139 @@ describe('the branch picker mode', () => {
     } finally {
       picker.unmount();
     }
+  });
+});
+
+describe('row actions stay in the tab order', () => {
+  // jsdom does not apply CSS layout — a stylesheet rule of `display: none`
+  // does not stop `.focus()` from landing there in this harness (verified:
+  // jsdom's focus algorithm does not consult cascaded `display`), so the
+  // regression this guards (buttons pulled out of the tab order by
+  // `display: none`, restored to reachability via `.section.staged` etc.)
+  // cannot be pinned by driving real focus here. Asserting the rule shape
+  // in the source is the honest substitute: reveal by opacity, on both
+  // `:hover` and `:focus-within`, never by `display`.
+  it('reveals the actions via opacity and :focus-within, never display:none', () => {
+    const source = readFileSync('src/ui/GitPanel.svelte', 'utf8');
+    const baseRule = /\.row \.actions \{([^}]*)\}/.exec(source)?.[1];
+    expect(baseRule, 'expected a .row .actions rule in GitPanel.svelte').toBeDefined();
+    expect(baseRule).toMatch(/opacity:\s*0/);
+    expect(baseRule).not.toMatch(/display:\s*none/);
+    // The reveal must fire on focus, not only on pointer hover — otherwise
+    // a keyboard user tabbing to a hidden-by-opacity button can activate it
+    // (opacity does not block focus) but never sees it happen.
+    expect(source).toMatch(/\.actions:focus-within/);
+  });
+});
+
+describe('joining status paths onto the repository', () => {
+  it('joins on the repo toplevel, not the workspace root, when the workspace opens below it', async () => {
+    // The bug this pins: the panel used to join a toplevel-relative status
+    // path onto the *workspace* root. When the workspace is opened below
+    // the repo root, that silently targets whatever same-named file lives
+    // at that wrong depth — here, a decoy nested under the workspace root
+    // while the real modified file sits at the repo root above it.
+    mounted = mountComponent(GitPanel);
+    const { app, platform, container } = mounted;
+    app.git.start();
+    platform.seedGitRepo('/w');
+    platform.seedGitBase('/w/a.txt', 'one\n');
+    platform.seedFile('/w/a.txt', 'one\ntwo\n');
+    platform.seedFile('/w/sub/a.txt', 'decoy\n');
+    await app.workspace.openFolder('/w/sub');
+    await settle();
+
+    const row = [...container.querySelectorAll('.section.changes .row')].find(
+      (r) => (r.querySelector('.open') as HTMLElement | null)?.textContent?.trim() === 'a.txt',
+    )!;
+    (row.querySelector('[title="Stage"]') as HTMLElement).click();
+    await settle();
+    await settle();
+
+    const after = parseGitStatus(await platform.gitStatus('/w'));
+    expect(after.staged).toContainEqual({ path: 'a.txt', status: 'M' });
+    expect(after.staged.some((e) => e.path === 'sub/a.txt')).toBe(false);
+    // The decoy is exactly as it was: untracked, never touched.
+    expect(after.unstaged).toContainEqual({ path: 'sub/a.txt', status: 'U' });
+  });
+
+  it('refuses the join and disables a row\'s actions, with a title saying why, when the toplevel is unknown', async () => {
+    const { app, container } = await setup();
+    const current = app.git.status.get()!;
+    app.git.status.set({ ...current, toplevel: null });
+    flush();
+
+    const row = [...container.querySelectorAll('.section.changes .row')].find((r) =>
+      r.textContent!.includes('edited.ts'),
+    )!;
+    const openEl = row.querySelector('.open') as HTMLElement;
+    // Rows still render — this is a refusal, not a crash.
+    expect(openEl.textContent).toContain('edited.ts');
+    expect(openEl.tagName).toBe('SPAN');
+    expect(openEl.getAttribute('title') ?? '').toMatch(/repository root/i);
+
+    const actionButtons = [...row.querySelectorAll('.actions button')];
+    expect(actionButtons.length).toBeGreaterThan(0);
+    for (const button of actionButtons) {
+      expect((button as HTMLButtonElement).disabled, button.outerHTML).toBe(true);
+      expect(button.getAttribute('title') ?? '').toMatch(/repository root/i);
+    }
+  });
+});
+
+describe('unstaging a rename', () => {
+  it('resets both the new path and the original path, so the old path\'s deletion does not stay staged', async () => {
+    // MemoryPlatform's status fake, unlike real porcelain, does not fuse a
+    // delete+add pair into one `R` record with `origPath` — so the raw
+    // staged shape it produces here (old.txt D, new.txt A) is fed to the
+    // panel reshaped into the porcelain-collapsed form a real rename would
+    // carry, which is the shape the fix (GitPanel's `unstageTargets`) has
+    // to act correctly over.
+    const { app, container, platform } = await setup();
+    platform.seedGitBase('/w/old.txt', 'body\n');
+    platform.seedFile('/w/old.txt', 'body\n');
+    platform.externalRename('/w/old.txt', '/w/new.txt');
+    await platform.gitStage('/w', ['/w/old.txt', '/w/new.txt']);
+
+    const raw = parseGitStatus(await platform.gitStatus('/w'));
+    expect(raw.staged).toContainEqual({ path: 'old.txt', status: 'D' });
+    expect(raw.staged).toContainEqual({ path: 'new.txt', status: 'A' });
+
+    app.git.status.set({
+      ...raw,
+      staged: [{ path: 'new.txt', status: 'R', origPath: 'old.txt' }],
+    });
+    flush();
+
+    (container.querySelector('.section.staged .row [title="Unstage"]') as HTMLElement).click();
+    await settle();
+    await settle();
+
+    const after = parseGitStatus(await platform.gitStatus('/w'));
+    expect(after.staged.some((e) => e.path === 'old.txt')).toBe(false);
+    expect(after.staged.some((e) => e.path === 'new.txt')).toBe(false);
+  });
+});
+
+describe('a deleted row', () => {
+  it('disables open on a deletion but keeps the row\'s stage/unstage action', async () => {
+    const { app, container, platform } = await setup();
+    platform.seedGitBase('/w/gone.ts', 'bye\n');
+    platform.seedFile('/w/gone.ts', 'bye\n');
+    platform.externalRemove('/w/gone.ts');
+    await app.git.refreshStatus();
+    await settle();
+
+    const row = [...container.querySelectorAll('.section.changes .row')].find((r) =>
+      r.textContent!.includes('gone.ts'),
+    )!;
+    const openEl = row.querySelector('.open') as HTMLElement;
+    expect(openEl.tagName).toBe('SPAN');
+    expect(openEl.getAttribute('title') ?? '').toMatch(/deleted/i);
+
+    // The row's other actions are unaffected — a deletion can still be
+    // (un)staged, only "open a file that is gone" is what is switched off.
+    const stage = row.querySelector('[title="Stage"]') as HTMLButtonElement;
+    expect(stage.disabled).toBe(false);
   });
 });
