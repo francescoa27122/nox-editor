@@ -109,12 +109,28 @@
     detail?: string;
     badge?: string;
     hint?: string;
+    /**
+     * The keyword this row matched on, when the title itself did not match.
+     * Rendered as a chip so a keyword hit does not look like a mis-hit with
+     * zero highlighted characters.
+     */
+    keyword?: string;
     disabled?: boolean;
     icon: IconName;
     accept: () => void;
   }
 
-  const rows = $derived.by<Row[]>(() => {
+  /**
+   * `total` is the real match count before the per-mode display caps, so the
+   * header count can be honest about truncation ("first M of N") instead of
+   * presenting the sliced length as the whole story.
+   */
+  interface RowsResult {
+    rows: Row[];
+    total: number;
+  }
+
+  const result = $derived.by<RowsResult>(() => {
     void $commandVersion;
     if (effectiveMode === 'commands') return commandRows(term);
     if (effectiveMode === 'buffers') return bufferRows(term);
@@ -122,6 +138,8 @@
     if (effectiveMode === 'symbols') return symbolRows(term);
     return fileRows(term);
   });
+  const rows = $derived(result.rows);
+  const total = $derived(result.total);
 
   /**
    * Where the cursor lands when the result set changes.
@@ -143,15 +161,15 @@
     input?.focus();
   });
 
-  function commandRows(query: string): Row[] {
+  function commandRows(query: string): RowsResult {
     const scored: { row: Row; score: number }[] = [];
 
     for (const command of commands.palette()) {
       const label = command.category ? `${command.category}: ${command.title}` : command.title;
       const match = fuzzyMatch(query, label);
-      const keywordMatch =
-        match ?? matchAgainstKeywords(query, command);
-      if (!keywordMatch) continue;
+      const keywordMatch = match ? null : matchAgainstKeywords(query, command);
+      const won = match ?? keywordMatch;
+      if (!won) continue;
 
       const enabled = commands.isEnabled(command.id);
       // Application bindings win; `keyHint` covers the CodeMirror-owned ones.
@@ -159,7 +177,7 @@
         keymap.displayFor(command.id) ??
         (command.keyHint ? formatChord(normalizeChord(command.keyHint)) : undefined);
       scored.push({
-        score: keywordMatch.score - (enabled ? 0 : 1000),
+        score: won.score - (enabled ? 0 : 1000),
         row: {
           key: command.id,
           title: label,
@@ -167,6 +185,9 @@
           disabled: !enabled,
           icon: 'command',
           ...(hint ? { hint } : {}),
+          // Only a keyword-won match carries the chip; a title hit already
+          // shows where it landed via the highlights.
+          ...(keywordMatch ? { keyword: keywordMatch.keyword } : {}),
           accept: () => {
             ui.closeOverlay();
             void commands.execute(command.id);
@@ -176,19 +197,40 @@
     }
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 200).map((s) => s.row);
+
+    // With an empty query, float this session's recently-run commands to the
+    // top in most-recent-first order, skipping any that are disabled right
+    // now; everything else keeps its order below. With a query the ranking
+    // stays pure fuzzy score — no recency blending. Decision: the command set
+    // is small, and a predictable "what you typed wins" ranking beats a
+    // cleverer one that reorders under your fingers.
+    if (query.length === 0) {
+      const rank = new Map(commands.recentCommands().map((id, index) => [id, index]));
+      const recent: typeof scored = [];
+      const rest: typeof scored = [];
+      for (const entry of scored) {
+        if (!entry.row.disabled && rank.has(entry.row.key)) recent.push(entry);
+        else rest.push(entry);
+      }
+      recent.sort((a, b) => rank.get(a.row.key)! - rank.get(b.row.key)!);
+      scored.length = 0;
+      scored.push(...recent, ...rest);
+    }
+
+    return { rows: scored.slice(0, 200).map((s) => s.row), total: scored.length };
   }
 
   function matchAgainstKeywords(query: string, command: Command) {
     for (const keyword of command.keywords ?? []) {
       const match = fuzzyMatch(query, keyword);
-      // Keyword hits rank below title hits so exact titles always win.
-      if (match) return { score: match.score * 0.6, positions: [] as number[] };
+      // Keyword hits rank below title hits so exact titles always win. The
+      // keyword itself travels along so the row can say what it matched on.
+      if (match) return { score: match.score * 0.6, positions: [] as number[], keyword };
     }
     return null;
   }
 
-  function fileRows(query: string): Row[] {
+  function fileRows(query: string): RowsResult {
     const root = $rootPath;
     const candidates = query.length === 0 ? recentFirst() : $fileIndex;
 
@@ -225,7 +267,9 @@
     }
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, 100).map((s) => s.row);
+    // `total` is capped by the 4000-candidate scoring break above, so on a
+    // huge index it is a lower bound — still far more honest than the slice.
+    return { rows: scored.slice(0, 100).map((s) => s.row), total: scored.length };
   }
 
   /**
@@ -236,7 +280,7 @@
    * than "find me this file". With no query the order is left alone — MRU is
    * the ranking, and fuzzy scoring would only scramble it.
    */
-  function bufferRows(query: string): Row[] {
+  function bufferRows(query: string): RowsResult {
     // Establishes the reactive dependency; the order itself comes from the
     // MRU list, which the snapshot signal does not carry.
     void $buffers;
@@ -270,7 +314,8 @@
     // Score first, then MRU as the tie-break — which with no query is the
     // only thing separating them.
     scored.sort((a, b) => b.score - a.score || a.order - b.order);
-    return scored.map((s) => s.row);
+    // No display cap here: every open buffer is shown, so total === rows.
+    return { rows: scored.map((s) => s.row), total: scored.length };
   }
 
   /** With an empty query, show recents first — that is what people want. */
@@ -280,46 +325,53 @@
     return [...recents, ...$fileIndex.filter((p) => !seen.has(p))].slice(0, 100);
   }
 
-  function lineRows(query: string): Row[] {
+  function lineRows(query: string): RowsResult {
     const view = app.view.get();
-    if (!view) return [];
+    if (!view) return { rows: [], total: 0 };
 
-    const total = view.state.doc.lines;
+    // Named to stay clear of the component-level `total` derived above.
+    const totalLines = view.state.doc.lines;
     const [rawLine, rawColumn] = query.split(':');
     const line = Number.parseInt(rawLine ?? '', 10);
     const column = Number.parseInt(rawColumn ?? '', 10);
 
     if (!Number.isFinite(line)) {
-      return [
-        {
-          key: 'goto-hint',
-          title: `Current file has ${total} lines`,
-          positions: [],
-          detail: 'Type a line number, optionally line:column',
-          disabled: true,
-          icon: 'info',
-          accept: () => {},
-        },
-      ];
+      return {
+        rows: [
+          {
+            key: 'goto-hint',
+            title: `Current file has ${totalLines} lines`,
+            positions: [],
+            detail: 'Type a line number, optionally line:column',
+            disabled: true,
+            icon: 'info',
+            accept: () => {},
+          },
+        ],
+        total: 1,
+      };
     }
 
-    const clamped = Math.min(Math.max(1, line), total);
+    const clamped = Math.min(Math.max(1, line), totalLines);
     const preview = view.state.doc.line(clamped).text.trim().slice(0, 90);
 
-    return [
-      {
-        key: 'goto',
-        title: `Go to line ${clamped}${Number.isFinite(column) ? `, column ${column}` : ''}`,
-        positions: [],
-        icon: 'arrow-down',
-        ...(preview ? { detail: preview } : {}),
-        ...(line !== clamped ? { badge: `clamped from ${line}` } : {}),
-        accept: () => {
-          ui.closeOverlay();
-          app.goToLine(clamped, Number.isFinite(column) ? column : 1);
+    return {
+      rows: [
+        {
+          key: 'goto',
+          title: `Go to line ${clamped}${Number.isFinite(column) ? `, column ${column}` : ''}`,
+          positions: [],
+          icon: 'arrow-down',
+          ...(preview ? { detail: preview } : {}),
+          ...(line !== clamped ? { badge: `clamped from ${line}` } : {}),
+          accept: () => {
+            ui.closeOverlay();
+            app.goToLine(clamped, Number.isFinite(column) ? column : 1);
+          },
         },
-      },
-    ];
+      ],
+      total: 1,
+    };
   }
 
   /**
@@ -344,13 +396,16 @@
   };
 
   /** A single disabled row, the shape `lineRows` uses to explain an empty list. */
-  function hintRow(title: string, detail: string): Row[] {
-    return [
-      { key: 'symbol-hint', title, positions: [], detail, disabled: true, icon: 'info', accept: () => {} },
-    ];
+  function hintRow(title: string, detail: string): RowsResult {
+    return {
+      rows: [
+        { key: 'symbol-hint', title, positions: [], detail, disabled: true, icon: 'info', accept: () => {} },
+      ],
+      total: 1,
+    };
   }
 
-  function symbolRows(query: string): Row[] {
+  function symbolRows(query: string): RowsResult {
     const view = app.view.get();
     // Settled before there is anything to parse or a language to ask about,
     // which is why it is the one state `symbolListState` does not name.
@@ -397,9 +452,13 @@
         );
     }
 
-    const scored = query
-      ? fuzzyFilter(query, symbols, (s) => s.qualified, 200)
-      : symbols.slice(0, 200).map((item) => ({ item, score: 0, positions: [] as number[] }));
+    // No limit passed: `fuzzyFilter` sorts the full match set before any
+    // slice regardless, and the pre-slice count is what makes the header
+    // count honest when the 200-cap truncates a fully-parsed file.
+    const matches = query
+      ? fuzzyFilter(query, symbols, (s) => s.qualified)
+      : symbols.map((item) => ({ item, score: 0, positions: [] as number[] }));
+    const scored = matches.slice(0, 200);
 
     const built = scored.map(({ item, positions }) => {
       // The symbol's start, not the start of its line: §7 says accepting puts
@@ -418,7 +477,7 @@
       };
     });
 
-    return state.partial
+    const rows = state.partial
       ? [
           ...built,
           {
@@ -432,6 +491,9 @@
           },
         ]
       : built;
+    // The appended "still parsing" hint counts on both sides so an uncapped
+    // partial list still renders a plain count rather than "first N of N-1".
+    return { rows, total: matches.length + (state.partial ? 1 : 0) };
   }
 
   function move(delta: number) {
@@ -491,7 +553,10 @@
       aria-activedescendant={rows[selected] ? `nox-row-${selected}` : undefined}
     />
     {#if rows.length > 0 && effectiveMode !== 'line'}
-      <span class="result-count">{rows.length}</span>
+      <!-- Honest about the display caps: a sliced list says so. -->
+      <span class="result-count">
+        {total === rows.length ? rows.length : `first ${rows.length} of ${total}`}
+      </span>
     {/if}
   </div>
 
@@ -516,6 +581,10 @@
             <span class:hit={segment.hit}>{segment.text}</span>
           {/each}
         </span>
+
+        {#if row.keyword}
+          <span class="keyword">{row.keyword}</span>
+        {/if}
 
         {#if row.detail}
           <span class="detail">{row.detail}</span>
@@ -650,6 +719,19 @@
   .label .hit {
     color: var(--nox-accent);
     font-weight: var(--nox-fw-medium);
+  }
+
+  /* Why this row matched when the title shows no highlight: the keyword it
+     hit. Same quiet register as the footer legend — informative, not loud. */
+  .keyword {
+    flex: none;
+    font-size: var(--nox-fs-2xs);
+    color: var(--nox-text-faint);
+    border: 1px solid var(--nox-border);
+    border-radius: var(--nox-r-full);
+    padding: 0 var(--nox-sp-3);
+    line-height: 15px;
+    white-space: nowrap;
   }
 
   .detail {

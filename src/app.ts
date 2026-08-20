@@ -1700,6 +1700,49 @@ export class NoxApp {
           }
         },
       },
+      // The scoped closes take an optional BufferId from the tab context menu
+      // and fall back to the active buffer when run from the palette.
+      // `workspace.closeOthers` force-discards dirty buffers (fine for the
+      // programmatic API); these route every close through `closeBuffer` so
+      // a dirty tab gets its save prompt, and stop when one is cancelled.
+      {
+        id: 'file.closeOthers',
+        title: 'Close Other Files',
+        category: 'File',
+        enabled: bufferEnabled,
+        run: async (arg) => {
+          const keep = typeof arg === 'string' ? arg : this.workspace.activeId.get();
+          if (!keep) return;
+          const group = this.workspace.groups.get().find((g) => g.tabs.some((t) => t.id === keep));
+          for (const tab of group?.tabs ?? []) {
+            if (tab.id !== keep && !(await this.closeBuffer(tab.id))) break;
+          }
+        },
+      },
+      {
+        id: 'file.closeToRight',
+        title: 'Close Files to the Right',
+        category: 'File',
+        enabled: bufferEnabled,
+        run: async (arg) => {
+          const anchorId = typeof arg === 'string' ? arg : this.workspace.activeId.get();
+          if (!anchorId) return;
+          const group = this.workspace.groups.get().find((g) => g.tabs.some((t) => t.id === anchorId));
+          const index = group ? group.tabs.findIndex((t) => t.id === anchorId) : -1;
+          if (!group || index < 0) return;
+          for (const tab of group.tabs.slice(index + 1)) {
+            if (!(await this.closeBuffer(tab.id))) break;
+          }
+        },
+      },
+      {
+        id: 'file.closeSaved',
+        title: 'Close Saved Files',
+        category: 'File',
+        enabled: bufferEnabled,
+        run: (arg) => this.workspace.closeSaved(typeof arg === 'string' ? arg : undefined),
+      },
+
       // --- Explorer -------------------------------------------------------
       // Each takes an optional path argument from the context menu and falls
       // back to `targetPath()` when run from the palette.

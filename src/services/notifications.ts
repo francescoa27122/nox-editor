@@ -8,11 +8,23 @@ import { Signal } from '@core/signal';
 
 export type NotificationKind = 'info' | 'success' | 'warning' | 'error';
 
+export interface NotificationAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Notification {
   id: number;
   kind: NotificationKind;
   message: string;
   detail?: string;
+  /**
+   * Buttons on the toast. Running one dismisses it. For the small class of
+   * moments where the fix is one obvious click — reload, retry, show — not
+   * for decisions, which stay modal ("Anything that needs a decision is a
+   * modal, not a toast" — this file's own header, still true).
+   */
+  actions?: NotificationAction[];
   /** Milliseconds before auto-dismiss. Errors stay until dismissed. */
   timeout: number;
 }
@@ -32,12 +44,13 @@ export class NotificationService {
   notify(
     kind: NotificationKind,
     message: string,
-    options: { detail?: string; timeout?: number } = {},
+    options: { detail?: string; timeout?: number; actions?: NotificationAction[] } = {},
   ): number {
     const id = this.#nextId++;
     const timeout = options.timeout ?? DEFAULT_TIMEOUTS[kind];
     const notification: Notification = { id, kind, message, timeout };
     if (options.detail) notification.detail = options.detail;
+    if (options.actions?.length) notification.actions = options.actions;
 
     // Keep the stack short — but only the auto-dismissing kinds compete for
     // the four slots. A sticky notification (timeout 0, i.e. an error) was

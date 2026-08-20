@@ -133,6 +133,8 @@ class Buffer {
   encoding: Encoding;
   state: EditorState;
   savedDoc: Text;
+  /** What `eol` was at the last save, for the dirty check above. */
+  savedEol: Eol;
   changeCount = 0;
   savedChangeCount = 0;
   /**
@@ -169,6 +171,7 @@ class Buffer {
     this.encoding = init.encoding ?? 'utf-8';
     this.state = init.state;
     this.savedDoc = init.state.doc;
+    this.savedEol = init.eol;
   }
 
   get isUntitled(): boolean {
@@ -176,6 +179,9 @@ class Buffer {
   }
 
   get isDirty(): boolean {
+    // An EOL switch changes what a save writes without touching the doc, so
+    // it dirties the buffer on its own.
+    if (this.eol !== this.savedEol) return true;
     if (this.changeCount === this.savedChangeCount) return false;
     const doc = this.state.doc;
     if (doc.length !== this.savedDoc.length) return true;
@@ -453,6 +459,19 @@ export class WorkspaceService {
     }
   }
 
+  /**
+   * Close every saved tab in a group — the one holding `within`, or the
+   * active group. Dirty buffers are skipped, never prompted: this is the
+   * sweep-away-what-is-safe gesture, so it must not be able to destroy
+   * anything. (Contrast `closeOthers`, which force-discards.)
+   */
+  closeSaved(within?: BufferId): void {
+    const group = (within ? this.#groupOf(within) : null) ?? this.#activeGroup();
+    for (const id of [...group.order]) {
+      this.close(id); // refuses dirty buffers without force — exactly the point
+    }
+  }
+
   closeAll(options: { force?: boolean } = {}): boolean {
     let allClosed = true;
     for (const id of [...this.#map.keys()]) {
@@ -654,6 +673,21 @@ export class WorkspaceService {
     }
   }
 
+  /**
+   * Switch what a save will write at each line's end.
+   *
+   * The document itself is canonical LF and does not change; `encode`
+   * applies `eol` at save time. Dirties the buffer (see `isDirty`) because
+   * the file on disk no longer matches what a save would write.
+   */
+  setEol(id: BufferId, eol: Eol): void {
+    const buffer = this.#map.get(id);
+    if (!buffer || buffer.eol === eol) return;
+    buffer.eol = eol;
+    buffer.revision++;
+    this.#sync();
+  }
+
   /** Replace a buffer's state outright (used by session restore and reload). */
   resetState(id: BufferId, state: EditorState): void {
     const buffer = this.#map.get(id);
@@ -713,6 +747,7 @@ export class WorkspaceService {
 
     buffer.savedDoc = buffer.state.doc;
     buffer.savedChangeCount = buffer.changeCount;
+    buffer.savedEol = buffer.eol;
     buffer.externalState = 'none';
 
     // Record the mtime we just produced so the watch event this write is about
@@ -784,6 +819,7 @@ export class WorkspaceService {
     // follow the file rather than keep asserting what it used to be.
     const { doc, eol, encoding } = decode(raw);
     buffer.eol = eol;
+    buffer.savedEol = eol;
     buffer.encoding = encoding;
 
     if (doc === buffer.state.doc.toString()) {

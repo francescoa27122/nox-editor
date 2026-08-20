@@ -6,6 +6,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The conveniences your hands expect.** Right-click a tab: Close Others,
+  Close to the Right, Close Saved, Copy Path, Reveal in Explorer, Split —
+  and closing never discards silently; dirty tabs get their save prompt.
+  Two files with the same name now tell themselves apart by their folder.
+  A scrolled tab strip shows edge fades and a slim scrollbar on hover. The
+  status bar counts errors and warnings and clicking it opens Problems;
+  clicking the line-endings item switches LF/CRLF, and the file honestly
+  reads as unsaved until you save it. The Problems rail icon carries the
+  error count; clicking the active rail icon collapses the sidebar (⌘B
+  brings it back); References has its own icon at last. The palette floats
+  your recently used commands to the top, shows which keyword matched when
+  the title didn't, and stops reporting a capped list as the total. Toasts
+  can carry a button now — "changed on disk" offers *Reload from Disk*.
+
 ### Changed
 
 - **One visual language across the panels.** The sidebar panels now share

@@ -186,10 +186,19 @@ export class FileWatcherService {
     this.#workspace.markExternalState(id, 'modified');
     this.#workspace.events.emit('external-change', { id, state: 'modified', reloaded: false });
     if (this.#warnOnce(id)) {
-      this.#notifications.warn(
-        `${basename(path)} changed on disk`,
-        'Your unsaved changes are kept. Nox will ask before overwriting the file.',
-      );
+      this.#notifications.notify('warning', `${basename(path)} changed on disk`, {
+        detail: 'Your unsaved changes are kept. Nox will ask before overwriting the file.',
+        // The one-obvious-click case toast actions exist for: take the disk's
+        // version now instead of meeting a dialog at save time.
+        actions: [
+          {
+            label: 'Reload from Disk',
+            run: () => {
+              void this.#workspace.reloadFromDisk(id).then(() => this.clearWarning(id));
+            },
+          },
+        ],
+      });
     }
   }
 

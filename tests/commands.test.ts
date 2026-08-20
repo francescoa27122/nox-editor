@@ -86,6 +86,42 @@ describe('CommandRegistry', () => {
     registry.register({ id: 'x', title: 'X', run: () => {} });
     expect(registry.version.get()).toBeGreaterThan(before);
   });
+
+  // The recent-command list feeding the palette's MRU float. Session-scoped
+  // by design (not persisted), so these pin only the in-memory contract.
+  describe('recentCommands', () => {
+    it('lists executed ids most recent first, deduplicated', async () => {
+      const registry = new CommandRegistry();
+      for (const id of ['a', 'b', 'c']) registry.register({ id, title: id, run: () => {} });
+
+      await registry.execute('a');
+      await registry.execute('b');
+      await registry.execute('a');
+      expect(registry.recentCommands()).toEqual(['a', 'b']);
+    });
+
+    it('keeps at most eight ids, dropping the oldest', async () => {
+      const registry = new CommandRegistry();
+      for (let i = 0; i < 10; i++) {
+        registry.register({ id: `c${i}`, title: `C${i}`, run: () => {} });
+      }
+      for (let i = 0; i < 10; i++) await registry.execute(`c${i}`);
+
+      expect(registry.recentCommands()).toHaveLength(8);
+      expect(registry.recentCommands()[0]).toBe('c9');
+      expect(registry.recentCommands()).not.toContain('c0');
+      expect(registry.recentCommands()).not.toContain('c1');
+    });
+
+    it('records nothing for a refused execution', async () => {
+      const registry = new CommandRegistry();
+      registry.register({ id: 'off', title: 'Off', enabled: () => false, run: () => {} });
+
+      await registry.execute('off');
+      await registry.execute('unknown');
+      expect(registry.recentCommands()).toEqual([]);
+    });
+  });
 });
 
 describe('chord parsing', () => {

@@ -9,6 +9,7 @@
   import ProblemsPanel from './ProblemsPanel.svelte';
   import ReferencesPanel from './ReferencesPanel.svelte';
   import Icon, { type IconName } from './Icon.svelte';
+  import { problemTotals } from './problems';
 
   /**
    * The sidebar shell.
@@ -20,8 +21,12 @@
    */
 
   const app = useApp();
-  const { ui, keymap, agentConfig, agents } = app;
+  const { ui, keymap, agentConfig, agents, config, lsp } = app;
+  const diagnostics = lsp.diagnostics;
   const view = ui.sidebarView;
+  // The rail's one ambient status: how many errors the project has. An
+  // activity rail that shows nothing until clicked is not earning its row.
+  const errorCount = $derived(problemTotals($diagnostics).errors);
   const configured = agentConfig.agents;
   const providers = agents.providers;
 
@@ -31,7 +36,7 @@
     { id: 'notes', icon: 'note', label: 'Notes', command: 'notes.focus' },
     { id: 'answers', icon: 'info', label: 'Answers', command: 'answers.focus' },
     { id: 'problems', icon: 'warning', label: 'Problems', command: 'problems.focus' },
-    { id: 'references', icon: 'search', label: 'References', command: 'references.focus' },
+    { id: 'references', icon: 'references', label: 'References', command: 'references.focus' },
   ];
 
   // The same policy `AgentPanel.svelte` and `NoxApp.#runnableAgents()` use, so
@@ -63,9 +68,19 @@
         aria-pressed={$view === entry.id}
         aria-label={entry.label}
         title={hint ? `${entry.label} (${hint})` : entry.label}
-        onclick={() => ui.showView(entry.id)}
+        onclick={() => {
+          // Re-clicking the current view collapses the sidebar — the
+          // universal rail convention. ⌘B or the title-bar toggle reopens.
+          if ($view === entry.id) config.set('workbench.showExplorer', false);
+          else ui.showView(entry.id);
+        }}
       >
         <Icon name={entry.icon} size={15} />
+        {#if entry.id === 'problems' && errorCount > 0}
+          <span class="badge" aria-label="{errorCount} errors">
+            {errorCount > 99 ? '99+' : errorCount}
+          </span>
+        {/if}
       </button>
     {/each}
   </nav>
@@ -129,5 +144,25 @@
   .rail-button.active {
     color: var(--nox-accent);
     background: var(--nox-active);
+  }
+
+  .badge {
+    position: absolute;
+    top: -3px;
+    right: -4px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    border-radius: var(--nox-r-full);
+    background: var(--nox-danger);
+    color: var(--nox-bg-base);
+    font-size: 9px;
+    font-weight: var(--nox-fw-semibold);
+    line-height: 13px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    /* Over the icon's corner, sitting on the rail's ground so it reads as a
+       counter, not part of the glyph. */
+    box-shadow: 0 0 0 2px var(--nox-bg-panel);
   }
 </style>

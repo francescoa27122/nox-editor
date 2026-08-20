@@ -3,9 +3,12 @@
   import { useApp } from './context';
   import Icon from './Icon.svelte';
   import { serverStatusLabel, serverStatusTitle } from './lsp-status';
+  import { problemTotals } from './problems';
 
   const app = useApp();
   const { workspace, config, commands, files, jobs, review, ui, lsp } = app;
+  const diagnostics = lsp.diagnostics;
+  const problemCounts = $derived(problemTotals($diagnostics));
 
   const buffers = workspace.buffers;
   const activeId = workspace.activeId;
@@ -65,6 +68,21 @@
       >
         <Icon name="file" size={11} />
         Review · {pendingReview.hunks}/{pendingReview.total}
+      </button>
+    {/if}
+
+    {#if problemCounts.errors + problemCounts.warnings > 0}
+      <button
+        class="item problems"
+        title="Show Problems (⌘⇧M)"
+        onclick={() => void commands.execute('problems.focus')}
+      >
+        {#if problemCounts.errors > 0}
+          <span class="problem-part error"><Icon name="error" size={10} />{problemCounts.errors}</span>
+        {/if}
+        {#if problemCounts.warnings > 0}
+          <span class="problem-part warning"><Icon name="warning" size={10} />{problemCounts.warnings}</span>
+        {/if}
       </button>
     {/if}
 
@@ -150,9 +168,13 @@
         {active.encoding === 'utf-8-bom' ? 'UTF-8 BOM' : 'UTF-8'}
       </span>
 
-      <span class="item static" title="Line endings">
+      <button
+        class="item"
+        title="Switch line endings — what a save writes at each line's end"
+        onclick={() => workspace.setEol(active.id, active.eol === '\r\n' ? '\n' : '\r\n')}
+      >
         {active.eol === '\r\n' ? 'CRLF' : 'LF'}
-      </span>
+      </button>
 
       <span
         class="item static"
@@ -219,6 +241,27 @@
 
   .item.static {
     cursor: default;
+    /* Visibly not a control: the audit found clickable and inert items
+       identical, discoverable only by accidental hover. */
+    color: var(--nox-text-faint);
+  }
+
+  .item.static:hover {
+    background: none;
+  }
+
+  .problem-part {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .problem-part.error :global(svg) {
+    color: var(--nox-danger);
+  }
+
+  .problem-part.warning :global(svg) {
+    color: var(--nox-warning);
   }
 
   .item.muted {

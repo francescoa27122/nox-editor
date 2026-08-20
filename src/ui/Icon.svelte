@@ -29,6 +29,9 @@
     restore: 'M4 6.5h5.5V12H4Z M6.5 6.5V4H12v5.5H9.5',
     plus: 'M8 3.5v9M3.5 8h9',
     search: 'M7.25 11.5a4.25 4.25 0 1 0 0-8.5 4.25 4.25 0 0 0 0 8.5ZM10.4 10.4 13.5 13.5',
+    // A dotted list of places — the References view. Added so it stops
+    // sharing `search` with the Search view one button over.
+    references: 'M6 4.5h7.5M6 8h7.5M6 11.5h7.5 M2.7 4.5h.1M2.7 8h.1M2.7 11.5h.1',
     replace:
       'M2.5 5.5h5.2a2.8 2.8 0 0 1 0 5.6H5.5 M4 4l-1.5 1.5L4 7 M9.5 10h4M9.5 13h4',
     'arrow-up': 'M8 12.5v-9M4.25 7.25 8 3.5l3.75 3.75',

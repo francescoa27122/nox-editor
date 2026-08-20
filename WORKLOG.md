@@ -8,6 +8,59 @@ are knowledge.**
 
 ---
 
+## 2026-08-19 (PC, UI 3) — Phase C: the conventions
+
+Branch `ui-phase-c`. Three-way split: tabs agent (context menu, overflow,
+name disambiguation), palette agent (MRU, keyword chips, true counts), me
+(status bar, EOL model, toast actions, rail).
+
+Shipped:
+
+- **Tabs**: house ContextMenu on every tab (7 items, keybinding hints,
+  Shift+F10); Close Others / to the Right / Saved as `file.*` commands —
+  the agent refused to copy `workspace.closeOthers`' silent dirty-discard
+  and routed sweeps through `closeBuffer` prompts, stop-on-cancel; edge
+  fades + 4px hover scrollbar (Firefox keeps fades only — can't render
+  4px; Tauri's webviews both can); `core/tab-labels.ts` walk-up
+  disambiguation ("index.ts — ui" vs "index.ts — core").
+- **Palette**: session-scoped 8-deep command MRU floated at empty query
+  (disabled ones not floated); non-empty query stays pure fuzzy — decided
+  and documented, predictability over blending; keyword-won matches show
+  the matched keyword as a chip instead of looking like mis-hits; counts
+  say "first M of N" when capped instead of lying.
+- **Status bar**: ⊗n ⚠n problems indicator (only when nonzero) opening
+  Problems; **EOL is a real switch** backed by `workspace.setEol` and a
+  `savedEol` on the buffer — isDirty now honestly includes "what a save
+  writes changed", save records it, reload resets it; inert items
+  (encoding/language) visibly fainter than clickable ones.
+- **Toasts**: `actions` on notifications (run = dismiss); first adoption:
+  the watcher's "changed on disk" warning offers **Reload from Disk**.
+- **Rail**: error-count badge on Problems; re-click active view collapses
+  the sidebar; References gets its own dotted-list glyph, ending the
+  double-`search` confusion.
+
+Deferred, stated: status-bar **git branch** (arrives with the stage/
+commit row's status read — no branch plumbing exists yet and building a
+throwaway read now would duplicate `nox_git_status`); encoding/language
+pickers (need a quick-pick surface + service-level conversion — Phase D
+material); rail collapse-survival (layout redesign; wants pixels first);
+notification center.
+
+Verified: 1257/1257 (76 files; +5 mine, +9 tab-labels, +4 palette/
+commands), svelte-check 455 files 0/0, build green. Live: the 7-item tab
+menu with hints, EOL flip grows the tab's dirty dot (the honest-dirty
+model visible end to end), zero console errors. Mutations: 4 mine + 3
+agents', all red, all recorded. One agent self-reported wiping its own
+uncommitted work with a careless `git checkout --` mid-mutation and
+redoing it — worth knowing the failure mode exists.
+
+Next: the desktop pass (A+B+C all changed pixels), then Francesco picks:
+Phase D oddments or v0.5 stage/commit.
+
+Confidence: high on behavior; look still wants eyes.
+
+---
+
 ## 2026-08-19 (PC, UI 2) — Phase B: the primitives
 
 Branch `ui-phase-b`. The extraction phase of the audit: two adoption
