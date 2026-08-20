@@ -16,6 +16,7 @@ export type OverlayKind =
   | 'buffers'
   | 'go-to-line'
   | 'go-to-symbol'
+  | 'git-branch'
   | 'settings'
   | 'keybindings';
 

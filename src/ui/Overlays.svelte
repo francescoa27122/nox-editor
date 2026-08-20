@@ -25,7 +25,8 @@
       $overlay === 'quick-open' ||
       $overlay === 'buffers' ||
       $overlay === 'go-to-line' ||
-      $overlay === 'go-to-symbol',
+      $overlay === 'go-to-symbol' ||
+      $overlay === 'git-branch',
   );
 
   function onScrimClick(event: MouseEvent) {

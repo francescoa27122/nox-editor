@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 import GitPanel from '../src/ui/GitPanel.svelte';
+import CommandPalette from '../src/ui/CommandPalette.svelte';
 import { flush, mountComponent, type Mounted } from './support/component';
 
 /**
@@ -219,5 +220,138 @@ describe('commit', () => {
     // The box keeps the message — a failed commit must not eat the words.
     expect((container.querySelector('.commit textarea') as HTMLTextAreaElement).value).toBe('doomed');
     expect(container.querySelector('.section.staged')!.textContent).toContain('edited.ts');
+  });
+});
+
+describe('branch switch and create', () => {
+  it('a refused switch leaves the panel unchanged and shows git\'s words', async () => {
+    const { app, platform, container } = await setup();
+    // A conflicting branch: f.txt differs and the worktree is dirty.
+    platform.seedGitBase('/w/f.txt', 'v1\n');
+    platform.externalWrite('/w/f.txt', 'v1\n');
+    await platform.gitSwitch('/w', 'other', true);
+    platform.externalWrite('/w/f.txt', 'v2\n');
+    await platform.gitStage('/w', ['/w/f.txt']);
+    await platform.gitCommit('/w', 'v2');
+    await platform.gitSwitch('/w', 'main', false);
+    platform.externalWrite('/w/f.txt', 'dirty\n');
+    await app.git.refreshStatus();
+    await settle();
+
+    await app.git.switch('other', false);
+    await settle();
+
+    expect(container.querySelector('.branch-line')!.textContent).toContain('main');
+    expect(
+      app.notifications.items.get().some(
+        (n) => n.kind === 'error' && n.message.includes('Your local changes'),
+      ),
+    ).toBe(true);
+  });
+
+  it('branch create + switch updates the branch line', async () => {
+    const { app, container } = await setup();
+    await app.git.switch('feature/picker', true);
+    await settle();
+    expect(container.querySelector('.branch-line')!.textContent).toContain('feature/picker');
+  });
+});
+
+describe('the branch picker mode', () => {
+  it('lists local branches with Create branch… at the top, prefix-free', async () => {
+    const { app, platform } = await setup();
+    await platform.gitSwitch('/w', 'feature/x', true);
+    await platform.gitSwitch('/w', 'main', false);
+    await app.git.refreshStatus();
+    await settle();
+
+    const picker = mountComponent(CommandPalette, { app, props: { mode: 'git-branch' as const } });
+    try {
+      await settle();
+      const rows = [...picker.container.querySelectorAll('[role="option"]')].map(
+        (r) => r.textContent ?? '',
+      );
+      expect(rows[0]).toContain('Create branch…');
+      expect(rows.some((r) => r.includes('feature/x'))).toBe(true);
+      expect(rows.some((r) => r.includes('main'))).toBe(true);
+    } finally {
+      picker.unmount();
+    }
+  });
+
+  it('typing keeps its first character — "main" matches whole, not "ain"', async () => {
+    // The trap this task guards against: every other palette mode is
+    // prefixed, so `term` drops `text[0]`. The branch mode is prefix-free,
+    // so `text[0]` is content the user typed and must survive.
+    //
+    // Because the matcher is subsequence-based, a query and its own
+    // one-character-shorter suffix can both match the same branch name (the
+    // suffix is trivially still a subsequence) — so "the row is still
+    // there" cannot tell a full match from a first-character-eaten one.
+    // What *does* differ, deterministically: "main" has four distinct
+    // letters, so matching the full word "main" against the branch "main"
+    // is forced to align position 0 ('m') to position 0, highlighting the
+    // whole word as one run. Matching the truncated "ain" cannot touch
+    // position 0 at all — 'm' isn't in the pattern. So whether the first
+    // character of the label renders with the `hit` class is exactly the
+    // signal that would catch `text.slice(1)` sneaking back into this mode.
+    const { app } = await setup();
+
+    const picker = mountComponent(CommandPalette, { app, props: { mode: 'git-branch' as const } });
+    try {
+      await settle();
+      const input = picker.container.querySelector('input')!;
+      input.value = 'main';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      flush();
+      await settle();
+
+      const rows = [...picker.container.querySelectorAll('[role="option"]')];
+      const mainRow = rows.find((r) => r.querySelector('.label')?.textContent?.trim() === 'main');
+      expect(mainRow, 'the "main" branch row should still be listed').toBeDefined();
+
+      const firstSpan = mainRow!.querySelector('.label span');
+      expect(firstSpan?.textContent).toBe('main');
+      expect(firstSpan?.classList.contains('hit')).toBe(true);
+    } finally {
+      picker.unmount();
+    }
+  });
+
+  it('does not let a prefix character hijack the branch mode into another one', async () => {
+    // '>' means commands and '@' means symbols in every other mode, and both
+    // are legal characters to type while filtering branches — neither may
+    // switch `effectiveMode` away from 'branches'. Note that neither
+    // character appears in any seeded branch name, so the fuzzy filter
+    // itself legitimately drops every branch row; the signal here is not
+    // "a branch still matches" but that this is still recognizably the
+    // branch picker at all — the placeholder (driven by `effectiveMode`)
+    // and the always-pinned "Create branch…" row, which only `branchRows`
+    // produces, both say so. Hijacked into 'commands' or 'symbols', the
+    // placeholder would read "Search commands…" / "Go to a symbol…" and
+    // "Create branch…" would not appear (nothing in either of those modes
+    // produces that row).
+    const { app } = await setup();
+
+    const picker = mountComponent(CommandPalette, { app, props: { mode: 'git-branch' as const } });
+    try {
+      await settle();
+      const input = picker.container.querySelector('input')!;
+
+      for (const prefix of ['>', '@']) {
+        input.value = prefix;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        flush();
+        await settle();
+
+        expect(input.getAttribute('aria-label'), prefix).toBe('Switch to a branch, or create one…');
+        const rows = [...picker.container.querySelectorAll('[role="option"]')].map(
+          (r) => r.textContent ?? '',
+        );
+        expect(rows[0], prefix).toContain('Create branch…');
+      }
+    } finally {
+      picker.unmount();
+    }
   });
 });

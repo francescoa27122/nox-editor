@@ -316,6 +316,17 @@ export class GitService {
     return ok ? result : null;
   }
 
+  /**
+   * `git switch <name>` / `git switch -c <name>` (spec §2). A refusal —
+   * dirty conflicting files, an invalid name — is git's to make and ours to
+   * show verbatim; we never pass -f (envelope §4).
+   */
+  async switch(name: string, create: boolean): Promise<void> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return;
+    await this.#write(() => this.#platform.gitSwitch(root, name, create));
+  }
+
   #pathOf(id: BufferId): string | null {
     return this.#workspace.buffers.get().find((b) => b.id === id)?.path ?? null;
   }

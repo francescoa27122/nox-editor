@@ -123,9 +123,7 @@
     <button
       class="branch-line"
       title="Switch or create a branch"
-      onclick={() => {
-        /* the branch picker lands in its own task */
-      }}
+      onclick={() => ui.openOverlay('git-branch')}
     >
       <Icon name="branch" size={12} />
       <span class="name">{branchLabel}</span>
