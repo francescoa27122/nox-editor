@@ -2232,6 +2232,16 @@ export class NoxApp {
         },
       },
       {
+        id: 'git.focus',
+        title: 'Show Git',
+        category: 'Git',
+        keywords: ['git', 'stage', 'commit', 'branch', 'changes', 'status'],
+        run: () => {
+          this.config.set('workbench.showExplorer', true);
+          this.ui.showView('git');
+        },
+      },
+      {
         id: 'git.showDiff',
         title: 'Show Changes',
         category: 'Git',
