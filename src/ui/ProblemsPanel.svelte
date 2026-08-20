@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
   import { problemRows, problemTotals } from './problems';
@@ -13,12 +14,31 @@
    */
 
   const app = useApp();
-  const { lsp, workspace } = app;
+  const { lsp, workspace, ui } = app;
+  const focusRequest = ui.focusProblemsRequest;
 
   const diagnostics = lsp.diagnostics;
   const rootPath = workspace.rootPath;
 
   let focused = $state(-1);
+  let listEl = $state<HTMLElement | null>(null);
+
+  // `problems.focus` (and Mod+Shift+M) land here; without this the list
+  // rendered but the keyboard stayed wherever it was.
+  $effect(() => {
+    void $focusRequest;
+    untrack(() => listEl)?.focus();
+  });
+
+  // The keyboard can walk below the fold; the mouse never needs this.
+  $effect(() => {
+    if (focused < 0) return;
+    // Optional call: jsdom has no scrollIntoView, and a missing scroll is
+    // not worth an exception in the middle of a click handler's flush.
+    untrack(() => listEl)
+      ?.querySelectorAll('.row')
+      [focused]?.scrollIntoView?.({ block: 'nearest' });
+  });
 
   const rows = $derived(problemRows($diagnostics, $rootPath));
   const totals = $derived(problemTotals($diagnostics));
@@ -80,6 +100,7 @@
       role="listbox"
       tabindex="0"
       aria-label="Problems"
+      bind:this={listEl}
       onkeydown={onKeyDown}
     >
       {#each rows as row, index (`${row.path}:${row.kind}:${row.line}:${index}`)}
@@ -90,6 +111,7 @@
           role="option"
           aria-selected={index === focused}
           tabindex="-1"
+          title={row.label}
           onclick={() => void open(index)}
           onkeydown={() => {}}
         >
@@ -159,8 +181,14 @@
     white-space: nowrap;
   }
 
+  .row:hover {
+    background: var(--nox-hover);
+  }
+
+  /* List selection, not editor text selection — the audit caught these two
+     panels borrowing CodeMirror's hotter violet token. */
   .row.focused {
-    background: var(--nox-selection);
+    background: var(--nox-selected);
   }
 
   .row:not(.file) {
@@ -169,6 +197,9 @@
 
   .row.file .path {
     font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .count {

@@ -96,6 +96,7 @@
   }
 
   .message {
+    overflow-wrap: anywhere;
     margin: 0;
     font-size: var(--nox-fs-sm);
     color: var(--nox-text-bright);

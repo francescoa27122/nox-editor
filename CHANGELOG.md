@@ -6,6 +6,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A round of paper cuts from a full UI audit: review hunk cards and the
+  diff table get their borders back (two design tokens had never been
+  defined, so those rules were silently dropped); the diff view's header
+  buttons are buttons again instead of bare text; the Problems and
+  References lists can be reached by keyboard (`⌘⇧M` now opens Problems)
+  and show hover states; long paths no longer push counts off-screen, and
+  every row carries its full text as a tooltip; hovering a tab with unsaved
+  changes keeps its dot until the pointer is on the close button itself;
+  dragging a tab past the end of the strip now shows the drop indicator;
+  confirm dialogs focus the safe choice whenever a destructive one is
+  present, so Enter never deletes by default; and a burst of routine toasts
+  can no longer push an unread error off the screen.
+
 ### Added
 
 - **Show Changes.** The active file against its git base, side by side or

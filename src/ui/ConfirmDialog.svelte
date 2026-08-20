@@ -10,8 +10,15 @@
   let container = $state<HTMLElement | null>(null);
 
   $effect(() => {
-    // The first choice is the default action and takes focus on open.
-    container?.querySelector('button')?.focus();
+    // The first choice is the default action and takes focus on open —
+    // unless any choice is destructive, in which case the first *safe*
+    // choice does. Enter must never destroy (or grant a permission) as the
+    // zero-keystroke default: the audit found Delete focused in the delete
+    // confirm and "Allow for this session" focused in the permission prompt.
+    const dangerous = request.choices.some((choice) => choice.danger);
+    const buttons = [...(container?.querySelectorAll('button') ?? [])];
+    const safe = request.choices.findIndex((choice) => !choice.danger);
+    (dangerous && safe >= 0 ? buttons[safe] : buttons[0])?.focus();
   });
 
   function onKeydown(event: KeyboardEvent) {

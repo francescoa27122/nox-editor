@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { useApp } from './context';
 
   /**
@@ -13,8 +14,26 @@
 
   const app = useApp();
   const list = app.locations;
+  const focusRequest = app.ui.focusReferencesRequest;
 
   let focused = $state(-1);
+  let listEl = $state<HTMLElement | null>(null);
+
+  // `references.focus` (and Mod+Shift+R) land here; without this the list
+  // rendered but the keyboard stayed wherever it was.
+  $effect(() => {
+    void $focusRequest;
+    untrack(() => listEl)?.focus();
+  });
+
+  $effect(() => {
+    if (focused < 0) return;
+    // Optional call: jsdom has no scrollIntoView, and a missing scroll is
+    // not worth an exception in the middle of a click handler's flush.
+    untrack(() => listEl)
+      ?.querySelectorAll('.row')
+      [focused]?.scrollIntoView?.({ block: 'nearest' });
+  });
 
   const rows = $derived($list?.rows ?? []);
 
@@ -66,6 +85,7 @@
       role="listbox"
       tabindex="0"
       aria-label={$list?.title ?? 'References'}
+      bind:this={listEl}
       onkeydown={onKeyDown}
     >
       {#each rows as row, index (`${row.path}:${row.kind}:${row.line}:${row.column}:${index}`)}
@@ -76,6 +96,7 @@
           role="option"
           aria-selected={index === focused}
           tabindex="-1"
+          title={row.label}
           onclick={() => void open(index)}
           onkeydown={() => {}}
         >
@@ -155,8 +176,13 @@
     white-space: nowrap;
   }
 
+  .row:hover {
+    background: var(--nox-hover);
+  }
+
+  /* List selection, not editor text selection — see ProblemsPanel. */
   .row.focused {
-    background: var(--nox-selection);
+    background: var(--nox-selected);
   }
 
   .row:not(.file) {
@@ -165,6 +191,9 @@
 
   .row.file .path {
     font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .count {

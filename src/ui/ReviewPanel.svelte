@@ -168,7 +168,7 @@
   }
 
   button:hover:not(:disabled) {
-    background: var(--nox-bg-hover);
+    background: var(--nox-hover);
     color: var(--nox-text-bright);
   }
 

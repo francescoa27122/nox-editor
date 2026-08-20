@@ -438,7 +438,7 @@
     if (rows.length === 0) return;
     selected = (selected + delta + rows.length) % rows.length;
     queueMicrotask(() => {
-      listElement?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+      listElement?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' });
     });
   }
 
