@@ -90,3 +90,58 @@ describe('the git panel, read-only', () => {
     expect(container.querySelector('.panel-empty')).not.toBeNull();
   });
 });
+
+describe('stage and unstage', () => {
+  it('stage moves the row between sections and the gutter base follows', async () => {
+    const { app, container } = await setup();
+    const id = (await app.workspace.open('/w/edited.ts'))!;
+    await settle();
+    // Before: the buffer differs from the index base ('one\n').
+    expect(app.git.hunks.get().has(id)).toBe(true);
+
+    const stage = [...container.querySelectorAll('.section.changes .row')]
+      .find((r) => r.textContent!.includes('edited.ts'))!
+      .querySelector('[title="Stage"]') as HTMLElement;
+    stage.click();
+    await settle();
+    await settle();
+
+    expect(container.querySelector('.section.staged')!.textContent).toContain('edited.ts');
+    // Envelope §6: the mutation refreshed the gutter base — the index now
+    // holds the buffer's text, so the hunks are gone.
+    expect(app.git.hunks.get().has(id)).toBe(false);
+  });
+
+  it('unstage returns the row', async () => {
+    const { app, container, platform } = await setup();
+    await platform.gitStage('/w', ['/w/edited.ts']);
+    await app.git.refreshStatus();
+    await settle();
+
+    const unstage = container
+      .querySelector('.section.staged .row [title="Unstage"]') as HTMLElement;
+    unstage.click();
+    await settle();
+    await settle();
+
+    expect(container.querySelector('.section.staged')).toBeNull();
+    expect(container.querySelector('.section.changes')!.textContent).toContain('edited.ts');
+  });
+
+  it('a refused stage becomes a notification with git\'s words, and the panel keeps the truth', async () => {
+    const { app, container, platform } = await setup();
+    platform.gitStage = async () => {
+      throw new Error("fatal: pathspec 'edited.ts' did not match any files");
+    };
+    const stage = [...container.querySelectorAll('.section.changes .row')]
+      .find((r) => r.textContent!.includes('edited.ts'))!
+      .querySelector('[title="Stage"]') as HTMLElement;
+    stage.click();
+    await settle();
+    await settle();
+
+    const items = app.notifications.items.get();
+    expect(items.some((n) => n.kind === 'error' && n.message.includes('did not match'))).toBe(true);
+    expect(container.querySelector('.section.staged')).toBeNull();
+  });
+});

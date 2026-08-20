@@ -75,9 +75,6 @@ export class GitService {
     this.#platform = platform;
     this.#workspace = workspace;
     this.#notifications = notifications;
-    // Read for real by the stage/commit/switch write paths (Task 6+); this
-    // line keeps noUnusedLocals honest until then — delete it when they land.
-    void this.#notifications;
   }
 
   /** Whether `start()` has run — what the commands gate on, LSP-style. */
@@ -270,6 +267,38 @@ export class GitService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * One write, one shape: try, surface a refusal verbatim as a notification,
+   * refresh regardless — the panel never shows a state its own action made
+   * stale, and after a failure the refresh shows the truth (envelope §6, §4).
+   */
+  async #write(action: () => Promise<void>): Promise<boolean> {
+    let ok = true;
+    try {
+      await action();
+    } catch (error) {
+      ok = false;
+      this.#notifications?.error(error instanceof Error ? error.message : String(error));
+    }
+    await this.refreshStatus();
+    await this.refreshAll();
+    return ok;
+  }
+
+  /** `git add` by name. Absolute paths; the platform relativizes. */
+  async stage(paths: string[]): Promise<void> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return;
+    await this.#write(() => this.#platform.gitStage(root, paths));
+  }
+
+  /** `git restore --staged` by name. The index only, by construction. */
+  async unstage(paths: string[]): Promise<void> {
+    const root = this.#workspace.rootPath.get();
+    if (!root) return;
+    await this.#write(() => this.#platform.gitUnstage(root, paths));
   }
 
   #pathOf(id: BufferId): string | null {

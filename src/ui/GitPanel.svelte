@@ -62,9 +62,7 @@
   }
 </script>
 
-{#snippet row(entry: FileEntry, _section: 'staged' | 'unstaged')}
-  <!-- `_section` (renamed to satisfy noUnusedParameters) is read by the
-       stage/unstage buttons the next task adds. -->
+{#snippet row(entry: FileEntry, section: 'staged' | 'unstaged')}
   <div class="row" title={entry.origPath ? `${entry.origPath} → ${entry.path}` : entry.path}>
     <span class="letter letter-{entry.status}">{entry.status}</span>
     <button class="open" onclick={() => void open(entry)}>{entry.path}</button>
@@ -72,7 +70,23 @@
       <button class="nox-button ghost small" title="Show Changes" onclick={() => void view(entry)}>
         <Icon name="file" size={11} />
       </button>
-      <!-- Stage / unstage buttons land in the stage task; `section` is used there. -->
+      {#if section === 'unstaged'}
+        <button
+          class="nox-button ghost small"
+          title="Stage"
+          onclick={() => void git.stage([absolute(entry)])}
+        >
+          <Icon name="plus" size={11} />
+        </button>
+      {:else}
+        <button
+          class="nox-button ghost small"
+          title="Unstage"
+          onclick={() => void git.unstage([absolute(entry)])}
+        >
+          <Icon name="minus" size={11} />
+        </button>
+      {/if}
     </span>
   </div>
 {/snippet}
