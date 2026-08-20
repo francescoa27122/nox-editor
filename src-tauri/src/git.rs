@@ -1,9 +1,9 @@
-//! Git file bases.
+//! Git file bases, and the stage/commit/branch commands.
 //!
-//! One command: fetch the version of a file the git index holds (`:0:` —
-//! what `git add` would leave alone). The index rather than HEAD because the
-//! gutter's question is "what have I changed that git doesn't hold yet", and
-//! for anyone not mid-staging the index *is* HEAD anyway.
+//! `nox_git_file_base` fetches the version of a file the git index holds
+//! (`:0:` — what `git add` would leave alone). The index rather than HEAD
+//! because the gutter's question is "what have I changed that git doesn't
+//! hold yet", and for anyone not mid-staging the index *is* HEAD anyway.
 //!
 //! `None` is the answer to everything that isn't content: no repo, untracked
 //! file, git not installed, non-UTF-8 blob. A missing gutter is the correct
@@ -15,7 +15,18 @@
 //! practice, and if it ever did the cost is a gutter that never arrives —
 //! never a blocked save or keystroke, because every caller is async and
 //! nothing on a critical path awaits this.
+//!
+//! The remaining six commands are argv-fixed writes and reads for the
+//! stage/commit/branch panel: `nox_git_status`, `nox_git_branches`,
+//! `nox_git_stage`, `nox_git_unstage`, `nox_git_commit`, `nox_git_switch`.
+//! Every one runs `git -C <root>` with no shell involved, `--literal-pathspecs`
+//! wherever pathspecs are given, and stops short of anything that leaves the
+//! machine (no push/pull/fetch), rewrites history (no amend/rebase/force), or
+//! destroys working-tree work (no discard, no `checkout --`, no stash). A
+//! refusal from git travels back verbatim: stderr, falling back to stdout
+//! when stderr is empty (git's "nothing to commit" lands on stdout).
 
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -96,6 +107,162 @@ fn relative_to_root(root: &str, file: &str) -> Option<String> {
         return None;
     }
     Some(relative.to_string())
+}
+
+/// The `io:`-prefixed message for a failed git invocation: git's own words,
+/// stderr first, stdout when stderr is empty (git prints "nothing to commit"
+/// on stdout). Shared by `run_git_ok` and `nox_git_commit` — the latter
+/// builds its own `Command` for stdin piping and so cannot go through
+/// `run_git`, but the failure-reporting rule is the same either way. The
+/// `io:` prefix is the fs.rs error convention; `platform/tauri.ts` strips it,
+/// so what the renderer sees is git verbatim.
+fn git_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    format!("io: {}", if stderr.is_empty() { stdout } else { stderr })
+}
+
+/// Run git and insist on success. Unlike `run_git`'s callers in the gutter
+/// path — where every failure is an honest `None` — a failed *write* must say
+/// why: see `git_error`.
+fn run_git_ok(dir: &Path, args: &[&str]) -> Result<std::process::Output> {
+    let output = run_git(dir, args).ok_or_else(|| "io: git could not be run".to_string())?;
+    if output.status.success() {
+        return Ok(output);
+    }
+    Err(git_error(&output))
+}
+
+/// The repository toplevel for `root`, in git's own vocabulary.
+fn repo_toplevel(root: &Path) -> Result<String> {
+    let output = run_git_ok(root, &["rev-parse", "--show-toplevel"])?;
+    let top = String::from_utf8_lossy(&output.stdout).trim_end_matches(['\r', '\n']).to_string();
+    if top.is_empty() {
+        return Err("io: fatal: not a git repository".to_string());
+    }
+    Ok(top)
+}
+
+/// A path made repo-relative by the same canonicalize-and-strip route
+/// `nox_git_file_base` uses. A deleted file cannot canonicalize, so the
+/// fallback resolves its parent and re-appends the name — staging a deletion
+/// is a first-class action in the panel.
+fn repo_relative(toplevel: &str, path: &str) -> Result<String> {
+    let p = Path::new(path);
+    let full = plain_canonical(p)
+        .or_else(|| {
+            let parent = plain_canonical(p.parent()?)?;
+            let name = p.file_name()?.to_str()?;
+            Some(format!("{parent}/{name}"))
+        })
+        .ok_or_else(|| format!("io: cannot resolve {path}"))?;
+    relative_to_root(toplevel, &full)
+        .ok_or_else(|| format!("io: {path} is not inside the repository"))
+}
+
+/// Raw porcelain v2 status. `-z` because filenames contain anything;
+/// parsing lives in TypeScript where it is testable without a repo.
+#[tauri::command]
+pub fn nox_git_status(root: String) -> Result<String> {
+    let output = run_git_ok(Path::new(&root), &["status", "--porcelain=v2", "--branch", "-z"])?;
+    String::from_utf8(output.stdout).map_err(|_| "io: git status output was not utf-8".to_string())
+}
+
+/// Raw local branch list, one short refname per line.
+#[tauri::command]
+pub fn nox_git_branches(root: String) -> Result<String> {
+    let output = run_git_ok(
+        Path::new(&root),
+        &["branch", "--list", "--format=%(refname:short)"],
+    )?;
+    String::from_utf8(output.stdout).map_err(|_| "io: git branch output was not utf-8".to_string())
+}
+
+/// `git add`. Argv-fixed; `--literal-pathspecs` so a `*` or `:` in a real
+/// filename is a filename, and `--` so nothing is ever read as an option.
+#[tauri::command]
+pub fn nox_git_stage(root: String, paths: Vec<String>) -> Result<()> {
+    let top = repo_toplevel(Path::new(&root))?;
+    let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "add".into(), "--".into()];
+    for path in &paths {
+        args.push(repo_relative(&top, path)?);
+    }
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git_ok(Path::new(&top), &refs)?;
+    Ok(())
+}
+
+/// `git reset -- <pathspec>` (never `--hard`, never a ref beyond the
+/// implicit `HEAD`): the index only, the working tree untouchable by
+/// construction. Not `git restore --staged` — verified live, that command
+/// fails with "fatal: could not resolve HEAD" on a repo with no commits yet
+/// (an unborn branch, e.g. right after `git init`), while pathspec-limited
+/// `reset` handles that case cleanly.
+#[tauri::command]
+pub fn nox_git_unstage(root: String, paths: Vec<String>) -> Result<()> {
+    let top = repo_toplevel(Path::new(&root))?;
+    let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "reset".into(), "--".into()];
+    for path in &paths {
+        args.push(repo_relative(&top, path)?);
+    }
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_git_ok(Path::new(&top), &refs)?;
+    Ok(())
+}
+
+/// `git commit --file=-`, the message on stdin — never argv: messages
+/// contain quotes, dashes, anything. Never `-a`, never pathspecs: what you
+/// staged is what lands. Hooks and signing run because git runs them; a
+/// refusal is surfaced verbatim.
+#[tauri::command]
+pub fn nox_git_commit(root: String, message: String) -> Result<String> {
+    use std::process::Stdio;
+
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(&root)
+        .args(["commit", "--file=-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let mut child = command.spawn().map_err(|e| format!("io: git could not be run ({e})"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "io: no stdin handle".to_string())?
+        .write_all(message.as_bytes())
+        .map_err(|e| format!("io: could not write the message ({e})"))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("io: git did not finish ({e})"))?;
+
+    if !output.status.success() {
+        return Err(git_error(&output));
+    }
+
+    let log = run_git_ok(Path::new(&root), &["log", "-1", "--format=%h %s"])?;
+    Ok(String::from_utf8_lossy(&log.stdout).trim().to_string())
+}
+
+/// `git switch`, the name validated first with `check-ref-format --branch`
+/// (a read) so the only strings reaching the write are ones git itself
+/// blessed. Never `-f`: a refusal over dirty files is git's to make and
+/// ours to show.
+#[tauri::command]
+pub fn nox_git_switch(root: String, name: String, create: bool) -> Result<()> {
+    let dir = Path::new(&root);
+    run_git_ok(dir, &["check-ref-format", "--branch", &name])?;
+    if create {
+        run_git_ok(dir, &["switch", "-c", &name])?;
+    } else {
+        run_git_ok(dir, &["switch", &name])?;
+    }
+    Ok(())
 }
 
 /// The index's version of the file, or `None` when there isn't one.
@@ -262,5 +429,142 @@ mod tests {
         let base = nox_git_file_base(as_string(&file)).unwrap();
 
         assert_eq!(base.as_deref(), Some("alpha\nbeta\n"));
+    }
+
+    /// Read stdout of a git command that must succeed — for assertions.
+    fn git_out(dir: &Path, args: &[&str]) -> String {
+        let output = run_git(dir, args).expect("git runs");
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn stage_and_unstage_round_trip_in_porcelain() {
+        let scratch = Scratch::new("git-stage");
+        git_in(&scratch.0, &["init"]);
+        let file = scratch.join("a.txt");
+        fs::write(&file, "one\n").unwrap();
+
+        nox_git_stage(as_string(&scratch.0), vec![as_string(&file)]).unwrap();
+        assert!(git_out(&scratch.0, &["status", "--porcelain"]).starts_with("A  a.txt"));
+
+        nox_git_unstage(as_string(&scratch.0), vec![as_string(&file)]).unwrap();
+        assert!(git_out(&scratch.0, &["status", "--porcelain"]).starts_with("?? a.txt"));
+        // The working tree was never touched.
+        assert_eq!(fs::read_to_string(&file).unwrap(), "one\n");
+    }
+
+    #[test]
+    fn staging_a_deleted_file_records_the_deletion() {
+        let scratch = Scratch::new("git-stage-del");
+        git_in(&scratch.0, &["init"]);
+        let file = scratch.join("a.txt");
+        fs::write(&file, "one\n").unwrap();
+        git_in(&scratch.0, &["add", "a.txt"]);
+        git_in(&scratch.0, &["commit", "-m", "base"]);
+        fs::remove_file(&file).unwrap();
+
+        // The path no longer exists, so canonicalize-and-strip must fall
+        // back to the parent — the case this test pins.
+        nox_git_stage(as_string(&scratch.0), vec![as_string(&file)]).unwrap();
+        assert!(git_out(&scratch.0, &["status", "--porcelain"]).starts_with("D  a.txt"));
+    }
+
+    #[test]
+    fn commit_lands_the_exact_multiline_message_and_only_one_commit() {
+        let scratch = Scratch::new("git-commit");
+        git_in(&scratch.0, &["init"]);
+        // `nox_git_commit` runs plain `git commit` — no inline `-c` identity
+        // like `git_in` carries — so the repo itself must hold one, exactly
+        // as a user's repo would. CI runners have no global identity.
+        git_in(&scratch.0, &["config", "user.email", "t@t"]);
+        git_in(&scratch.0, &["config", "user.name", "t"]);
+        git_in(&scratch.0, &["config", "commit.gpgsign", "false"]);
+        fs::write(scratch.join("a.txt"), "one\n").unwrap();
+        git_in(&scratch.0, &["add", "a.txt"]);
+
+        // Quotes, a lone `--`, a second paragraph: stdin makes them all safe.
+        let message = "Say \"hello\" -- carefully\n\nBody with 'quotes' and -- dashes.\n";
+        let result = nox_git_commit(as_string(&scratch.0), message.to_string()).unwrap();
+        assert!(result.ends_with("Say \"hello\" -- carefully"), "got {result:?}");
+
+        assert_eq!(git_out(&scratch.0, &["rev-list", "--count", "HEAD"]).trim(), "1");
+        assert_eq!(git_out(&scratch.0, &["log", "-1", "--format=%B"]).trim_end(), message.trim_end());
+    }
+
+    #[test]
+    fn commit_with_nothing_staged_fails_with_gits_words() {
+        let scratch = Scratch::new("git-commit-clean");
+        git_in(&scratch.0, &["init"]);
+        git_in(&scratch.0, &["config", "user.email", "t@t"]);
+        git_in(&scratch.0, &["config", "user.name", "t"]);
+        git_in(&scratch.0, &["config", "commit.gpgsign", "false"]);
+        git_in(&scratch.0, &["commit", "--allow-empty", "-m", "root"]);
+
+        let error = nox_git_commit(as_string(&scratch.0), "message".to_string()).unwrap_err();
+        // Git says this on stdout, which is why the helper falls back to it.
+        assert!(error.contains("nothing to commit"), "got {error:?}");
+    }
+
+    #[test]
+    fn switch_refuses_a_dirty_conflict_and_the_tree_is_byte_identical() {
+        let scratch = Scratch::new("git-switch-dirty");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        let file = scratch.join("f.txt");
+        fs::write(&file, "v1\n").unwrap();
+        git_in(&scratch.0, &["add", "f.txt"]);
+        git_in(&scratch.0, &["commit", "-m", "one"]);
+        git_in(&scratch.0, &["switch", "-c", "other"]);
+        fs::write(&file, "v2\n").unwrap();
+        git_in(&scratch.0, &["add", "f.txt"]);
+        git_in(&scratch.0, &["commit", "-m", "two"]);
+        git_in(&scratch.0, &["switch", "main"]);
+        fs::write(&file, "dirty\n").unwrap();
+
+        let error = nox_git_switch(as_string(&scratch.0), "other".to_string(), false).unwrap_err();
+        // The phrase the MemoryPlatform fake mirrors — this assertion is the
+        // tripwire that keeps fake and real from drifting apart.
+        assert!(
+            error.contains("Your local changes to the following files would be overwritten"),
+            "got {error:?}"
+        );
+        assert_eq!(fs::read_to_string(&file).unwrap(), "dirty\n");
+        assert_eq!(git_out(&scratch.0, &["branch", "--show-current"]).trim(), "main");
+    }
+
+    #[test]
+    fn created_branch_appears_in_the_list() {
+        let scratch = Scratch::new("git-branch-create");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        git_in(&scratch.0, &["commit", "--allow-empty", "-m", "root"]);
+
+        nox_git_switch(as_string(&scratch.0), "feature/x".to_string(), true).unwrap();
+        let branches = nox_git_branches(as_string(&scratch.0)).unwrap();
+        assert!(branches.lines().any(|l| l == "feature/x"), "got {branches:?}");
+        assert!(branches.lines().any(|l| l == "main"));
+    }
+
+    #[test]
+    fn invalid_branch_name_is_refused_by_the_validation_read() {
+        let scratch = Scratch::new("git-branch-bad");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        git_in(&scratch.0, &["commit", "--allow-empty", "-m", "root"]);
+
+        let error = nox_git_switch(as_string(&scratch.0), "bad name".to_string(), true).unwrap_err();
+        assert!(error.contains("not a valid branch name"), "got {error:?}");
+        // The write never ran: no such branch exists.
+        let branches = nox_git_branches(as_string(&scratch.0)).unwrap();
+        assert!(!branches.contains("bad"), "got {branches:?}");
+    }
+
+    #[test]
+    fn status_carries_branch_and_entries_nul_terminated() {
+        let scratch = Scratch::new("git-status");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        fs::write(scratch.join("a.txt"), "one\n").unwrap();
+
+        let raw = nox_git_status(as_string(&scratch.0)).unwrap();
+        assert!(raw.contains("# branch.head main"));
+        assert!(raw.contains("? a.txt\u{0}"), "got {raw:?}");
     }
 }
