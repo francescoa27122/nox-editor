@@ -25,6 +25,7 @@ import {
   type TerminalSession,
   type TerminalSpec,
   type Unwatch,
+  type UpdateInfo,
   type WatchEvent,
 } from './types';
 
@@ -72,6 +73,8 @@ export class TauriPlatform implements Platform {
     localModels: true,
     languageServers: true,
     gitState: true,
+    // The desktop build replaces itself through the updater plugin.
+    selfUpdate: true,
     // Windows is the only desktop target that hides its decorations — see
     // `lib.rs`'s setup hook. macOS keeps its traffic lights over an overlay
     // title bar and must not draw a second set beside them.
@@ -224,6 +227,21 @@ export class TauriPlatform implements Platform {
       void window.isMaximized().then(handler);
     });
     return unlisten;
+  }
+
+  async checkForUpdate(): Promise<UpdateInfo | null> {
+    // Wired to the updater plugin in the desktop-wiring task. Absence is
+    // the honest interim answer, and also the permanent one when no
+    // latest.json is published (spec envelope §4).
+    return null;
+  }
+
+  async installUpdate(): Promise<void> {
+    throw new PlatformError('no update in hand — check first', 'not-found');
+  }
+
+  async relaunch(): Promise<void> {
+    /* Nothing to relaunch into until installUpdate can install. */
   }
 
   /**
