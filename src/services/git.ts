@@ -39,6 +39,13 @@ const ACTIVATION_REFETCH_MS = 2000;
 export class GitService {
   /** Hunks per buffer. No entry means no repo, no changes, or too large. */
   readonly hunks = new Signal<ReadonlyMap<BufferId, BufferHunks>>(new Map());
+  /**
+   * Bumped whenever a base is fetched or forgotten. The hunks signal is
+   * silent when a *clean* file's base arrives — nothing changed in it — but
+   * the diff view still has to move from "asking git" to "no changes", and
+   * this is what it watches.
+   */
+  readonly baseRevision = new Signal(0);
 
   #platform: Platform;
   #workspace: WorkspaceService;
@@ -55,6 +62,11 @@ export class GitService {
   constructor(platform: Platform, workspace: WorkspaceService) {
     this.#platform = platform;
     this.#workspace = workspace;
+  }
+
+  /** Whether `start()` has run — what the commands gate on, LSP-style. */
+  get started(): boolean {
+    return this.#started;
   }
 
   /**
@@ -88,6 +100,16 @@ export class GitService {
     );
   }
 
+  /**
+   * The normalized index text for `path`: `undefined` not fetched yet,
+   * `null` git has nothing, a string otherwise. The diff view reads this
+   * rather than fetching — the service's triggers own freshness, and the
+   * view inherits the gutter's staleness story, `.git` blind spot included.
+   */
+  baseFor(path: string): string | null | undefined {
+    return this.#bases.get(path);
+  }
+
   /** Forget every base and re-ask git about every open file. */
   async refreshAll(): Promise<void> {
     this.#bases.clear();
@@ -117,6 +139,7 @@ export class GitService {
     this.#computed.clear();
     this.#refetched.clear();
     this.hunks.set(new Map());
+    this.baseRevision.update((n) => n + 1);
   }
 
   #drop(id: BufferId): void {
@@ -164,6 +187,7 @@ export class GitService {
       base = null;
     }
     this.#bases.set(path, base === null ? null : normalizeGitBase(base));
+    this.baseRevision.update((n) => n + 1);
     this.#compute(id);
   }
 

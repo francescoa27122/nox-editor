@@ -10,7 +10,7 @@
   import { lspCompletionExtension } from '@editor/completion';
   import { lspHoverExtension } from '@editor/hover';
   import { cachedLanguage, hasGrammar, languageCompartment, loadLanguage } from '@editor/languages';
-  import { setGitGutter } from '@editor/git-gutter';
+  import { onGitGutterClick, setGitGutter } from '@editor/git-gutter';
   import { gutterLines } from '@core/git-gutter';
   import { applyDiagnostics } from '@editor/lsp';
   import { pathToUri } from '@core/uri';
@@ -60,7 +60,14 @@
       return { uri: pathToUri(buffer.path), languageId: buffer.languageId };
     },
   };
-  const lspExtensions = [lspCompletionExtension(lspDeps), lspHoverExtension(lspDeps)];
+  const lspExtensions = [
+    lspCompletionExtension(lspDeps),
+    lspHoverExtension(lspDeps),
+    // Not LSP, but the same lifecycle: pane-scoped because it needs the app.
+    // A mousedown on the git gutter opens the diff view — the click that
+    // gutter's own design deferred to exactly this feature.
+    onGitGutterClick.of(() => void app.commands.execute('git.showDiff')),
+  ];
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {

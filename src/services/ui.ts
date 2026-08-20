@@ -93,6 +93,13 @@ export class UIService {
    */
   readonly agentsOpen = new Signal(false);
   /**
+   * Whether the git diff view is showing, in the same slot. Layered below
+   * review and agents in both the render conditional and `dismissTop`:
+   * staging a set while the diff is open shows the review, and Escape then
+   * uncovers the diff again rather than the editor.
+   */
+  readonly diffOpen = new Signal(false);
+  /**
    * Whether the terminal panel is showing.
    *
    * Sits *below* the editor rather than taking it over, unlike review and
@@ -172,7 +179,15 @@ export class UIService {
   /** Show the agents panel, which shares the editor area with review. */
   showAgents(): void {
     this.reviewOpen.set(false);
+    this.diffOpen.set(false);
     this.agentsOpen.set(true);
+  }
+
+  /** Show the git diff view, which shares the same slot. */
+  showDiff(): void {
+    this.reviewOpen.set(false);
+    this.agentsOpen.set(false);
+    this.diffOpen.set(true);
   }
 
   showView(view: SidebarView): void {
@@ -229,6 +244,7 @@ export class UIService {
       this.findOpen.get() ||
       this.reviewOpen.get() ||
       this.agentsOpen.get() ||
+      this.diffOpen.get() ||
       this.prompt.get() !== null ||
       this.confirm.get() !== null
     );
@@ -263,6 +279,11 @@ export class UIService {
     }
     if (this.agentsOpen.get()) {
       this.agentsOpen.set(false);
+      this.focusEditor();
+      return true;
+    }
+    if (this.diffOpen.get()) {
+      this.diffOpen.set(false);
       this.focusEditor();
       return true;
     }

@@ -107,6 +107,24 @@ describe('the git service', () => {
     expect(app.git.hunks.get().has(id)).toBe(false);
   });
 
+  it('bumps baseRevision whenever a base arrives, even for a clean file', async () => {
+    // The hunks signal stays silent when a clean file's base lands — nothing
+    // changed in it — but the diff view must still move from "asking git" to
+    // "no changes", and baseRevision is the only tick it gets. jsdom cannot
+    // stage that race (the base always lands before the first paint), so the
+    // guarantee is pinned here at the service instead.
+    platform.seedFile(FILE, BASE);
+    platform.seedGitBase(FILE, BASE);
+    await app.workspace.openFolder('/w');
+    await vi.runAllTimersAsync();
+    // After the folder settles: the only bump left to come is the fetch's.
+    const before = app.git.baseRevision.get();
+    const id = (await app.workspace.open(FILE))!;
+    await vi.runAllTimersAsync();
+    expect(app.git.hunks.get().has(id)).toBe(false);
+    expect(app.git.baseRevision.get()).toBeGreaterThan(before);
+  });
+
   it('re-asks for every base on refreshAll', async () => {
     const id = await openSeeded(BASE, BASE);
     expect(app.git.hunks.get().has(id)).toBe(false);
