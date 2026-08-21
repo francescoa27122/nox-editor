@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-21
+
 A pass over how discoverable Nox is, driven by an audit of the packaged app
 rather than the browser dev target — where more than half the UI is switched
 off and so had never been looked at.
