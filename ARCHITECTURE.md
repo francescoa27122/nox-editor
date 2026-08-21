@@ -929,6 +929,34 @@ index naming a body that is not there. That case is handled by loading the
 note with an empty body rather than dropping it — the title is still worth
 keeping.
 
+Notes leave Nox as Markdown, and the front matter is **not YAML**. No YAML
+parser ships and none was added for this: hand-rolling a subset of a
+whitespace-significant format is how importers rot. `core/note-file.ts` writes
+one `key: value` per line where the value is JSON — `stringify` out,
+`parse` in, exact in both directions, and still readable as front matter by a
+person. Gaining compatibility with other note tools is a decision worth making
+on its own evidence, not one to smuggle in through an export format.
+
+Anything the parser does not recognise becomes **body**, never an error and
+never a reason to skip a file: plain Markdown from elsewhere imports as a
+note, and a file carrying real YAML imports with its metadata visible in the
+text, which a person can fix by hand. A file that is silently dropped is just
+gone.
+
+Import **always adds**. Files carry the id they were exported with, so
+honouring it would make re-importing your own backup rewrite every note in
+place. Merging needs a conflict UI and a rule for which side wins; adding
+needs neither, and a duplicate note is a nuisance where an overwritten one is
+a loss. Filenames are the title slugified, with the note's ordinal appended on
+collision — titles are user-edited and not unique, and two notes sharing a
+path means exporting four notes and finding three files.
+
+Both commands are the first notes commands to leave Nox's own config
+directory, so they are also the first to declare `capabilities` —
+`fs.create` and `fs.read`. They need a folder picker, which the browser build
+does not have, and are greyed there rather than hidden: a greyed command
+explains itself, a missing one does not.
+
 A note can point at code, and `NotesService` still cannot reach a workspace.
 An anchor is three primitives — a path, a line, the anchored text — stored
 verbatim and interpreted by nothing in that module. `app.ts` resolves them,

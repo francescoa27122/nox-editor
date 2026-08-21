@@ -20,6 +20,7 @@ import { prepareRenameSeed, renameEdits } from '@core/lsp-rename';
 import { changesOf, textEditsOf } from '@core/lsp-text-edit';
 import { offsetAt, positionAt } from '@core/lsp-position';
 import { ANCHOR_WINDOW, resolveAnchorLine } from '@core/anchor';
+import { formatNoteFile, noteFileName, parseNoteFile } from '@core/note-file';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
 import { pathToUri, uriToPath } from '@core/uri';
@@ -1726,6 +1727,117 @@ export class NoxApp {
     this.goToLine(withinWindow + first - 1, 1);
   }
 
+  /**
+   * Write every note into a folder as Markdown.
+   *
+   * Through `writeTextFile` rather than the config API, which addresses files
+   * by name inside Nox's own directory and cannot reach a folder the user
+   * chose.
+   */
+  async exportNotes(): Promise<void> {
+    const folder = await this.platform.pickFolder();
+    if (!folder) return;
+
+    const notes = this.notes.notes.get();
+    const taken = new Set<string>();
+    let written = 0;
+    let failure: string | null = null;
+
+    for (const note of notes) {
+      // Ordinal from the id, which is where the note's own uniqueness already
+      // lives (`n7` ↔ `note-7.txt`).
+      const ordinal = Number(/^n(\d+)$/.exec(note.id)?.[1] ?? 0);
+      const name = noteFileName(note.title, ordinal, taken);
+      taken.add(name);
+
+      const text = formatNoteFile(
+        {
+          id: note.id,
+          title: note.title,
+          createdAt: note.createdAt,
+          updatedAt: note.updatedAt,
+          pinned: note.pinned,
+          ...(note.anchor ? { anchor: note.anchor } : {}),
+        },
+        note.body,
+      );
+
+      try {
+        await this.platform.writeTextFile(join(folder, name), text);
+        written++;
+      } catch (cause) {
+        // Keep going: one unwritable name should not cost the other notes.
+        failure ??= cause instanceof Error ? cause.message : String(cause);
+      }
+    }
+
+    if (failure) {
+      this.notifications.error(
+        `Exported ${written} of ${notes.length} notes`,
+        failure,
+      );
+    } else {
+      this.notifications.success(`Exported ${written} notes`, folder);
+    }
+  }
+
+  /**
+   * Read every `.md` in a folder back in as notes.
+   *
+   * Additive: nothing already here is changed or removed. See
+   * `NotesService.importNote` for why the id in a file is ignored.
+   */
+  async importNotes(): Promise<void> {
+    const folder = await this.platform.pickFolder();
+    if (!folder) return;
+
+    let entries;
+    try {
+      entries = await this.platform.readDir(folder);
+    } catch (cause) {
+      this.notifications.error(
+        'Could not read that folder',
+        cause instanceof Error ? cause.message : String(cause),
+      );
+      return;
+    }
+
+    const files = entries.filter((entry) => !entry.isDirectory && entry.name.endsWith('.md'));
+    let imported = 0;
+    let failure: string | null = null;
+
+    for (const entry of files) {
+      try {
+        const text = await this.platform.readTextFile(entry.path);
+        const parsed = parseNoteFile(text);
+        this.notes.importNote({
+          // Falls back to the filename so plain Markdown written elsewhere
+          // arrives with a name rather than as "Untitled".
+          title: parsed.meta.title ?? entry.name.replace(/\.md$/, ''),
+          body: parsed.body,
+          ...(parsed.meta.pinned !== undefined ? { pinned: parsed.meta.pinned } : {}),
+          ...(parsed.meta.anchor ? { anchor: parsed.meta.anchor } : {}),
+          ...(parsed.meta.createdAt !== undefined ? { createdAt: parsed.meta.createdAt } : {}),
+          ...(parsed.meta.updatedAt !== undefined ? { updatedAt: parsed.meta.updatedAt } : {}),
+        });
+        imported++;
+      } catch (cause) {
+        failure ??= cause instanceof Error ? cause.message : String(cause);
+      }
+    }
+
+    if (files.length === 0) {
+      this.notifications.info('No .md files in that folder', folder);
+      return;
+    }
+    if (failure) {
+      this.notifications.error(`Imported ${imported} of ${files.length} notes`, failure);
+    } else {
+      this.notifications.success(`Imported ${imported} notes`, folder);
+      this.ui.focusNotes();
+    }
+  }
+
   async openPaths(paths: readonly string[]): Promise<void> {
     for (const path of paths) {
       try {
@@ -3221,6 +3333,29 @@ export class NoxApp {
         // Neither touches the workspace filesystem.
         enabled: () => this.#selectionSeed() !== null,
         run: () => this.#newNoteFromSelection(),
+      },
+      {
+        id: 'notes.export',
+        title: 'Export Notes to Folder…',
+        category: 'Notes',
+        keywords: ['note', 'export', 'markdown', 'backup', 'save'],
+        // Writes files into a folder the user picked — the first notes
+        // command to leave Nox's own config directory. See the design's §4.3.
+        capabilities: ['fs.create'],
+        // Both halves need a folder, and the browser build has no dialog to
+        // pick one with. Greyed rather than hidden: a greyed command explains
+        // itself, a missing one does not.
+        enabled: () => this.platform.capabilities.nativeDialogs,
+        run: () => void this.exportNotes(),
+      },
+      {
+        id: 'notes.import',
+        title: 'Import Notes from Folder…',
+        category: 'Notes',
+        keywords: ['note', 'import', 'markdown', 'restore', 'load'],
+        capabilities: ['fs.read'],
+        enabled: () => this.platform.capabilities.nativeDialogs,
+        run: () => void this.importNotes(),
       },
       {
         id: 'notes.open',
