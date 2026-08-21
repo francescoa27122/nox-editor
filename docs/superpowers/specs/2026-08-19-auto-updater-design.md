@@ -278,29 +278,63 @@ capability exactly as `GitService` is
 ## 8. The operator's key ceremony — human hands only
 
 Run once, on the operator's machine, never by an agent and never in CI
-(envelope §1). Three commands and one paste:
+(envelope §1). Three commands and one paste.
+
+**Done 2026-08-20**, key id `A40CD806C398B1A7`. The public half is in
+`tauri.conf.json` (this commit). The keypair is password-protected, so
+**both** secrets are required — a private key whose password CI does not have
+signs nothing.
+
+**Shell matters here, and the bash forms below fail on Windows.** Two traps,
+both hit on the first real run:
+
+- **`~` is not expanded for native executables in PowerShell.** `tauri signer
+  generate -w ~/.tauri/...` created a literal `~` directory *inside the
+  repository* — the one place §8 says not to put it. Use `$HOME` (PowerShell)
+  or `$env:USERPROFILE`, never a bare `~`.
+- **PowerShell has no `<` redirection.** `gh secret set NAME < file` is a
+  parser error; pipe `Get-Content -Raw` instead.
 
 ```bash
+# --- bash / zsh (macOS, Linux, Git Bash) ---------------------------------
 # 1. Generate the keypair OUTSIDE any repository. Choose a real password.
-npm run tauri signer generate -- -w ~/.tauri/nox-updater.key
+npm run tauri signer generate -- -w "$HOME/.tauri/nox-updater.key"
 
-# 2. Hand both halves the private key needs to CI, without them touching disk here.
-gh secret set TAURI_SIGNING_PRIVATE_KEY --repo francescoa27122/nox-editor < ~/.tauri/nox-updater.key
+# 2. Hand the private key to CI without it passing through a browser field.
+gh secret set TAURI_SIGNING_PRIVATE_KEY --repo francescoa27122/nox-editor < "$HOME/.tauri/nox-updater.key"
 gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo francescoa27122/nox-editor
 # (paste the password at the prompt)
-
-# 3. Paste the PUBLIC key — printed by step 1, also in
-#    ~/.tauri/nox-updater.key.pub — into plugins.updater.pubkey in
-#    src-tauri/tauri.conf.json, and commit that. The public key is the
-#    only half that belongs in the repo.
 ```
 
-Then keep `~/.tauri/nox-updater.key` backed up somewhere that is not
-this repo: losing it means future releases cannot be verified by
-already-shipped builds, and Tauri's guide is blunt that there is no
-recovery. After the first signed release, update `releaseBody` in
-`release.yml` to stop teaching the `xattr` ritual as the only path —
-updates now skip it.
+```powershell
+# --- PowerShell (Windows) -----------------------------------------------
+npm run tauri signer generate -- -w "$HOME\.tauri\nox-updater.key"
+
+Get-Content "$HOME\.tauri\nox-updater.key" -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo francescoa27122/nox-editor
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo francescoa27122/nox-editor
+```
+
+3. Paste the **public** key — printed by step 1, also in
+   `nox-updater.key.pub` — into `plugins.updater.pubkey` in
+   `src-tauri/tauri.conf.json`, and commit it. The public key is the only
+   half that belongs in the repo.
+
+**Order matters.** Commit the public key *before* setting
+`TAURI_SIGNING_PRIVATE_KEY`: the release workflow's guard step deliberately
+fails any build where the private key is present and `pubkey` is empty, so
+setting the secret first turns the next tag into a failed release.
+
+Then keep the private key backed up somewhere that is not this repo: losing
+it means future releases cannot be verified by already-shipped builds, and
+Tauri's guide is blunt that there is no recovery.
+
+**What the ceremony does not do: make an already-released build updatable.**
+`pubkey` is baked into the binary at build time, so every install built
+before this commit carries an empty key and can verify nothing. v0.5.0 is
+such a build. The first release cut *after* this is the first one that is
+both signed and able to verify — everyone on an earlier build installs it by
+hand, once. After that first signed release, update `releaseBody` in
+`release.yml` to stop teaching the `xattr` ritual as the only path.
 
 ## 9. What changes when the OS certificates arrive
 
