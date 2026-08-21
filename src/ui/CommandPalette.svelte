@@ -53,12 +53,17 @@
   }
 
   /** The active mode, which the prefix can change without reopening. */
-  const effectiveMode = $derived.by<'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches'>(
+  const effectiveMode = $derived.by<
+    'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches' | 'notes'
+  >(
     () => {
       // The branch picker is a picker, not the multiplexed palette: no prefix
       // may switch it into another mode, because "?" or ">" are legal in what
       // the user might type while filtering.
       if (mode === 'git-branch') return 'branches';
+      // Same reasoning as the branch picker: a dedicated picker, so no
+      // prefix may switch it. A note title may legitimately start with '>'.
+      if (mode === 'note-open') return 'notes';
       if (text.startsWith('>')) return 'commands';
       if (text.startsWith('~')) return 'buffers';
       if (text.startsWith(':')) return 'line';
@@ -68,7 +73,9 @@
   );
 
   const term = $derived(
-    effectiveMode === 'files' || effectiveMode === 'branches' ? text.trim() : text.slice(1).trim(),
+    effectiveMode === 'files' || effectiveMode === 'branches' || effectiveMode === 'notes'
+      ? text.trim()
+      : text.slice(1).trim(),
   );
 
   const placeholder = $derived.by(() => {
@@ -83,6 +90,8 @@
         return 'Go to a symbol in this file…';
       case 'branches':
         return 'Switch to a branch, or create one…';
+      case 'notes':
+        return 'Go to a note…';
       default:
         return 'Search files by name…';
     }
@@ -100,6 +109,8 @@
         return 'dot';
       case 'branches':
         return 'branch';
+      case 'notes':
+        return 'note';
       default:
         return 'search';
     }
@@ -164,6 +175,7 @@
     if (effectiveMode === 'line') return lineRows(term);
     if (effectiveMode === 'symbols') return symbolRows(term);
     if (effectiveMode === 'branches') return branchRows(term);
+    if (effectiveMode === 'notes') return noteRows(term);
     return fileRows(term);
   });
   const rows = $derived(result.rows);
@@ -450,6 +462,48 @@
   }
 
   /**
+   * Notes by title, pinned ones first.
+   *
+   * Fuzzy here and substring in the panel's filter box, deliberately: this is
+   * the "I know which note I want" path, where a subsequence match reads as
+   * mind-reading, while a filter box wants a query that can be narrowed.
+   * Titles only — the body is what the panel searches, and a palette row has
+   * nowhere to put a matching line.
+   */
+  function noteRows(query: string): RowsResult {
+    const all = app.notes.notes.get();
+    const scored: { row: Row; score: number; pinned: boolean }[] = [];
+
+    for (const note of all) {
+      const match =
+        query.length === 0 ? { score: 0, positions: [] as number[] } : fuzzyMatch(query, note.title);
+      if (!match) continue;
+      scored.push({
+        score: match.score,
+        pinned: note.pinned,
+        row: {
+          key: `note:${note.id}`,
+          title: note.title,
+          positions: match.positions,
+          icon: 'note',
+          ...(note.pinned ? { badge: 'pinned' } : {}),
+          accept: () => {
+            ui.closeOverlay();
+            app.notes.select(note.id);
+            ui.focusNotes();
+          },
+        },
+      });
+    }
+
+    // Pinned first, then by score. Sorting by score alone would bury a pinned
+    // note under a better-scoring one, which is the opposite of what pinning
+    // was asked to do.
+    scored.sort((a, b) => (a.pinned === b.pinned ? b.score - a.score : a.pinned ? -1 : 1));
+    return { rows: scored.map((entry) => entry.row), total: scored.length };
+  }
+
+  /**
    * Local branches, "Create branch…" pinned first (the spec's §1 order).
    * The current branch is shown but inert — switching to where you stand
    * is a no-op git would also shrug at.
@@ -700,6 +754,8 @@
         return 'Only structure is listed, not variables — delete the @ to search files instead.';
       case 'branches':
         return 'Choose "Create branch…" above to make one with that name.';
+      case 'notes':
+        return 'Titles only here — use the filter box in the Notes panel to search inside a note.';
       case 'files':
         return 'Try part of the file name, or > for commands and ~ for an open file.';
       default:

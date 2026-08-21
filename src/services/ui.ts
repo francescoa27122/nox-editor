@@ -17,6 +17,10 @@ export type OverlayKind =
   | 'go-to-line'
   | 'go-to-symbol'
   | 'git-branch'
+  // Not 'notes': `SidebarView` and `FocusZone` below both already have one,
+  // and three unions sharing a member name makes a bare string literal
+  // ambiguous at every call site.
+  | 'note-open'
   | 'settings'
   | 'keybindings';
 

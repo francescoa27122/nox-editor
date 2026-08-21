@@ -3149,6 +3149,16 @@ export class NoxApp {
         run: () => this.ui.focusNotes(),
       },
       {
+        id: 'notes.open',
+        title: 'Go to Note',
+        category: 'Notes',
+        keywords: ['note', 'find', 'search', 'jump', 'open'],
+        // No `capabilities`: this moves the selection and the focus and
+        // touches nothing outside Nox's own notes.
+        enabled: () => this.notes.notes.get().length > 0,
+        run: () => this.ui.openOverlay('note-open'),
+      },
+      {
         id: 'notes.new',
         title: 'New Note',
         category: 'Notes',
