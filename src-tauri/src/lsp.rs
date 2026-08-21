@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::ops::ControlFlow;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -327,6 +328,7 @@ pub fn nox_lsp_start(
                         line,
                     },
                 );
+                ControlFlow::Continue(())
             });
         });
     }
@@ -422,7 +424,10 @@ mod tests {
         bytes.extend_from_slice(b"[Error] server exited with status 101\n");
 
         let mut lines = Vec::new();
-        read_lines(Cursor::new(bytes), |line| lines.push(line));
+        read_lines(Cursor::new(bytes), |line| {
+            lines.push(line);
+            ControlFlow::Continue(())
+        });
 
         assert_eq!(
             lines,
@@ -444,7 +449,10 @@ mod tests {
         let mut lines = Vec::new();
         read_lines(
             Cursor::new(b"[Error] panicked at 'index out of bounds'"),
-            |line| lines.push(line),
+            |line| {
+                lines.push(line);
+                ControlFlow::Continue(())
+            },
         );
 
         assert_eq!(

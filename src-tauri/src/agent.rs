@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::ops::ControlFlow;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -120,39 +121,21 @@ pub fn nox_agent_spawn(
         let id = id.clone();
         let child = Arc::clone(&child);
         std::thread::spawn(move || {
-            let mut stdout = stdout;
-            let mut stream = LineStream::default();
-            let mut buffer = [0u8; 8192];
-
-            // Raw byte reads rather than `BufRead::lines()`, because that
-            // turns one non-UTF-8 byte into the end of the conversation. See
-            // `LineStream`.
-            'read: loop {
-                match stdout.read(&mut buffer) {
-                    // EOF: the agent closed stdout, so it has finished
-                    // talking.
-                    Ok(0) => break,
-                    Ok(count) => {
-                        for line in stream.push(&buffer[..count]) {
-                            if !worth_emitting(&line) {
-                                continue;
-                            }
-                            // A failed emit means the window is gone; nothing
-                            // to recover.
-                            if !emit_line(&app, "nox://agent-line", &id, line) {
-                                break 'read;
-                            }
-                        }
-                    }
-                    Err(_) => break,
+            // Read through `read_lines` rather than `BufRead::lines()`,
+            // because that turns one non-UTF-8 byte into the end of the
+            // conversation.
+            read_lines(stdout, |line| {
+                if !worth_emitting(&line) {
+                    return ControlFlow::Continue(());
                 }
-            }
-
-            if let Some(line) = stream.finish() {
-                if worth_emitting(&line) {
-                    emit_line(&app, "nox://agent-line", &id, line);
+                // A failed emit means the window is gone; nothing to recover,
+                // and no reason to go on reading.
+                if emit_line(&app, "nox://agent-line", &id, line) {
+                    ControlFlow::Continue(())
+                } else {
+                    ControlFlow::Break(())
                 }
-            }
+            });
 
             // stdout closing is the earliest reliable sign the agent is done.
             // Reaping here also stops the child becoming a zombie when nobody
@@ -183,29 +166,18 @@ pub fn nox_agent_spawn(
         let app = app.clone();
         let id = id.clone();
         std::thread::spawn(move || {
-            let mut stderr = stderr;
-            let mut stream = LineStream::default();
-            let mut buffer = [0u8; 8192];
-
             // Same decoding as stdout, and for a sharper reason: mojibake in
             // a traceback is exactly the kind of thing that reaches stderr,
             // and dropping the rest of it would lose the only explanation a
             // crashed agent ever gives (`stdio.ts#died` reports these lines).
-            loop {
-                match stderr.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(count) => {
-                        for line in stream.push(&buffer[..count]) {
-                            emit_line(&app, "nox://agent-stderr", &id, line);
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            if let Some(line) = stream.finish() {
+            //
+            // Read to the end whatever the emits do: unlike stdout, a dead
+            // window is not a reason to stop draining the pipe, because an
+            // agent that fills stderr and is never read blocks on the write.
+            read_lines(stderr, |line| {
                 emit_line(&app, "nox://agent-stderr", &id, line);
-            }
+                ControlFlow::Continue(())
+            });
         });
     }
 
@@ -272,8 +244,7 @@ pub fn nox_agent_kill_all(state: State<'_, AgentState>) -> Result<()> {
 }
 
 /// Splits a child process's output into lines, surviving bytes that are not
-/// UTF-8. Used for an agent's stdout and stderr here, and for a language
-/// server's stderr in `lsp.rs`, which had the same bug.
+/// UTF-8. The decoding half of `read_lines`, which is the only way in.
 ///
 /// `BufRead::lines()`, which this module used, cannot do the job: it yields
 /// `Err(InvalidData)` for a chunk that is not valid UTF-8, so **one** stray
@@ -293,7 +264,7 @@ pub fn nox_agent_kill_all(state: State<'_, AgentState>) -> Result<()> {
 /// truncated by the agent dying mid-write — are dropped rather than
 /// substituted, which is what happened before too.
 #[derive(Default)]
-pub struct LineStream {
+struct LineStream {
     decoder: Utf8Stream,
     /// The tail of a line whose newline has not arrived yet.
     partial: String,
@@ -303,7 +274,7 @@ impl LineStream {
     /// Every complete line in this chunk. A trailing partial line is held
     /// back for the next call, so half a JSON object never reaches the
     /// renderer's parser.
-    pub fn push(&mut self, bytes: &[u8]) -> Vec<String> {
+    fn push(&mut self, bytes: &[u8]) -> Vec<String> {
         self.partial.push_str(&self.decoder.push(bytes));
 
         let mut lines = Vec::new();
@@ -321,7 +292,7 @@ impl LineStream {
     /// Whatever never got its newline. An agent that forgets the last one, or
     /// is killed mid-message, still gets that message delivered — as it did
     /// under `BufRead::lines()`.
-    pub fn finish(&mut self) -> Option<String> {
+    fn finish(&mut self) -> Option<String> {
         let mut line = std::mem::take(&mut self.partial);
         trim_carriage_return(&mut line);
         if line.is_empty() {
@@ -334,17 +305,24 @@ impl LineStream {
 
 /// Read `source` to its end, handing over one line at a time.
 ///
-/// Raw byte reads through `LineStream` rather than `BufRead::lines()`, which
-/// every reader here used until it was found to yield `Err(InvalidData)` for a
-/// chunk that is not valid UTF-8 — one stray byte ended the thread, and
-/// everything the process said afterwards was lost. Shared with `lsp.rs`,
-/// which had the same bug on a language server's stderr, so a server and an
-/// agent garble a line the same way rather than one of them going silent.
+/// The one reader behind every piped stream Nox supervises: an agent's stdout
+/// and stderr here, and a language server's stderr in `lsp.rs`. Raw byte reads
+/// through `LineStream` rather than `BufRead::lines()`, which all three used
+/// until it was found to yield `Err(InvalidData)` for a chunk that is not
+/// valid UTF-8 — one stray byte ended the thread, and everything the process
+/// said afterwards was lost. Sharing the reader is what keeps a server and an
+/// agent garbling a line the same way, rather than the fix landing on one of
+/// them and not the other.
+///
+/// `on_line` returns `Break` when there is nowhere left to put a line — the
+/// window is gone — and reading stops there. Returning `Continue` throughout
+/// drains the stream whatever the emits do, which is what a stderr reader
+/// wants: a pipe nobody empties eventually blocks the process filling it.
 ///
 /// A free function taking `impl Read` rather than a loop written out in each
 /// thread, so the reading can be driven by a test: a `ChildStdout` cannot be
 /// handed the bytes a test needs it to carry.
-pub fn read_lines(mut source: impl Read, mut on_line: impl FnMut(String)) {
+pub fn read_lines(mut source: impl Read, mut on_line: impl FnMut(String) -> ControlFlow<()>) {
     let mut stream = LineStream::default();
     let mut buffer = [0u8; 8192];
 
@@ -355,7 +333,12 @@ pub fn read_lines(mut source: impl Read, mut on_line: impl FnMut(String)) {
             Ok(0) => break,
             Ok(count) => {
                 for line in stream.push(&buffer[..count]) {
-                    on_line(line);
+                    // `Break` means there is nowhere left to put a line, so
+                    // the tail of the stream is abandoned rather than drained
+                    // — including the partial line below.
+                    if on_line(line).is_break() {
+                        return;
+                    }
                 }
             }
             Err(_) => break,
@@ -365,7 +348,7 @@ pub fn read_lines(mut source: impl Read, mut on_line: impl FnMut(String)) {
     // A process killed mid-write still gets its last line delivered, as it
     // did under `BufRead::lines()`.
     if let Some(line) = stream.finish() {
-        on_line(line);
+        let _ = on_line(line);
     }
 }
 
@@ -405,6 +388,7 @@ fn poisoned<T>(_: T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     /// The failure this prevents: one byte that is not UTF-8 on an agent's
     /// stdout ending the reader loop for good. `BufRead::lines()` — what this
@@ -430,6 +414,31 @@ mod tests {
                 "{\"type\":\"done\"}".to_string(),
             ],
             "the lines after the bad byte must still be delivered"
+        );
+    }
+
+    /// The failure this prevents: reading on after the window it was reading
+    /// *for* has gone. An agent's stdout emit fails once the webview is torn
+    /// down, and a chatty agent would otherwise keep a thread spinning
+    /// through megabytes with nowhere to put them, for as long as the process
+    /// lives.
+    #[test]
+    fn stops_reading_when_the_caller_breaks() {
+        let mut seen = Vec::new();
+        read_lines(Cursor::new(b"first\nsecond\nthird\n"), |line| {
+            let stop = line == "second";
+            seen.push(line);
+            if stop {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+
+        assert_eq!(
+            seen,
+            vec!["first".to_string(), "second".to_string()],
+            "nothing after the break should be read"
         );
     }
 

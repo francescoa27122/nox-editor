@@ -278,12 +278,23 @@ pub fn nox_git_commit(root: String, message: String) -> Result<String> {
     command.creation_flags(CREATE_NO_WINDOW);
 
     let mut child = command.spawn().map_err(|e| format!("io: git could not be run ({e})"))?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| "io: no stdin handle".to_string())?
-        .write_all(message.as_bytes())
-        .map_err(|e| format!("io: could not write the message ({e})"))?;
+    let mut stdin = child.stdin.take().ok_or_else(|| "io: no stdin handle".to_string())?;
+
+    // A broken pipe here is not a failure worth reporting: it means git exited
+    // before it read the message, which is exactly what it does when it
+    // refuses the commit — unmerged files, nothing staged, a failing hook.
+    // Returning the pipe error would replace git's own explanation with a
+    // plumbing detail, and whether the write loses that race is a matter of
+    // pipe buffering, so the same refusal produced git's words on macOS and
+    // "Broken pipe (os error 32)" on Linux. Fall through and let git speak.
+    match stdin.write_all(message.as_bytes()) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {}
+        Err(error) => return Err(format!("io: could not write the message ({error})")),
+    }
+    // Explicit, because git waits for EOF on `--file=-` and the borrow above
+    // would otherwise hold the pipe open until the end of the function.
+    drop(stdin);
     let output = child
         .wait_with_output()
         .map_err(|e| format!("io: git did not finish ({e})"))?;
