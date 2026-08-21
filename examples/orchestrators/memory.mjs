@@ -5,8 +5,14 @@
  * `proposal.stage`, `session.note`, `session.summary` is the whole vocabulary,
  * and none of them store anything. That is not an omission. An agent is a
  * separate process, so what it remembers is its own business, kept on its own
- * side of the pipe. Nothing here needs a line of editor code, and the editor
- * cannot be made slower or larger by any of it.
+ * side of the pipe, and the editor cannot be made slower or larger by any of
+ * it.
+ *
+ * The editor's one contribution is an address: `NOX_CONFIG_DIR` on the spawned
+ * agent's environment, so the store can sit beside `session.json` instead of
+ * in a directory of this file's invention. It is not a capability — the
+ * protocol still stores nothing, and a process that can write at all could
+ * always have written anywhere.
  *
  * Used two ways:
  *
@@ -30,7 +36,26 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const DEFAULT_PATH = join(homedir(), '.nox', 'agent-memory.jsonl');
+/**
+ * Where the store lives when nobody names a file.
+ *
+ * Beside `session.json` and `settings.json`, in the directory Nox puts on the
+ * agent's environment when it spawns one. That path is per-platform and
+ * derived from the bundle identifier, so Nox is the only party that knows it;
+ * recomputing it here would duplicate a contract that can drift.
+ *
+ * The fallback is for an agent run by hand — from a shell, or under a Nox old
+ * enough not to set the variable. Losing the variable should cost a different
+ * store, not a crash.
+ */
+export function defaultPath(env = process.env) {
+  const configured = env.NOX_CONFIG_DIR;
+  return configured
+    ? join(configured, 'agent-memory.jsonl')
+    : join(homedir(), '.nox', 'agent-memory.jsonl');
+}
+
+export const DEFAULT_PATH = defaultPath();
 
 /** Words carried by every instruction, so their overlap means nothing. */
 const NOISE = new Set([
@@ -47,7 +72,7 @@ function tokens(text) {
   );
 }
 
-export function createMemory({ path = DEFAULT_PATH, now = () => new Date().toISOString() } = {}) {
+export function createMemory({ path = defaultPath(), now = () => new Date().toISOString() } = {}) {
   /**
    * Every entry, oldest first. A line that will not parse is dropped rather
    * than fatal: the realistic way this file goes wrong is a process killed

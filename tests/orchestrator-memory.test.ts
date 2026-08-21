@@ -1,5 +1,5 @@
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // the part with logic in it; the adapter that drives it is covered over real
 // pipes in `stdio.test.ts`.
 // @ts-expect-error — an example, deliberately outside the typed source tree.
-import { createMemory, formatRecall, remembering } from '../examples/orchestrators/memory.mjs';
+import { createMemory, defaultPath, formatRecall, remembering } from '../examples/orchestrators/memory.mjs';
 
 describe('agent memory', () => {
   let dir: string;
@@ -20,6 +20,20 @@ describe('agent memory', () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('defaults beside session.json, and falls back when Nox did not say where', () => {
+    // The variable Nox puts on a spawned agent's environment. Joined rather
+    // than treated as a whole path, so the store lands in the same directory
+    // as `session.json` and `settings.json`.
+    expect(defaultPath({ NOX_CONFIG_DIR: '/cfg/dev.nox.editor' })).toBe(
+      join('/cfg/dev.nox.editor', 'agent-memory.jsonl'),
+    );
+
+    // Run from a shell, or under a Nox old enough not to set it: a different
+    // store, not a crash.
+    expect(defaultPath({})).toBe(join(homedir(), '.nox', 'agent-memory.jsonl'));
+    expect(defaultPath({ NOX_CONFIG_DIR: '' })).toBe(join(homedir(), '.nox', 'agent-memory.jsonl'));
   });
 
   it('creates the directory and appends one line per entry', () => {
