@@ -65,6 +65,18 @@ const MODIFIER_KEYS = new Set([
   'capslock',
 ]);
 
+/*
+  Careful in tests: this is read once at module scope, and the two test
+  environments disagree about it. Under `node`, Node fills `navigator.platform`
+  with the *real* host, so this is true on a Mac and false on the Linux and
+  Windows CI runners. Under `jsdom`, `navigator.platform` is always `''`, so it
+  is false everywhere including on a Mac.
+
+  A test that hardcodes one resolution of `Mod` therefore passes locally and
+  fails half the CI matrix — which is exactly what happened to
+  `tests/menu.test.ts`'s accelerator assertions. Assert against `platformIsMac`,
+  or use an explicit modifier and avoid `Mod` altogether, as the keymap tests do.
+*/
 const isMac =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
 

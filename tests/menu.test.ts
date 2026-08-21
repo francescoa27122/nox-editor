@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NoxApp } from '../src/app';
 import { MemoryPlatform } from '../src/platform/memory';
+import { platformIsMac } from '../src/services/keymap';
 import type { MenuNode, PlatformCapabilities } from '../src/platform/types';
 import { COVERED_BY_SYSTEM_ITEMS, buildMenu, toAccelerator } from '../src/services/menu';
 
@@ -195,11 +196,21 @@ describe('accelerators', () => {
       return found;
     };
 
-    expect(acceleratorFor('file.save')).toBe('Cmd+S');
+    // `Mod` is the one chord token whose meaning depends on the host — it
+    // resolves to meta on macOS and ctrl everywhere else — and `file.save`'s
+    // default really is `Mod+S`, so these two expectations cannot be one
+    // literal. Hardcoding the macOS resolution is what turned this test red on
+    // every non-macOS CI runner while passing locally: this file runs under
+    // the node environment, where Node reports the *real* host in
+    // `navigator.platform`, so on a Mac it read `Cmd+S` and agreed with itself.
+    //
+    // Note the two are not a prefix swap: `toAccelerator` orders modifiers
+    // ctrl, alt, shift, meta, so meta lands after alt and ctrl lands before it.
+    expect(acceleratorFor('file.save')).toBe(platformIsMac ? 'Cmd+S' : 'Ctrl+S');
 
     app.keymap.assign('file.save', 'Mod+Alt+S', { from: 'Mod+S' });
     await Promise.resolve();
-    expect(acceleratorFor('file.save')).toBe('Alt+Cmd+S');
+    expect(acceleratorFor('file.save')).toBe(platformIsMac ? 'Alt+Cmd+S' : 'Ctrl+Alt+S');
 
     app.menu.dispose();
   });
