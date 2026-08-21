@@ -121,6 +121,63 @@ async function setup() {
   return { app, platform, container };
 }
 
+describe('an untracked directory', () => {
+  /**
+   * The defect this guards, found by walking the packaged app and reachable
+   * by no test before it: git collapses an untracked directory into a single
+   * `? lib/` record and never names the files inside it. The tree matched
+   * exact paths only, so a brand-new folder and everything in it carried no
+   * marker at all — the one state where "is this new?" is the whole question.
+   *
+   * `seedGitUntrackedDirectory` exists so the fake emits that *shape*, not
+   * merely those facts: seeding the files individually produces `? lib/a.ts`
+   * records, which the old exact-match code already handled and which real
+   * git never sends.
+   */
+  it('marks the files inside it, which git never names', async () => {
+    mounted = mountComponent(ExplorerPanel);
+    const { app, platform, container } = mounted;
+    app.git.start();
+    platform.seedGitRepo('/w');
+    platform.seedGitBase('/w/tracked.ts', 'same\n');
+    platform.seedFile('/w/tracked.ts', 'same\n');
+    platform.mkdirp('/w/lib');
+    platform.seedFile('/w/lib/helper.ts', 'new\n');
+    platform.seedGitUntrackedDirectory('/w/lib');
+    await app.workspace.openFolder('/w');
+    await app.files.setRoot('/w');
+    await settle();
+
+    // The record really is the collapsed directory form, or this test would
+    // be proving something easier than the defect.
+    const raw = parseGitStatus(await platform.gitStatus('/w'));
+    expect(raw.unstaged.map((e) => e.path)).toContain('lib/');
+    expect(raw.unstaged.map((e) => e.path)).not.toContain('lib/helper.ts');
+
+    await app.files.toggle('/w/lib');
+    await settle();
+
+    expect(letterOf(container, 'helper.ts')).toEqual(['U', 'Untracked']);
+    expect(letterOf(container, 'tracked.ts')).toBeNull();
+  });
+
+  /** The directory row itself stays bare: a folder is not a changed file. */
+  it('still leaves the folder row unmarked', async () => {
+    mounted = mountComponent(ExplorerPanel);
+    const { app, platform, container } = mounted;
+    app.git.start();
+    platform.seedGitRepo('/w');
+    platform.mkdirp('/w/lib');
+    platform.seedFile('/w/lib/helper.ts', 'new\n');
+    platform.seedGitUntrackedDirectory('/w/lib');
+    await app.workspace.openFolder('/w');
+    await app.files.setRoot('/w');
+    await settle();
+
+    expect(letterOf(container, 'lib')).toBeNull();
+  });
+});
+
 describe('git status on the tree', () => {
   it('marks changed files with the porcelain letter and leaves clean ones bare', async () => {
     const { container } = await setup();
