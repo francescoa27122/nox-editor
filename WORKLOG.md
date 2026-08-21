@@ -8,6 +8,72 @@ are knowledge.**
 
 ---
 
+## 2026-08-20 (PC, release) — Cut v0.5.0
+
+PR #53 merged first (`bd14716`, CI green on all five jobs). Then the release,
+on branch `release-0.5.0`, following the shape `release-0.4.3` (#44) set.
+
+**Tagging alone would have failed.** `release.yml`'s gate reads
+`src-tauri/tauri.conf.json`'s version and cross-checks `package.json` and
+`src-tauri/Cargo.toml` against it *and* against the tag, before spending
+twenty minutes on binaries. All three said `0.4.3`, so `v0.5.0` would have
+been rejected at the first step. The bump is the release; the tag only
+records it.
+
+Shipped:
+
+- **Five version files** to 0.5.0: `package.json`, `package-lock.json` (both
+  the top-level and the `packages[""]` entry), `src-tauri/tauri.conf.json`,
+  `src-tauri/Cargo.toml`, and the `nox` entry in `src-tauri/Cargo.lock`.
+  **`Cargo.lock` is edited by hand** because there is no Rust toolchain on
+  this PC — the same thing 0.4.3 did, and safe for the same reason: the gate
+  cross-checks the versions and the three Rust CI jobs build with this
+  lockfile, so a lie here fails there rather than shipping.
+- **CHANGELOG `[Unreleased]` → `## [0.5.0] — 2026-08-20`**, plus a fresh
+  empty `[Unreleased]` and the compare links. The section was **consolidated
+  on the way**: it had accumulated **four separate `### Added` blocks** with
+  `### Changed` and `### Fixed` interleaved between them, because four
+  features each appended their own. Now one Added, one Changed, one Fixed, in
+  Keep a Changelog's order. No wording changed — only which heading the
+  entries sit under.
+- **README's Status section**, which is the file's one version-bearing claim:
+  v0.4 → v0.5, 1162 → 1421 tests, and a paragraph naming what 0.5.0 actually
+  is — git, changing the keys, `.nox/settings.json`, a fast explorer, self
+  update — with "not there yet" corrected to plugins **and blame**.
+- **ROADMAP's release annotations.** That file's whole premise is that
+  milestones and releases have never lined up and each shipped row says which
+  release carried it. v0.5's table, v0.6's two 1.0-gate rows and v0.2's
+  explorer row now say 0.5.0.
+
+Verified:
+
+- `npm test` 1421/1421, `npm run check` 473 files 0 errors, `npm run build`
+  green — on the bumped tree, not the pre-bump one.
+- The gate's own arithmetic, run by hand before pushing anything: all three
+  version files read `0.5.0`, and `v0.5.0` minus its `v` matches.
+
+Next:
+
+- Watch the release run. Per `nox-windows-test-builds`: `releaseDraft: true`,
+  so it lands as a **draft**, and **assets upload per job** — the Windows
+  `.exe` appears while other platforms are still building, so poll for the
+  asset rather than the run. ~8 minutes historically, and the Linux job has
+  hung once on apt for 30 (transient; `fail-fast: false` means the others
+  still upload).
+- Then the 1.0 keyboard pass on the Mac, and the certificates.
+
+Blocked:
+
+- Nothing. The draft release is Francesco's to publish — that is a
+  publication, not a build.
+
+Confidence:
+
+- High that the gate passes: its check is four string comparisons and I ran
+  them.
+- The binaries themselves are unverified by construction — this PC cannot
+  build them, which is the whole reason the tag exists.
+
 ## 2026-08-20 (PC, 1.0 bar) — The browser pass over all three
 
 Not a feature. The three commits below each closed with "not verified on a
