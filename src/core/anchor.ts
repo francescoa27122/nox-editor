@@ -12,6 +12,29 @@
  */
 
 /**
+ * Where a note's subject lives in the code.
+ *
+ * Three primitives, and `NotesService` interprets none of them. That is what
+ * lets this exist at all: the service is given a `Platform` and nothing else
+ * so that opening a different folder cannot change or hide notes, and a path
+ * it could resolve would mean a workspace in reach. `app.ts` does the
+ * resolving — it already holds both services, and already splits this way for
+ * `notes.rename`.
+ */
+export interface NoteAnchor {
+  /** Absolute, as the workspace gave it. Meaningless to this module. */
+  path: string;
+  /** 1-based, matching `app.goToLine`. */
+  line: number;
+  /**
+   * The anchored text. Kept beside `line` rather than instead of it so a jump
+   * can re-find code that edits above it have moved — see
+   * `core/anchor.ts`.
+   */
+  snippet: string;
+}
+
+/**
  * How far from the remembered line a match is still believed, in lines.
  *
  * An edit that moved code further than this is a restructure rather than a

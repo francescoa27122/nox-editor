@@ -935,3 +935,79 @@ describe('anchoring a note to code', () => {
     expect(reloaded.notes.get()[0]!.anchor).toEqual(anchor);
   });
 });
+
+describe('importing a note', () => {
+  const anchor = { path: '/w/src/lsp.rs', line: 320, snippet: 'for line in' };
+
+  it('takes every field the file carried', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+
+    notes.importNote({
+      title: 'from a file',
+      body: 'the text',
+      pinned: true,
+      anchor,
+      createdAt: 111,
+      updatedAt: 222,
+    });
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    const note = reloaded.notes.get()[0]!;
+
+    expect(note.title).toBe('from a file');
+    expect(note.body).toBe('the text');
+    expect(note.pinned).toBe(true);
+    expect(note.anchor).toEqual(anchor);
+    expect(note.createdAt).toBe(111);
+    expect(note.updatedAt).toBe(222);
+  });
+
+  /**
+   * The failure this prevents: import overwriting the note you already have.
+   * Files carry the id they were exported with, so re-importing an export of
+   * this very folder would otherwise rewrite every note in place. Merge needs
+   * a conflict UI and a rule for which side wins; "always add" needs neither,
+   * and a duplicate note is a nuisance where an overwritten one is a loss.
+   */
+  it('adds a new note rather than overwriting the id the file names', async () => {
+    const notes = new NotesService(new MemoryPlatform());
+
+    const existing = notes.create();
+    notes.rename(existing, 'the one I already had');
+
+    const imported = notes.importNote({ id: existing, title: 'from a file', body: 'x' });
+
+    expect(imported).not.toBe(existing);
+    expect(notes.notes.get()).toHaveLength(2);
+    expect(notes.notes.get().find((n) => n.id === existing)!.title).toBe('the one I already had');
+  });
+
+  it('gives an imported note its own body file, not one already in use', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+
+    const first = notes.create();
+    notes.setBody(first, 'the original');
+    notes.importNote({ title: 'imported', body: 'the imported one' });
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    const bodies = reloaded.notes.get().map((n) => n.body).sort();
+
+    expect(bodies).toEqual(['the imported one', 'the original']);
+  });
+
+  it('stamps a note whose file carried no timestamps', () => {
+    const notes = new NotesService(new MemoryPlatform());
+
+    const id = notes.importNote({ title: 'no dates', body: '' });
+    const note = notes.notes.get().find((n) => n.id === id)!;
+
+    expect(note.createdAt).toBeGreaterThan(0);
+    expect(note.updatedAt).toBeGreaterThan(0);
+  });
+});

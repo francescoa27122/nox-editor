@@ -1,4 +1,5 @@
 import { Signal } from '@core/signal';
+import type { NoteAnchor } from '@core/anchor';
 import type { Platform } from '@platform/types';
 
 /**
@@ -27,28 +28,7 @@ const UNTITLED = 'Untitled note';
 /** Matches the session's debounce; tuned for the same reason — typing. */
 const SAVE_DELAY = 400;
 
-/**
- * Where a note's subject lives in the code.
- *
- * Three primitives, and `NotesService` interprets none of them. That is what
- * lets this exist at all: the service is given a `Platform` and nothing else
- * so that opening a different folder cannot change or hide notes, and a path
- * it could resolve would mean a workspace in reach. `app.ts` does the
- * resolving — it already holds both services, and already splits this way for
- * `notes.rename`.
- */
-export interface NoteAnchor {
-  /** Absolute, as the workspace gave it. Meaningless to this module. */
-  path: string;
-  /** 1-based, matching `app.goToLine`. */
-  line: number;
-  /**
-   * The anchored text. Kept beside `line` rather than instead of it so a jump
-   * can re-find code that edits above it have moved — see
-   * `core/anchor.ts`.
-   */
-  snippet: string;
-}
+export type { NoteAnchor };
 
 export interface Note {
   /**
@@ -228,6 +208,53 @@ export class NotesService {
       ...list,
     ]);
     this.selectedId.set(id);
+    this.#schedule();
+    return id;
+  }
+
+  /**
+   * Add a note from a file, keeping whatever the file carried.
+   *
+   * **Always adds.** The `id` a file names is deliberately ignored and a
+   * fresh one minted: files carry the id they were exported with, so
+   * re-importing an export of this very folder would otherwise rewrite every
+   * note in place. Merging needs a conflict UI and a rule for which side
+   * wins; adding needs neither, and a duplicate note is a nuisance where an
+   * overwritten one is a loss.
+   *
+   * One update rather than `create()` followed by four setters: importing a
+   * folder is the one path where the per-note cost is multiplied by however
+   * many files were picked.
+   */
+  importNote(note: {
+    id?: string;
+    title: string;
+    body: string;
+    pinned?: boolean;
+    anchor?: NoteAnchor;
+    createdAt?: number;
+    updatedAt?: number;
+  }): string {
+    const ordinal = this.#nextOrdinal++;
+    const id = `n${ordinal}`;
+    const now = Date.now();
+
+    this.#bodyFiles.set(id, `note-${ordinal}.txt`);
+    this.#dirtyBodies.add(id);
+    // Rides on the dirty body exactly as `create()` does, for the same
+    // reason — see the comment there.
+    this.notes.update((list) => [
+      {
+        id,
+        title: note.title.trim() || UNTITLED,
+        body: note.body,
+        createdAt: note.createdAt ?? now,
+        updatedAt: note.updatedAt ?? now,
+        pinned: note.pinned ?? false,
+        ...(note.anchor ? { anchor: note.anchor } : {}),
+      },
+      ...list,
+    ]);
     this.#schedule();
     return id;
   }
