@@ -78,15 +78,12 @@ export class NotesService {
   /** Notes whose body has moved since the last successful write. */
   #dirtyBodies = new Set<string>();
   /**
-   * Note id → the revision its body was at when the *current or most recent*
-   * write for it started. A keystroke bumps this. Comparing it again after
-   * the write's await settles is what tells a persist whether the text it
-   * just wrote is still the text on the note — if not, another keystroke
-   * landed mid-write and the id must stay dirty rather than being cleared
-   * for words that were never persisted.
+   * Supplies `#indexRevision` below. The body half of this scheme is gone —
+   * a dirty body is now cleared before its write and re-armed by any edit
+   * that lands during it — and this goes with the index half.
    */
-  #bodyRevision = new Map<string, number>();
   #nextRevision = 1;
+
   /** Body files of deleted notes, waiting to be blanked. */
   #released = new Set<string>();
   /**
@@ -184,7 +181,6 @@ export class NotesService {
 
     this.#bodyFiles.set(id, `note-${ordinal}.txt`);
     this.#dirtyBodies.add(id);
-    this.#bodyRevision.set(id, this.#nextRevision++);
     // Deliberately does not bump #indexRevision. A new note is also an
     // index-only change (its id and title need a row), but it rides on the
     // dirty body instead: that keeps at least one full pass alive, and the
@@ -217,7 +213,6 @@ export class NotesService {
       list.map((note) => (note.id === id ? { ...note, body, updatedAt: now } : note)),
     );
     this.#dirtyBodies.add(id);
-    this.#bodyRevision.set(id, this.#nextRevision++);
     this.#schedule();
   }
 
@@ -260,7 +255,6 @@ export class NotesService {
     if (file) this.#released.add(file);
     this.#bodyFiles.delete(id);
     this.#dirtyBodies.delete(id);
-    this.#bodyRevision.delete(id);
 
     const remaining = list.filter((note) => note.id !== id);
     this.notes.set(remaining);
@@ -353,19 +347,19 @@ export class NotesService {
           continue;
         }
 
-        const revisionAtStart = this.#bodyRevision.get(id);
+        // Cleared *before* the write, not after. A setBody landing while the
+        // write is in flight puts the id straight back, which is the whole
+        // mechanism — there is no revision to capture and compare.
+        this.#dirtyBodies.delete(id);
         const problem = await this.#write(file, note.body);
         if (problem) {
-          // Stay dirty on failure so the next save tries again: until this
-          // write lands, the text exists nowhere but memory.
+          // Until this write lands the text exists nowhere but memory, so
+          // re-arm. `failed` is what stops this same call retrying it
+          // forever now that a failure re-dirties the id.
+          this.#dirtyBodies.add(id);
           failure ??= problem;
           failed.add(id);
-          continue;
         }
-        // A setBody landing while the write above was in flight bumped the
-        // revision again — the text just written is already stale, so the
-        // id stays dirty and comes right back around this same loop.
-        if (this.#bodyRevision.get(id) === revisionAtStart) this.#dirtyBodies.delete(id);
       }
 
       for (const file of [...this.#released]) {
