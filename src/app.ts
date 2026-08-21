@@ -3526,6 +3526,12 @@ export class NoxApp {
       'Mod+R': 'nav.goToSymbol',
       'Mod+Shift+F': 'search.focus',
       'Mod+Shift+N': 'notes.focus',
+      // The picker sits with the other pickers (Mod+P files, Mod+E buffers,
+      // Mod+R symbols) rather than with the panel chord above, because that
+      // is what it is. `Mod+Alt+N` keeps the mnemonic — plain `Mod+N` is
+      // `file.new` and `Mod+Shift+N` is the panel — and ⌥N being a dead key
+      // on a Mac does not matter, because chords match on `event.code`.
+      'Mod+Alt+N': 'notes.open',
       // The problems list is the panel most worth a hotkey, and ⌘⇧M is the
       // convention everywhere. References keeps no chord of its own: its
       // natural entry is Shift+F12, which already fills and shows the view.
