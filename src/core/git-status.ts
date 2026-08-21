@@ -59,6 +59,16 @@ export interface FileEntry {
   status: GitStatusLetter;
   /** A rename's source, when there is one. */
   origPath?: string;
+  /**
+   * True when this record names a **submodule** rather than a file.
+   *
+   * Porcelain's third field is `N...` for an ordinary path and `S<c><m><u>`
+   * for a submodule, and that letter is the only signal there is: a submodule
+   * path carries no trailing slash, so it is indistinguishable from a file by
+   * its text. Discarding it is what let the Git panel offer Open and Show
+   * Changes on a row that can only answer "sub is a folder."
+   */
+  submodule?: boolean;
 }
 
 export interface GitStatus {
@@ -125,16 +135,19 @@ export function parseGitStatus(raw: string): GitStatus {
       const x = record[2]!;
       const y = record[3]!;
       const path = tailAfter(record, 8);
-      if (x !== '.') status.staged.push({ path, status: letter(x) });
-      if (y !== '.') status.unstaged.push({ path, status: letter(y) });
+      // Field 3 is `N...` for a path and `S<c><m><u>` for a submodule.
+      const submodule = record.startsWith('S', 5) ? true : undefined;
+      if (x !== '.') status.staged.push({ path, status: letter(x), submodule });
+      if (y !== '.') status.unstaged.push({ path, status: letter(y), submodule });
     } else if (record.startsWith('2 ')) {
       // 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path> NUL <origPath>
       const x = record[2]!;
       const y = record[3]!;
       const path = tailAfter(record, 9);
       const origPath = records[++i] ?? '';
-      if (x !== '.') status.staged.push({ path, status: letter(x), origPath });
-      if (y !== '.') status.unstaged.push({ path, status: letter(y) });
+      const submodule = record.startsWith('S', 5) ? true : undefined;
+      if (x !== '.') status.staged.push({ path, status: letter(x), origPath, submodule });
+      if (y !== '.') status.unstaged.push({ path, status: letter(y), submodule });
     } else if (record.startsWith('? ')) {
       status.unstaged.push({ path: record.slice(2), status: 'U' });
     } else if (record.startsWith('u ')) {

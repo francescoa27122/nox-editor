@@ -6,6 +6,34 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Search could not find your dotfiles.** `.github/workflows/*`,
+  `.eslintrc.json` and Nox's own `.nox/settings.json` were skipped by the
+  walker, and the panel reported "No results" — which was untrue rather than
+  unhelpful. Search now reads them.
+- **"Files to exclude" was ignored** whenever "files to include" had already
+  matched a file. Excluding `*.test.ts` while including `*.ts` still returned
+  the test files.
+- **One stray byte from an agent froze the session.** A single character an
+  agent's output could not encode ended the reader, and Nox sat on "Working…"
+  for the rest of the run — with no way back except quitting. The same byte
+  truncated a language server's diagnostics at the point they mattered most.
+- **An agent that stops answering now gives up** instead of waiting forever.
+- **The file watcher was silently dead** if your project lived under a folder
+  called `dist`, `node_modules` or `target` — no reload prompts, no tree
+  updates, no warning. Search kept working, so the failure looked arbitrary.
+- **A long stream of writes** — a code generator, `tsc --watch` — froze the
+  tree, the file index and change detection for as long as it lasted.
+- **A conflicted file lost its change marks**, and the diff view blamed it on
+  being untracked or outside a repository. Mid-merge Nox now compares against
+  your side of the merge and says so.
+- **Cancelling a crashed agent, or typing into a terminal whose shell had
+  exited, raised a "Something went wrong" toast** for what is an ordinary race.
+- Submodules and new folders no longer offer Open and Show Changes in the Git
+  panel, where they could only fail. Staging them still works, because it is
+  the one action that makes sense.
+
 ### Added
 
 - **You can see what you granted an agent, and take it back.** Everything

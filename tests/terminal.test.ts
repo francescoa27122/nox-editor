@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Platform, TerminalSession, TerminalSpec } from '../src/platform/types';
 import { TerminalService } from '../src/services/terminal';
+import { unhandledRejections } from './support/unhandled-rejections';
 
 /**
  * The terminal service against a fake pty.
@@ -18,11 +19,19 @@ class FakeSession implements TerminalSession {
 
   #data: ((data: string) => void)[] = [];
   #exits: ((code: number | null) => void)[] = [];
+  /** When set, `write` and `resize` reject with it — see `refuses` below. */
+  #refuses: string | null;
+
+  constructor(refuses: string | null = null) {
+    this.#refuses = refuses;
+  }
 
   async write(data: string): Promise<void> {
+    if (this.#refuses) throw new Error(this.#refuses);
     this.written.push(data);
   }
   async resize(cols: number, rows: number): Promise<void> {
+    if (this.#refuses) throw new Error(this.#refuses);
     this.sizes.push([cols, rows]);
   }
   onData(handler: (data: string) => void): void {
@@ -45,7 +54,12 @@ class FakeSession implements TerminalSession {
   }
 }
 
-function harness(options: { terminals?: boolean; fail?: string } = {}) {
+/**
+ * `refuses` makes the pty answer every write and resize with an error, which
+ * is what `nox_pty_write` and `nox_pty_resize` do between the shell exiting
+ * and `nox://pty-exit` crossing IPC (`pty.rs:283`, `pty.rs:305`).
+ */
+function harness(options: { terminals?: boolean; fail?: string; refuses?: string } = {}) {
   const opened: TerminalSpec[] = [];
   const sessions: FakeSession[] = [];
 
@@ -54,7 +68,7 @@ function harness(options: { terminals?: boolean; fail?: string } = {}) {
     async openTerminal(spec: TerminalSpec) {
       opened.push(spec);
       if (options.fail) throw new Error(options.fail);
-      const session = new FakeSession();
+      const session = new FakeSession(options.refuses ?? null);
       sessions.push(session);
       return session;
     },
@@ -211,5 +225,29 @@ describe('lifecycle', () => {
 
     expect(sessions[0]!.written).toEqual(['ls\r']);
     expect(sessions[0]!.sizes).toEqual([[100, 30]]);
+  });
+
+  /**
+   * The failure this prevents: the next keystroke, or any ResizeObserver tick,
+   * arriving in the window between a shell exiting and `nox://pty-exit`
+   * reaching the renderer. `nox_pty_write` and `nox_pty_resize` answer
+   * `not-found` there, and `void this.#session?.write(data)` attached no
+   * catch — so the rejection reached the `unhandledrejection` backstop at
+   * `app.ts:686` and showed "Something went wrong" over a shell that had
+   * simply finished.
+   *
+   * The neighbouring test asserts these must not *throw*, which they never
+   * did; the failure is a rejection, and only watching for one catches it.
+   */
+  it('does not report a write or resize the pty has already forgotten', async () => {
+    const { terminal } = harness({ refuses: 'not-found: no terminal term-1' });
+    await terminal.open(80, 24);
+
+    const rejections = await unhandledRejections(() => {
+      terminal.write('ls\r');
+      terminal.resize(100, 30);
+    });
+
+    expect(rejections).toEqual([]);
   });
 });

@@ -11,7 +11,16 @@ import type { BufferId, WorkspaceService } from './workspace';
  *
  * The base of the comparison is the **index** (`:0:`) — the gutter's
  * question is "what have I changed that git doesn't hold yet", and for
- * anyone not mid-staging the index is HEAD anyway. The base text is
+ * anyone not mid-staging the index is HEAD anyway.
+ *
+ * Mid-merge there *is* no stage 0, and reading its absence as "git holds
+ * nothing for this file" is what used to blank the gutter on exactly the
+ * files a conflict makes hardest to read. `nox_git_file_base` now falls back
+ * to stage 2 (*ours*) and then stage 1 (the merge base); stage 2 first
+ * because it is the mid-merge analogue of HEAD, so the gutter keeps marking
+ * what the merge proposes to add rather than the user's own committed work.
+ *
+ * The base text is
  * normalized the way `decode` normalizes a buffer (BOM off, CRLF → LF),
  * because the editor's document is canonical LF and an unnormalized CRLF
  * base would mark every line modified.

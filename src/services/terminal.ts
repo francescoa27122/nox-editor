@@ -105,14 +105,31 @@ export class TerminalService {
     }
   }
 
-  /** Send keystrokes. Silently ignored when nothing is running. */
+  /**
+   * Send keystrokes. Silently ignored when nothing is running.
+   *
+   * The catch is not defensive tidiness. Both of these are fire-and-forget
+   * calls over IPC that genuinely rejects: for a short window after a shell
+   * exits, `#session` is still set while Rust has already dropped the id from
+   * its registry, so `nox_pty_write` answers `not-found`. Without a catch that
+   * rejection reaches the `unhandledrejection` backstop and the user gets
+   * "Something went wrong" for typing into a terminal that had just finished.
+   * There is nothing to report: the exit event is a moment behind and says it
+   * properly.
+   */
   write(data: string): void {
-    void this.#session?.write(data);
+    void this.#session?.write(data).catch(() => undefined);
   }
 
-  /** Tell the shell the panel changed size. */
+  /**
+   * Tell the shell the panel changed size. Swallows a late rejection for the
+   * same reason `write` does — a ResizeObserver tick after the shell exits
+   * reaches a `nox_pty_resize` that no longer knows the id.
+   */
   resize(cols: number, rows: number): void {
-    void this.#session?.resize(Math.max(1, Math.floor(cols)), Math.max(1, Math.floor(rows)));
+    void this.#session
+      ?.resize(Math.max(1, Math.floor(cols)), Math.max(1, Math.floor(rows)))
+      .catch(() => undefined);
   }
 
   /** Stop the shell. Safe when nothing is running. */

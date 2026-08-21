@@ -16,7 +16,7 @@
 //! where it can be unit-tested against a fake server instead of a real one.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
@@ -25,6 +25,8 @@ use std::os::windows::process::CommandExt;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::agent::read_lines;
 
 /// Suppresses the console window Windows would otherwise give a
 /// console-subsystem child of a GUI process. `winbase.h`'s value; not worth a
@@ -317,8 +319,7 @@ pub fn nox_lsp_start(
         let app = app.clone();
         let id = id.clone();
         std::thread::spawn(move || {
-            for line in BufReader::new(stderr).lines() {
-                let Ok(line) = line else { break };
+            read_lines(stderr, |line| {
                 let _ = app.emit(
                     "nox://lsp-stderr",
                     LinePayload {
@@ -326,7 +327,7 @@ pub fn nox_lsp_start(
                         line,
                     },
                 );
-            }
+            });
         });
     }
 
@@ -398,6 +399,59 @@ fn poisoned<T>(_: T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    /// The failure this prevents: one byte that is not UTF-8 on a language
+    /// server's stderr ending the reader thread for good. `BufRead::lines()`
+    /// — what this module used — yields `Err(InvalidData)` for such a chunk,
+    /// so the loop stopped while the server went on running, and every later
+    /// diagnostic was lost in silence. stdout is byte-framed by
+    /// `MessageStream` and was never affected, which is exactly why this went
+    /// unnoticed: the editor kept working, and only the one channel that
+    /// explains a misbehaving server went quiet.
+    ///
+    /// One accented character in a path is enough — `rust-analyzer` logging a
+    /// cp1252 filename, or a server that writes a raw byte offset into its
+    /// own log line.
+    #[test]
+    fn stderr_survives_a_byte_that_can_never_be_valid() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice("[Error] loading caf\u{e9}/main.rs\n".as_bytes());
+        bytes.extend_from_slice(&[0x7B, 0xE9, 0x7D]);
+        bytes.push(b'\n');
+        bytes.extend_from_slice(b"[Error] server exited with status 101\n");
+
+        let mut lines = Vec::new();
+        read_lines(Cursor::new(bytes), |line| lines.push(line));
+
+        assert_eq!(
+            lines,
+            vec![
+                "[Error] loading caf\u{e9}/main.rs".to_string(),
+                "{\u{FFFD}}".to_string(),
+                "[Error] server exited with status 101".to_string(),
+            ],
+            "the diagnostics after the bad byte must still be delivered"
+        );
+    }
+
+    /// A server killed mid-write leaves its last diagnostic without a
+    /// newline, and that line is usually the one that says why it died.
+    /// `BufRead::lines()` delivered it for free; the byte-reading loop only
+    /// does so because it drains the stream on the way out.
+    #[test]
+    fn stderr_delivers_a_last_line_that_never_got_its_newline() {
+        let mut lines = Vec::new();
+        read_lines(
+            Cursor::new(b"[Error] panicked at 'index out of bounds'"),
+            |line| lines.push(line),
+        );
+
+        assert_eq!(
+            lines,
+            vec!["[Error] panicked at 'index out of bounds'".to_string()]
+        );
+    }
 
     #[test]
     fn reads_one_message_in_one_push() {

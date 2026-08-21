@@ -581,6 +581,103 @@ describe('unstaging a rename', () => {
   });
 });
 
+describe('a row that names a directory rather than a file', () => {
+  /**
+   * Real git names a directory in status whenever one is untracked: a single
+   * `? fresh/` record, trailing slash and all, with the files inside it never
+   * mentioned. It reached this panel as an ordinary row — a clickable
+   * filename and a Show Changes button, both of which can only ever fail
+   * ("fresh is a folder."), sitting next to a Stage button that is the one
+   * thing on the row that genuinely works.
+   *
+   * The sibling fix in `ExplorerPanel` is *not* this one: there the job was
+   * to expand a directory record onto the rows beneath it. Here the record
+   * is the row, and the job is to offer only what a directory can do.
+   */
+  async function setupDirectory() {
+    mounted = mountComponent(GitPanel);
+    const { app, platform, container } = mounted;
+    app.git.start();
+    platform.seedGitRepo('/w');
+    platform.seedGitBase('/w/tracked.ts', 'same\n');
+    platform.seedFile('/w/tracked.ts', 'same\n');
+    platform.mkdirp('/w/fresh/inner');
+    platform.seedFile('/w/fresh/m.txt', 'm\n');
+    platform.seedFile('/w/fresh/inner/n.txt', 'n\n');
+    platform.seedGitUntrackedDirectory('/w/fresh');
+    await app.workspace.openFolder('/w');
+    await settle();
+
+    // The record really is the collapsed directory form, or this block would
+    // be testing something easier than the defect.
+    const raw = parseGitStatus(await platform.gitStatus('/w'));
+    expect(raw.unstaged.map((e) => e.path)).toContain('fresh/');
+    expect(raw.unstaged.map((e) => e.path)).not.toContain('fresh/m.txt');
+
+    const row = [...container.querySelectorAll('.section.changes .row')].find((r) =>
+      r.textContent!.includes('fresh/'),
+    )!;
+    return { app, platform, container, row };
+  }
+
+  it('does not offer to open it, because opening a folder can only fail', async () => {
+    const { app, row } = await setupDirectory();
+    const openEl = row.querySelector('.open') as HTMLElement;
+
+    expect(openEl.textContent).toContain('fresh/');
+    expect(openEl.tagName, 'a directory row must not offer a clickable filename').toBe('SPAN');
+    expect(openEl.getAttribute('title') ?? '').toMatch(/folder|directory/i);
+    // The proof that it is a refusal and not merely a grey tint: nothing was
+    // opened, and no workspace error was raised.
+    expect(app.workspace.buffers.get().length).toBe(0);
+  });
+
+  it('does not offer Show Changes either — a folder has no diff', async () => {
+    const { app, row } = await setupDirectory();
+    // Selected by position, not by title: the title is what the fix changes.
+    const view = row.querySelector('.actions button:first-of-type') as HTMLButtonElement;
+
+    expect(view.disabled).toBe(true);
+    expect(view.getAttribute('title') ?? '').toMatch(/folder|directory/i);
+
+    view.click();
+    await settle();
+    expect(app.ui.diffOpen.get()).toBe(false);
+  });
+
+  it('keeps Stage, which is the one action a directory row can honour', async () => {
+    // `git add -- fresh` adds every file beneath it — pinned against real
+    // git in `src-tauri/src/git.rs`'s
+    // `staging_a_directory_adds_every_file_beneath_it`.
+    const { app, platform, row } = await setupDirectory();
+    const stage = row.querySelector('[title="Stage"]') as HTMLButtonElement;
+    expect(stage.disabled).toBe(false);
+
+    stage.click();
+    await settle();
+    await settle();
+
+    const after = parseGitStatus(await platform.gitStatus('/w'));
+    expect(after.staged).toContainEqual({ path: 'fresh/inner/n.txt', status: 'A' });
+    expect(after.staged).toContainEqual({ path: 'fresh/m.txt', status: 'A' });
+    expect(app.notifications.items.get().filter((n) => n.kind === 'error')).toEqual([]);
+  });
+
+  it('the fake stages a directory the way real git does, instead of refusing', async () => {
+    // The divergence that kept the row's breakage invisible: the fake threw
+    // "did not match any files" for a directory pathspec, so the only test
+    // anyone would have written died on the fake rather than on the panel.
+    const { platform } = await setupDirectory();
+
+    await platform.gitStage('/w', ['/w/fresh']);
+
+    const after = parseGitStatus(await platform.gitStatus('/w'));
+    expect(after.staged.map((e) => e.path).sort()).toEqual(['fresh/inner/n.txt', 'fresh/m.txt']);
+    // The collapsed untracked record is gone: git has heard of these files now.
+    expect(after.unstaged.map((e) => e.path)).not.toContain('fresh/');
+  });
+});
+
 describe('a deleted row', () => {
   it('disables open on a deletion but keeps the row\'s stage/unstage action', async () => {
     const { app, container, platform } = await setup();

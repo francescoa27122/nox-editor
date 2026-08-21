@@ -10,7 +10,7 @@
 //! build` or `npm install` inside the workspace would otherwise push tens of
 //! thousands of events across the IPC boundary before anyone could ignore them.
 
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
 use notify::event::{CreateKind, ModifyKind, RemoveKind};
@@ -47,8 +47,42 @@ struct ChangePayload {
     paths: Vec<String>,
 }
 
-fn is_ignored(path: &Path) -> bool {
-    path.components().any(|component| match component {
+/// The spellings an event path may arrive under for a watch on `root`.
+///
+/// Two, because the backends disagree: inotify builds paths from the path it
+/// was handed, while FSEvents reports the canonical one — on macOS a watch on
+/// `/var/folders/…` delivers events as `/private/var/folders/…`. Resolved once
+/// at watch time so the hot callback never touches the disk.
+fn watch_roots(root: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![root.to_path_buf()];
+    if let Ok(canonical) = root.canonicalize() {
+        if canonical != root {
+            roots.push(canonical);
+        }
+    }
+    roots
+}
+
+/// Whether `path` sits in a directory not worth watching, judged **relative to
+/// the watched root** — the same way `search.rs` judges its patterns, since
+/// `OverrideBuilder::new(&root)` makes those root-relative too.
+///
+/// Scanning the whole absolute path instead is what this replaces, and it was
+/// not a nuance: a perfectly ordinary workspace at `~/Projects/dist/myapp` had
+/// every one of its events discarded, so external changes produced no tree
+/// refresh, no re-index and no reload prompt — silently, and only on that
+/// machine's layout. Search kept working, so the two subsystems disagreed
+/// about the same folder and the failure looked arbitrary rather than
+/// explicable.
+fn is_ignored_under(roots: &[PathBuf], path: &Path) -> bool {
+    let Some(relative) = roots.iter().find_map(|root| path.strip_prefix(root).ok()) else {
+        // Not under any spelling of the root, so there is no "inside the
+        // project" to judge against. Forward it: a stray event costs one
+        // wasted refresh, whereas dropping one we should have kept is exactly
+        // the silent, unreportable failure this function just stopped having.
+        return false;
+    };
+    relative.components().any(|component| match component {
         Component::Normal(name) => name
             .to_str()
             .map(|segment| DENY.contains(&segment))
@@ -87,6 +121,7 @@ pub fn nox_watch(app: AppHandle, state: State<'_, WatcherState>, path: String) -
     *guard = None;
 
     let emitter = app.clone();
+    let roots = watch_roots(Path::new(&path));
     let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
         let Ok(event) = result else { return };
         let Some(kind) = classify(&event.kind) else { return };
@@ -94,7 +129,7 @@ pub fn nox_watch(app: AppHandle, state: State<'_, WatcherState>, path: String) -
         let paths: Vec<String> = event
             .paths
             .iter()
-            .filter(|p| !is_ignored(p))
+            .filter(|p| !is_ignored_under(&roots, p))
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
 
@@ -204,17 +239,70 @@ pub fn nox_git_meta_unwatch(state: State<'_, GitMetaWatcherState>) -> Result<(),
 mod tests {
     use super::*;
 
+    fn roots(root: &str) -> Vec<PathBuf> {
+        vec![PathBuf::from(root)]
+    }
+
     #[test]
-    fn ignores_denied_segments_anywhere_in_the_path() {
-        assert!(is_ignored(Path::new("/w/node_modules/pkg/index.js")));
-        assert!(is_ignored(Path::new("/w/.git/HEAD")));
-        assert!(is_ignored(Path::new("/w/crates/core/target/debug/x")));
+    fn ignores_denied_segments_anywhere_below_the_root() {
+        let r = roots("/w");
+        assert!(is_ignored_under(&r, Path::new("/w/node_modules/pkg/index.js")));
+        assert!(is_ignored_under(&r, Path::new("/w/.git/HEAD")));
+        assert!(is_ignored_under(&r, Path::new("/w/crates/core/target/debug/x")));
     }
 
     #[test]
     fn does_not_ignore_similarly_named_files() {
-        assert!(!is_ignored(Path::new("/w/src/target.ts")));
-        assert!(!is_ignored(Path::new("/w/src/node_modules.md")));
+        let r = roots("/w");
+        assert!(!is_ignored_under(&r, Path::new("/w/src/target.ts")));
+        assert!(!is_ignored_under(&r, Path::new("/w/src/node_modules.md")));
+    }
+
+    /// Guards the defect that made the watcher completely dead for anyone
+    /// whose project happened to live under a directory named `dist`,
+    /// `node_modules` or `target`: the segments above the watched root are
+    /// not part of the project and must not be judged.
+    #[test]
+    fn does_not_judge_the_segments_above_the_root() {
+        let r = roots("/home/me/Projects/dist/myapp");
+        assert!(!is_ignored_under(&r, Path::new("/home/me/Projects/dist/myapp/src/a.ts")));
+        assert!(!is_ignored_under(&r, Path::new("/home/me/Projects/dist/myapp/dist.ts")));
+        // The intent that survives: a denied directory *inside* the project.
+        assert!(is_ignored_under(
+            &r,
+            Path::new("/home/me/Projects/dist/myapp/node_modules/x/index.js"),
+        ));
+        assert!(is_ignored_under(
+            &r,
+            Path::new("/home/me/Projects/dist/myapp/dist/bundle.js"),
+        ));
+    }
+
+    /// A path outside every spelling of the root is forwarded rather than
+    /// dropped — see `is_ignored_under`. Without this the fallback could be
+    /// "re-scan the absolute path" without any test noticing.
+    #[test]
+    fn forwards_paths_that_are_not_under_the_root() {
+        assert!(!is_ignored_under(&roots("/w"), Path::new("/elsewhere/dist/a.ts")));
+    }
+
+    /// Guards the other half of the fallback: FSEvents hands us the canonical
+    /// path, so if `watch_roots` did not carry that spelling, nothing under
+    /// the root would strip, every path would take the permissive fallback,
+    /// and the DENY list would leak a whole `npm install` across the IPC
+    /// boundary — trading one silent failure for the storm the module header
+    /// says this filter exists to prevent.
+    #[test]
+    fn filters_denied_directories_under_the_canonical_root_spelling() {
+        let dir = std::env::temp_dir().join(format!("nox-canon-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let resolved = watch_roots(&dir);
+        let canonical = dir.canonicalize().expect("temp dir canonicalises");
+
+        assert!(is_ignored_under(&resolved, &canonical.join("node_modules/x/index.js")));
+        assert!(!is_ignored_under(&resolved, &canonical.join("src/a.ts")));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -237,13 +325,14 @@ mod tests {
         std::fs::create_dir_all(&nested).expect("create temp dir");
 
         let (tx, rx) = mpsc::channel::<(&'static str, Vec<String>)>();
+        let watch_roots = watch_roots(&dir);
         let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
             let Ok(event) = result else { return };
             let Some(kind) = classify(&event.kind) else { return };
             let paths: Vec<String> = event
                 .paths
                 .iter()
-                .filter(|p| !is_ignored(p))
+                .filter(|p| !is_ignored_under(&watch_roots, p))
                 .map(|p| p.to_string_lossy().into_owned())
                 .collect();
             if !paths.is_empty() {
@@ -334,5 +423,65 @@ mod tests {
         drop(watcher);
         let _ = std::fs::remove_dir_all(&dir);
         assert!(saw, "expected a meta event for the index write");
+    }
+
+    /// The end-to-end guard for the same defect, through a real `notify`
+    /// watcher rather than string arithmetic: before the fix this saw zero
+    /// surviving events in ten seconds. It also covers the macOS-only half —
+    /// FSEvents delivers `/private/var/...` for a watch registered on
+    /// `/var/...`, so a root match on the caller's spelling alone strips
+    /// nothing and every event falls through the same crack.
+    #[test]
+    fn watches_a_root_that_lives_under_a_denied_directory() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let base = std::env::temp_dir().join(format!("nox-under-dist-test-{}", std::process::id()));
+        let root = base.join("dist").join("myapp");
+        let nested = root.join("src");
+        std::fs::create_dir_all(&nested).expect("create temp dir");
+
+        let (tx, rx) = mpsc::channel::<Vec<String>>();
+        let watch_roots = watch_roots(&root);
+        let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            let Ok(event) = result else { return };
+            if classify(&event.kind).is_none() {
+                return;
+            }
+            let paths: Vec<String> = event
+                .paths
+                .iter()
+                .filter(|p| !is_ignored_under(&watch_roots, p))
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            if !paths.is_empty() {
+                let _ = tx.send(paths);
+            }
+        })
+        .expect("create watcher");
+        watcher
+            .watch(&root, RecursiveMode::Recursive)
+            .expect("watch root");
+
+        std::fs::write(nested.join("a.ts"), "x").expect("write file");
+
+        let mut saw = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(paths) => {
+                    if paths.iter().any(|p| p.ends_with("a.ts")) {
+                        saw = true;
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        drop(watcher);
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(saw, "expected an event for a write inside a root under dist/");
     }
 }

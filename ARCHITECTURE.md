@@ -1473,6 +1473,35 @@ the same token, not that all panels share a token.
 
 ---
 
+### A fake that emits one shape of a record proves less than its test count
+
+Real `git status --porcelain=v2` collapses an untracked directory into a
+single `? lib/` record and never names the files inside it. `MemoryPlatform`
+only ever emitted `? <file>`, so twelve component tests and ten mutation
+checks all passed while a brand-new folder carried no marker at all. A walk of
+the packaged app found it; nothing else could have.
+
+Auditing the other fakes for the same property found five more of the same
+kind, and the pattern is worth stating as a rule: **when a fake can only
+produce one shape of a record, every test over it is exercising the easy
+path.** The question to ask of any fake is not "does it return the right
+facts" but "does it return them in every shape the real thing sends".
+
+What that audit turned up, all since fixed: `git show :0:` fails on an
+unmerged path (the fake wrote a stage-0 entry that real git does not have, so
+a conflicted file silently lost its gutter); `ignore`'s walker defaults to
+skipping hidden files, so dotfiles were unsearchable while the fake walked
+them; `ignore`'s overrides are last-match-wins, so excludes added before
+includes were inert — and the test asserting otherwise encoded the *fake's*
+behaviour; `BufRead::lines()` ends a stream on one invalid byte, which the
+fake could not represent because it deals in JS strings.
+
+The same reasoning applies to test *helpers*. `search_integration.rs` re-types
+the walker configuration rather than importing it, which is why it certified
+both search defects as absent — a copy of the logic under test is not a test.
+
+---
+
 ---
 
 ## 5. How to add a feature
@@ -1527,12 +1556,16 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | `undoSession` still revokes grants as a side effect | Revocation is its own command now (`permissions.revokeGrants`), so undoing an agent's *work* arguably should leave its *permissions* alone. The two are still welded in `agent/runtime.ts`; the panel's toast says so rather than surprising the user. |
 | The explorer does not dim gitignored files | `git.rs` runs `--porcelain=v2 --branch -z` without `--ignored`, so the `!` records never arrive. Real support is a Rust change plus a Platform-boundary change, not a component one. |
 | A collapsed folder shows nothing about what is inside it | The tree marks changed and unsaved *files*; a collapsed `src/` hiding forty changes still reads as quiet. Needs an ancestor-prefix set — cheap, and on the same off-typing-path trigger — plus a decision about what a folder's marker looks like. |
+| A save can still refresh the whole tree | FSEvents flags are sticky per path, so an in-place rewrite of a file renamed earlier in the session arrives as `Modify(Name(_))` and is classified a rename; Nox's own atomic save adds a `Create` and three renames of its own. The event kind cannot tell a sticky flag from a real rename — only re-reading the tree can — so the fix belongs in `FileTreeService.refresh()` reporting whether anything actually changed. |
+| The quick-open index still starves during a sustained write storm | The 1 s coalesce ceiling bounds the *flush*, but each structural flush resets `REINDEX_MS`, so the project re-walk still waits for the storm to end. Deliberate — the full walk is the expensive one — but worth revisiting. |
+| `search_integration.rs` re-types the walker configuration | Its `walk()` helper is a hand-copy of `search.rs`'s builder with a truncated exclude list and no include handling, which is why four integration tests passed throughout both search defects. Importing the real `plan_walk` needs `pub mod search` in `lib.rs`. |
+| The browser search walks `node_modules` and `.git` | `MemoryPlatform.searchProject` applies no always-exclude list, so the dev target searches machine directories the desktop build prunes. Divergence in the harmless direction, but it is the fake being wrong. |
 | Dirty flag on huge files | See §4. Above 2 MB, undo-to-saved leaves the tab dirty. |
 | Watch mtime resolution | See §4. A coarse-mtime filesystem can let an external write in the same second as a save be misread as our own. |
 | Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. |
 | Folds are not persisted across sessions | Fold state lives in the buffer's `EditorState`, so it survives tab switches but not a restart. Cursor positions *are* persisted — see §4. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
-| Only UTF-8 is read and written | With or without a BOM, which is detected and preserved. A file in a legacy encoding opens as mojibake rather than being detected. Real support means a decoder in Rust, not a heuristic in TS. |
+| Only UTF-8 is read and written | With or without a BOM, which is detected and preserved. A file in a legacy encoding does **not** open as mojibake — `nox_read_text_file` refuses it with `not-text: … is not valid UTF-8`, so nothing can be written back corrupted. The cost is that such a file cannot be opened at all. Real support means a decoder in Rust, not a heuristic in TS. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |
 | The transaction log does not survive a restart | Deliberate — see §4. Undo history does not either, so a persisted log would list changes it could not undo. |
 | Agent processes are not sandboxed | A configured agent runs with Nox's own privileges. The permission model governs what it may ask *Nox* to do, not what its own process can reach — a stdio agent is trusted code you chose to run, like a shell plugin. |

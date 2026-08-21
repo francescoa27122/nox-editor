@@ -23,8 +23,8 @@ Rust: `cargo test --manifest-path src-tauri/Cargo.toml`. **`cargo` may not be in
 
 - **`CONTRIBUTING.md:23-82`** — the five rules and the feature checklist. Read these first; they are not style preferences.
 - **`ARCHITECTURE.md:45-189`** — layers and where everything lives.
-- **`ARCHITECTURE.md:190-1477`** — the decision log. Before changing anything load-bearing, check whether its current shape is already argued for. It usually is.
-- **`ARCHITECTURE.md:1519`** — the Known debt table. If you take a shortcut, add it here.
+- **`ARCHITECTURE.md:190-1506`** — the decision log. Before changing anything load-bearing, check whether its current shape is already argued for. It usually is.
+- **`ARCHITECTURE.md:1548`** — the Known debt table. If you take a shortcut, add it here.
 - **`AGENT-PLATFORM.md`** — the agent runtime, permissions and context API.
 
 ## Skills

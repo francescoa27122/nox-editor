@@ -109,7 +109,8 @@ export class MemoryPlatform implements Platform {
       heads: new Map([[branch, new Map()]]),
       index: new Map(),
       commits: [],
-      conflicts: new Set(), untrackedDirectories: new Set(),
+      conflicts: new Map(),
+      untrackedDirectories: new Set(),
     });
   }
 
@@ -130,18 +131,6 @@ export class MemoryPlatform implements Platform {
   }
 
   /**
-   * Leave `path` mid-merge: HEAD and the index keep the pre-merge text, the
-   * worktree gets `contents` (in a real conflict, marker soup), and
-   * `gitStatus` reports it as a porcelain `u` record instead of an ordinary
-   * worktree edit.
-   *
-   * The model has no merge machinery and does not need any — what a test
-   * needs is the one record shape the seeds could not otherwise produce.
-   * Without it the fake could emit only `?` and `1` records, so the single
-   * state where staging is dangerous was the single state no test could
-   * reach.
-   */
-  /**
    * Mark a directory untracked the way git reports one: a single `? dir/`
    * record, with the files inside it never mentioned. Seeding the files
    * individually is *not* the same shape and will not exercise the code that
@@ -154,21 +143,57 @@ export class MemoryPlatform implements Platform {
     repo.untrackedDirectories.add(relative(root, p));
   }
 
-  seedGitConflict(path: string, contents: string): void {
+  /**
+   * Leave `path` mid-merge: the worktree gets `contents` (in a real
+   * conflict, marker soup), the index holds *stages* rather than an ordinary
+   * entry, and `gitStatus` reports a porcelain `u` record instead of a
+   * worktree edit.
+   *
+   * The stages are the whole point, and the previous version of this seed
+   * got them wrong in a way that hid a real defect. It wrote the pre-merge
+   * text into the index at stage 0 and left a comment claiming "nothing
+   * reads the index for a path git calls unmerged" — but `gitFileBase` reads
+   * exactly that, so the fake answered a base for a conflicted file while
+   * real git refuses (`git show :0:<path>` exits non-zero mid-merge with
+   * "is in the index, but not at stage 0"). The one state the gutter and the
+   * diff view got wrong was the one state the fake could not express.
+   *
+   * `stages` controls the two things a caller can actually observe. `ours`
+   * defaults to whatever HEAD already held — what our side brought to the
+   * merge — and `null` means our side committed the deletion, which is the
+   * `DU` modify/delete shape where stage 2 is absent and the merge base is
+   * the only content git has. `base` is stage 1, and it defaults to
+   * `MERGE_BASE_SEED` rather than to `ours`: an ancestor that equalled our
+   * side would not have produced a conflict, and making the two identical is
+   * precisely what would let a wrong stage *order* in `gitFileBase` pass a
+   * test unnoticed.
+   *
+   * There is still no merge machinery here and none is wanted; what a test
+   * needs is the record and index shapes it could not otherwise produce.
+   */
+  seedGitConflict(
+    path: string,
+    contents: string,
+    stages: { base?: string; ours?: string | null } = {},
+  ): void {
     const p = normalize(path);
     if (!this.#repoFor(p)) this.seedGitRepo(dirname(p));
     const [root, repo] = this.#repoEntryFor(p)!;
     const rel = relative(root, p);
-    // Whatever HEAD already held stays HEAD's; a path conflicted out of
-    // nowhere gets `contents` as its base so it is still a tracked file.
     const head = repo.heads.get(repo.branch)!;
-    const base = head.get(rel) ?? contents;
-    head.set(rel, base);
-    // There are no stages 1/2/3 here. Nothing reads the index for a path git
-    // calls unmerged, so it holds the base and the `u` record carries the
-    // fact that matters.
-    repo.index.set(rel, base);
-    repo.conflicts.add(rel);
+    // A path conflicted out of nowhere gets `contents` so it is still tracked.
+    const ours = stages.ours === undefined ? (head.get(rel) ?? contents) : stages.ours;
+    const base = stages.base ?? MERGE_BASE_SEED;
+    if (ours === null) {
+      // Our side committed the deletion, so HEAD does not hold the path.
+      head.delete(rel);
+      repo.conflicts.set(rel, { base });
+    } else {
+      head.set(rel, ours);
+      repo.conflicts.set(rel, { base, ours });
+    }
+    // No stage 0: that is the fact real git has and the old seed did not.
+    repo.index.delete(rel);
     this.seedFile(p, contents);
   }
 
@@ -294,13 +319,22 @@ export class MemoryPlatform implements Platform {
    * Answers from whatever a test seeded, null otherwise — a lookup is a
    * legitimate fake, unlike a process spawn. The real build's null means
    * "no repo / untracked / no git", and unseeded means exactly that here.
+   *
+   * The stage walk mirrors `git.rs`'s `INDEX_STAGES` — stage 0, then ours,
+   * then the merge base — and it is not optional dressing: an unmerged path
+   * has no stage 0 at all, so an index-only lookup reports a conflicted file
+   * as untracked and the gutter goes blank mid-merge. `git.rs` carries the
+   * argument for the order; the two must not drift.
    */
   async gitFileBase(path: string): Promise<string | null> {
     const p = normalize(path);
     const entry = this.#repoEntryFor(p);
     if (!entry) return null;
     const [root, repo] = entry;
-    return repo.index.get(relative(root, p)) ?? null;
+    const rel = relative(root, p);
+    const stages = repo.conflicts.get(rel);
+    if (stages) return stages.ours ?? stages.base ?? null;
+    return repo.index.get(rel) ?? null;
   }
 
   async checkForUpdate(): Promise<UpdateInfo | null> {
@@ -403,12 +437,47 @@ export class MemoryPlatform implements Platform {
       // the model would report a file as conflicted forever.
       repo.conflicts.delete(rel);
       if (typeof text === 'string') repo.index.set(rel, text);
+      // `null` is a directory node. Real git takes a directory pathspec
+      // happily — `git add -- fresh` stages every file beneath it, and even
+      // an empty directory is silently accepted — while this fake used to
+      // refuse it as "did not match any files". That divergence is what kept
+      // the Git panel's directory row (git's collapsed `? fresh/` record)
+      // untestable, and so kept its broken open/diff affordances unnoticed.
+      else if (text === null) this.#stageDirectory(repo, repoRoot, p);
       else if (repo.index.has(rel)) repo.index.delete(rel); // staging a deletion
       else {
         throw new PlatformError(`fatal: pathspec '${rel}' did not match any files`, 'io', p);
       }
     }
     this.#notifyGitMeta(repoRoot);
+  }
+
+  /**
+   * `git add -- <dir>`: every file beneath `dir` into the index, and every
+   * tracked path beneath it that no longer exists recorded as a deletion —
+   * verified against real git, which stages a `D` and an `A` from one
+   * directory pathspec over a directory that lost one file and gained
+   * another.
+   */
+  #stageDirectory(repo: FakeGitRepo, repoRoot: string, dir: string): void {
+    for (const [node, value] of this.#nodes) {
+      if (typeof value !== 'string' || !contains(dir, node)) continue;
+      const rel = relative(repoRoot, node);
+      repo.conflicts.delete(rel);
+      repo.index.set(rel, value);
+    }
+    for (const rel of [...repo.index.keys()]) {
+      const node = join(repoRoot, rel);
+      if (contains(dir, node) && !this.#nodes.has(node)) repo.index.delete(rel);
+    }
+    // The collapsed `? dir/` record exists only while git has never heard of
+    // anything beneath the directory, so staging it retires the record.
+    const dirRel = relative(repoRoot, dir);
+    for (const seeded of [...repo.untrackedDirectories]) {
+      if (seeded === dirRel || seeded.startsWith(`${dirRel}/`)) {
+        repo.untrackedDirectories.delete(seeded);
+      }
+    }
   }
 
   async gitUnstage(root: string, paths: string[]): Promise<void> {
@@ -426,6 +495,18 @@ export class MemoryPlatform implements Platform {
     const [repoRoot, repo] = this.#requireRepo(root);
     if (message.trim().length === 0) {
       throw new PlatformError('Aborting commit due to empty commit message.', 'io');
+    }
+    // Unmerged paths first, and before the clean check, exactly as git orders
+    // it. This is not decoration: an unmerged path has no stage 0, so the
+    // snapshot below would quietly drop the conflicted file out of HEAD —
+    // the fake destroying work git protects. Wording verified against real
+    // git; `src-tauri/src/git.rs` holds the tripwire that keeps the two from
+    // drifting.
+    if (repo.conflicts.size > 0) {
+      throw new PlatformError(
+        "error: Committing is not possible because you have unmerged files.\nhint: Fix them up in the work tree, and then use 'git add/rm <file>'\nhint: as appropriate to mark resolution and make a commit.\nfatal: Exiting because of an unresolved conflict.",
+        'io',
+      );
     }
     const head = repo.heads.get(repo.branch)!;
     const clean =
@@ -971,11 +1052,15 @@ interface FakeGitRepo {
   index: Map<string, string>;
   commits: { hash: string; subject: string }[];
   /**
-   * Repo-relative paths git would call unmerged. Set by `seedGitConflict`
-   * and cleared by staging the path; there is no merge to enter or finish
-   * here, only the state a merge leaves behind.
+   * Repo-relative paths git would call unmerged, each mapped to the index
+   * stages it carries. Set by `seedGitConflict` and cleared by staging the
+   * path; there is no merge to enter or finish here, only the state a merge
+   * leaves behind.
+   *
+   * A key here means the path has *no stage 0*, which is what real git
+   * reports for an unmerged path and what `gitFileBase` has to cope with.
    */
-  conflicts: Set<string>;
+  conflicts: Map<string, ConflictStages>;
   /**
    * Repo-relative directories git would collapse into one `? dir/` record.
    * Real git never names the files inside an untracked directory, and a tree
@@ -986,6 +1071,24 @@ interface FakeGitRepo {
   untrackedDirectories: Set<string>;
 }
 
+/**
+ * The index stages of an unmerged path that anything here reads: 1, the
+ * merge base, and 2, ours. Either can be absent — a modify/delete conflict
+ * has no 2, an add/add conflict has no 1 — which is exactly why
+ * `gitFileBase` walks them in order instead of assuming one.
+ *
+ * Stage 3 (theirs) is not modelled. Nothing reads it, and it is not the
+ * worktree text either: mid-merge the file on disk holds marker soup, so
+ * carrying `contents` here under the name "theirs" would be a lie the model
+ * has no use for.
+ */
+interface ConflictStages {
+  /** Stage 1 — the merge base. */
+  base?: string;
+  /** Stage 2 — ours, the content HEAD held before the merge. */
+  ours?: string;
+}
+
 /** Directories first, then case-insensitive name order. Shared by platforms. */
 export function sortEntries(entries: DirEntry[]): DirEntry[] {
   return entries.sort((a, b) => {
@@ -993,6 +1096,16 @@ export function sortEntries(entries: DirEntry[]): DirEntry[] {
     return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
   });
 }
+
+/**
+ * Stage 1 for a seeded conflict when the caller did not name one.
+ *
+ * Deliberately unlike anything else a seed produces: the merge base is an
+ * ancestor of both sides, so it cannot equal ours in a real conflict, and a
+ * fake that let the two coincide would report a `gitFileBase` that reads the
+ * stages in the wrong order as correct.
+ */
+const MERGE_BASE_SEED = 'the merge base\n';
 
 /** A deterministic 40-hex stand-in for an oid, derived from a counter. */
 function fakeOid(n: number): string {

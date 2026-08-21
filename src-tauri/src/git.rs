@@ -4,6 +4,8 @@
 //! (`:0:` — what `git add` would leave alone). The index rather than HEAD
 //! because the gutter's question is "what have I changed that git doesn't
 //! hold yet", and for anyone not mid-staging the index *is* HEAD anyway.
+//! Mid-merge there is no stage 0 and the lookup walks `INDEX_STAGES`
+//! instead; that constant carries the reasoning.
 //!
 //! `None` is the answer to everything that isn't content: no repo, untracked
 //! file, git not installed, non-UTF-8 blob. A missing gutter is the correct
@@ -310,6 +312,33 @@ pub fn nox_git_switch(root: String, name: String, create: bool) -> Result<()> {
     Ok(())
 }
 
+/// The index stages `nox_git_file_base` will read, in the order it reads them.
+///
+/// Stage 0 is the ordinary index entry and the only one a path outside a
+/// merge has. Mid-merge it does not exist at all: `git show :0:<path>` on an
+/// unmerged path exits non-zero with "is in the index, but not at stage 0",
+/// which read as "untracked" for as long as this was a single lookup — so a
+/// conflicted file lost its gutter, and the diff view told the user the file
+/// was untracked or outside a repository while they were staring at conflict
+/// markers inside a tracked file in a repository.
+///
+/// **2 before 1** is the substantive decision. Stage 2 is *ours* — the
+/// content HEAD held before the merge started — and stage 1 is the merge
+/// base. The gutter's question is "what have I changed that git does not
+/// hold yet", and for anyone not mid-staging the index is HEAD anyway; the
+/// mid-merge analogue of that is HEAD's own side, so diffing against stage 2
+/// marks exactly the lines the merge is proposing to add to the file. Stage 1
+/// would instead mark the user's *already committed* work as unheld, which is
+/// the wrong answer to the gutter's question. Stage 1 is still the second
+/// fallback because a modify/delete conflict where our side deleted the file
+/// has stages 1 and 3 only, and the merge base is then the sole content git
+/// has for the path.
+///
+/// Stage 3 (*theirs*) is deliberately absent: it is the one side the working
+/// tree is not, so a diff against it would describe neither what the user
+/// wrote nor what they had.
+const INDEX_STAGES: [u8; 3] = [0, 2, 1];
+
 /// The index's version of the file, or `None` when there isn't one.
 #[tauri::command]
 pub fn nox_git_file_base(path: String) -> Result<Option<String>> {
@@ -341,21 +370,31 @@ pub fn nox_git_file_base(path: String) -> Result<Option<String>> {
         return Ok(None);
     };
 
-    // `--literal-pathspecs` so a `*` or `:` in a real filename is a filename,
-    // not a glob or magic pathspec.
-    let spec = format!(":0:{relpath}");
-    let Some(output) = run_git(Path::new(root), &["--literal-pathspecs", "show", &spec]) else {
-        return Ok(None);
-    };
-    if !output.status.success() {
-        // Untracked, or otherwise not in the index.
-        return Ok(None);
+    // Stage 0 first — the ordinary case, and the only stage that exists for
+    // a path that is not mid-merge. `2` and `1` are the unmerged fallbacks;
+    // see `INDEX_STAGES` for why in that order.
+    for stage in INDEX_STAGES {
+        // `--literal-pathspecs` so a `*` or `:` in a real filename is a
+        // filename, not a glob or magic pathspec.
+        let spec = format!(":{stage}:{relpath}");
+        let Some(output) = run_git(Path::new(root), &["--literal-pathspecs", "show", &spec]) else {
+            return Ok(None);
+        };
+        if !output.status.success() {
+            // This stage does not exist. For stage 0 that is the ordinary
+            // "untracked, or not in the index" — but it is *also* what git
+            // says about every tracked file mid-merge, so the loop tries the
+            // unmerged stages before giving up rather than reporting a
+            // conflicted file as untracked.
+            continue;
+        }
+        return match String::from_utf8(output.stdout) {
+            Ok(text) => Ok(Some(text)),
+            // A binary blob is not a base to diff against.
+            Err(_) => Ok(None),
+        };
     }
-    match String::from_utf8(output.stdout) {
-        Ok(text) => Ok(Some(text)),
-        // A binary blob is not a base to diff against.
-        Err(_) => Ok(None),
-    }
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -412,6 +451,133 @@ mod tests {
 
     fn as_string(path: &Path) -> String {
         path.to_string_lossy().into_owned()
+    }
+
+    /// Run git in `dir` and tolerate a refusal — for the one command a test
+    /// *wants* to fail. `git merge` over a conflicting change exits non-zero
+    /// by design, so `git_in`'s assertion would fail the test on the very
+    /// state it is trying to construct.
+    fn git_try(dir: &Path, args: &[&str]) {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .output()
+            .expect("git runs");
+    }
+
+    /// Leave `dir` mid-merge with `name` unmerged, both sides having edited
+    /// it: the `u UU` state, index stages 1, 2 and 3, no stage 0.
+    fn conflict_both_modified(dir: &Path, name: &str) {
+        git_in(dir, &["init", "-b", "main"]);
+        fs::write(dir.join(name), "base line\ncommon\n").unwrap();
+        git_in(dir, &["add", name]);
+        git_in(dir, &["commit", "-m", "base"]);
+        git_in(dir, &["switch", "-c", "theirs"]);
+        fs::write(dir.join(name), "their line\ncommon\n").unwrap();
+        git_in(dir, &["commit", "-am", "theirs"]);
+        git_in(dir, &["switch", "main"]);
+        fs::write(dir.join(name), "our line\ncommon\n").unwrap();
+        git_in(dir, &["commit", "-am", "ours"]);
+        git_try(dir, &["merge", "theirs"]);
+    }
+
+    /// Guard: the scenario builders above are worthless if the merge did not
+    /// actually conflict, so every unmerged-path test asserts the state it
+    /// depends on before asserting the behaviour.
+    fn assert_unmerged(dir: &Path, name: &str) {
+        let status = git_out(dir, &["status", "--porcelain=v2"]);
+        assert!(
+            status.lines().any(|l| l.starts_with("u ") && l.ends_with(name)),
+            "expected {name} unmerged, got {status:?}"
+        );
+        let stage_zero = run_git(dir, &["--literal-pathspecs", "show", &format!(":0:{name}")])
+            .expect("git runs");
+        assert!(
+            !stage_zero.status.success(),
+            "expected no stage 0 for an unmerged path; git printed {:?}",
+            String::from_utf8_lossy(&stage_zero.stdout)
+        );
+    }
+
+    /// Guards the defect: `git show :0:<path>` *fails* on an unmerged path —
+    /// stage 0 does not exist mid-merge — and treating that failure as
+    /// "not in the index" left a conflicted file with no gutter at all,
+    /// while the diff view told the user it was untracked or outside a
+    /// repository. Stage 2 ("ours") is the pre-merge HEAD content, which is
+    /// the base that answers the gutter's actual question mid-merge: what is
+    /// this merge proposing to do to my file.
+    #[test]
+    fn an_unmerged_path_falls_back_to_ours() {
+        let scratch = Scratch::new("git-unmerged-ours");
+        conflict_both_modified(&scratch.0, "app.ts");
+        assert_unmerged(&scratch.0, "app.ts");
+
+        let base = nox_git_file_base(as_string(&scratch.join("app.ts"))).unwrap();
+
+        assert_eq!(base.as_deref(), Some("our line\ncommon\n"));
+    }
+
+    /// The other half of the fallback. When *our* side deleted the file and
+    /// theirs edited it, the index carries stages 1 and 3 but no stage 2, so
+    /// "ours" is not available and the merge base is the only content git
+    /// has. Without this rung the modify/delete conflict — the one whose
+    /// resolution is hardest to reason about — would still show no gutter.
+    #[test]
+    fn an_unmerged_path_without_ours_falls_back_to_the_merge_base() {
+        let scratch = Scratch::new("git-unmerged-base");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        fs::write(scratch.join("d.txt"), "base\n").unwrap();
+        git_in(&scratch.0, &["add", "d.txt"]);
+        git_in(&scratch.0, &["commit", "-m", "base"]);
+        git_in(&scratch.0, &["switch", "-c", "theirs"]);
+        fs::write(scratch.join("d.txt"), "theirs edit\n").unwrap();
+        git_in(&scratch.0, &["commit", "-am", "theirs"]);
+        git_in(&scratch.0, &["switch", "main"]);
+        git_in(&scratch.0, &["rm", "d.txt"]);
+        git_in(&scratch.0, &["commit", "-m", "ours deletes"]);
+        git_try(&scratch.0, &["merge", "theirs"]);
+        assert_unmerged(&scratch.0, "d.txt");
+
+        let base = nox_git_file_base(as_string(&scratch.join("d.txt"))).unwrap();
+
+        assert_eq!(base.as_deref(), Some("base\n"));
+    }
+
+    /// The tripwire that keeps the `MemoryPlatform` fake honest about what a
+    /// commit does mid-merge. An unmerged path has no stage 0, so a fake that
+    /// snapshots its index into HEAD would quietly drop the conflicted file;
+    /// real git refuses instead, and the fake mirrors this phrase.
+    #[test]
+    fn a_commit_with_unmerged_files_is_refused_with_gits_words() {
+        let scratch = Scratch::new("git-commit-unmerged");
+        conflict_both_modified(&scratch.0, "app.ts");
+        assert_unmerged(&scratch.0, "app.ts");
+        git_in(&scratch.0, &["config", "user.email", "t@t"]);
+        git_in(&scratch.0, &["config", "user.name", "t"]);
+        git_in(&scratch.0, &["config", "commit.gpgsign", "false"]);
+
+        let error = nox_git_commit(as_string(&scratch.0), "message".to_string()).unwrap_err();
+
+        assert!(
+            error.contains("Committing is not possible because you have unmerged files"),
+            "got {error:?}"
+        );
+        assert!(error.contains("Exiting because of an unresolved conflict"), "got {error:?}");
+    }
+
+    /// The fallback must not turn "untracked" into a base. An unmerged path
+    /// is the only reason to look past stage 0; a file git has never heard
+    /// of has no stage 1, 2 or 3 either, and `None` stays the answer.
+    #[test]
+    fn the_unmerged_fallback_does_not_invent_a_base_for_an_untracked_file() {
+        let scratch = Scratch::new("git-unmerged-untracked");
+        conflict_both_modified(&scratch.0, "app.ts");
+        let loose = scratch.join("loose.txt");
+        fs::write(&loose, "never added\n").unwrap();
+
+        assert_eq!(nox_git_file_base(as_string(&loose)).unwrap(), None);
     }
 
     #[test]
@@ -513,6 +679,32 @@ mod tests {
         // back to the parent — the case this test pins.
         nox_git_stage(as_string(&scratch.0), vec![as_string(&file)]).unwrap();
         assert!(git_out(&scratch.0, &["status", "--porcelain"]).starts_with("D  a.txt"));
+    }
+
+    /// Real git names a *directory* in status whenever one is untracked
+    /// (`? fresh/`), and `git add -- fresh` on that row adds every file
+    /// beneath it. This pins the production behaviour the `MemoryPlatform`
+    /// fake mirrors: the fake used to throw "did not match any files" for a
+    /// directory pathspec, so the Git panel's directory row could not be
+    /// exercised at all and its broken open/diff affordances went unnoticed.
+    #[test]
+    fn staging_a_directory_adds_every_file_beneath_it() {
+        let scratch = Scratch::new("git-stage-dir");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        git_in(&scratch.0, &["commit", "--allow-empty", "-m", "root"]);
+        fs::create_dir_all(scratch.join("fresh/inner")).unwrap();
+        fs::write(scratch.join("fresh/m.txt"), "m\n").unwrap();
+        fs::write(scratch.join("fresh/inner/n.txt"), "n\n").unwrap();
+
+        // git collapses the whole thing into one record before staging.
+        let before = git_out(&scratch.0, &["status", "--porcelain"]);
+        assert_eq!(before.trim(), "?? fresh/", "got {before:?}");
+
+        nox_git_stage(as_string(&scratch.0), vec![as_string(&scratch.join("fresh"))]).unwrap();
+
+        let after = git_out(&scratch.0, &["status", "--porcelain"]);
+        assert!(after.contains("A  fresh/m.txt"), "got {after:?}");
+        assert!(after.contains("A  fresh/inner/n.txt"), "got {after:?}");
     }
 
     #[test]

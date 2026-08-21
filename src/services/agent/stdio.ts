@@ -29,10 +29,24 @@ import {
 /** How long to wait for an agent to introduce itself before giving up. */
 const HANDSHAKE_TIMEOUT_MS = 10_000;
 
+/**
+ * How long a run may go without the agent writing anything.
+ *
+ * Far longer than the handshake's ten seconds, and deliberately so: a run is
+ * usually a model call, and minutes of silence while one thinks is ordinary.
+ * This is not a budget for the work — it is the point past which an agent has
+ * plainly stopped rather than is thinking. The alternative is what shipped:
+ * no deadline of any kind, and any agent that stopped writing without closing
+ * its stdout left the session saying "Working…" for the life of the app.
+ */
+const RUN_IDLE_TIMEOUT_MS = 300_000;
+
 export interface StdioOptions {
   /** Shown in errors, and as the agent's name until it says otherwise. */
   label?: string;
   handshakeTimeoutMs?: number;
+  /** Silence allowed between lines during a run; see `RUN_IDLE_TIMEOUT_MS`. */
+  idleTimeoutMs?: number;
 }
 
 export class StdioTransport implements AgentTransport {
@@ -47,6 +61,12 @@ export class StdioTransport implements AgentTransport {
   #stderr: string[] = [];
   #exited: { code: number | null } | null = null;
   #onExit: (() => void) | null = null;
+  /**
+   * Settles a `#nextLine` that is still waiting, for the two cases neither
+   * `#onLine` nor `#onExit` can ever cover: a cancelled agent and a disposed
+   * transport. An agent that is alive and silent produces neither event.
+   */
+  #abandon: (() => void) | null = null;
 
   constructor(open: () => Promise<AgentProcess>, id: string, options: StdioOptions = {}) {
     this.#open = open;
@@ -96,7 +116,20 @@ export class StdioTransport implements AgentTransport {
     const process = this.#process;
     if (!process) throw new Error(`${this.id} was not connected`);
 
-    const stop = () => void this.#write({ type: 'cancel' });
+    const idleTimeoutMs = this.#options.idleTimeoutMs ?? RUN_IDLE_TIMEOUT_MS;
+
+    const stop = () => {
+      // Caught rather than left as a bare `void`: `nox_agent_send` answers
+      // `not-found` once Rust has dropped the id from its registry, which it
+      // does *before* emitting the exit — so cancelling an agent that has
+      // just crashed rejects here, and an uncaught rejection reaches the
+      // `unhandledrejection` backstop and shows "Something went wrong" about
+      // a process that is already gone. There is nothing to tell the user.
+      void this.#write({ type: 'cancel' }).catch(() => undefined);
+      // Nothing else can end the wait below: a cancelled agent may write
+      // nothing more and may never exit.
+      this.#abandon?.();
+    };
     run.signal.addEventListener('abort', stop);
 
     try {
@@ -108,10 +141,18 @@ export class StdioTransport implements AgentTransport {
       });
 
       while (!run.signal.aborted) {
-        const line = await this.#nextLine();
-        // The process ending is a legitimate way to finish; a well-behaved
-        // agent says `done` first, and one that crashes should not hang us.
-        if (line === null) return;
+        const line = await this.#nextLine(idleTimeoutMs);
+        if (line === null) {
+          // Four things arrive as `null` and only one of them is a failure.
+          // The process ending is a legitimate way to finish — a well-behaved
+          // agent says `done` first, and one that crashes should not hang us —
+          // and cancelling and disposing both settle this wait on purpose.
+          // What is left is an agent that is still there and has gone quiet,
+          // and that has to be loud: returning would report a run as finished
+          // when it produced nothing at all.
+          if (this.#exited || this.#process === null || run.signal.aborted) return;
+          throw this.#died(`stopped responding after ${idleTimeoutMs}ms`);
+        }
 
         const parsed = parseInbound(line);
         if (!parsed.ok) throw this.#died(`sent something unusable: ${parsed.reason}`);
@@ -129,6 +170,10 @@ export class StdioTransport implements AgentTransport {
   dispose(): void {
     const process = this.#process;
     this.#process = null;
+    // Before the hooks are cleared, not after: clearing them was all `dispose`
+    // used to do, which orphaned a run waiting on `#nextLine` for good — the
+    // job stayed alive with nothing left that could ever settle it.
+    this.#abandon?.();
     this.#onLine = null;
     this.#onExit = null;
     void process?.kill().catch(() => undefined);
@@ -142,6 +187,12 @@ export class StdioTransport implements AgentTransport {
    * listening between the two awaits.
    */
   #nextLine(timeoutMs?: number): Promise<string | null> {
+    // A disposed transport has nothing left to wait for, and — having
+    // released the process — nothing left that could settle a promise either.
+    // Checked before `#abandon` can help, because `dispose` is very often
+    // called while a run is between two awaits rather than inside this one.
+    if (this.#process === null) return Promise.resolve(null);
+
     const buffered = this.#pending.shift();
     if (buffered !== undefined) return Promise.resolve(buffered);
     if (this.#exited) return Promise.resolve(null);
@@ -153,6 +204,7 @@ export class StdioTransport implements AgentTransport {
         settled = true;
         this.#onLine = null;
         this.#onExit = null;
+        this.#abandon = null;
         if (timer !== undefined) clearTimeout(timer);
         resolve(value);
       };
@@ -162,6 +214,7 @@ export class StdioTransport implements AgentTransport {
 
       this.#onLine = (line) => finish(line);
       this.#onExit = () => finish(this.#pending.shift() ?? null);
+      this.#abandon = () => finish(null);
     });
   }
 
