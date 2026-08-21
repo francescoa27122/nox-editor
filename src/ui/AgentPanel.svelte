@@ -1,22 +1,32 @@
 <script lang="ts">
+  import { contains, relative } from '@core/path';
   import { runnableAgents } from '@services/agent/config';
   import type { AgentAction, AgentSessionSnapshot, SessionStatus } from '@services/agent/runtime';
+  import { describeCapability, isResourceScoped, type Grant } from '@services/permissions';
   import { useApp } from './context';
   import Icon, { type IconName } from './Icon.svelte';
 
   /**
-   * What agents have done, and one button to take it back.
+   * What agents have done, what they may still do, and buttons to take back
+   * either one without taking back the other.
    *
    * Deliberately a record rather than a chat: the thing a user needs from this
    * panel is to see exactly what was read, what was run, what was refused, and
    * to be able to undo all of it. A conversation transcript is a different
    * feature, and not the one that makes an agent safe to leave running.
+   *
+   * Standing permissions live here rather than in a panel of their own for the
+   * same reason: the moment a user wants to close a door is the moment they
+   * are looking at what came through it, and a permissions viewer somewhere
+   * else is a permissions viewer nobody opens.
    */
 
   const app = useApp();
-  const { agents, agentConfig, notifications, ui, commands, platform } = app;
+  const { agents, agentConfig, notifications, permissions, ui, commands, platform } = app;
 
   const sessions = agents.sessions;
+  const grants = permissions.grants;
+  const root = app.workspace.rootPath;
   const providers = agents.providers;
   const configured = agentConfig.agents;
   const configError = agentConfig.error;
@@ -33,6 +43,28 @@
   );
 
   let expanded = $state<string | null>(null);
+
+  /** Standing grants held by one session. Empty for most of them, and that is the honest answer. */
+  const grantsOf = (sessionId: string): Grant[] =>
+    $grants.filter(
+      (grant) => grant.principal.kind === 'agent' && grant.principal.sessionId === sessionId,
+    );
+
+  /**
+   * What a grant actually covers, in the words the prompt asked in.
+   *
+   * A resource-scoped capability with no resource is not a narrow grant with a
+   * missing label — it is the widest kind there is. `review.apply` declares
+   * `buffer.edit` and deliberately names no file, because naming the active
+   * one would understate the reach of what the user agreed to; the list has to
+   * say so rather than render a blank beside neighbours that show a path.
+   */
+  function coversOf(grant: Grant): string {
+    if (grant.resource) {
+      return contains($root ?? '', grant.resource) ? relative($root!, grant.resource) : grant.resource;
+    }
+    return isResourceScoped(grant.capability) ? 'any file' : 'anywhere';
+  }
 
   const STATUS: Record<SessionStatus, { label: string; tone: string }> = {
     running: { label: 'Working', tone: 'accent' },
@@ -76,10 +108,25 @@
   }
 
   function undo(session: AgentSessionSnapshot) {
+    // `AgentRuntime.undoSession` revokes this session's standing permissions
+    // as well as reverting its work, so the count has to be taken before the
+    // call. Saying so is not decoration: the two are separable now, the panel
+    // offers a button for each, and a user who pressed the one marked Undo
+    // would otherwise have no way to learn that it also shut a door.
+    const revoked = grantsOf(session.id).length;
+    const alsoRevoked =
+      revoked === 0
+        ? ''
+        : ` Its ${revoked === 1 ? 'standing permission was' : `${revoked} standing permissions were`}` +
+          ' revoked too, so it will be asked again next time.';
+
     const { undone, skipped } = agents.undoSession(session.id);
 
     if (undone.length === 0 && skipped.length === 0) {
-      notifications.info(`${session.label} has not changed anything yet`);
+      notifications.info(
+        `${session.label} has not changed anything yet`,
+        alsoRevoked.trim() || undefined,
+      );
       return;
     }
     // The log is a record of what happened and undoing does not erase it, so
@@ -87,14 +134,15 @@
     if (undone.length === 0) {
       notifications.info(
         `Nothing left to take back from ${session.label}`,
-        'Its changes have already been undone, or those files have been edited since.',
+        'Its changes have already been undone, or those files have been edited since.' +
+          alsoRevoked,
       );
       return;
     }
     if (skipped.length > 0) {
       notifications.warn(
         `Took back ${undone.length} of ${undone.length + skipped.length} files`,
-        'The rest have been edited since, so their changes were left alone.',
+        'The rest have been edited since, so their changes were left alone.' + alsoRevoked,
       );
       return;
     }
@@ -102,6 +150,7 @@
       `Took back everything ${session.label} did across ${undone.length} ${
         undone.length === 1 ? 'file' : 'files'
       }`,
+      alsoRevoked.trim() || undefined,
     );
   }
 </script>
@@ -120,6 +169,20 @@
     </div>
 
     <div class="actions">
+      {#if $grants.length > 0}
+        <!--
+          Shown only when there is something to revoke, so the count is the
+          disclosure: it says how much is standing without a viewer to open,
+          and it is the one route to a grant whose session is not on screen.
+        -->
+        <button
+          class="nox-button small"
+          onclick={() => void commands.execute('permissions.revokeGrants')}
+          title="Take back every standing permission. Nothing already written changes."
+        >
+          Revoke {$grants.length} {$grants.length === 1 ? 'permission' : 'permissions'}
+        </button>
+      {/if}
       <button class="nox-button small" onclick={() => void commands.execute('agents.configure')}>
         Configure
       </button>
@@ -182,12 +245,46 @@
           <span class="label">{session.label}</span>
           <span class="status {status.tone}">{status.label}</span>
           <span class="spacer"></span>
+          {#if grantsOf(session.id).length > 0}
+            <button
+              class="linkish"
+              onclick={() => void commands.execute('permissions.revokeSessionGrants', session.id)}
+              title="Stop this agent without reverting its work"
+            >
+              Revoke access
+            </button>
+          {/if}
           {#if session.changes > 0}
-            <button class="undo" onclick={() => undo(session)}>Undo session</button>
+            <button class="linkish" onclick={() => undo(session)}>Undo session</button>
           {/if}
         </div>
 
         {#if expanded === session.id}
+          {@const held = grantsOf(session.id)}
+          <section class="grants">
+            <h3>Standing permissions</h3>
+            {#if held.length === 0}
+              <p>
+                None. Whatever this agent was allowed to do, it was allowed once or allowed by
+                policy — a policy rule is not something you granted, so there is nothing here to
+                take back.
+              </p>
+            {:else}
+              <ul>
+                {#each held as grant (grant.key)}
+                  <li>
+                    <span>{describeCapability(grant.capability)}</span>
+                    <code>{coversOf(grant)}</code>
+                  </li>
+                {/each}
+              </ul>
+              <p>
+                Granted with <strong>Allow for this session</strong>, and in force until you revoke
+                them or Nox restarts. Revoking leaves everything the agent has already written
+                exactly as it is.
+              </p>
+            {/if}
+          </section>
           <ol class="trail">
             {#each session.actions as action, index (index)}
               <li class:refused={action.kind === 'command' && !action.granted}>
@@ -324,15 +421,64 @@
     color: var(--nox-success);
   }
 
-  .undo {
+  .linkish {
     cursor: pointer;
     color: var(--nox-text-muted);
     text-decoration: underline;
     text-underline-offset: 2px;
   }
 
-  .undo:hover {
+  .linkish:hover {
     color: var(--nox-text-bright);
+  }
+
+  .grants {
+    margin: var(--nox-sp-2) 0 0 calc(11px + var(--nox-sp-2));
+    padding: var(--nox-sp-2) 0 var(--nox-sp-2) var(--nox-sp-3);
+    /* A rule rather than a filled card: this sits inside the expanded row and
+       a second background would read as a second panel. */
+    border-left: 2px solid var(--nox-border-subtle);
+  }
+
+  .grants h3 {
+    margin: 0;
+    font-size: var(--nox-fs-xs);
+    font-weight: 600;
+    color: var(--nox-text-muted);
+  }
+
+  .grants p {
+    max-width: 62ch;
+    margin: var(--nox-sp-2) 0 0;
+    font-size: var(--nox-fs-xs);
+    line-height: 1.6;
+    color: var(--nox-text-faint);
+  }
+
+  .grants ul {
+    list-style: none;
+    margin: var(--nox-sp-2) 0 0;
+    padding: 0;
+    font-size: var(--nox-fs-xs);
+  }
+
+  .grants li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--nox-sp-2);
+    padding: 2px 0;
+    /* The standing grants are the one thing on this panel that is still live,
+       so they read at the warning colour the refused-action rows use. */
+    color: var(--nox-warning);
+  }
+
+  .grants code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--nox-font-mono);
+    font-size: 0.92em;
+    color: var(--nox-text-muted);
   }
 
   .trail {

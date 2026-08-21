@@ -3,6 +3,7 @@ import { MemoryPlatform } from '../src/platform/memory';
 import { LspService } from '../src/services/lsp';
 import { SERVERS_FILE, ServerRegistry } from '../src/services/lsp/registry';
 import { WorkspaceService } from '../src/services/workspace';
+import { activeLanguageStatus, serverStatusLabel } from '../src/ui/lsp-status';
 import { FakeLanguageServer } from './support/fake-lsp-process';
 
 /**
@@ -194,6 +195,46 @@ describe('configuration', () => {
     expect(service.sessions.get()).toEqual([
       expect.objectContaining({ name: 'tsserver', status: 'running' }),
     ]);
+  });
+
+  /**
+   * The field the status bar could not do without. `SessionStatusRow` carried
+   * no `languages`, so the active buffer's language was not an input to
+   * `serverStatusLabel` and could not be made one — which is why the bar read
+   * `tsserver` beside an open `main.py`. Taken from `entry.config` rather than
+   * re-read from the registry, because a row describes a running session and
+   * `lsp.reload` can leave those two disagreeing.
+   */
+  it('reports which languages each running server answers for', async () => {
+    const { service } = await setup();
+    await service.start();
+
+    expect(service.sessions.get()[0]?.languages).toEqual(['typescript']);
+  });
+
+  it('does not let the bar claim a TypeScript server for a Python file', async () => {
+    const { platform, workspace, service } = await setup();
+    platform.seedFile('/w/src/main.py', 'x = 1\n');
+    await workspace.open('/w/src/main.py');
+    await service.start();
+
+    // End to end through the real service rather than a hand-built row, so
+    // the language id spelling that `servers.json` uses and the one
+    // `BufferSnapshot` uses are checked against each other too.
+    const languageId = workspace.activeSnapshot()!.languageId;
+    expect(languageId).toBe('python');
+
+    expect(serverStatusLabel(service.sessions.get(), languageId)).toBe('1 server');
+    expect(
+      activeLanguageStatus(
+        { id: languageId, name: 'Python', hasGrammar: true },
+        service.sessions.get(),
+      ),
+    ).toEqual({
+      title: 'Python — no language server configured',
+      tone: 'muted',
+      commandId: 'lsp.configure',
+    });
   });
 });
 

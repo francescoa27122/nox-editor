@@ -30,6 +30,29 @@
 
 export type GitStatusLetter = 'M' | 'A' | 'D' | 'R' | 'U' | 'C';
 
+/**
+ * The word each porcelain letter stands for.
+ *
+ * Lives here rather than in whichever component happened to need it first: it
+ * is the vocabulary of the letters themselves, and the Git panel and the file
+ * tree must not be able to disagree about what a `C` means. Both render the
+ * letter as a *character* carrying this as tooltip and accessible name, which
+ * is also what keeps the encoding off colour alone (WCAG 1.4.1) — six letters
+ * over four token colours could never be separated by colour anyway.
+ *
+ * `R` covers copies too: `letter()` folds porcelain's C into R deliberately,
+ * and that is what frees `C` to mean *conflicted*. `U` was not available,
+ * because in this vocabulary U is untracked.
+ */
+export const GIT_STATUS_LABEL: Record<GitStatusLetter, string> = {
+  M: 'Modified',
+  A: 'Added',
+  D: 'Deleted',
+  R: 'Renamed or copied',
+  U: 'Untracked',
+  C: 'Conflicted',
+};
+
 export interface FileEntry {
   /** Relative to the repository toplevel, exactly as git printed it. */
   path: string;

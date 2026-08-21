@@ -30,6 +30,18 @@ export interface LspDiagnostic {
 export interface SessionStatusRow {
   name: string;
   status: SessionStatus;
+  /**
+   * The language ids this server answers for, as `BufferSnapshot.languageId`
+   * spells them.
+   *
+   * Carried on the row rather than looked up from the registry by whoever is
+   * rendering, because a row describes a *running* session and the registry
+   * describes the file on disk: `lsp.reload` can leave the two disagreeing
+   * for as long as it takes the old sessions to die. Without this the status
+   * bar had no way to tell whether the server it was naming had anything to
+   * do with the file in front of the user, and named it anyway.
+   */
+  languages: readonly string[];
   /** Why it failed, when it did. */
   error: string | null;
   stderr: readonly string[];
@@ -285,6 +297,7 @@ export class LspService {
       this.#running.map((entry) => ({
         name: entry.session.name,
         status: entry.session.status.get(),
+        languages: entry.config.languages,
         error: entry.session.error,
         stderr: entry.session.stderr,
       })),

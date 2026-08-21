@@ -267,6 +267,17 @@ user was allowed to type" would bury the entries an audit is looking for.
 one to `~/.ssh/config` — remembered grants key on the resource for `fs.*`, and
 on the capability alone for the rest, which is the granularity each is asked at.
 
+**A grant you cannot see is a grant you cannot withdraw.** Everything
+"Allow for this session" remembers is on `PermissionService.grants`, listed in
+the Agents panel with the capability and the resource it covers, and revocable
+by `permissions.revokeGrants` without touching a line the agent already wrote.
+Until 0.7 the only caller of `forgetSession` was `undoSession`, so taking back
+a permission meant reverting the work it produced — which is a choice nobody
+would make, so in practice grants stood until Nox restarted. Revoking is
+itself a capability (`permissions.revoke`) and is denied by policy rather than
+prompted for: asking an agent's user whether the agent may edit the record of
+what they agreed to is not a question worth putting on screen.
+
 **Denials throw.** A denial that returned `false` would be indistinguishable
 from a disabled command, and "nothing happened" is the worst possible answer to
 "may I".

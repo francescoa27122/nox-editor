@@ -74,6 +74,7 @@ import {
   PermissionError,
   PermissionService,
   type PermissionRequest,
+  type Principal,
   type PromptAnswer,
 } from '@services/permissions';
 import { SearchService } from '@services/search';
@@ -85,7 +86,7 @@ import { UpdateService } from '@services/updates';
 import { FileWatcherService } from '@services/watcher';
 import { GitService } from '@services/git';
 import { WorkspaceService, type BufferId } from '@services/workspace';
-import type { ChangeSetSpec } from '@services/transactions';
+import { authorLabel, type ChangeSetSpec } from '@services/transactions';
 
 /** What `NoxApp.formatBuffer` did. The save path and the command read it differently. */
 export type FormatOutcome =
@@ -715,6 +716,44 @@ export class NoxApp {
     });
 
     return choice === 'allow-session' || choice === 'allow-once' ? choice : 'deny';
+  }
+
+  /**
+   * Take back standing permissions, and leave everything else alone.
+   *
+   * Shared by the palette commands and the Agents panel button so the two
+   * cannot drift into reporting different things, which is the same reason
+   * `applyReview` exists.
+   *
+   * The detail line is the load-bearing half. Before this, `forgetSession`
+   * had exactly one caller — `AgentRuntime.undoSession` — so the only way to
+   * stop an agent writing was to revert everything it had written. A user
+   * pressing something called "revoke" has every reason to expect the same
+   * thing here, and has to be told plainly that their files were left alone.
+   */
+  revokeGrants(principal?: Principal): number {
+    const forgotten = this.permissions.forgetSession(principal);
+    const who = principal ? authorLabel(principal) : 'Agents and plugins';
+
+    if (forgotten.length === 0) {
+      // Deliberately not phrased as a success. Saying "revoked" when nothing
+      // was standing would leave the user believing a door was shut that was
+      // never open, and §2.6 spends its length on exactly that distinction.
+      this.notifications.info(
+        principal ? `${who} holds no standing permissions` : 'No standing permissions to revoke',
+        'Anything allowed so far was allowed once, or allowed by policy. Neither is a grant.',
+      );
+      return 0;
+    }
+
+    this.notifications.success(
+      `Revoked ${forgotten.length} standing ${
+        forgotten.length === 1 ? 'permission' : 'permissions'
+      }`,
+      `${who} will be asked again next time. Nothing already written has changed — ` +
+        'undo the session for that.',
+    );
+    return forgotten.length;
   }
 
   /**
@@ -2479,6 +2518,37 @@ export class NoxApp {
           }
         },
       },
+      // --- Permissions ------------------------------------------------------
+      // Revoking is its own command rather than a step inside `undoSession`.
+      // Keeping an agent's edits while closing the door it wrote through is
+      // the case that had no move at all before these two existed.
+      {
+        id: 'permissions.revokeGrants',
+        title: 'Revoke Every Standing Permission',
+        category: 'Agents',
+        keywords: ['permission', 'grant', 'access', 'revoke', 'forget', 'trust', 'session'],
+        capabilities: ['permissions.revoke'],
+        enabled: () => this.permissions.grants.get().length > 0,
+        run: () => this.revokeGrants(),
+      },
+      {
+        id: 'permissions.revokeSessionGrants',
+        title: "Revoke One Agent's Standing Permissions",
+        category: 'Agents',
+        // Needs a session id, so it says nothing useful in the palette. It is
+        // still a command so the Agents panel button goes through the same
+        // door as everything else instead of calling the service directly.
+        hidden: true,
+        capabilities: ['permissions.revoke'],
+        run: (arg) => {
+          if (typeof arg !== 'string') return;
+          // The label the panel shows, so the toast names the agent the same
+          // way the row above it does rather than falling back to an id.
+          const label = this.agents.sessions.get().find((s) => s.id === arg)?.label ?? arg;
+          this.revokeGrants({ kind: 'agent', sessionId: arg, label });
+        },
+      },
+
       // --- Review -----------------------------------------------------------
       // Staging is programmatic; these are the decisions a human makes about
       // what was staged, and every one of them is a command like anything else.

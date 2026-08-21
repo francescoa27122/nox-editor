@@ -3,7 +3,7 @@
   import { hasGrammar } from '@editor/languages';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
-  import { serverStatusLabel, serverStatusTitle } from './lsp-status';
+  import { activeLanguageStatus, serverStatusLabel, serverStatusTitle } from './lsp-status';
   import { problemTotals } from './problems';
 
   const app = useApp();
@@ -71,10 +71,34 @@
   });
 
   const lspSessions = lsp.sessions;
-  const lspLabel = $derived(serverStatusLabel($lspSessions));
-  const lspFailed = $derived($lspSessions.some((session) => session.status === 'failed'));
 
   const active = $derived($buffers.find((b) => b.id === $activeId) ?? null);
+
+  /**
+   * The active buffer's language, not the aggregate. Without it the bar named
+   * whichever server it found — leaving `typescript-language-server` on screen
+   * beside an open `main.py`, in the one readout people take to mean "this is
+   * what understands the file I am looking at".
+   */
+  const lspLabel = $derived(serverStatusLabel($lspSessions, active?.languageId ?? null));
+  const lspFailed = $derived($lspSessions.some((session) => session.status === 'failed'));
+
+  const languageStatus = $derived(
+    active
+      ? activeLanguageStatus(
+          {
+            id: active.languageId,
+            name: active.languageName,
+            hasGrammar: hasGrammar(active.languageId),
+          },
+          $lspSessions,
+        )
+      : null,
+  );
+
+  /** Pulled out so the click handler needs no narrowing inside the template. */
+  const languageCommand = $derived(languageStatus?.commandId ?? null);
+  const languageTitle = $derived(languageStatus?.title ?? active?.languageName ?? '');
   const dirtyCount = $derived($buffers.filter((b) => b.isDirty).length);
 
   const indentLabel = $derived(
@@ -270,15 +294,42 @@
         {active.eol === '\r\n' ? 'CRLF' : 'LF'}
       </button>
 
-      <span
-        class="item static"
-        class:muted={!hasGrammar(active.languageId)}
-        title={hasGrammar(active.languageId)
-          ? active.languageName
-          : `${active.languageName} — no grammar installed`}
-      >
-        {active.languageName}
-      </span>
+      <!--
+        One control, two facts: whether a grammar is installed and whether a
+        language server is. Both are "something this file could have and does
+        not", and the grammar half already said so here — a second control for
+        the server half would have split one question across two places.
+
+        A button only when there is somewhere to go. "No server for this
+        language" has a fix and `lsp.configure` is it; a missing grammar does
+        not, so that stays the inert readout it has always been.
+
+        The button keeps `.muted` — faint is how this bar says "not
+        installed", and the audit's worry about inert and clickable items
+        looking alike is answered by the hover response rather than the
+        resting colour: `button.item:hover` outranks `.item.muted`, so this
+        one lights up and takes a ground where `.item.static` does neither.
+      -->
+      {#if languageCommand}
+        <button
+          class="item"
+          class:muted={languageStatus?.tone === 'muted'}
+          class:warn={languageStatus?.tone === 'warn'}
+          title={languageTitle}
+          onclick={() => void commands.execute(languageCommand)}
+        >
+          {active.languageName}
+        </button>
+      {:else}
+        <span
+          class="item static"
+          class:muted={languageStatus?.tone === 'muted'}
+          class:warn={languageStatus?.tone === 'warn'}
+          title={languageTitle}
+        >
+          {active.languageName}
+        </span>
+      {/if}
     {/if}
 
     <button

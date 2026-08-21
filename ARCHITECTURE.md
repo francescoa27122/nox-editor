@@ -1524,6 +1524,9 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 |---|---|
 | Problems and References are not windowed | They share the flat-row shape the explorer and search now window (see §4), but their natural limits are lower. Re-decide on their own merits rather than inheriting the explorer spec's out-of-scope line. |
 | Commit is enabled while a merge conflict is unresolved | The panel names conflicts and refuses to stage them, but the Commit button does not know about them. Real git refuses ("committing is not possible because you have unmerged files") and the refusal surfaces through the existing error path, so the outcome is correct and merely late. `MemoryPlatform.gitCommit` does not model the refusal, so nothing tests it. |
+| `undoSession` still revokes grants as a side effect | Revocation is its own command now (`permissions.revokeGrants`), so undoing an agent's *work* arguably should leave its *permissions* alone. The two are still welded in `agent/runtime.ts`; the panel's toast says so rather than surprising the user. |
+| The explorer does not dim gitignored files | `git.rs` runs `--porcelain=v2 --branch -z` without `--ignored`, so the `!` records never arrive. Real support is a Rust change plus a Platform-boundary change, not a component one. |
+| A collapsed folder shows nothing about what is inside it | The tree marks changed and unsaved *files*; a collapsed `src/` hiding forty changes still reads as quiet. Needs an ancestor-prefix set — cheap, and on the same off-typing-path trigger — plus a decision about what a folder's marker looks like. |
 | Dirty flag on huge files | See §4. Above 2 MB, undo-to-saved leaves the tab dirty. |
 | Watch mtime resolution | See §4. A coarse-mtime filesystem can let an external write in the same second as a save be misread as our own. |
 | Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. |
