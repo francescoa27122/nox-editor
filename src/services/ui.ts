@@ -167,6 +167,22 @@ export class UIService {
     this.focusEditor();
   }
 
+  /**
+   * Close the overlay and leave focus to the caller.
+   *
+   * `closeOverlay` above refocuses the editor, which is right for every
+   * picker whose result *is* the editor — a file, a line, a symbol, a
+   * branch. It is wrong for one that hands focus somewhere else: both focus
+   * requests are signal bumps read by `$effect`, so they land in the same
+   * flush and the editor's wins on effect order rather than on intent. The
+   * note picker selects a note and then focuses the notes panel, and without
+   * this the panel opens with the caret still in the editor.
+   */
+  closeOverlayWithoutFocus(): void {
+    if (this.overlay.get() === null) return;
+    this.overlay.set(null);
+  }
+
   openFind(replace: boolean): void {
     this.findReplaceMode.set(replace);
     this.findOpen.set(true);

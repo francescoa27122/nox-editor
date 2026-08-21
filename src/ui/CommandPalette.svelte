@@ -488,7 +488,9 @@
           icon: 'note',
           ...(note.pinned ? { badge: 'pinned' } : {}),
           accept: () => {
-            ui.closeOverlay();
+            // Not `closeOverlay`: that refocuses the editor, and its focus
+            // request would beat `focusNotes` below to the same flush.
+            ui.closeOverlayWithoutFocus();
             app.notes.select(note.id);
             ui.focusNotes();
           },
