@@ -244,7 +244,35 @@ by another tool with real YAML in it therefore imports with its metadata
 visible in the body rather than vanishing, which is recoverable by hand;
 dropping it is not.
 
-### 4.3 Where it degrades
+### 4.3 The command surface, and what it may do
+
+Placed in §4 because export and import are the only new commands that need a
+capability at all — but the table covers every command this document adds,
+because an implementer reading §2 or §3 alone would otherwise have to guess.
+
+| Command | From | `capabilities` |
+|---|---|---|
+| `notes.open` | §2.3 | none |
+| `notes.newFromSelection` | §3.1 | none |
+| `notes.export` | §4.1 | `['fs.create']` |
+| `notes.import` | §4.2 | `['fs.read']` |
+
+CONTRIBUTING's second rule is that a command with a side effect must declare
+its capabilities, and that the declaration is the entire basis of permission
+enforcement. The reason the four existing `notes.*` commands in `app.ts:3144`
+declare none is not an oversight to copy blindly: they touch only Nox's own
+config directory through `readConfigFile`/`writeConfigFile`, which is not a
+workspace filesystem operation and has no capability in the union at
+`services/permissions.ts:22`.
+
+**Export and import are the first notes commands that leave that directory.**
+`writeTextFile` into a folder the user picked is `fs.create`; `readDir` plus
+`readTextFile` is `fs.read`. `notes.open` and `notes.newFromSelection` stay
+capability-free — the first only moves the selection and focus, and the
+second reads the active buffer and writes a note, neither of which touches
+the workspace.
+
+### 4.4 Where it degrades
 
 Both commands require `capabilities.nativeDialogs` (`platform/types.ts:29`).
 The browser build has no dialogs and `persistentStorage` false, so both
