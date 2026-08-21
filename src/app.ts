@@ -19,7 +19,7 @@ import { locationRows, referenceTargets, type LocationList } from '@core/lsp-ref
 import { prepareRenameSeed, renameEdits } from '@core/lsp-rename';
 import { changesOf, textEditsOf } from '@core/lsp-text-edit';
 import { offsetAt, positionAt } from '@core/lsp-position';
-import { ANCHOR_WINDOW, resolveAnchorLine } from '@core/anchor';
+import { ANCHOR_WINDOW, resolveAnchor } from '@core/anchor';
 import { formatNoteFile, noteFileName, parseNoteFile } from '@core/note-file';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
@@ -1701,7 +1701,7 @@ export class NoxApp {
     this.notes.rename(id, seed.title);
     this.notes.setBody(id, seed.body);
     this.notes.setAnchor(id, seed.anchor);
-    this.ui.focusNotes();
+    this.revealNotes();
   }
 
   /**
@@ -1712,19 +1712,90 @@ export class NoxApp {
    * looking right. Only a window around the remembered line is read, so this
    * costs the same on a 10 MB file as on a small one.
    */
-  async openNoteAnchor(anchor: NoteAnchor): Promise<void> {
+  async openNoteAnchor(id: string, anchor: NoteAnchor): Promise<void> {
     await this.openPaths([anchor.path]);
 
-    const view = this.view.get();
-    if (!view) return;
+    // Read through the workspace rather than the mounted `EditorView`: the
+    // buffer is the same text, and taking it from the view would make both
+    // the jump and the correction depend on a component being mounted.
+    const found = this.#locateAnchor(anchor) ?? { line: anchor.line, found: false };
+    this.goToLine(found.line, 1);
+    this.#healAnchor(id, anchor, found);
+  }
 
-    const doc = view.state.doc;
+  /**
+   * Show the notes panel, opening the sidebar if it is collapsed.
+   *
+   * `ui.focusNotes()` alone only chooses *which* panel the sidebar shows. If
+   * the sidebar is closed that is invisible, so creating a note appeared to do
+   * nothing at all. Every sibling panel already pairs the two —
+   * `search.focus`, `problems.focus`, `references.focus`, `git.focus`,
+   * `answers.focus` — and notes was the one that did not.
+   */
+  revealNotes(): void {
+    this.config.set('workbench.showExplorer', true);
+    this.ui.focusNotes();
+  }
+
+  /**
+   * Bring a note's anchor up to date against the file, without jumping.
+   *
+   * Called when a note is selected, so the chip names where its code *is*
+   * rather than where it was when the note was made. Only the open buffer is
+   * consulted — an anchor into a file nobody has opened keeps its remembered
+   * line, because reading from disk to label a chip is not worth a round trip.
+   */
+  refreshNoteAnchor(id: string): void {
+    const note = this.notes.notes.get().find((entry) => entry.id === id);
+    const anchor = note?.anchor;
+    if (!anchor) return;
+
+    const found = this.#locateAnchor(anchor);
+    if (found) this.#healAnchor(id, anchor, found);
+  }
+
+  /**
+   * Where `anchor` sits in its file now, or null when nothing has that file
+   * open. Only the open buffer is consulted — reading from disk to label a
+   * chip is not worth a round trip.
+   */
+  #locateAnchor(anchor: NoteAnchor): { line: number; found: boolean } | null {
+    const buffer = this.workspace.findByPath(anchor.path);
+    if (!buffer) return null;
+
+    const text = this.workspace.textOf(buffer.id);
+    return text === undefined ? null : this.#locate(text, anchor);
+  }
+
+  /**
+   * Where `anchor` sits in `text` now.
+   *
+   * Only a window around the remembered line is read, so this costs the same
+   * on a 10 MB file as on a small one.
+   */
+  #locate(text: string, anchor: NoteAnchor): { line: number; found: boolean } {
+    const rows = text.split('\n');
     const first = Math.max(1, anchor.line - ANCHOR_WINDOW);
-    const last = Math.min(doc.lines, anchor.line + ANCHOR_WINDOW);
-    const text = doc.sliceString(doc.line(first).from, doc.line(last).to);
+    const last = Math.min(rows.length, anchor.line + ANCHOR_WINDOW);
+    const window = rows.slice(first - 1, last).join('\n');
 
-    const withinWindow = resolveAnchorLine(text, anchor.line - first + 1, anchor.snippet);
-    this.goToLine(withinWindow + first - 1, 1);
+    const within = resolveAnchor(window, anchor.line - first + 1, anchor.snippet);
+    return { line: within.line + first - 1, found: within.found };
+  }
+
+  /**
+   * Write a corrected line back to the note, so the anchor tracks its code
+   * instead of rotting and the chip stops naming a line the code left.
+   *
+   * **Only when the snippet was actually found.** A fallback is the
+   * neighbourhood the code used to be in, not where it is, and persisting one
+   * would overwrite the last thing anyone knew with a guess. `setAnchor` does
+   * not touch `updatedAt`, so a note does not claim to have been edited
+   * because it corrected itself.
+   */
+  #healAnchor(id: string, anchor: NoteAnchor, found: { line: number; found: boolean }): void {
+    if (!found.found || found.line === anchor.line) return;
+    this.notes.setAnchor(id, { ...anchor, line: found.line });
   }
 
   /**
@@ -1834,7 +1905,7 @@ export class NoxApp {
       this.notifications.error(`Imported ${imported} of ${files.length} notes`, failure);
     } else {
       this.notifications.success(`Imported ${imported} notes`, folder);
-      this.ui.focusNotes();
+      this.revealNotes();
     }
   }
 
@@ -3322,7 +3393,7 @@ export class NoxApp {
         category: 'Notes',
         keyHint: 'Mod+Shift+N',
         keywords: ['note', 'scratch', 'memo'],
-        run: () => this.ui.focusNotes(),
+        run: () => this.revealNotes(),
       },
       {
         id: 'notes.newFromSelection',
@@ -3374,7 +3445,7 @@ export class NoxApp {
         keywords: ['note', 'create', 'add'],
         run: () => {
           this.notes.create();
-          this.ui.focusNotes();
+          this.revealNotes();
         },
       },
       {
