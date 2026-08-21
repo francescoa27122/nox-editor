@@ -30,9 +30,18 @@ function lineStarts(text: string): number[] {
 /**
  * Length of the line beginning at `start`, excluding its terminator.
  *
- * A `\r` before the `\n` terminates the line rather than sitting on it. Every
- * file in this repository is CRLF, so counting it as content would shift every
- * column reported for the line.
+ * A `\r` before the `\n` terminates the line rather than sitting on it, because
+ * counting it as content would shift every column reported for the line.
+ *
+ * No caller in Nox can currently reach that branch: every one of them passes a
+ * buffer's document, and a document is canonical LF by construction — `decode`
+ * strips CRLF on the way in and `encode` reapplies it on save, so the file's
+ * ending is metadata the text never carries (see ARCHITECTURE.md §4, "The
+ * document is canonical"). It is handled anyway because this is a pure string
+ * helper over LSP's own coordinate system rather than over Nox's documents, and
+ * a helper that silently mis-measures raw file text is a trap for the first
+ * caller who hands it some. `tests/lsp-position.test.ts` is what keeps the
+ * branch honest; do not delete those cases as dead weight.
  */
 function lineLength(text: string, start: number): number {
   let end = text.indexOf('\n', start);
