@@ -6,6 +6,25 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-08-20
+
+The first signed release. No feature changes: this exists so that updates can
+be verified, which nothing before it could do.
+
+### Changed
+
+- **Nox can now verify an update before installing it.** The operator's
+  signing key ceremony is done, so releases from here on carry a signed
+  `latest.json` and every download is checked against the public key built
+  into the app. Until now the updater ran and found nothing, because there
+  was nothing signed to find.
+- **This is the first build that can verify anything.** The public key is
+  compiled into the binary, and every build before this one carries an empty
+  one — so **0.5.0 and earlier cannot auto-update, ever.** Install this
+  release by hand, once; from here on *Check for Updates…* works, and an
+  update installed through it skips the macOS quarantine ritual that a fresh
+  download still needs.
+
 ## [0.5.0] — 2026-08-20
 
 ### Added
@@ -1010,7 +1029,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/francescoa27122/nox-editor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/francescoa27122/nox-editor/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/francescoa27122/nox-editor/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/francescoa27122/nox-editor/compare/v0.4.1...v0.4.2
