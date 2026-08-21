@@ -85,6 +85,73 @@ describe('what the menu contains', () => {
     );
   });
 
+  /**
+   * The same tree, for a platform with no responder chain to defer to.
+   *
+   * `COVERED_BY_SYSTEM_ITEMS` is not a list of commands a menu should never
+   * show — it is a list of commands *macOS already shows for us*. Windows and
+   * Linux have no such items, so leaving them out there would mean Undo and
+   * Select All appearing in no menu at all.
+   */
+  it('claims the responder-chain items itself where there is no responder chain', () => {
+    const app = new NoxApp(new MemoryPlatform());
+    const menu = buildMenu(app.commands.all(), () => undefined, { systemItems: false });
+
+    for (const id of COVERED_BY_SYSTEM_ITEMS) {
+      expect(commandIds(menu), id).toContain(id);
+    }
+  });
+
+  /**
+   * The failure this prevents: a hand-drawn menu rendering a node it cannot
+   * act on. A `predefined` item names something only the OS can perform, so
+   * on a platform drawing its own menu it would be a row that does nothing.
+   */
+  it('emits nothing predefined where there is no system to hand it to', () => {
+    const app = new NoxApp(new MemoryPlatform());
+    const menu = buildMenu(app.commands.all(), () => undefined, { systemItems: false });
+
+    const predefined: string[] = [];
+    walk(menu, (node) => {
+      if (node.kind === 'predefined') predefined.push(node.item);
+    });
+    expect(predefined).toEqual([]);
+  });
+
+  /** Still exactly once each — the guarantee does not weaken off macOS. */
+  it('lists every palette-visible command exactly once without system items', () => {
+    const app = new NoxApp(new MemoryPlatform());
+    const listed = commandIds(buildMenu(app.commands.all(), () => undefined, { systemItems: false }));
+
+    expect(new Set(listed).size).toBe(listed.length);
+    expect([...listed].sort()).toEqual([...app.commands.palette().map((c) => c.id)].sort());
+  });
+
+  /**
+   * The failure this prevents: rules left behind by the items they framed.
+   * `LAYOUT` writes `leading: [predefined('about'), separator]` and
+   * `trailing: [separator, predefined('fullscreen')]`, so dropping the
+   * predefined nodes without collapsing the separators leaves a menu opening
+   * or closing on a horizontal rule — and two adjacent rules wherever one sat
+   * between two dropped items.
+   */
+  it('leaves no rule stranded when the system items go', () => {
+    const app = new NoxApp(new MemoryPlatform());
+    const menu = buildMenu(app.commands.all(), () => undefined, { systemItems: false });
+
+    walk(menu, (node) => {
+      if (node.kind !== 'submenu') return;
+      const items = node.items;
+      expect(items.length, `${node.label} is empty`).toBeGreaterThan(0);
+      expect(items[0]!.kind, `${node.label} opens on a rule`).not.toBe('separator');
+      expect(items[items.length - 1]!.kind, `${node.label} ends on a rule`).not.toBe('separator');
+      for (let i = 1; i < items.length; i++) {
+        const doubled = items[i]!.kind === 'separator' && items[i - 1]!.kind === 'separator';
+        expect(doubled, `${node.label} has two rules in a row`).toBe(false);
+      }
+    });
+  });
+
   /** Hidden commands are hidden from the palette; a menu is no different. */
   it('omits hidden commands', () => {
     const app = new NoxApp(new MemoryPlatform());
