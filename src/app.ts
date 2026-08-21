@@ -3390,6 +3390,16 @@ export class NoxApp {
 
       // --- Notes ------------------------------------------------------------
       {
+        id: 'menubar.focus',
+        title: 'Focus Menu Bar',
+        category: 'View',
+        keyHint: 'F10',
+        keywords: ['menu', 'menubar', 'bar'],
+        // No `capabilities`: it moves focus and nothing else.
+        enabled: () => !this.platform.capabilities.applicationMenu,
+        run: () => this.ui.focusMenuBar(),
+      },
+      {
         id: 'notes.focus',
         title: 'Show Notes',
         category: 'Notes',
@@ -3605,6 +3615,11 @@ export class NoxApp {
       // `file.new` and `Mod+Shift+N` is the panel — and ⌥N being a dead key
       // on a Mac does not matter, because chords match on `event.code`.
       'Mod+Alt+N': 'notes.open',
+      // Bare F10 is free: all three existing F10 handlers require Shift, and
+      // `editor-context-menu.test.ts` asserts an unmodified F10 is left
+      // alone. Alt-mnemonics were the alternative and collide — `Alt+G` is
+      // already `nav.goToLine` off macOS, which is the Go menu's own letter.
+      'F10': 'menubar.focus',
       // The problems list is the panel most worth a hotkey, and ⌘⇧M is the
       // convention everywhere. References keeps no chord of its own: its
       // natural entry is Shift+F12, which already fills and shows the view.

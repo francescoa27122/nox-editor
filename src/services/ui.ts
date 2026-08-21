@@ -142,6 +142,17 @@ export class UIService {
   readonly focusExplorerRequest = new Signal(0);
   /** Bumped to ask the notes panel to put the cursor in the note body. */
   readonly focusNotesRequest = new Signal(0);
+  /**
+   * Bumped to put the caret on the menu bar — the same focus-request shape
+   * every panel uses. Only meaningful where Nox draws its own menu.
+   */
+  readonly focusMenuBarRequest = new Signal(0);
+  /**
+   * Whether a menu-bar menu is showing. Held here rather than in the
+   * component because this file owns the answer to "what does Escape close",
+   * and a menu hanging open under a dialog would be two things claiming it.
+   */
+  readonly menuBarOpen = new Signal(false);
   /** Bumped to ask the answers panel to take focus. */
   readonly focusAnswersRequest = new Signal(0);
   /** Bumped to ask the problems list to take focus. */
@@ -262,6 +273,10 @@ export class UIService {
     this.focusSearchRequest.update((n) => n + 1);
   }
 
+  focusMenuBar(): void {
+    this.focusMenuBarRequest.update((n) => n + 1);
+  }
+
   focusNotes(): void {
     this.sidebarView.set('notes');
     this.focusZone.set('notes');
@@ -316,6 +331,7 @@ export class UIService {
       this.reviewOpen.get() ||
       this.agentsOpen.get() ||
       this.diffOpen.get() ||
+      this.menuBarOpen.get() ||
       this.prompt.get() !== null ||
       this.confirm.get() !== null
     );
@@ -339,6 +355,13 @@ export class UIService {
     }
     if (this.findOpen.get()) {
       this.closeFind();
+      return true;
+    }
+    // Ahead of the panels below: a menu is drawn over them, so it is what a
+    // person means by Escape while one is showing. The bar itself clears the
+    // flag and restores focus; this is the ordering claim, not the mechanism.
+    if (this.menuBarOpen.get()) {
+      this.menuBarOpen.set(false);
       return true;
     }
     // Escape puts the review away without deciding anything. The staged set

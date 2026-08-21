@@ -197,11 +197,31 @@ export function toAccelerator(chord: string): string | undefined {
  * Pure, and exported for the test that checks nothing is missing —
  * `MenuService` only adds the platform round trip.
  */
+export interface BuildOptions {
+  /**
+   * Whether the platform supplies its own menu items — Undo, Cut, Quit and
+   * the rest of the responder chain.
+   *
+   * True on macOS, where the system draws them and performing them through
+   * the responder chain is what makes ⌘Z work in a text field rather than
+   * only in the document.
+   *
+   * False wherever Nox draws the menu itself. There is no responder chain to
+   * defer to, so `COVERED_BY_SYSTEM_ITEMS` stops meaning "leave these out" —
+   * those commands exist and must be listed, or Undo and Select All appear
+   * in no menu at all. Nothing `predefined` is emitted either: it names an
+   * action only the OS can perform, so a hand-drawn menu could only render
+   * it as a row that does nothing.
+   */
+  systemItems: boolean;
+}
+
 export function buildMenu(
   commands: readonly Command[],
   acceleratorFor: (commandId: string) => string | undefined,
+  options: BuildOptions = { systemItems: true },
 ): MenuNode[] {
-  const covered = new Set(COVERED_BY_SYSTEM_ITEMS);
+  const covered = new Set(options.systemItems ? COVERED_BY_SYSTEM_ITEMS : []);
   const byCategory = new Map<string, Command[]>();
   for (const command of commands) {
     if (command.hidden || covered.has(command.id)) continue;
@@ -221,8 +241,15 @@ export function buildMenu(
   const menus: MenuNode[] = [];
   const placed = new Set<string>();
 
+  // `leading`/`trailing` are where every `predefined` node enters the tree.
+  // Dropping them here rather than filtering the finished menu keeps the
+  // separator bookkeeping below honest: a group left with nothing but rules
+  // must not become a menu.
+  const fixed = (nodes: readonly MenuNode[] | undefined): MenuNode[] =>
+    (nodes ?? []).filter((node) => options.systemItems || node.kind !== 'predefined');
+
   for (const group of LAYOUT) {
-    const items: MenuNode[] = [...(group.leading ?? [])];
+    const items: MenuNode[] = [...fixed(group.leading)];
     let blocks = 0;
     for (const category of group.categories) {
       const bucket = byCategory.get(category);
@@ -234,12 +261,24 @@ export function buildMenu(
       for (const command of bucket) items.push(item(command));
       blocks += 1;
     }
-    items.push(...(group.trailing ?? []));
-    if (items.length === 0) continue;
+    items.push(...fixed(group.trailing));
+
+    // A rule exists to separate two things. Dropping the system items can
+    // leave one with nothing on a side — `leading: [about, separator]` and
+    // `trailing: [separator, fullscreen]` both do — so rules are collapsed
+    // after the fact rather than each site being special-cased.
+    const tidy = items.filter((node, index) => {
+      if (node.kind !== 'separator') return true;
+      if (index === 0) return false;
+      if (items[index - 1]?.kind === 'separator') return false;
+      return items.slice(index + 1).some((later) => later.kind !== 'separator');
+    });
+
+    if (tidy.length === 0) continue;
     menus.push(
       group.role === undefined
-        ? { kind: 'submenu', label: group.label, items }
-        : { kind: 'submenu', label: group.label, role: group.role, items },
+        ? { kind: 'submenu', label: group.label, items: tidy }
+        : { kind: 'submenu', label: group.label, role: group.role, items: tidy },
     );
   }
 
@@ -269,10 +308,17 @@ export class MenuService {
 
   /** The tree as it would be installed. Exposed for tests and for `install`. */
   describe(): MenuNode[] {
-    return buildMenu(this.#commands.all(), (commandId) => {
-      const chord = this.#keymap.chordFor(commandId);
-      return chord === undefined ? undefined : toAccelerator(chord);
-    });
+    return buildMenu(
+      this.#commands.all(),
+      (commandId) => {
+        const chord = this.#keymap.chordFor(commandId);
+        return chord === undefined ? undefined : toAccelerator(chord);
+      },
+      // One tree, two consumers: the native menu on macOS and `MenuBar` where
+      // Nox draws its own. Reading the same builder is what stops the two
+      // drifting — there is no second layout table to keep in step.
+      { systemItems: this.#platform.capabilities.applicationMenu },
+    );
   }
 
   async install(): Promise<void> {
