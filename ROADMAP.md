@@ -43,7 +43,7 @@ The MVP: a real editor you can work in.
 | **Drag files out of Nox** | Dragging a tree entry into another app. Requires a native drag source on the Rust side. |
 | **Rename several files at once** | Multi-select exists; renaming many needs a find/replace-style pattern UI, not a single prompt. |
 | **Untitled buffer language picker** | Status bar click to set the language before a first save. |
-| **Explorer virtualisation** ✅ | The flat-node model anticipated it since v0.1 and the model did not change: the panel renders a window of rows plus two spacers, so the scrollbar still describes the whole tree. Below ~200 rows nothing is windowed, which keeps small folders exactly as they were. Scrolling to the lead row became arithmetic on its index rather than `scrollIntoView` on an element that may no longer exist — strictly better, since it never needed the row to be drawn. `aria-setsize`/`aria-posinset` arrived with it, not after: rows leaving the DOM makes them mandatory. |
+| **Explorer virtualisation** ✅ *(released in 0.5.0)* | The flat-node model anticipated it since v0.1 and the model did not change: the panel renders a window of rows plus two spacers, so the scrollbar still describes the whole tree. Below ~200 rows nothing is windowed, which keeps small folders exactly as they were. Scrolling to the lead row became arithmetic on its index rather than `scrollIntoView` on an element that may no longer exist — strictly better, since it never needed the row to be drawn. `aria-setsize`/`aria-posinset` arrived with it, not after: rows leaving the DOM makes them mandatory. |
 
 ### ✅ Shipped *(M1–M7 of [AGENT-PLATFORM.md](AGENT-PLATFORM.md) — released in 0.2.0, except the local model in 0.3.0)*
 
@@ -109,6 +109,8 @@ The MVP: a real editor you can work in.
 
 ## v0.5 — Version control
 
+*Every row below except Blame released in 0.5.0.*
+
 | | Why |
 |---|---|
 | **Git gutter** ✅ | Added / modified / removed per line, against the **index** — the gutter's question is "what have I changed that git doesn't hold yet". Marks map through keystrokes between 300 ms recomputes; the base refetches on save, on external change, on activation and on an explicit palette refresh, because the watcher deliberately ignores `.git` and a commit emits no event. Degrades to absence: no repo, untracked, binary, no git — no marks, never an error. The first one-shot process capture in the Rust layer (`git.rs`); real `.git` watching arrives with stage/commit, which needs it anyway. |
@@ -119,6 +121,8 @@ The MVP: a real editor you can work in.
 ---
 
 ## v0.6 — Extensibility
+
+*The keybinding editor and workspace settings released in 0.5.0 — both were 1.0 gates, which is why they came before the rest of this table.*
 
 | | Why |
 |---|---|

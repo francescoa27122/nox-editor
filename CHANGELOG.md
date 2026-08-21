@@ -6,6 +6,8 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-08-20
+
 ### Added
 
 - **The explorer stays fast in a big project.** It now renders only the rows
@@ -95,7 +97,6 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     untouchable by construction of the commands chosen. Hunk-level staging is
     its own later step.
 
-### Added
 
 - **Nox can update itself.** Ten seconds after launch (behind a new
   Workbench setting), or on *Check for Updates…*, Nox asks the newest
@@ -119,6 +120,26 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   your recently used commands to the top, shows which keyword matched when
   the title didn't, and stops reporting a capped list as the total. Toasts
   can carry a button now — "changed on disk" offers *Reload from Disk*.
+
+
+- **Show Changes.** The active file against its git base, side by side or
+  inline — pick in the view or in Settings under *Diff Layout*. Open it
+  from the palette or by clicking any mark in the git gutter. Long
+  unchanged stretches fold to a count; click one to see the whole file.
+  The view follows you between tabs, and it is read-only on purpose:
+  editing belongs in the editor, and putting hunks back belongs to
+  staging, which is next.
+
+
+- **Git gutter.** Lines that differ from what git holds are marked beside
+  the code: green for a new line, amber for a changed one, a red tick where
+  lines were deleted. The comparison is against the index — what `git add`
+  would leave alone — and the marks follow your typing between refreshes.
+  Nothing watches `.git` yet, so after a commit or stage made in a terminal
+  the gutter catches up when you switch back to the file, or on **Refresh
+  Git Gutter** from the palette. Turn it off with *Git Gutter* in Settings.
+  No repository, an untracked file, or no git installed simply means no
+  marks — never an error.
 
 ### Changed
 
@@ -146,28 +167,6 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   confirm dialogs focus the safe choice whenever a destructive one is
   present, so Enter never deletes by default; and a burst of routine toasts
   can no longer push an unread error off the screen.
-
-### Added
-
-- **Show Changes.** The active file against its git base, side by side or
-  inline — pick in the view or in Settings under *Diff Layout*. Open it
-  from the palette or by clicking any mark in the git gutter. Long
-  unchanged stretches fold to a count; click one to see the whole file.
-  The view follows you between tabs, and it is read-only on purpose:
-  editing belongs in the editor, and putting hunks back belongs to
-  staging, which is next.
-
-### Added
-
-- **Git gutter.** Lines that differ from what git holds are marked beside
-  the code: green for a new line, amber for a changed one, a red tick where
-  lines were deleted. The comparison is against the index — what `git add`
-  would leave alone — and the marks follow your typing between refreshes.
-  Nothing watches `.git` yet, so after a commit or stage made in a terminal
-  the gutter catches up when you switch back to the file, or on **Refresh
-  Git Gutter** from the palette. Turn it off with *Git Gutter* in Settings.
-  No repository, an untracked file, or no git installed simply means no
-  marks — never an error.
 
 ## [0.4.3] — 2026-08-19
 
@@ -1011,7 +1010,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/francescoa27122/nox-editor/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/francescoa27122/nox-editor/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/francescoa27122/nox-editor/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/francescoa27122/nox-editor/compare/v0.4.0...v0.4.1

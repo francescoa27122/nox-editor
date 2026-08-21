@@ -248,9 +248,19 @@ actually able to change.
 
 ## Status
 
-**v0.4.** It's young, and it's a personal project rather than a product, but
-it's real software with 1162 tests and I use it. Expect rough edges, and open an
+**v0.5.** It's young, and it's a personal project rather than a product, but
+it's real software with 1421 tests and I use it. Expect rough edges, and open an
 issue if you hit one.
+
+**Git arrived in 0.5.0** — a gutter marking what the index doesn't hold yet, a
+side-by-side or inline diff of the file against its base, and a focused panel
+to stage, unstage, commit and switch branches. Not a Git client: no push, pull,
+rebase or amend, and nothing that can discard your working tree.
+
+Also in 0.5.0: **you can change the keys** (every command, including the ones
+with none), **a project can carry its own conventions** in `.nox/settings.json`,
+the explorer stays fast in a folder with tens of thousands of entries, and Nox
+can update itself.
 
 Language servers landed in 0.4.2 and finished in 0.4.3 — diagnostics,
 completion, hover, go to definition, find references, rename symbol and
@@ -258,7 +268,7 @@ formatting, from a `servers.json` you write. Run **Configure Language Servers**
 from the palette and Nox creates it with a working `typescript-language-server`
 entry to start from; **Reload Language Servers** picks up your edits. Nox never
 starts a server you did not list there, and Format on Save is off until you
-turn it on. Not there yet: plugins. See [ROADMAP.md](ROADMAP.md).
+turn it on. Not there yet: plugins, and blame. See [ROADMAP.md](ROADMAP.md).
 
 ## Under the hood
 
