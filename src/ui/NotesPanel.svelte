@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { findNotes } from '@core/note-search';
+  import { contains, relative } from '@core/path';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
   import PanelEmpty from './PanelEmpty.svelte';
@@ -37,6 +38,37 @@
   const hits = $derived(findNotes($list, query));
 
   const selected = $derived($list.find((note) => note.id === $selectedId) ?? null);
+
+  const rootPath = app.workspace.rootPath;
+
+  /**
+   * Whether the selected note's anchor points into the folder that is open.
+   *
+   * A note anchored in folder A and read in folder B cannot jump anywhere, so
+   * the chip says so rather than pretending. The note itself is never hidden
+   * or altered: an unresolvable anchor costs the jump, not the note — and
+   * rewriting anchors on a folder switch would let opening a folder mutate
+   * notes, which is the one thing `NotesService` is built to prevent.
+   */
+  /**
+   * How the chip names the anchored file: relative to the open folder, so
+   * `src/lsp.rs` rather than `lsp.rs`. The basename alone is what the note's
+   * default title already says, and it cannot tell two `index.ts` apart.
+   */
+  const anchorLabel = $derived.by(() => {
+    const anchor = selected?.anchor;
+    if (!anchor) return '';
+    const root = $rootPath;
+    const where = root ? relative(root, anchor.path) : anchor.path;
+    return `${where}:${anchor.line}`;
+  });
+
+  const anchorReachable = $derived.by(() => {
+    const anchor = selected?.anchor;
+    const root = $rootPath;
+    if (!anchor || !root) return false;
+    return anchor.path === root || contains(root, anchor.path);
+  });
 
   /**
    * Load the note into the textarea when the *selection* changes, and never
@@ -160,6 +192,25 @@
       <button class="note-title" title="Rename" onclick={() => void commands.execute('notes.rename')}>
         {note.title}
       </button>
+      {#if note.anchor}
+        {@const anchor = note.anchor}
+        <!-- The line here is where the note was *made*. Clicking re-finds the
+             snippet, so a drifted anchor still lands on its code — resolving
+             on render instead would mean reading the file on every paint, for
+             a file that may not even be open. -->
+        <button
+          class="anchor"
+          class:unreachable={!anchorReachable}
+          disabled={!anchorReachable}
+          title={anchorReachable
+            ? `Open ${anchor.path}:${anchor.line}`
+            : `${anchor.path} is not in the folder that is open`}
+          onclick={() => void app.openNoteAnchor(anchor)}
+        >
+          <Icon name="file" size={11} />
+          <span class="anchor-label">{anchorLabel}</span>
+        </button>
+      {/if}
       <textarea
         bind:this={bodyInput}
         class="body"
@@ -360,6 +411,38 @@
 
   .note-title:hover {
     background: var(--nox-hover);
+  }
+
+  .anchor {
+    display: flex;
+    align-items: center;
+    gap: var(--nox-sp-2);
+    align-self: flex-start;
+    max-width: calc(100% - var(--nox-sp-4) * 2);
+    margin: 0 var(--nox-sp-4) var(--nox-sp-3);
+    padding: 2px var(--nox-sp-2);
+    border: 1px solid var(--nox-border);
+    border-radius: var(--nox-r-sm);
+    color: var(--nox-text-muted);
+    font-size: var(--nox-fs-xs);
+  }
+
+  .anchor:hover:not(:disabled) {
+    background: var(--nox-hover);
+    color: var(--nox-text);
+    border-color: var(--nox-accent);
+  }
+
+  /* Greyed rather than hidden: a note whose code is in another folder should
+     still say what it was about. */
+  .anchor.unreachable {
+    opacity: 0.5;
+  }
+
+  .anchor-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .body {
