@@ -565,7 +565,13 @@ export interface Platform {
    */
   watch(path: string, onEvent: (event: WatchEvent) => void): Promise<Unwatch>;
 
-  pickFolder(): Promise<string | null>;
+  /**
+   * Ask for a directory. `title` captions the dialog — it is the only thing
+   * that says *why* a folder is being asked for, and the caller is the only
+   * one that knows. Defaults to opening a workspace, which is what it was
+   * used for first.
+   */
+  pickFolder(title?: string): Promise<string | null>;
   pickFile(): Promise<string | null>;
   pickSavePath(options?: SaveDialogOptions): Promise<string | null>;
 

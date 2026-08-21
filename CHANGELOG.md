@@ -6,6 +6,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-08-21
+
+Notes stop being a scratchpad you cannot search and start being somewhere you
+can keep things: findable, pinnable, tied to the code they are about, and
+readable outside Nox as Markdown.
+
 ### Fixed
 
 - **Search could not find your dotfiles.** `.github/workflows/*`,
@@ -36,6 +42,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Notes are searchable, and they can be pinned.** The list showed titles
+  only, so a note whose subject was in its body could not be found at all —
+  and it got worse with every note you kept. There is now a filter over titles
+  *and* bodies that shows you the line it matched on, a pin for the notes you
+  keep coming back to, and ⌥⌘N to jump straight to one by name.
+- **A note can point at the code it is about.** Select something and *New Note
+  from Selection* makes a note holding that code, tied to where it came from;
+  the link under the title takes you back. It survives editing — when lines are
+  inserted above, the link follows its code instead of quietly pointing at the
+  wrong place — and a note whose file belongs to a different folder says so
+  rather than disappearing.
+- **Notes go in and out as Markdown.** They lived as `note-7.txt` behind an
+  index in a config folder, which is a quiet reason not to trust them with
+  anything that matters. Export writes one readable `.md` per note into a
+  folder you choose and import reads a folder back in. Importing always adds,
+  so bringing in your own backup cannot overwrite what is already there.
 - **You can see what you granted an agent, and take it back.** Everything
   "Allow for this session" remembered was previously invisible, and the only
   way to revoke it was to undo the agent's work — so in practice grants stood
@@ -48,6 +70,9 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Notes commands did nothing visible when the sidebar was closed.** Creating
+  a note, or pressing ⇧⌘N, chose the notes panel without opening the sidebar to
+  show it — which reads as a broken command rather than a hidden panel.
 - **The status bar no longer names a language server that has nothing to do
   with your file.** Opening `main.py` with a TypeScript server running left it
   reading `typescript-language-server`. It now names the server for the file
@@ -1132,7 +1157,9 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/francescoa27122/nox-editor/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/francescoa27122/nox-editor/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/francescoa27122/nox-editor/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/francescoa27122/nox-editor/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/francescoa27122/nox-editor/compare/v0.4.2...v0.4.3

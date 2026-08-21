@@ -1806,7 +1806,9 @@ export class NoxApp {
    * chose.
    */
   async exportNotes(): Promise<void> {
-    const folder = await this.platform.pickFolder();
+    // Captioned, because the default says "Open Folder" — which reads as
+    // "open this as a workspace", the opposite of writing files into it.
+    const folder = await this.platform.pickFolder('Export Notes Into Folder');
     if (!folder) return;
 
     const notes = this.notes.notes.get();
@@ -1859,7 +1861,7 @@ export class NoxApp {
    * `NotesService.importNote` for why the id in a file is ignored.
    */
   async importNotes(): Promise<void> {
-    const folder = await this.platform.pickFolder();
+    const folder = await this.platform.pickFolder('Import Notes From Folder');
     if (!folder) return;
 
     let entries;
