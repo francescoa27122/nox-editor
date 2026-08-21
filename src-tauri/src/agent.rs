@@ -78,6 +78,20 @@ pub fn nox_agent_spawn(
         builder.current_dir(directory);
     }
 
+    // Where Nox keeps `session.json` and `settings.json`, handed to the agent
+    // so anything it persists can sit beside them rather than in a directory
+    // of its own invention. Nox is the only party that knows this path — it is
+    // per-platform and derived from the bundle identifier — and an agent that
+    // recomputed it would be duplicating a contract that can drift.
+    //
+    // It grants nothing: the protocol still has no verb that stores anything,
+    // and an agent could always write wherever it liked. This is an address,
+    // not a capability. Absent on failure rather than fatal, since an agent
+    // that does not persist anything must still start.
+    if let Ok(directory) = app.path().app_config_dir() {
+        builder.env("NOX_CONFIG_DIR", &directory);
+    }
+
     // Windows gives a console-subsystem child its own window when the parent
     // is a GUI app, and an agent is one. Without this an empty console sits in
     // front of the editor for as long as the agent runs — empty because its
