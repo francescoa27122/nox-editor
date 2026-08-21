@@ -9,6 +9,11 @@ coverage/
 
 # Editor/agent tooling config, not part of the project.
 .claude/
+# …except the project skills, which are documentation: they encode subsystem
+# invariants the same way ARCHITECTURE.md does, and CLAUDE.md references them.
+!.claude/
+!.claude/skills/
+!.claude/skills/**
 
 # Compiled helper, rebuilt on demand.
 scripts/.window-id.bin
