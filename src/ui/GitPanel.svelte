@@ -69,6 +69,41 @@
   const NO_TOPLEVEL = 'Cannot locate this file: the repository root could not be determined';
   const DELETED = 'Deleted — nothing to open';
   const CONFLICTED = 'Resolve the conflict before staging';
+  const FOLDER_OPEN = 'A folder — nothing to open';
+  const FOLDER_DIFF = 'A folder — nothing to diff';
+
+  /**
+   * Whether a status record names a directory rather than a file.
+   *
+   * git collapses an untracked directory into a single `? fresh/` record and
+   * never names the files inside it, and the trailing slash is the only thing
+   * that says so — `join` strips it, so it has to be read off the record. Such
+   * a row reached this panel as an ordinary one: a clickable filename that
+   * could only ever answer "fresh is a folder.", and a Show Changes button
+   * with nothing to show. Stage is the one action that is genuinely right
+   * here, because `git add -- fresh` adds every file beneath it.
+   *
+   * Not the same fix as `ExplorerPanel`'s, which expands a directory record
+   * onto the rows underneath it. In this panel the record *is* the row, and
+   * the job is to offer only what a directory can actually do.
+   *
+   * Known gap, deliberate: git also names a directory without a trailing
+   * slash for a **submodule** (`1 .M S.MU … sub`), and only porcelain's
+   * `<sub>` field distinguishes it — a field `parseGitStatus` discards, in a
+   * file this change does not own. Recorded as a handoff.
+   */
+  /**
+   * Rows that name a directory rather than a file, and so cannot be opened
+   * or diffed. Two shapes reach here and only one looks like one: git spells
+   * an untracked directory with a trailing slash, and a submodule with no
+   * slash at all — for that one the only signal is porcelain's `S<c><m><u>`
+   * field, which `parseGitStatus` now preserves. Staging stays available for
+   * both, because `git add -- <dir>` and `git add -- <submodule>` are the
+   * one action that is genuinely right on them.
+   */
+  function isDirectory(entry: FileEntry): boolean {
+    return entry.path.endsWith('/') || entry.submodule === true;
+  }
 
   /**
    * A conflict is not an edit, and the panel used to say it was — a `u`
@@ -135,6 +170,7 @@
   {@const unresolved = target === null}
   {@const deleted = entry.status === 'D'}
   {@const conflicted = entry.status === 'C'}
+  {@const directory = isDirectory(entry)}
   {@const actionTitle = (label: string) => (unresolved ? NO_TOPLEVEL : label)}
   <div class="row" title={entry.origPath ? `${entry.origPath} → ${entry.path}` : entry.path}>
     <span
@@ -143,16 +179,19 @@
       aria-label={GIT_STATUS_LABEL[entry.status]}
       role="img">{entry.status}</span
     >
-    {#if unresolved || deleted}
-      <span class="open disabled" title={unresolved ? NO_TOPLEVEL : DELETED}>{entry.path}</span>
+    {#if unresolved || deleted || directory}
+      <span
+        class="open disabled"
+        title={unresolved ? NO_TOPLEVEL : directory ? FOLDER_OPEN : DELETED}>{entry.path}</span
+      >
     {:else}
       <button class="open" onclick={() => void open(entry)}>{entry.path}</button>
     {/if}
     <span class="actions">
       <button
         class="nox-button ghost small"
-        title={actionTitle('Show Changes')}
-        disabled={unresolved}
+        title={actionTitle(directory ? FOLDER_DIFF : 'Show Changes')}
+        disabled={unresolved || directory}
         onclick={() => void view(entry)}
       >
         <Icon name="file" size={11} />

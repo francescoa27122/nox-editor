@@ -27,6 +27,34 @@ import type { BufferId, WorkspaceService } from './workspace';
 
 /** Long enough to absorb a save-plus-formatter burst, short enough to feel live. */
 const COALESCE_MS = 180;
+/**
+ * The ceiling on how long `COALESCE_MS` may be pushed back.
+ *
+ * Without one, the sliding window is not a debounce but a hostage: every event
+ * cleared and rescheduled the timer, so anything emitting faster than 180 ms
+ * apart — codegen, `tsc --watch` writing into `src/`, an rsync — held the
+ * flush off for as long as it ran. A measured 6 s / 3588-event stream produced
+ * zero flushes, freezing the tree, the index and external-change detection for
+ * the whole storm. The sharp edge is the last one: `app.ts`'s save-overwrite
+ * dialog is gated on `externalState`, which only a flush sets, so ⌘S mid-storm
+ * silently skipped the "changed on disk" prompt.
+ *
+ * One second, because it is bounded on both sides:
+ *
+ *   - **Not shorter**, because the ceiling should never fire for the bursty
+ *     case, and shortening `COALESCE_MS` instead would be the wrong lever. An
+ *     80-file `git checkout` measured 526 events inside a 19 ms span; a second
+ *     is two orders of magnitude clear of it, so ordinary work still pays for
+ *     exactly one flush.
+ *   - **Not longer**, because a flush is what makes ⌘S safe, and a second is
+ *     comfortably under the gap between a user noticing a change and reaching
+ *     for save.
+ *
+ * It also sits below `REINDEX_MS`, deliberately: a forced flush refreshes the
+ * tree, but the far more expensive project re-walk keeps its own, longer
+ * governor rather than inheriting this one.
+ */
+const MAX_COALESCE_MS = 1000;
 /** Re-walking the project for quick-open is far more expensive than a tree refresh. */
 const REINDEX_MS = 2000;
 
@@ -46,6 +74,7 @@ export class FileWatcherService {
   #pendingPaths = new Set<string>();
   #structureChanged = false;
   #coalesceTimer: ReturnType<typeof setTimeout> | null = null;
+  #maxWaitTimer: ReturnType<typeof setTimeout> | null = null;
   #reindexTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Buffers already reported as externally changed, so we warn once each. */
@@ -127,10 +156,19 @@ export class FileWatcherService {
     for (const path of event.paths) this.#pendingPaths.add(path);
 
     if (this.#coalesceTimer) clearTimeout(this.#coalesceTimer);
-    this.#coalesceTimer = setTimeout(() => {
-      this.#coalesceTimer = null;
-      void this.#flush();
-    }, COALESCE_MS);
+    this.#coalesceTimer = setTimeout(() => this.#runFlush(), COALESCE_MS);
+
+    // Started once per batch and deliberately never rescheduled: it is the one
+    // timer a steady event stream cannot keep pushing away, which is the whole
+    // point of it. A wall-clock deadline would do the same job, but a plain
+    // timer is immune to the clock jumping under a suspend or an NTP step.
+    this.#maxWaitTimer ??= setTimeout(() => this.#runFlush(), MAX_COALESCE_MS);
+  }
+
+  /** Whichever of the two coalescing timers fires first flushes; both stop. */
+  #runFlush(): void {
+    this.#clearCoalesceTimers();
+    void this.#flush();
   }
 
   async #flush(): Promise<void> {
@@ -235,10 +273,16 @@ export class FileWatcherService {
     }, REINDEX_MS);
   }
 
-  #clearTimers(): void {
+  #clearCoalesceTimers(): void {
     if (this.#coalesceTimer) clearTimeout(this.#coalesceTimer);
-    if (this.#reindexTimer) clearTimeout(this.#reindexTimer);
+    if (this.#maxWaitTimer) clearTimeout(this.#maxWaitTimer);
     this.#coalesceTimer = null;
+    this.#maxWaitTimer = null;
+  }
+
+  #clearTimers(): void {
+    this.#clearCoalesceTimers();
+    if (this.#reindexTimer) clearTimeout(this.#reindexTimer);
     this.#reindexTimer = null;
   }
 }

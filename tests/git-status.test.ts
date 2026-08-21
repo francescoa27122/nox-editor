@@ -144,3 +144,31 @@ describe('parseGitBranches', () => {
     expect(parseGitBranches('')).toEqual([]);
   });
 });
+
+describe('a submodule record', () => {
+  /**
+   * The record below is verbatim from a real repository with a dirty
+   * submodule at `sub` — captured, not composed.
+   *
+   * The trap it guards: a submodule path carries **no trailing slash**, so it
+   * is indistinguishable from a file by its text. Porcelain's third field is
+   * the only signal — `N...` for a path, `S<c><m><u>` for a submodule — and
+   * the parser used to discard it. The Git panel then offered Open and Show
+   * Changes on a row that can only answer "sub is a folder."
+   */
+  const RECORD =
+    '1 .M S.M. 160000 160000 160000 ' +
+    '0ea11d91d8a6c09c24e521992f048f01736ffadc ' +
+    '0ea11d91d8a6c09c24e521992f048f01736ffadc sub';
+
+  it('is flagged as a submodule, though its path looks like a file', () => {
+    const status = parseGitStatus(`# branch.head main\0${RECORD}\0`);
+    expect(status.unstaged).toEqual([{ path: 'sub', status: 'M', submodule: true }]);
+  });
+
+  it('leaves an ordinary path unflagged, so the signal means something', () => {
+    const ordinary = '1 .M N... 100644 100644 100644 aaa bbb readme.md';
+    const status = parseGitStatus(`# branch.head main\0${ordinary}\0`);
+    expect(status.unstaged).toEqual([{ path: 'readme.md', status: 'M', submodule: undefined }]);
+  });
+});

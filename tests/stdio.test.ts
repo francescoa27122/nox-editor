@@ -12,6 +12,7 @@ import { JobRunner } from '../src/services/jobs';
 import { PermissionService } from '../src/services/permissions';
 import { ReviewService } from '../src/services/review';
 import { WorkspaceService } from '../src/services/workspace';
+import { unhandledRejections } from './support/unhandled-rejections';
 
 /**
  * The transport against a fake process.
@@ -311,6 +312,91 @@ describe('the conversation', () => {
     await running;
 
     expect(process.written).toContainEqual({ type: 'cancel' });
+  });
+
+  /**
+   * The failure this prevents: an agent that is alive and simply not talking
+   * parking the session on "Working…" for the life of the app. `connect` has
+   * had a deadline since it was written; `run` had none of any kind, so
+   * nothing in the transport could ever end this wait.
+   *
+   * How a healthy agent reaches this state: one byte that is not UTF-8 on its
+   * stdout used to end the Rust reader loop, after which no line and no exit
+   * event were ever emitted again (`agent.rs`). That cause is fixed, but "the
+   * agent stopped writing and did not close stdout" is not a state the
+   * renderer can rule out, so it needs an answer of its own.
+   */
+  it('gives up on an agent that goes quiet mid-run', async () => {
+    // Silent but alive: it never replies and never exits.
+    const process = new FakeProcess();
+    const transport = transportFor(process, { idleTimeoutMs: 20 });
+    const connecting = transport.connect();
+    process.say(hello());
+    await connecting;
+
+    await expect(
+      transport.run(
+        { instruction: 'go', context: '', signal: new AbortController().signal },
+        async (request) => ({ id: request.id, ok: true, result: null }),
+      ),
+    ).rejects.toThrow(/stopped responding/);
+  });
+
+  /**
+   * The failure this prevents: `dispose` orphaning the promise a run is
+   * waiting on. It cleared `#onLine` and `#onExit`, which are the only two
+   * things that could ever settle it, so disposing a stuck session left the
+   * job running for ever — the panel could not even be closed out of it.
+   */
+  it('settles a run in flight when the transport is disposed', async () => {
+    const process = new FakeProcess();
+    const transport = transportFor(process);
+    const connecting = transport.connect();
+    process.say(hello());
+    await connecting;
+
+    const running = transport.run(
+      { instruction: 'go', context: '', signal: new AbortController().signal },
+      async (request) => ({ id: request.id, ok: true, result: null }),
+    );
+
+    transport.dispose();
+
+    await expect(running).resolves.toBeUndefined();
+  });
+
+  /**
+   * The failure this prevents: pressing Cancel on an agent that has already
+   * crashed showing "Something went wrong". `nox_agent_send` answers
+   * `not-found` once the reader thread has removed the id from `AgentState`,
+   * which it does *before* emitting the exit (`agent.rs:154-160`) — so that
+   * window is exactly when a user reaches for Cancel. `void this.#write(...)`
+   * attached no catch, and the rejection reached the `unhandledrejection`
+   * backstop at `app.ts:686`.
+   */
+  it('does not report a cancel the agent is no longer there to receive', async () => {
+    const process = new FakeProcess((message) => {
+      // The run got through; by the time the cancel goes out the process is
+      // gone and Rust has forgotten the id.
+      if (message.type === 'cancel') throw new Error('not-found: no agent proc-1-1');
+    });
+    const transport = transportFor(process);
+    const connecting = transport.connect();
+    process.say(hello());
+    await connecting;
+
+    const controller = new AbortController();
+    const running = transport.run(
+      { instruction: 'go', context: '', signal: controller.signal },
+      async (request) => ({ id: request.id, ok: true, result: null }),
+    );
+
+    const rejections = await unhandledRejections(() => {
+      controller.abort();
+    });
+
+    expect(rejections).toEqual([]);
+    await running;
   });
 
   it('kills the process when disposed', async () => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { contains, relative } from '@core/path';
+  import { contains, join, relative } from '@core/path';
   import { diffViewRows, type DiffViewRow, type SideCell } from '@core/diff-view';
   import { MAX_DIFF_BYTES } from '@services/git';
   import { useApp } from './context';
@@ -22,6 +22,7 @@
   const activeId = workspace.activeId;
   const hunksMap = git.hunks;
   const baseRevision = git.baseRevision;
+  const gitStatus = git.status;
   const settings = config.settings;
 
   /** Expand-all: one click on any fold shows the whole file. Per file. */
@@ -50,6 +51,32 @@
   });
 
   const changeCount = $derived(entry?.hunks.length ?? 0);
+
+  /**
+   * Whether the active file is one git calls unmerged.
+   *
+   * This view used to have no idea, and said so in the worst possible words:
+   * mid-merge there is no `:0:` for git to show, the base came back null, and
+   * the empty state told the user the file was "untracked, outside a
+   * repository, or there is no git to ask" while they were looking at
+   * conflict markers in a tracked file inside a repository. `git.rs` now
+   * falls back to the unmerged stages, so a base usually arrives — but it is
+   * *ours*, not the index, and both facts have to reach the words below.
+   *
+   * Status paths are toplevel-relative, and the toplevel is not the workspace
+   * root whenever a workspace is opened below it — the same join rule the
+   * Git panel and the file tree follow. No toplevel means no claim.
+   */
+  const conflicted = $derived.by(() => {
+    const status = $gitStatus;
+    const toplevel = status?.toplevel;
+    const path = active?.path;
+    if (!status || !toplevel || !path) return false;
+    return status.unstaged.some((e) => e.status === 'C' && join(toplevel, e.path) === path);
+  });
+
+  /** What the tally is counting against — never "the index" mid-merge. */
+  const baseLabel = $derived(conflicted ? 'ours (the pre-merge side)' : 'the index');
 
   const folder = $derived.by(() => {
     if (!active?.path) return '';
@@ -123,7 +150,7 @@
           {#if folder}<span class="folder">{folder}</span>{/if}
           {#if changeCount > 0}
             <span class="tally">
-              {changeCount} change{changeCount === 1 ? '' : 's'} against the index
+              {changeCount} change{changeCount === 1 ? '' : 's'} against {baseLabel}
             </span>
           {/if}
         </p>
@@ -163,6 +190,17 @@
       <p class="empty">An untitled buffer has no git base yet. Save it first.</p>
     {:else if base === undefined}
       <p class="empty">Asking git…</p>
+    {:else if base === null && conflicted}
+      <!--
+        The residual case once `git.rs` walks the unmerged stages: every side
+        of the conflict exists, but none of them decodes as text — a binary
+        merge conflict. Saying "untracked, outside a repository" here was
+        wrong on every count, and wrong at the moment the words matter most.
+      -->
+      <p class="empty">
+        This file is mid-merge and none of the conflict's sides is text git can show. Resolve it
+        in the editor; the gutter and this view stay empty rather than guessing.
+      </p>
     {:else if base === null}
       <p class="empty">
         Git has no base for this file — it is untracked, outside a repository, or there is no

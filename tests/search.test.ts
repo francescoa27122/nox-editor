@@ -128,10 +128,20 @@ describe('globs', () => {
     expect(globToRegExp('*.ts').test('mats')).toBe(false);
   });
 
-  it('excludes take priority over includes', () => {
+  it('an exclude beats an include that also matched', () => {
     const includes = [globToRegExp('*.ts')];
     const excludes = [globToRegExp('*.test.ts')];
     expect(matchesGlobs('a.ts', includes, excludes)).toBe(true);
+    // This assertion is correct, and it passed for as long as the desktop build
+    // did the exact opposite. `ignore`'s overrides are last-match-wins and
+    // `search.rs` added the excludes *before* the includes, so `include *.ts`
+    // with `exclude *.test.ts` handed `a.test.ts` back in the shipped app. What
+    // the test locked in was the fake's behaviour alone, while reading as
+    // though it covered the rule for the whole product — which is worse than no
+    // coverage, because it is the reason nobody went looking. The Rust half is
+    // now pinned by `an_exclude_beats_an_include_that_also_matched` in
+    // `src-tauri/src/search.rs`, and the two share a name so that changing one
+    // without the other is visibly half a change.
     expect(matchesGlobs('a.test.ts', includes, excludes)).toBe(false);
   });
 
@@ -198,6 +208,26 @@ describe('SearchService', () => {
     await runSearch(search, 'NEEDLE');
 
     expect(search.results.get().map((f) => f.path)).toEqual(['/w/notes.txt']);
+  });
+
+  it('searches dotfiles and dot-directories', async () => {
+    const { platform, workspace, search } = setup();
+    // Guards the divergence that made every dotfile unsearchable on the desktop
+    // build: `ignore` skips hidden entries by default and `search.rs` never
+    // turned that off, while this fake has always walked them. Nox's own
+    // per-workspace settings live in `.nox/settings.json`, so the editor could
+    // not find text in its own configuration. Pairs with
+    // `dotfiles_and_dot_directories_are_searched` in `src-tauri/src/search.rs`;
+    // only the Rust one can fail for the reason this comment describes, which
+    // is precisely why the pair has to exist.
+    platform.seedFile('/w/.nox/settings.json', '{ "needle": true }\n');
+    platform.seedFile('/w/.env', 'NEEDLE_TOKEN=1\n');
+    await workspace.openFolder('/w');
+    await runSearch(search, 'needle');
+
+    const paths = search.results.get().map((file) => file.path);
+    expect(paths).toContain('/w/.nox/settings.json');
+    expect(paths).toContain('/w/.env');
   });
 
   it('applies include globs', async () => {
