@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { findNotes } from '@core/note-search';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
   import PanelEmpty from './PanelEmpty.svelte';
@@ -23,6 +24,17 @@
   const focusRequest = ui.focusNotesRequest;
 
   let bodyInput = $state<HTMLTextAreaElement | null>(null);
+  let query = $state('');
+
+  /**
+   * The rows to show. `findNotes` is a pure function in `core/` rather than
+   * logic here, so the matching and the ordering are tested without a DOM.
+   *
+   * Filtering costs nothing: `load()` already reads every body into the
+   * signal, so the whole corpus is in memory and there is no index to keep
+   * agreeing with it.
+   */
+  const hits = $derived(findNotes($list, query));
 
   const selected = $derived($list.find((note) => note.id === $selectedId) ?? null);
 
@@ -82,21 +94,64 @@
       switching folders.
     </PanelEmpty>
   {:else}
-    <ul class="list">
-      {#each $list as note (note.id)}
-        <li>
-          <button
-            class="row"
-            class:selected={note.id === $selectedId}
-            aria-current={note.id === $selectedId}
-            onclick={() => notes.select(note.id)}
-          >
-            <Icon name="note" size={13} />
-            <span class="row-title">{note.title}</span>
-          </button>
-        </li>
-      {/each}
-    </ul>
+    <div class="filter">
+      <Icon name="search" size={12} />
+      <input
+        class="filter-input"
+        type="text"
+        placeholder="Filter notes…"
+        aria-label="Filter notes"
+        bind:value={query}
+        onkeydown={(event) => {
+          // Escape clears the filter rather than bubbling to the overlay
+          // layer, which has nothing open — an unhandled Escape here would
+          // leave a narrowed list with no obvious way back.
+          if (event.key === 'Escape' && query.length > 0) {
+            event.stopPropagation();
+            query = '';
+          }
+        }}
+      />
+    </div>
+
+    {#if hits.length === 0}
+      <p class="no-matches">No note matches “{query}”.</p>
+    {:else}
+      <ul class="list">
+        {#each hits as hit (hit.note.id)}
+          <li>
+            <div class="row-wrap" class:selected={hit.note.id === $selectedId}>
+              <button
+                class="row"
+                aria-current={hit.note.id === $selectedId}
+                onclick={() => notes.select(hit.note.id)}
+              >
+                <Icon name="note" size={13} />
+                <span class="row-text">
+                  <span class="row-title">{hit.note.title}</span>
+                  {#if hit.snippet}
+                    <!-- Only ever the line that matched: quoting the first
+                         line of a body that does not contain the query would
+                         read as a hit on text that is not there. -->
+                    <span class="row-snippet">{hit.snippet}</span>
+                  {/if}
+                </span>
+              </button>
+              <button
+                class="pin-button"
+                class:pinned={hit.note.pinned}
+                title={hit.note.pinned ? 'Unpin' : 'Pin to top'}
+                aria-label={hit.note.pinned ? 'Unpin note' : 'Pin note to top'}
+                aria-pressed={hit.note.pinned}
+                onclick={() => notes.pin(hit.note.id, !hit.note.pinned)}
+              >
+                <Icon name="pin" size={12} />
+              </button>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
   {/if}
 
   {#if selected}
@@ -156,32 +211,131 @@
     padding: 0 var(--nox-sp-2);
   }
 
+  .filter {
+    display: flex;
+    align-items: center;
+    gap: var(--nox-sp-2);
+    margin: 0 var(--nox-sp-3) var(--nox-sp-2);
+    padding: 0 var(--nox-sp-2);
+    border: 1px solid var(--nox-border);
+    border-radius: var(--nox-r-sm);
+    color: var(--nox-text-faint);
+  }
+
+  .filter:focus-within {
+    border-color: var(--nox-accent);
+  }
+
+  .filter-input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--nox-sp-2) 0;
+    background: transparent;
+    border: none;
+    color: var(--nox-text);
+    font-family: var(--nox-font-ui);
+    font-size: var(--nox-fs-sm);
+  }
+
+  /* The wrapper already draws the focus state for the whole row. */
+  .filter-input:focus-visible {
+    box-shadow: none;
+  }
+
+  .no-matches {
+    margin: 0;
+    padding: var(--nox-sp-2) var(--nox-sp-4);
+    color: var(--nox-text-faint);
+    font-size: var(--nox-fs-sm);
+  }
+
+  .row-wrap {
+    display: flex;
+    align-items: center;
+    border-radius: var(--nox-r-sm);
+  }
+
+  .row-wrap:hover {
+    background: var(--nox-hover);
+  }
+
+  .row-wrap.selected {
+    background: var(--nox-selected);
+  }
+
   .row {
     display: flex;
     align-items: center;
     gap: var(--nox-sp-3);
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     padding: var(--nox-sp-2) var(--nox-sp-3);
-    border-radius: var(--nox-r-sm);
     color: var(--nox-text-muted);
     font-size: var(--nox-fs-sm);
     text-align: left;
   }
 
-  .row:hover {
-    background: var(--nox-hover);
+  .row-wrap:hover .row {
     color: var(--nox-text);
   }
 
-  .row.selected {
-    background: var(--nox-selected);
+  .row-wrap.selected .row {
     color: var(--nox-text-bright);
+  }
+
+  /* Column so a snippet sits under its title rather than beside it: the
+     sidebar is narrow and the title is what the eye scans for. */
+  .row-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
   }
 
   .row-title {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .row-snippet {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--nox-text-faint);
+    font-size: var(--nox-fs-xs);
+  }
+
+  /* Hidden until the row is worth acting on, or the note is already pinned.
+     A pin button on every row at rest turns a list of notes into a list of
+     controls. */
+  .pin-button {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin-right: var(--nox-sp-2);
+    border-radius: var(--nox-r-sm);
+    color: var(--nox-text-faint);
+    opacity: 0;
+  }
+
+  .row-wrap:hover .pin-button,
+  .pin-button:focus-visible,
+  .pin-button.pinned {
+    opacity: 1;
+  }
+
+  /* Hover feedback is the background, not the colour: colouring it would
+     have to beat `.pinned` below, and then hovering a pinned note would hide
+     the very state the button exists to show. */
+  .pin-button:hover {
+    background: var(--nox-hover);
+    color: var(--nox-text);
+  }
+
+  .pin-button.pinned {
+    color: var(--nox-accent);
   }
 
   .editor {

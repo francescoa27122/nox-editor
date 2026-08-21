@@ -759,3 +759,83 @@ describe('when the disk refuses', () => {
     expect(await platform.readConfigFile('note-1.txt')).toBe('deferred');
   });
 });
+
+describe('pinning', () => {
+  it('marks a note pinned and round-trips it', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    notes.pin(id, true);
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+
+    expect(reloaded.notes.get()[0]!.pinned).toBe(true);
+  });
+
+  it('unpins again', async () => {
+    const notes = new NotesService(new MemoryPlatform());
+
+    const id = notes.create();
+    notes.pin(id, true);
+    notes.pin(id, false);
+
+    expect(notes.notes.get()[0]!.pinned).toBe(false);
+  });
+
+  /**
+   * The failure this prevents: bumping VERSION for the new field, or reading
+   * a missing one as undefined. `load()` discards the whole file when the
+   * version does not match, so an index written before pinning existed would
+   * take every note with it — the field has to be optional on disk and
+   * default to false in memory instead.
+   */
+  it('reads an index written before pinning existed', async () => {
+    const platform = new MemoryPlatform();
+    await platform.writeConfigFile('note-1.txt', 'a body from before');
+    await platform.writeConfigFile(
+      'notes.json',
+      JSON.stringify({
+        version: 1,
+        selectedId: 'n1',
+        notes: [{ id: 'n1', title: 'Older note', createdAt: 1, updatedAt: 2, body: 'note-1.txt' }],
+      }),
+    );
+
+    const notes = new NotesService(platform);
+    await notes.load();
+
+    expect(notes.notes.get()).toHaveLength(1);
+    expect(notes.notes.get()[0]!.pinned).toBe(false);
+    expect(notes.notes.get()[0]!.body).toBe('a body from before');
+  });
+
+  /**
+   * The failure this prevents: pinning is index-only — no body is dirty and
+   * nothing is released — so it is the same shape as rename(), and must set
+   * the same flag. Without it the persist loop's exit check sees nothing
+   * pending and returns having written the pre-pin index, and there is no
+   * second flush on the quit path to recover it.
+   */
+  it('persists a pin that lands while the index write is still in flight, in one flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    await notes.flush();
+
+    const gate = platform.hold('notes.json');
+    const theFlush = notes.flush();
+    await gate.started;
+
+    notes.pin(id, true);
+    gate.release();
+    await theFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get()[0]!.pinned).toBe(true);
+  });
+});

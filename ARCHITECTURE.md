@@ -929,6 +929,21 @@ index naming a body that is not there. That case is handled by loading the
 note with an empty body rather than dropping it — the title is still worth
 keeping.
 
+Finding a note is a **view** concern, and stays one. `load()` reads every body
+into the signal, so the whole corpus is already in memory and filtering is a
+pure function over it — `core/note-search.ts`, which is where the matching and
+the snippet can be tested without a DOM. A search index inside `NotesService`
+would be state to keep agreeing with the notes, bought for nothing at this
+size.
+
+The filter box matches **substrings**; the `note-open` palette matches
+**fuzzily**. That is not an inconsistency. A palette is for naming a note you
+already have in mind, where a subsequence match reads as mind-reading; a filter
+box is for narrowing, and `sl` matching `shopping list` means the query can
+never be narrowed. Pinning is the only thing that reorders the list, and it is
+user-driven: `create()` still decides the order, and sorting by a timestamp
+would move rows while they are being typed into.
+
 A note's dirty flag is cleared **before** its write, not after. The
 difference is not stylistic: clearing afterwards means the write has to prove
 that what it wrote is still what the note says, which took a revision counter

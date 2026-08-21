@@ -16,6 +16,10 @@
     // A page with ruled lines and deliberately no folded corner, so it does
     // not read as `file` at the rail's 15px.
     note: 'M3.5 2.5h9v11h-9Z M5.75 6h4.5M5.75 8.5h4.5M5.75 11h2.75',
+    // A pushpin seen side-on rather than the head-on circle-and-dot: at 12px
+    // the head-on version is a dot with a ring and reads as a bullet or a
+    // radio button, neither of which suggests "held at the top".
+    pin: 'M5.5 2.5h5 M6.6 2.5v4.2c0 .9-.6 1.5-1.5 1.9h5.8c-.9-.4-1.5-1-1.5-1.9V2.5 M8 8.6v4.9',
     // `close` was the alternative and is wrong: it means "dismiss this"
     // everywhere else, and delete here is permanent.
     trash: 'M3 4.5h10 M6.25 4.5V2.9a.4.4 0 0 1 .4-.4h2.7a.4.4 0 0 1 .4.4v1.6 M4.6 4.5l.5 8.2a.8.8 0 0 0 .8.8h4.2a.8.8 0 0 0 .8-.8l.5-8.2',
