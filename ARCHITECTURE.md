@@ -1488,6 +1488,37 @@ this set too: it is the one place the feature would construct input for git
 (`apply --cached`) rather than naming files, and it gets its own envelope
 read when it is built.
 
+### Where the OS will not draw a menu, Nox draws its own
+
+macOS has a native menu bar and keeps it. Everywhere else — Windows, Linux,
+the browser target — `MenuBar.svelte` renders one inside the title bar.
+Windows is the reason: `set_decorations(false)` there removes the frame
+Windows hosts its menu in. Linux is not blocked by that (the `#[cfg(windows)]`
+block is Windows-only) but by the accelerator argument below being WKWebView's
+and never tested against WebKitGTK — one in-window bar for both is cheaper
+than a third code path with an unverified story.
+
+It is gated on `capabilities.applicationMenu`, so macOS is untouched and no
+`Platform` method or IPC is added. Both menus render `MenuService.describe()`,
+so drift is structurally impossible — there is no second layout table.
+`buildMenu` takes `{ systemItems }` for the difference that is real:
+`COVERED_BY_SYSTEM_ITEMS` is not a list of commands a menu should never show,
+it is a list of commands *macOS already shows*, so off macOS they are listed
+as ordinary commands and nothing `predefined` is emitted at all.
+
+**The payoff is `enabled`.** The native menu draws every item live because
+greying them would mean pushing ~130 command states across the IPC boundary.
+The predicates already live in the renderer, so the in-window bar simply calls
+them when a menu opens — once per item in the one submenu shown, no IPC,
+nothing on the typing path.
+
+The popup is `ContextMenu` unchanged: it already does arrows, Home/End,
+type-ahead, Enter, Escape, focus return and viewport flipping, and a second
+implementation of that would be a second set of bugs. `UIService` stays the
+single authority on what Escape closes — the bar renders from `menuBarOpen`
+rather than owning it, because when it owned its own state the two disagreed
+and a menu stayed on screen that the app believed had closed.
+
 ### The native menu is generated from the command table
 
 The menu is not written out anywhere. `services/menu.ts` reads
@@ -1693,8 +1724,8 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | macOS trash has no "Put Back" | Nox trashes via `NSFileManager` rather than Finder/AppleScript, because the AppleScript path blocks for two minutes and then fails when Finder is unavailable. A trashed file restores to the Trash folder, not its original location. Covered by `tests/fileops_integration.rs`. |
 | Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**; unsaved work does, because it is in the session. The reload also kills any running agent, which is the point — a renderer that no longer exists cannot talk to them. |
 | Grammar coverage | Parsers ship for TS/JS/JSX/TSX, JSON, HTML, CSS/SCSS, Markdown, Python, Rust. Other languages open and edit correctly but render unhighlighted; the status bar greys the language name to say so. |
-| The native menu is macOS-only | Windows draws its menu bar *inside* the window frame and Nox turns decorations off there to draw its own title bar, so a menu would land underneath it. Linux is not blocked by that but the accelerator argument in §4 is WKWebView's, not WebKitGTK's, and has not been checked against it. `nox_set_menu` returns `Ok(())` without setting a menu on both. |
-| Menu items are always drawn enabled | Enablement is re-checked when the item is chosen (`CommandRegistry.execute` refuses a disabled command), so nothing runs that should not — but a disabled item looks live and does nothing when clicked. Greying them means pushing every state change in the app across the IPC boundary to keep ~130 items in step. |
+| No *native* menu off macOS | Windows and Linux now draw an in-window menu bar instead (§4), so every platform has a menu; what is still missing is a **native** one off macOS. Windows cannot host one — `set_decorations(false)` removes the frame it lives in. A native GTK menu for Linux is possible but unbuilt: the accelerator argument in §4 is WKWebView's, never checked against WebKitGTK. `nox_set_menu` still returns `Ok(())` on both. |
+| Native menu items are always drawn enabled | macOS only: greying them means pushing every state change across the IPC boundary to keep ~130 items in step. Enablement is re-checked when the item is chosen (`CommandRegistry.execute` refuses a disabled command), so nothing runs that should not — but a disabled item looks live and does nothing when clicked. The in-window bar (§4) has no such problem: the predicates are already in the renderer, so it greys them correctly. |
 | The menu has no Close Window item | `PredefinedMenuItem::close_window` carries ⌘W and Nox binds ⌘W to `file.close`, so both in one menu would be two items claiming one accelerator. Nox has no `window.close` command to offer instead; the traffic light and ⌘Q are the ways out. |
 | `--geometry` suppresses geometry persistence for that launch | Deliberate — see §4 — but it means a walk cannot be used to *set* a remembered window, and a malformed `--geometry` falls back to an ordinary launch that does persist. |
 | Browser build does not persist edits | Deliberate: it is for developing the UI, not storing work. Settings and session do persist via localStorage. |

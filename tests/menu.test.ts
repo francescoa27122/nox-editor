@@ -40,6 +40,19 @@ function commandIds(nodes: readonly MenuNode[]): string[] {
   return ids;
 }
 
+/**
+ * `MemoryPlatform` reports `applicationMenu: false`, and since `describe()`
+ * became platform-dependent that means "the tree Nox draws itself". Tests
+ * about the *macOS* tree — the one that defers to the responder chain — have
+ * to ask for a platform that claims it.
+ */
+class SystemMenuPlatform extends MemoryPlatform {
+  constructor() {
+    super();
+    (this.capabilities as { applicationMenu: boolean }).applicationMenu = true;
+  }
+}
+
 describe('what the menu contains', () => {
   /**
    * The failure this whole feature exists to prevent, stated as a test: a
@@ -48,7 +61,7 @@ describe('what the menu contains', () => {
    * category gets its own trailing menu rather than being dropped.
    */
   it('lists every palette-visible command exactly once', () => {
-    const app = new NoxApp(new MemoryPlatform());
+    const app = new NoxApp(new SystemMenuPlatform());
     const menu = app.menu.describe();
     const listed = commandIds(menu);
 
@@ -68,7 +81,7 @@ describe('what the menu contains', () => {
    * would undo the *document* while the cursor sat in a search field.
    */
   it('leaves the responder-chain items to the system', () => {
-    const app = new NoxApp(new MemoryPlatform());
+    const app = new NoxApp(new SystemMenuPlatform());
     const menu = app.menu.describe();
 
     for (const id of COVERED_BY_SYSTEM_ITEMS) {

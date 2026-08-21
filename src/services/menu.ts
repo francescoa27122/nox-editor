@@ -308,10 +308,17 @@ export class MenuService {
 
   /** The tree as it would be installed. Exposed for tests and for `install`. */
   describe(): MenuNode[] {
-    return buildMenu(this.#commands.all(), (commandId) => {
-      const chord = this.#keymap.chordFor(commandId);
-      return chord === undefined ? undefined : toAccelerator(chord);
-    });
+    return buildMenu(
+      this.#commands.all(),
+      (commandId) => {
+        const chord = this.#keymap.chordFor(commandId);
+        return chord === undefined ? undefined : toAccelerator(chord);
+      },
+      // One tree, two consumers: the native menu on macOS and `MenuBar` where
+      // Nox draws its own. Reading the same builder is what stops the two
+      // drifting — there is no second layout table to keep in step.
+      { systemItems: this.#platform.capabilities.applicationMenu },
+    );
   }
 
   async install(): Promise<void> {

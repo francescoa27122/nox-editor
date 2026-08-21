@@ -1,6 +1,7 @@
 <script lang="ts">
   import { basename, join, tildify } from '@core/path';
   import { useApp } from './context';
+  import MenuBar from './MenuBar.svelte';
   import Icon from './Icon.svelte';
 
   const app = useApp();
@@ -41,6 +42,15 @@
    * at all — which is how it shipped a permanent gap in fullscreen.
    */
   const overlayChrome = app.platform.capabilities.overlayWindowControls;
+
+  /**
+   * macOS has a native menu bar and keeps it. Everywhere else Nox draws its
+   * own — Windows because turning decorations off removes the frame that
+   * would host one, Linux because the accelerator story for a GTK menu has
+   * never been tested, and the browser target because it has no OS menu at
+   * all.
+   */
+  const drawsOwnMenu = !app.platform.capabilities.applicationMenu;
 
   let fullscreen = $state(false);
 
@@ -161,6 +171,10 @@
       <span class="root" title={$rootPath}>{rootName}</span>
     {/if}
   </div>
+
+  {#if drawsOwnMenu}
+    <MenuBar />
+  {/if}
 
   <div class="center">
     {#if trail.length > 0}
