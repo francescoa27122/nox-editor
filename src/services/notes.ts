@@ -27,6 +27,29 @@ const UNTITLED = 'Untitled note';
 /** Matches the session's debounce; tuned for the same reason — typing. */
 const SAVE_DELAY = 400;
 
+/**
+ * Where a note's subject lives in the code.
+ *
+ * Three primitives, and `NotesService` interprets none of them. That is what
+ * lets this exist at all: the service is given a `Platform` and nothing else
+ * so that opening a different folder cannot change or hide notes, and a path
+ * it could resolve would mean a workspace in reach. `app.ts` does the
+ * resolving — it already holds both services, and already splits this way for
+ * `notes.rename`.
+ */
+export interface NoteAnchor {
+  /** Absolute, as the workspace gave it. Meaningless to this module. */
+  path: string;
+  /** 1-based, matching `app.goToLine`. */
+  line: number;
+  /**
+   * The anchored text. Kept beside `line` rather than instead of it so a jump
+   * can re-find code that edits above it have moved — see
+   * `core/anchor.ts`.
+   */
+  snippet: string;
+}
+
 export interface Note {
   /**
    * Opaque and stable. The title is a label the user edits, so anything that
@@ -40,6 +63,8 @@ export interface Note {
   updatedAt: number;
   /** Held at the top of the list. Organisational, not content. */
   pinned: boolean;
+  /** Where its subject lives, when it has one. */
+  anchor?: NoteAnchor;
 }
 
 /** A note in the index. The body lives in the file this names. */
@@ -58,6 +83,8 @@ interface NoteRecord {
    * directions without a bump.
    */
   pinned?: boolean;
+  /** Optional on disk for the same reason `pinned` is — no VERSION bump. */
+  anchor?: NoteAnchor;
 }
 
 interface NotesFile {
@@ -161,6 +188,9 @@ export class NotesService {
         createdAt: record.createdAt ?? 0,
         updatedAt: record.updatedAt ?? 0,
         pinned: record.pinned ?? false,
+        // Spread so an absent anchor stays absent rather than becoming an
+        // explicit `undefined` key, which `toEqual` and JSON both notice.
+        ...(record.anchor ? { anchor: record.anchor } : {}),
       });
     }
 
@@ -247,6 +277,32 @@ export class NotesService {
     );
     // Index-only, exactly like `rename()`: no body moved and nothing was
     // released, so this flag is the only thing that will carry it.
+    this.#indexDirty = true;
+    this.#schedule();
+  }
+
+  /**
+   * Point a note at a place in the code, or unpoint it.
+   *
+   * The anchor is stored verbatim and never inspected. A path that resolves
+   * to nothing in the current workspace is still worth keeping: it costs the
+   * jump, not the note.
+   */
+  setAnchor(id: string, anchor: NoteAnchor | null): void {
+    const current = this.notes.get().find((note) => note.id === id);
+    if (!current) return;
+
+    this.notes.update((list) =>
+      list.map((note) => {
+        if (note.id !== id) return note;
+        if (!anchor) {
+          const { anchor: _dropped, ...rest } = note;
+          return rest;
+        }
+        return { ...note, anchor };
+      }),
+    );
+    // Index-only, exactly like `rename()` and `pin()`.
     this.#indexDirty = true;
     this.#schedule();
   }
@@ -410,6 +466,7 @@ export class NotesService {
                   updatedAt: note.updatedAt,
                   body: file,
                   pinned: note.pinned,
+                  ...(note.anchor ? { anchor: note.anchor } : {}),
                 },
               ]
             : [];

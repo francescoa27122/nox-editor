@@ -839,3 +839,99 @@ describe('pinning', () => {
     expect(reloaded.notes.get()[0]!.pinned).toBe(true);
   });
 });
+
+describe('anchoring a note to code', () => {
+  const anchor = { path: '/w/src/lsp.rs', line: 320, snippet: 'for line in BufReader' };
+
+  it('stores an anchor and round-trips it', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    notes.setAnchor(id, anchor);
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+
+    expect(reloaded.notes.get()[0]!.anchor).toEqual(anchor);
+  });
+
+  it('leaves a note with no anchor undefined', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+
+    notes.create();
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+
+    expect(reloaded.notes.get()[0]!.anchor).toBeUndefined();
+  });
+
+  it('clears an anchor', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    notes.setAnchor(id, anchor);
+    notes.setAnchor(id, null);
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+
+    expect(reloaded.notes.get()[0]!.anchor).toBeUndefined();
+  });
+
+  /**
+   * The failure this prevents: `NotesService` reaching for a workspace to
+   * resolve a path. It is given a `Platform` and nothing else precisely so
+   * that opening another folder cannot change or hide notes, and an anchor
+   * is the first field that tempts someone to break that. The service stores
+   * three primitives and never interprets them; `app.ts` does the resolving,
+   * because it is the layer that already holds both services.
+   */
+  it('stores a path it cannot resolve without complaint', async () => {
+    const platform = new MemoryPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    notes.setAnchor(id, { path: '/some/other/folder/gone.rs', line: 4, snippet: 'x' });
+    await notes.flush();
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+
+    // The note is intact and so is the anchor: an unresolvable path costs the
+    // jump, never the note.
+    expect(reloaded.notes.get()).toHaveLength(1);
+    expect(reloaded.notes.get()[0]!.anchor?.path).toBe('/some/other/folder/gone.rs');
+  });
+
+  /**
+   * The failure this prevents: anchoring is index-only, the same shape as
+   * rename() and pin(), so it must set the same flag. Without it an anchor
+   * landing while notes.json is mid-write is written nowhere.
+   */
+  it('persists an anchor that lands while the index write is still in flight, in one flush', async () => {
+    const platform = new LatchedPlatform();
+    const notes = new NotesService(platform);
+
+    const id = notes.create();
+    await notes.flush();
+
+    const gate = platform.hold('notes.json');
+    const theFlush = notes.flush();
+    await gate.started;
+
+    notes.setAnchor(id, anchor);
+    gate.release();
+    await theFlush;
+
+    const reloaded = new NotesService(platform);
+    await reloaded.load();
+    expect(reloaded.notes.get()[0]!.anchor).toEqual(anchor);
+  });
+});
