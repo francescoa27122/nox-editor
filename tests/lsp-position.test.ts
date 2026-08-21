@@ -28,8 +28,9 @@ describe('offsetAt', () => {
   });
 
   it('treats CRLF as a terminator rather than content', () => {
-    // Every file in this repository is CRLF. A carriage return counted as
-    // content on the line would shift every column after it.
+    // No production caller reaches this today — buffers are canonical LF —
+    // so these two CRLF cases are the only thing holding the branch up.
+    // A carriage return counted as content would shift every column after it.
     const text = 'const a = 1;\r\nconst b = 2;\r\n';
     expect(offsetAt(text, { line: 1, character: 0 })).toBe(14);
   });
