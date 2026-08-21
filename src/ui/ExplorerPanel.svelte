@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { GIT_STATUS_LABEL, type GitStatusLetter } from '@core/git-status';
-  import { canMoveInto, dirname, join } from '@core/path';
+  import { canMoveInto, dirname, join, separatorOf } from '@core/path';
   import { rootLabel } from '@services/filetree';
   import { useApp } from './context';
   import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
@@ -132,16 +132,49 @@
    */
   const gitLetters = $derived.by(() => {
     const letters = new Map<string, GitStatusLetter>();
+    /*
+      Untracked *directories*, as absolute paths ending in a separator.
+
+      git collapses an untracked directory into a single `? lib/` record and
+      never mentions the files inside it, so a tree that only ever matches
+      exact paths shows nothing at all for a newly created folder — not on the
+      folder, not on anything in it. Found by walking the packaged app; no
+      component test could have reached it, because the fake git in
+      `MemoryPlatform` only ever emitted `? <file>`.
+    */
+    const untrackedDirectories: string[] = [];
     const status = $gitStatus;
     const toplevel = status?.toplevel;
-    if (!status || !toplevel) return letters;
+    if (!status || !toplevel) return { letters, untrackedDirectories };
     // Unstaged is written second so the worktree fact wins: the tree shows
     // the file on disk, not the index. A conflict only ever arrives
     // unstaged, so the letter that must never be overwritten cannot be.
     for (const entry of status.staged) letters.set(join(toplevel, entry.path), entry.status);
-    for (const entry of status.unstaged) letters.set(join(toplevel, entry.path), entry.status);
-    return letters;
+    for (const entry of status.unstaged) {
+      const absolute = join(toplevel, entry.path);
+      letters.set(absolute, entry.status);
+      // The trailing slash is the only thing that distinguishes git's
+      // directory form from a file, and `join` strips it — so it has to be
+      // read off the record before joining.
+      if (entry.path.endsWith('/')) {
+        untrackedDirectories.push(absolute + separatorOf(absolute));
+      }
+    }
+    return { letters, untrackedDirectories };
   });
+
+  /**
+   * The letter for one row, exact match first and then the untracked-directory
+   * prefixes. Prefix matching is last because it is the rarer and more
+   * expensive answer, and a file git named directly must win over an ancestor.
+   */
+  function letterFor(path: string): GitStatusLetter | undefined {
+    const exact = gitLetters.letters.get(path);
+    if (exact) return exact;
+    return gitLetters.untrackedDirectories.some((prefix) => path.startsWith(prefix))
+      ? 'U'
+      : undefined;
+  }
 
   /** Visible rows in display order — the axis every range operation works on. */
   const orderedPaths = $derived($nodes.map((node) => node.path));
@@ -694,7 +727,7 @@
             one fact should not have two appearances.
           -->
           {#if !node.isDirectory}
-            {@const letter = gitLetters.get(node.path)}
+            {@const letter = letterFor(node.path)}
             {@const dirty = bufferPaths.dirty.has(node.path)}
             {#if letter || dirty}
               <span class="marks">

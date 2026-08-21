@@ -109,7 +109,7 @@ export class MemoryPlatform implements Platform {
       heads: new Map([[branch, new Map()]]),
       index: new Map(),
       commits: [],
-      conflicts: new Set(),
+      conflicts: new Set(), untrackedDirectories: new Set(),
     });
   }
 
@@ -141,6 +141,19 @@ export class MemoryPlatform implements Platform {
    * state where staging is dangerous was the single state no test could
    * reach.
    */
+  /**
+   * Mark a directory untracked the way git reports one: a single `? dir/`
+   * record, with the files inside it never mentioned. Seeding the files
+   * individually is *not* the same shape and will not exercise the code that
+   * has to expand a directory record into the rows under it.
+   */
+  seedGitUntrackedDirectory(path: string): void {
+    const p = normalize(path);
+    if (!this.#repoFor(p)) this.seedGitRepo(dirname(p));
+    const [root, repo] = this.#repoEntryFor(p)!;
+    repo.untrackedDirectories.add(relative(root, p));
+  }
+
   seedGitConflict(path: string, contents: string): void {
     const p = normalize(path);
     if (!this.#repoFor(p)) this.seedGitRepo(dirname(p));
@@ -346,7 +359,13 @@ export class MemoryPlatform implements Platform {
       }
 
       if (!inIndex && !inHead) {
-        if (inWork) records.push(`? ${rel}`);
+        // git collapses an untracked directory, so a file beneath one is
+        // never named. Suppressing it here is what makes the fake's output
+        // the same *shape* as real git's rather than merely the same facts.
+        const collapsed = [...repo.untrackedDirectories].some((dir) =>
+          rel.startsWith(`${dir}/`),
+        );
+        if (inWork && !collapsed) records.push(`? ${rel}`);
         continue;
       }
       const x = !inHead ? 'A' : !inIndex ? 'D' : head.get(rel) === repo.index.get(rel) ? '.' : 'M';
@@ -362,6 +381,9 @@ export class MemoryPlatform implements Platform {
       if (x === '.' && y === '.') continue;
       records.push(`1 ${x}${y} N... 100644 100644 100644 ${zeros} ${zeros} ${rel}`);
     }
+    // The trailing slash is the whole point: it is the only thing that tells
+    // a reader this record names a directory rather than a file.
+    for (const dir of repo.untrackedDirectories) records.push(`? ${dir}/`);
     return records.join('\0') + '\0';
   }
 
@@ -954,6 +976,14 @@ interface FakeGitRepo {
    * here, only the state a merge leaves behind.
    */
   conflicts: Set<string>;
+  /**
+   * Repo-relative directories git would collapse into one `? dir/` record.
+   * Real git never names the files inside an untracked directory, and a tree
+   * that only matches exact paths therefore shows nothing for a brand-new
+   * folder — a defect found by walking the packaged app, invisible here until
+   * this seam existed.
+   */
+  untrackedDirectories: Set<string>;
 }
 
 /** Directories first, then case-insensitive name order. Shared by platforms. */
