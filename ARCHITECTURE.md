@@ -970,7 +970,20 @@ wrong code *silently* — worse than pointing nowhere, since it still looks
 right. `core/anchor.ts` re-finds the snippet outward from the remembered line,
 so a non-unique one (`}` appears hundreds of times) lands on the nearest copy;
 past a 500-line window the remembered line is the safer answer, and only that
-window is read, so the cost is the same on a 10 MB file. **The wrong folder:**
+window is read, so the cost is the same on a 10 MB file.
+
+**The anchor corrects itself rather than merely being re-guessed.** When it
+resolves against real text — on selecting the note, and on following the chip
+— a found line is written back, so the chip names where the code *is* and the
+anchor stops rotting. Only when the snippet was actually found: a fallback is
+the neighbourhood the code used to be in, and persisting one would overwrite
+the last thing anyone knew with a guess. Both triggers are discrete user
+actions, deliberately: the buffer's revision changes on every keystroke, so
+deriving the label from the file's text would put a scan on the typing path
+for something nobody reads while typing. The cost of that choice is that the
+chip can go stale while a note stays selected and its file is edited
+underneath — following it still lands correctly, and reselecting corrects the
+label. **The wrong folder:**
 an anchor into a folder that is not open greys its chip and the note is
 otherwise untouched. Dropping the anchor there would let opening a folder
 mutate notes, which is precisely what the service's isolation forbids — doing

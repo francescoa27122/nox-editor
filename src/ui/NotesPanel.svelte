@@ -84,6 +84,22 @@
     );
   });
 
+  /**
+   * Bring the selected note's anchor up to date, so the chip names where its
+   * code *is* rather than where the note was made.
+   *
+   * On selection rather than continuously: the buffer's revision changes on
+   * every keystroke, so deriving this from the file's text would put a scan
+   * on the typing path for a label nobody is reading while they type. The
+   * cost of that choice is that the chip can go stale while a note stays
+   * selected and its file is edited underneath — clicking it still lands on
+   * the right line, and re-selecting the note corrects the label.
+   */
+  $effect(() => {
+    const id = $selectedId;
+    if (id) untrack(() => app.refreshNoteAnchor(id));
+  });
+
   $effect(() => {
     // Track the counter so a focus command re-runs this effect.
     void $focusRequest;
@@ -194,10 +210,11 @@
       </button>
       {#if note.anchor}
         {@const anchor = note.anchor}
-        <!-- The line here is where the note was *made*. Clicking re-finds the
-             snippet, so a drifted anchor still lands on its code — resolving
-             on render instead would mean reading the file on every paint, for
-             a file that may not even be open. -->
+        <!-- The anchor's own line, which the effect above keeps current: it
+             is corrected against the file when the note is selected and again
+             when the chip is followed. Deriving it from the file's text
+             instead would resolve on every paint — the buffer's revision
+             changes per keystroke — for a label nobody reads while typing. -->
         <button
           class="anchor"
           class:unreachable={!anchorReachable}
@@ -205,7 +222,7 @@
           title={anchorReachable
             ? `Open ${anchor.path}:${anchor.line}`
             : `${anchor.path} is not in the folder that is open`}
-          onclick={() => void app.openNoteAnchor(anchor)}
+          onclick={() => void app.openNoteAnchor(note.id, anchor)}
         >
           <Icon name="file" size={11} />
           <span class="anchor-label">{anchorLabel}</span>

@@ -48,27 +48,41 @@ export interface NoteAnchor {
  */
 export const ANCHOR_WINDOW = 500;
 
+export interface ResolvedAnchor {
+  /** The 1-based line to jump to. */
+  line: number;
+  /**
+   * Whether `line` is where the snippet actually is, rather than the
+   * remembered line fallen back to.
+   *
+   * The caller needs this to decide whether the answer is worth writing back
+   * to the note. A found line *is* the anchor's subject; a fallback is only
+   * the neighbourhood it used to be in, and persisting that would overwrite
+   * the last thing anyone actually knew about where the code was.
+   */
+  found: boolean;
+}
+
 /**
- * The 1-based line to jump to for an anchor remembered at `line` holding
- * `snippet`, given the file's current `text`.
+ * Where an anchor remembered at `line` holding `snippet` sits in `text` now.
  *
  * Falls back to `line` (clamped into the file) whenever the snippet cannot be
  * found nearby, which puts the reader in the neighbourhood the note was about
  * — the best that can honestly be offered once the code itself is gone.
  */
-export function resolveAnchorLine(text: string, line: number, snippet: string): number {
+export function resolveAnchor(text: string, line: number, snippet: string): ResolvedAnchor {
   const rows = text.split('\n');
   const clamped = Math.min(Math.max(line, 1), rows.length);
 
   const needle = snippet.trim();
   // An empty snippet matches every blank line, which is not help — it is a
   // jump to whichever blank line happens to be nearest.
-  if (needle.length === 0) return clamped;
+  if (needle.length === 0) return { line: clamped, found: false };
 
   const matches = (index: number) => rows[index]?.trim() === needle;
 
   const start = clamped - 1;
-  if (matches(start)) return clamped;
+  if (matches(start)) return { line: clamped, found: true };
 
   // Outward from the remembered line rather than a scan from the top, so the
   // *nearest* match wins. With a non-unique snippet, scanning from the top
@@ -79,9 +93,9 @@ export function resolveAnchorLine(text: string, line: number, snippet: string): 
     // Before ahead of after on a tie: an anchor that drifted is usually
     // pushed *down* by an insertion, so the copy above the remembered line is
     // the one the note was made against.
-    if (before >= 0 && matches(before)) return before + 1;
-    if (after < rows.length && matches(after)) return after + 1;
+    if (before >= 0 && matches(before)) return { line: before + 1, found: true };
+    if (after < rows.length && matches(after)) return { line: after + 1, found: true };
   }
 
-  return clamped;
+  return { line: clamped, found: false };
 }

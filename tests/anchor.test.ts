@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAnchorLine } from '../src/core/anchor';
+import { resolveAnchor } from '../src/core/anchor';
 
 /**
  * Where a note's anchor actually lands once the file has moved on.
@@ -15,7 +15,7 @@ describe('resolving an anchor', () => {
   it('stays put when the line still holds the snippet', () => {
     const text = lines('one', 'two', 'three');
 
-    expect(resolveAnchorLine(text, 2, 'two')).toBe(2);
+    expect(resolveAnchor(text, 2, 'two').line).toBe(2);
   });
 
   /**
@@ -27,19 +27,19 @@ describe('resolving an anchor', () => {
   it('follows code pushed down by an insertion above it', () => {
     const text = lines('added', 'added', 'one', 'two', 'three');
 
-    expect(resolveAnchorLine(text, 2, 'two')).toBe(4);
+    expect(resolveAnchor(text, 2, 'two').line).toBe(4);
   });
 
   it('follows code pulled up by a deletion above it', () => {
     const text = lines('two', 'three');
 
-    expect(resolveAnchorLine(text, 4, 'two')).toBe(1);
+    expect(resolveAnchor(text, 4, 'two').line).toBe(1);
   });
 
   it('ignores indentation changes, which reformatting makes constantly', () => {
     const text = lines('one', '        two', 'three');
 
-    expect(resolveAnchorLine(text, 2, 'two')).toBe(2);
+    expect(resolveAnchor(text, 2, 'two').line).toBe(2);
   });
 
   /**
@@ -50,8 +50,8 @@ describe('resolving an anchor', () => {
   it('prefers the nearest match when the snippet is not unique', () => {
     const text = lines('}', 'a', '}', 'b', '}', 'c', '}');
 
-    expect(resolveAnchorLine(text, 4, '}')).toBe(3);
-    expect(resolveAnchorLine(text, 6, '}')).toBe(5);
+    expect(resolveAnchor(text, 4, '}').line).toBe(3);
+    expect(resolveAnchor(text, 6, '}').line).toBe(5);
   });
 
   /**
@@ -63,24 +63,24 @@ describe('resolving an anchor', () => {
   it('falls back to the remembered line when the snippet has gone', () => {
     const text = lines('one', 'two', 'three');
 
-    expect(resolveAnchorLine(text, 2, 'deleted long ago')).toBe(2);
+    expect(resolveAnchor(text, 2, 'deleted long ago').line).toBe(2);
   });
 
   it('clamps a line past the end of a file that has shrunk', () => {
     const text = lines('one', 'two');
 
-    expect(resolveAnchorLine(text, 99, 'gone')).toBe(2);
+    expect(resolveAnchor(text, 99, 'gone').line).toBe(2);
   });
 
   it('never returns less than the first line', () => {
-    expect(resolveAnchorLine('one', 0, 'gone')).toBe(1);
-    expect(resolveAnchorLine('one', -5, 'gone')).toBe(1);
+    expect(resolveAnchor('one', 0, 'gone').line).toBe(1);
+    expect(resolveAnchor('one', -5, 'gone').line).toBe(1);
   });
 
   it('treats an empty snippet as no help, not as a match on every blank line', () => {
     const text = lines('one', '', 'three');
 
-    expect(resolveAnchorLine(text, 3, '')).toBe(3);
+    expect(resolveAnchor(text, 3, '').line).toBe(3);
   });
 
   /**
@@ -91,6 +91,32 @@ describe('resolving an anchor', () => {
   it('does not chase a match beyond the search window', () => {
     const far = ['target', ...Array.from({ length: 900 }, (_, i) => `filler ${i}`)];
 
-    expect(resolveAnchorLine(far.join('\n'), 901, 'target')).toBe(901);
+    expect(resolveAnchor(far.join('\n'), 901, 'target').line).toBe(901);
+  });
+});
+
+describe('reporting whether it found the snippet', () => {
+  /**
+   * The caller needs this to decide whether the answer is trustworthy enough
+   * to write back. A found line is the anchor's subject; a fallback is only
+   * the neighbourhood it used to be in, and persisting that would overwrite
+   * the last thing anyone actually knew.
+   */
+  it('says so when the snippet was there', () => {
+    expect(resolveAnchor(lines('added', 'one', 'two'), 1, 'two').found).toBe(true);
+  });
+
+  it('says so when it fell back to the remembered line', () => {
+    expect(resolveAnchor(lines('one', 'two'), 2, 'deleted long ago').found).toBe(false);
+  });
+
+  it('does not claim a find for an empty snippet', () => {
+    expect(resolveAnchor(lines('one', ''), 2, '').found).toBe(false);
+  });
+
+  it('does not claim a find beyond the window', () => {
+    const far = ['target', ...Array.from({ length: 900 }, (_, i) => `filler ${i}`)];
+
+    expect(resolveAnchor(far.join('\n'), 901, 'target').found).toBe(false);
   });
 });

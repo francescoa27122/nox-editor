@@ -492,7 +492,7 @@
             // request would beat `focusNotes` below to the same flush.
             ui.closeOverlayWithoutFocus();
             app.notes.select(note.id);
-            ui.focusNotes();
+            app.revealNotes();
           },
         },
       });
