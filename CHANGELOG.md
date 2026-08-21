@@ -8,6 +8,65 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The explorer stays fast in a big project.** It now renders only the rows
+  on screen, so a folder with tens of thousands of entries scrolls like one
+  with thirty. Nothing about using it changes: the same rows, the same
+  keyboard, the same drag and drop, and the scrollbar still describes the
+  whole tree. Small folders are rendered whole exactly as before — below a
+  couple of hundred rows the bookkeeping would cost more than it saves.
+  - Arrowing to a row that is off screen scrolls to it by arithmetic rather
+    than by asking the browser to scroll an element into view, which is what
+    lets it work for a row that is not currently drawn at all.
+  - Screen readers are told the size of the *tree*, not the size of the
+    window — every row now carries its true position in the whole list.
+
+- **A project can carry its own conventions.** Nox now reads
+  `.nox/settings.json` from the folder you have open and layers it over your
+  own settings, so a repository that indents with four spaces indents with
+  four spaces for everyone who opens it — without touching what you prefer
+  everywhere else. Close the folder and your own values are back.
+  - **Only eight settings can come from a project**, and they are the eight
+    that describe the *code*: tab size, spaces-vs-tabs, auto indent, word
+    wrap, trim trailing whitespace, insert final newline, format on save, and
+    what to hide in the explorer. Everything else — your theme, your fonts,
+    your terminal, your save habits — is yours and cannot be set by a folder.
+  - **This is an allowlist, not a blocklist, and `terminal.shell` is the
+    reason.** A settings file arrives with a cloned repository, written by
+    whoever wrote the repository. Nothing that names a program, a path or an
+    address will ever be settable from one.
+  - A setting a project owns is shown in Settings with a **Workspace** badge
+    and its control switched off, because a switch that cannot change
+    anything is worse than no switch. The footer offers **Workspace
+    settings**, and the new **Open Workspace Settings** command creates the
+    file if it is not there and opens it as an ordinary tab.
+  - The file is watched: editing it — in Nox or anywhere else — applies
+    straight away, with no reload and nothing to press.
+  - A missing, unreadable or corrupt file means "no project settings",
+    silently. It is often written by someone who is not you, and a warning
+    you cannot act on is worse than nothing.
+
+- **You can change the keys.** *Keyboard Shortcuts* (⌘⌥K) is no longer a
+  reference — it is an editor. Every command has a row, including the ones
+  with no key at all, which read *Unassigned* until you give them one. Hover
+  a row and press the keyboard button, then press the chord you want: the
+  panel shows it back to you, `↵` accepts, `Esc` cancels.
+  - **A key already in use is named before you take it.** The well says
+    which command holds it, and the button reads *Rebind, and unassign* —
+    accepting takes the key away from the old owner rather than quietly
+    shadowing it, so what the list shows is always what runs.
+  - **Reset is per command, and only appears where something changed.**
+    *Reset all* shows in the header once anything is customised and
+    disappears when nothing is.
+  - Customisations live in **`keybindings.json`** beside `settings.json`, as
+    rules layered over the defaults rather than a copy of them — so a Nox
+    that ships a new default key picks it up, and a corrupt file costs your
+    rebinds rather than the editor's boot. The file is hand-editable:
+    `{ "chord": "…", "command": "…" }` adds one, `"remove": true` takes a
+    default away.
+  - The **Editor** section — undo, cut, paste, multi-cursor — stays
+    read-only and now says why: those keys are CodeMirror's, and binding
+    them in two places would mean two owners racing for the same keystroke.
+
 - **Stage, commit, branch.** A Git panel in the sidebar — a focused view, not
   a full client. Files you have touched are listed staged and unstaged, each
   with a stage/unstage button (+/−); write a commit message and **Commit**

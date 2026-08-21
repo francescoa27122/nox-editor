@@ -230,9 +230,13 @@ is why Umbra takes about 30 lines to describe rather than a second stylesheet.
 | <kbd>Mod \\</kbd> | Split the editor |
 | <kbd>Mod ,</kbd> | Settings |
 
-Press <kbd>Mod ⌥ K</kbd> for the full list. It lives in the app and it's always
-current. Every action in Nox is a command, so anything you can do is in the
-palette whether or not it has a shortcut.
+Press <kbd>Mod ⌥ K</kbd> for the full list — and to change any of it. Every
+command has a row there, including the ones with no key yet; press the chord
+you want and it's yours, with the command that already held it named before you
+take it. Your changes live in `keybindings.json` as rules layered over the
+defaults, so a new default key in a later Nox still reaches you. The list lives
+in the app and is always current. Every action in Nox is a command, so anything
+you can do is in the palette whether or not it has a shortcut.
 
 Also in the box: syntax highlighting for nine language families, multiple
 cursors, code folding, jumping to a function or class by name in the file

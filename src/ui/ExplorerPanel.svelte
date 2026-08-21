@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { canMoveInto, dirname } from '@core/path';
   import { rootLabel } from '@services/filetree';
   import { useApp } from './context';
@@ -19,6 +20,63 @@
 
   let listElement = $state<HTMLElement | null>(null);
   let menu = $state<{ anchor: MenuAnchor; path: string | null } | null>(null);
+
+  /**
+   * Windowing.
+   *
+   * `FileTreeService` has exposed the tree as a flat ordered list since v0.1
+   * precisely so the renderer could do this; nothing in the model changes.
+   * The row height lives here rather than in the stylesheet, and the CSS
+   * reads it back through `--nox-tree-row-h`, so the number the arithmetic
+   * uses and the number the browser paints cannot drift apart. See
+   * `docs/superpowers/specs/2026-08-20-explorer-virtualisation-design.md`.
+   */
+  const ROW_HEIGHT = 23;
+  const OVERSCAN = 8;
+  /** Below this, the extra state costs more than the skipped rows save. */
+  const MIN_ROWS_TO_WINDOW = 200;
+
+  let scrollTop = $state(0);
+  let viewportHeight = $state(0);
+
+  /**
+   * What cannot be measured is not windowed.
+   *
+   * A viewport height of zero means "before layout" — or jsdom, which has no
+   * layout at all. Windowing on that would render nothing, which is a far
+   * worse failure than rendering too much.
+   */
+  const windowed = $derived(viewportHeight > 0 && $nodes.length > MIN_ROWS_TO_WINDOW);
+
+  const firstIndex = $derived(
+    windowed ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN) : 0,
+  );
+  const endIndex = $derived(
+    windowed
+      ? Math.min(
+          $nodes.length,
+          firstIndex + Math.ceil(viewportHeight / ROW_HEIGHT) + OVERSCAN * 2,
+        )
+      : $nodes.length,
+  );
+  const visibleNodes = $derived($nodes.slice(firstIndex, endIndex));
+  const padTop = $derived(firstIndex * ROW_HEIGHT);
+  const padBottom = $derived(($nodes.length - endIndex) * ROW_HEIGHT);
+
+  function measure(): void {
+    const height = listElement?.clientHeight ?? 0;
+    if (height !== viewportHeight) viewportHeight = height;
+  }
+
+  $effect(() => {
+    const element = listElement;
+    if (!element) return;
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
 
   const activeBuffer = $derived($buffers.find((b) => b.id === $activeId) ?? null);
   const openPaths = $derived(new Set($buffers.map((b) => b.path).filter(Boolean) as string[]));
@@ -172,8 +230,17 @@
     menu = { anchor: { x: event.clientX, y: event.clientY }, path };
   }
 
-  /** Keyboard equivalent: anchor to the focused row rather than the pointer. */
-  function openMenuFromKeyboard() {
+  /**
+   * Keyboard equivalent: anchor to the focused row rather than the pointer.
+   *
+   * A menu needs real coordinates, so this one does still measure a real
+   * element — which means scrolling the lead into view and letting the window
+   * re-render before looking for it. The fixed fallback stays for the case
+   * where there is no lead at all.
+   */
+  async function openMenuFromKeyboard() {
+    revealLead();
+    await tick();
     const row = listElement?.querySelector('.row.lead');
     const rect = row?.getBoundingClientRect();
     menu = {
@@ -270,10 +337,37 @@
     void commands.execute(id, paths);
   }
 
+  /**
+   * Put the lead row on screen, by arithmetic rather than by element.
+   *
+   * `scrollIntoView` on `.row.lead` stopped being possible the moment the
+   * lead can be outside the window — which is exactly when this matters.
+   * Working from the index needs no row in the DOM, and no `scrollIntoView`,
+   * which jsdom does not implement anyway.
+   */
+  function revealLead(): void {
+    const element = listElement;
+    if (!element) return;
+    const index = leadIndex;
+    if (index < 0) return;
+
+    measure();
+    const height = viewportHeight || element.clientHeight;
+    if (height <= 0) return;
+
+    const top = index * ROW_HEIGHT;
+    if (top < element.scrollTop) element.scrollTop = top;
+    else if (top + ROW_HEIGHT > element.scrollTop + height) {
+      element.scrollTop = top + ROW_HEIGHT - height;
+    }
+    // Written back here rather than waited for: setting `scrollTop` does not
+    // reliably emit a scroll event, and the next window must not lag a frame
+    // behind the row it was asked to show.
+    scrollTop = element.scrollTop;
+  }
+
   function scrollSelectionIntoView() {
-    queueMicrotask(() => {
-      listElement?.querySelector('.row.lead')?.scrollIntoView?.({ block: 'nearest' });
-    });
+    queueMicrotask(revealLead);
   }
 
   async function onKeydown(event: KeyboardEvent) {
@@ -365,12 +459,12 @@
       }
       case 'ContextMenu':
         event.preventDefault();
-        openMenuFromKeyboard();
+        void openMenuFromKeyboard();
         break;
       case 'F10':
         if (!event.shiftKey) return;
         event.preventDefault();
-        openMenuFromKeyboard();
+        void openMenuFromKeyboard();
         break;
     }
   }
@@ -437,6 +531,11 @@
       aria-label="Files"
       tabindex="0"
       bind:this={listElement}
+      style="--nox-tree-row-h: {ROW_HEIGHT}px"
+      onscroll={(event) => {
+        scrollTop = event.currentTarget.scrollTop;
+        measure();
+      }}
       onkeydown={onKeydown}
       oncontextmenu={(event) => openMenu(event, null)}
       ondragover={(event) => onDragOver(event, null)}
@@ -449,7 +548,13 @@
         }
       }}
     >
-      {#each $nodes as node (node.path)}
+      {#if padTop > 0}
+        <div class="spacer" style="height: {padTop}px" role="presentation"></div>
+      {/if}
+      <!-- `aria-setsize` / `aria-posinset` below are mandatory, not decorative:
+           once rows leave the DOM a screen reader would otherwise be told the
+           tree is exactly as long as the window. -->
+      {#each visibleNodes as node, index (node.path)}
         <div
           class="row"
           class:selected={$selectedPaths.has(node.path)}
@@ -476,6 +581,8 @@
           aria-selected={$selectedPaths.has(node.path)}
           aria-expanded={node.isDirectory ? node.expanded : undefined}
           aria-level={node.depth + 1}
+          aria-setsize={$nodes.length}
+          aria-posinset={firstIndex + index + 1}
           style="padding-left: {8 + node.depth * 12}px"
           onclick={(event) => onRowClick(event, node)}
           ondblclick={() => !node.isDirectory && workspace.open(node.path)}
@@ -499,6 +606,9 @@
       {:else}
         <p class="nox-empty">This folder is empty.</p>
       {/each}
+      {#if padBottom > 0}
+        <div class="spacer" style="height: {padBottom}px" role="presentation"></div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -604,11 +714,19 @@
     border-radius: 0;
   }
 
+  /* Spacers stand in for the rows outside the window, so the scrollbar
+     describes the whole tree and every rendered row keeps its true offset. */
+  .spacer {
+    flex: none;
+  }
+
   .row {
     display: flex;
     align-items: center;
     gap: var(--nox-sp-2);
-    height: 23px;
+    /* Set from ROW_HEIGHT above: the arithmetic and the paint share one number. */
+    height: var(--nox-tree-row-h, 23px);
+    flex: none;
     padding-right: var(--nox-sp-4);
     font-size: var(--nox-fs-sm);
     color: var(--nox-text-muted);

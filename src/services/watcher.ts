@@ -42,6 +42,7 @@ export class FileWatcherService {
   #unwatch: Unwatch | null = null;
   #root: string | null = null;
 
+  #pathListeners = new Set<(paths: ReadonlySet<string>) => void>();
   #pendingPaths = new Set<string>();
   #structureChanged = false;
   #coalesceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -98,6 +99,18 @@ export class FileWatcherService {
     this.#warned.delete(id);
   }
 
+  /**
+   * Be told which paths changed, after coalescing.
+   *
+   * Deliberately not "which buffers changed" — a listener may care about a
+   * file nothing has open, which is exactly the case `.nox/settings.json` is.
+   * Returns an unsubscribe.
+   */
+  onPathsChanged(listener: (paths: ReadonlySet<string>) => void): () => void {
+    this.#pathListeners.add(listener);
+    return () => this.#pathListeners.delete(listener);
+  }
+
   /** Run any pending work immediately. Tests use this instead of waiting. */
   async flushNow(): Promise<void> {
     this.#clearTimers();
@@ -129,6 +142,12 @@ export class FileWatcherService {
     if (structureChanged) {
       await this.#files.refresh({ reindex: false });
       this.#scheduleReindex();
+    }
+
+    // Before the open-buffer work below, and before its early return: a
+    // listener's file need not be open for the change to matter.
+    if (paths.size > 0) {
+      for (const listener of [...this.#pathListeners]) listener(paths);
     }
 
     // Match against open buffers. A rename reports both the old and the new

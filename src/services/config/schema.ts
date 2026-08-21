@@ -16,6 +16,18 @@ interface Common {
   category: SettingCategory;
   /** Hide from the settings UI (still settable via the config file). */
   advanced?: boolean;
+  /**
+   * May be set per project in `.nox/settings.json`.
+   *
+   * An **allowlist**, not a denylist, because a workspace file arrives with a
+   * cloned repository and is written by whoever wrote the repository. Only
+   * facts about the *code* belong here — its indentation, what it excludes,
+   * whether it formats on save — never a fact about the person reading it,
+   * and never anything naming a program, a path or an address.
+   * `terminal.shell` is the reason this list exists. See
+   * `docs/superpowers/specs/2026-08-20-workspace-settings-design.md` §0.
+   */
+  workspace?: true;
 }
 
 export interface BooleanSetting extends Common {
@@ -205,21 +217,25 @@ export const SETTINGS_SCHEMA = {
     label: 'Tab Size',
     description: 'Number of columns a tab occupies.',
     category: 'Text',
+    workspace: true,
   }),
   'editor.insertSpaces': bool(true, {
     label: 'Insert Spaces',
     description: 'Indent with spaces instead of tab characters.',
     category: 'Text',
+    workspace: true,
   }),
   'editor.wordWrap': bool(false, {
     label: 'Word Wrap',
     description: 'Wrap long lines at the viewport edge.',
     category: 'Text',
+    workspace: true,
   }),
   'editor.autoIndent': bool(true, {
     label: 'Auto Indent',
     description: 'Keep indentation and add a level after an opening bracket.',
     category: 'Text',
+    workspace: true,
   }),
   'editor.codeFolding': bool(true, {
     label: 'Code Folding',
@@ -263,22 +279,26 @@ export const SETTINGS_SCHEMA = {
     label: 'Trim Trailing Whitespace',
     description: 'Strip trailing spaces from every line on save.',
     category: 'Files',
+    workspace: true,
   }),
   'files.insertFinalNewline': bool(true, {
     label: 'Insert Final Newline',
     description: 'Ensure the file ends with exactly one newline on save.',
     category: 'Files',
+    workspace: true,
   }),
   'files.formatOnSave': bool(false, {
     label: 'Format on Save',
     description:
       'Ask the language server to format the file just before each save. Needs a server that offers formatting; skipped when Auto Save is After Delay.',
     category: 'Files',
+    workspace: true,
   }),
   'files.excludeFromExplorer': str('.git, node_modules, target, dist, .DS_Store', {
     label: 'Hide In Explorer',
     description: 'Comma-separated names the explorer will not show.',
     category: 'Files',
+    workspace: true,
   }),
 } as const satisfies Record<string, SettingDescriptor>;
 
@@ -292,6 +312,15 @@ export type Settings = {
 };
 
 export const SETTING_KEYS = Object.keys(SETTINGS_SCHEMA) as SettingKey[];
+
+/** The keys a project may set in `.nox/settings.json`. Opt-in, per §0. */
+export const WORKSPACE_SETTING_KEYS = SETTING_KEYS.filter(
+  (key) => SETTINGS_SCHEMA[key].workspace === true,
+);
+
+export function isWorkspaceScoped(key: SettingKey): boolean {
+  return SETTINGS_SCHEMA[key].workspace === true;
+}
 
 export function defaultSettings(): Settings {
   const out = {} as Record<string, unknown>;
@@ -325,6 +354,25 @@ export function coerce(key: SettingKey, value: unknown): Settings[SettingKey] {
           : descriptor.default
       ) as Settings[SettingKey];
   }
+}
+
+/**
+ * A workspace file, validated.
+ *
+ * Same as `coerceAll` but over `WORKSPACE_SETTING_KEYS` only: a key the schema
+ * does not scope to a workspace is dropped **at the boundary**, silently. A
+ * warning would train people to ignore it, and the file is usually written by
+ * someone who is not the person reading it.
+ */
+export function coerceWorkspace(raw: unknown): Partial<Settings> {
+  if (!raw || typeof raw !== 'object') return {};
+  const source = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of WORKSPACE_SETTING_KEYS) {
+    if (!(key in source)) continue;
+    out[key] = coerce(key, source[key]);
+  }
+  return out as Partial<Settings>;
 }
 
 /** Validate a whole persisted object, dropping unknown and invalid keys. */

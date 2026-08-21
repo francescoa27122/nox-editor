@@ -8,6 +8,339 @@ are knowledge.**
 
 ---
 
+## 2026-08-20 (PC, 1.0 bar) — The browser pass over all three
+
+Not a feature. The three commits below each closed with "not verified on a
+screen", and `npm run dev` runs the browser target on this PC — so the claim
+was cheaper to close than to keep writing down. Chromium via the preview
+tools, driven through `window.nox` and real `KeyboardEvent`s at the window,
+which is the same door `KeymapService.attach` listens on.
+
+What is now verified in a real engine, not jsdom:
+
+- **The keybinding editor, end to end.** ⌃⌥K opened it: **151 application
+  rows, 92 of them Unassigned, 18 read-only Editor rows with zero edit
+  buttons**. Recorded F9 onto *Toggle Explorer*, accepted — the row redrew as
+  F9, the customised dot and both resets appeared. Then, with the overlay
+  closed: **F9 toggled the explorer and Ctrl+B did nothing**, which is the
+  only assertion that actually matters. `localStorage` held exactly the two
+  rules the design says it should — one `remove`, one addition. `resetAll()`
+  emptied the file and Ctrl+B came back.
+- **`inert` reflects to an attribute** (`inertReflects: true`,
+  `'inert' in HTMLElement.prototype`). That was the one claim the workspace-
+  settings entry called *reasoned rather than exercised*, because jsdom does
+  not implement `inert` at all. It is now exercised.
+- **The row-height contract holds in the real engine**: the tree's
+  `--nox-tree-row-h` computes to `23px` and a row's painted height is `23px`.
+  That is the whole point of moving the number into TS, and it had never been
+  checked against an actual layout.
+- **Windowing, on 609 nodes** (600 files written into the demo workspace
+  through `platform.writeTextFile`): **42 rows rendered**, spacers of
+  2116px + 10925px, and `42 × 23 + 13041 = 14007 = 609 × 23` **exactly**. At
+  `scrollTop = 6900` the first rendered row was index **292** — `floor(6900/23)
+  − OVERSCAN` — carrying `aria-posinset="293"` and `aria-setsize="609"`. The
+  keyboard path put a lead 200 rows above the window back on screen and
+  rendered it.
+- Zero console errors across the whole session.
+
+**One trap worth naming, because it looks exactly like a bug.** Setting
+`tree.scrollTop` programmatically did *not* update the window at first, and a
+scroll listener installed for the test counted **zero** events. The cause is
+the harness, not the app: the Browser pane was not displayed, so the page
+composites no frames, and **scroll events are frame-driven**. Dispatching one
+by hand produced the exactly-correct window above. This is the same class of
+artifact as the desktop pass's BUG-1 (an invisible harness window eating
+clicks) — if a future pass sees a "dead" scroll handler, display the pane
+before filing anything.
+
+Still unverified, and now the honest remainder: everything a keyboard and a
+pair of eyes decide rather than a DOM query — whether overscan 8 avoids a
+flash on a fast flick, whether "Rebind, and unassign" fits beside a long
+command name, and every Tauri-only surface (the terminal, the dialogs, the
+title bar, the git panel against a real repo).
+
+Verified: the numbers above, plus `npm test` 1421/1421, `npm run check` 473
+files 0 errors, `npm run build` green at the tree these three commits stand on.
+
+Next: unchanged — the real-keyboard desktop pass on a Mac, then the tag.
+
+Confidence: high, and higher than it was three entries ago on exactly the
+things a browser can settle.
+
+## 2026-08-20 (PC, 1.0 bar) — Explorer virtualisation
+
+Branch `keybinding-editor`, third commit. The last **code** row of the 1.0
+bar; what remains of 1.0 after this is a real-keyboard pass and two
+certificates. Spec:
+`docs/superpowers/specs/2026-08-20-explorer-virtualisation-design.md`.
+
+Shipped:
+
+- **The panel renders a window; the model never noticed.** `FlatNode`,
+  `#flatten`, `FileTreeService` and every service test are untouched —
+  the flat list has said since v0.1 that it exists to make this possible,
+  and this is the whole of collecting on it. The rendered slice sits
+  between two `role="presentation"` spacers, so the scrollbar still
+  describes the whole tree and every row keeps its true offset.
+- **Spacers rather than a transform**, deliberately: the container is also
+  the drop target and the keyboard surface, and a transformed child changes
+  what `contains()` and `getBoundingClientRect()` mean for both.
+- **The row height has one home.** It was `height: 23px` in the stylesheet;
+  it is now a TS constant the CSS reads through `--nox-tree-row-h`.
+  Windowing by index fails silently if the painted height and the
+  arithmetic disagree, so they cannot be two numbers.
+- **What cannot be measured is not windowed.** Viewport height 0 — before
+  layout, and jsdom, which has no layout at all — renders every row.
+  Windowing an unmeasured viewport renders *nothing*, which is a much worse
+  failure than rendering too much; it also keeps every other jsdom suite
+  seeing the tree it always saw.
+- **`scrollIntoView` is gone, and its replacement is strictly better.**
+  `scrollSelectionIntoView` used to query `.row.lead` and call
+  `scrollIntoView` on it — impossible once the lead can be outside the
+  window, which is exactly when it matters. It is now arithmetic on the
+  lead's index: no row required in the DOM, and no `scrollIntoView`, which
+  jsdom does not implement and which the old line had to guard with `?.`
+  for that reason.
+- **`aria-setsize` / `aria-posinset` arrived with the change, not after.**
+  Rows leaving the DOM makes them mandatory: without them a screen reader
+  would be told the tree is exactly as long as the window.
+- Shift+F10's menu still measures a real row, because a menu needs real
+  coordinates — it reveals the lead, `await tick()`, then measures, and
+  keeps its old fixed fallback.
+
+Verified:
+
+- `npm test` — **1421 passed, 88 files** (1412/87 at the previous commit;
+  +9). `npm run check` — 473 files, 0 errors. `npm run build` — green.
+- **Eight mutation checks, all red after one round of re-aiming.** Two
+  survived the first pass and both were *test* faults rather than code
+  faults, which is the useful part:
+  1. Killing `revealLead`'s scroll-**up** branch survived, because the only
+     keyboard test at the time arrowed **down**. The suite had one
+     direction; the code had two. Added "arrowing above the top edge
+     scrolls back up", and both branches now have a killer.
+  2. Slicing from `0` instead of `firstIndex` survived against the
+     initial-render test, because at scroll offset 0 those are the same
+     expression. Re-aimed at the scrolled test, where it dies.
+- At the time of this commit: jsdom over a stubbed `clientHeight` only.
+  Closed the same day against Chromium and 609 real nodes — see the
+  browser-pass entry above. What a browser still cannot settle from a DOM
+  query: whether overscan 8 avoids a flash of blank rows on a fast flick.
+
+Next:
+
+- **The 1.0 keyboard pass**, on a real machine — the bar's own last row
+  ("nothing in the release notes says unverified"). It now covers a full
+  cycle's worth of surfaces: UI phases A-C, the git panel and branch picker,
+  the keybinding editor's recording flow, a project's `.nox/settings.json`,
+  and a large folder in the explorer.
+- Then the 1.0 tag, once the certificates are a decision.
+
+Blocked:
+
+- Not pushed, no PR — the standing rule. Three commits sit on
+  `keybinding-editor`.
+- Code signing is a purchase; the desktop pass wants a Mac. Neither is this
+  machine's to close.
+
+Confidence:
+
+- High on the arithmetic: eight mutations, and the two survivors were caught
+  and converted rather than explained away.
+- Medium on the feel. Overscan, scroll smoothness and the drag-over
+  behaviour near a window edge have been reasoned about and not seen.
+
+## 2026-08-20 (PC, v0.6) — Workspace settings
+
+Branch `keybinding-editor`, second commit. Chosen because the 1.0 bar's own
+order puts it next, and because it was the last remaining 1.0 gate that is
+pure code — explorer virtualisation aside, what is left is a Mac and two
+certificates. Spec first:
+`docs/superpowers/specs/2026-08-20-workspace-settings-design.md`.
+
+Shipped:
+
+- **`ConfigService` is three layers**, lowest first: the schema's defaults,
+  the user's `settings.json`, the project's `.nox/settings.json`. Every
+  write still lands in the *user* layer — that never changed — but `set()`
+  now compares against the user layer rather than the effective value, or a
+  write to a shadowed key would vanish the moment the folder closed.
+  `serialize()` writes the user layer only, so a project's conventions can
+  never bleed into a reader's own file.
+- **The scope is an allowlist on the schema** (`workspace: true`), eight
+  keys wide: tab size, insert spaces, auto indent, word wrap, trim trailing
+  whitespace, insert final newline, format on save, exclude from explorer.
+  The reasoning is in §0 and is the reason the feature is shaped this way at
+  all — a workspace file arrives with a **cloned repository**. `terminal.shell`
+  is the name that makes it concrete: a repository able to set it would run
+  a binary of its author's choosing the first time you opened a terminal. A
+  denylist would be wrong by default the day someone adds a setting.
+  There is a test that names those keys and fails if the list grows to
+  include one.
+- **`loadWorkspace(root)`**, wired to `rootPath.subscribe` and to a new
+  `FileWatcherService.onPathsChanged` hook, so an edit to the file — in Nox
+  or in another program — applies with nothing to press. The hook fires
+  *before* `#flush`'s "no open buffers" early return, because that return is
+  about reconciling buffers and this listener is not one. A null root clears
+  the layer: closing a folder must not leave its indentation behind.
+- **The panel is read-only over that layer, on purpose.** VS Code's
+  User/Workspace tab pair is a second write path and a way to commit a
+  personal preference into a shared repository by accident. Instead an
+  overridden row wears a **Workspace** badge, its control is `inert`, its
+  reset is hidden, the header counts what the project set, and the footer
+  offers **Workspace settings** → the new `prefs.openWorkspaceSettings`
+  command, which creates `{}` and opens the file as an ordinary tab.
+  `update()` also refuses the write itself — `inert` is a browser feature and
+  the guard that matters must not be one.
+
+Verified:
+
+- `npm test` — **1412 passed, 87 files** (1383/85 at the previous commit;
+  +20 `workspace-settings`, +9 `settings-panel-workspace`). `npm run check`
+  — 472 files, 0 errors. `npm run build` — green.
+- **Ten mutation checks, all confirmed red then reverted** — including two
+  that had to be *rewritten because the first version survived*, which is
+  the part worth keeping:
+  1. **A surviving mutation found a real design defect.** The panel first
+     derived its badge set through `$settings`; deleting that read left the
+     test green. The reason is that `#recompute` deliberately stays quiet
+     when nothing *moved*, and a project that sets a key to the value the
+     reader already had changes **ownership without changing any value** —
+     a row could become project-owned with nothing on screen noticing. Fixed
+     with a dedicated `config.workspaceScope` signal, and a new test covers
+     exactly that case.
+  2. The second survivor was a test defect: `new Event('change')` does not
+     bubble, and Svelte 5 delegates `change` at the container, so the
+     handler never ran and the guard looked stronger than it was. Fixed with
+     `{ bubbles: true }`, and the mutation then went red.
+- jsdom does not implement `inert`, so Svelte sets it as an IDL property that
+  never reflects to an attribute — the test asserts the property and says why.
+  A real browser reflects it.
+
+Next:
+
+- **Explorer virtualisation** — the last pure-code 1.0 gate, and the 1.0
+  bar's own words: "the only trust-row item whose absence a larger project
+  would feel every day".
+- Then the real-keyboard desktop pass, then the tag.
+
+Blocked:
+
+- Not pushed, no PR — the standing rule.
+- Code signing (a purchase) and the desktop pass (a Mac) are the two 1.0
+  gates this machine cannot close.
+
+Confidence:
+
+- High on the layering and the scope boundary: ten mutations, and the scope
+  list has a test that names the keys that must stay out of it.
+- Medium on the panel at the time of writing; the `inert` half was closed
+  the same day in Chromium (see the browser-pass entry above), the badge
+  and footer still want eyes.
+- One thing deliberately not built: `.nox/keybindings.json`. The rule format
+  is already layerable, but a repository supplying keystrokes is its own
+  trust question and wants its own §0.
+
+## 2026-08-20 (PC, v0.6) — The keybinding editor
+
+Branch `keybinding-editor`, off `main` at `8453ab5` (pulled this session:
+main had moved four commits past `ca44580` with the auto-updater and the
+BUG-1 postmortem). Chosen by the 1.0 bar's own order — *find references →
+rename → format on save → git → stage/commit → **keybinding editor** →
+workspace settings → explorer virtualisation → keyboard pass → tag* — and
+because it was the only remaining 1.0 gate that was pure code rather than
+a purchase or a ritual. Spec first:
+`docs/superpowers/specs/2026-08-20-keybinding-editor-design.md`.
+
+Shipped:
+
+- **The keymap grew a second tier.** `bind()` now builds a recorded
+  **default table**; a `KeybindingRule` from `keybindings.json` is applied
+  *over* it and never edits it — which is exactly what makes reset a
+  deletion rather than a remembered original. `#rebuild()` replays the
+  defaults minus each `(chord, command)` pair a `remove` rule names, then
+  applies additions; additions land last and `#add` unshifts, so a user
+  binding beats a default on the same chord with no new precedence
+  machinery. One version bump per rebuild, not one per replayed default.
+- **`when` and `arg` are inherited, not serialised.** A predicate cannot be
+  written to JSON, so an addition takes the guard from the command's own
+  default: rebinding Escape keeps `hasDismissible()`, and a rebound
+  `nav.goToTab` keeps its index. Stated in the spec and tested rather than
+  left to be discovered.
+- **Recording is a mode of the service** (`beginCapture`/`endCapture`), not
+  a listener in the panel. It has to be: `attach` resolves on the window's
+  **capture** phase, so a claimed chord is already `preventDefault`ed and
+  executed before any element inside the panel could see it. While
+  capturing, every key is swallowed and handed to the recorder — bare
+  modifiers ignored, so reaching for ⇧ first records nothing.
+- **`handleKey(event)` split out of `attach`**, so both the tests and the
+  capture branch have one door instead of two.
+- **The panel is an editor.** Every command gets a row — bound *or not*,
+  reading "Unassigned", because adding a key to a command that has none is
+  half of what "change the keys" means and the old list could not express
+  it. Per row: change, clear, and a reset that appears only where something
+  differs. Header: a customised count and **Reset all**, both absent when
+  nothing is. A conflicting chord **names the command it would displace**
+  and the accept button says *Rebind, and unassign* — accepting takes the
+  key away rather than shadowing it, because an addition would win anyway
+  and a key whose listed owner is not the one that runs is the confusion
+  this panel exists to remove. Re-recording a row's existing chord is a
+  no-op, not a customisation. The **Editor** section stays read-only and
+  now says why on screen.
+- **`keybindings.json`** beside `settings.json`, through the existing
+  `readConfigFile`/`writeConfigFile` — no new `Platform` method. Corrupt or
+  unreadable leaves the defaults standing (`ConfigService.load`'s rule); a
+  non-rule entry is dropped and the rules around it kept. Loaded in
+  `#boot()` next to `config.load()`, which is safe because the constructor
+  has already run `#registerKeybindings`.
+
+Verified:
+
+- `npm test` — **1383 passed, 85 files** (1346/83 at the branch point;
+  +24 `keymap-user-bindings`, +13 `keybindings-panel`). `npm run check` —
+  470 files, 0 errors. `npm run build` — green.
+- **Eight mutation checks, all confirmed red then reverted**: the
+  removed-pair skip deleted from `#rebuild`; `#add` pushing instead of
+  unshifting; the inherited-`arg` lookup forced to `undefined`; the capture
+  branch falling through to `resolve()`; `accept()`'s unassign-conflicts
+  loop deleted; the rows derivation not reading `$keymapVersion`;
+  `stopRecording()` not calling `endCapture`; the unbound-command rows
+  dropped from the derivation.
+- One real defect found and fixed on the way: a **literal NUL byte** had
+  been written into `keymap.ts` as the pair-key separator, which made
+  `grep` treat the file as binary. Replaced with a `\u0000` escape (same
+  value, visible in source) and commented.
+- `npm install` was needed before `npm run check` would pass at all: main's
+  auto-updater merge added `@tauri-apps/plugin-process` and
+  `plugin-updater` to `package.json`, and this PC's `node_modules`
+  predated it. Not a repo defect — but the 3 errors look exactly like one.
+- Verified in a real browser afterwards — see the browser-pass entry above.
+  At the time of this commit it was jsdom only.
+
+Next:
+
+- **Workspace settings** (`.nox/settings.json` layered over user settings) —
+  the last pure-code 1.0 gate after this one, and the keybinding rule file
+  is already shaped to layer when it arrives.
+- Then explorer virtualisation, then the keyboard pass, then the tag.
+
+Blocked:
+
+- Not pushed, no PR — the standing rule. Code signing and the desktop pass
+  remain the two 1.0 gates this machine cannot close (a purchase and a
+  Mac).
+
+Confidence:
+
+- High on the service: eight mutations, and `resolve()` — not "the map
+  contains a binding" — is the assertion of record throughout.
+- Medium on the panel's *feel*. The behaviour is tested; the hover
+  affordances, the recording well's width and whether "Rebind, and
+  unassign" fits beside a long command name have been seen by nothing with
+  eyes.
+- One edge accepted and documented: a bare `Escape` cannot be recorded from
+  the UI (it is the cancel key), only hand-written into the file.
+
 ## 2026-08-20 (PC, v0.5) — Stage, commit, branch
 
 Branch `git-stage-commit`, off `main` at `ca44580`, ten tasks per

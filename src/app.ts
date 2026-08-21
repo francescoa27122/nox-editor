@@ -42,7 +42,7 @@ import {
 import { createPlatform } from '@platform/index';
 import type { Platform } from '@platform/types';
 import { CommandRegistry, type Command } from '@services/commands';
-import { ConfigService, type SettingKey } from '@services/config';
+import { ConfigService, workspaceConfigPath, type SettingKey } from '@services/config';
 import {
   AgentConfigService,
   AGENTS_FILE,
@@ -173,7 +173,7 @@ export class NoxApp {
   constructor(platform: Platform) {
     this.platform = platform;
     this.config = new ConfigService(platform);
-    this.keymap = new KeymapService(this.commands);
+    this.keymap = new KeymapService(this.commands, platform);
     // Buffers are created with the current settings and no grammar; the
     // grammar is reconfigured in once it resolves. See EditorPane.
     this.workspace = new WorkspaceService(platform, () =>
@@ -268,6 +268,13 @@ export class NoxApp {
   async #boot(): Promise<void> {
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
+    // Before the session restores a root: the subscription above fires on
+    // that restore, but boot's own `files.setRoot` below should already see
+    // the project's excludes.
+    await this.config.loadWorkspace(this.workspace.rootPath.get());
+    // After the constructor, so `#registerKeybindings` has already recorded
+    // the defaults these rules are layered over.
+    await this.keymap.loadUserRules();
     await this.agentConfig.load();
     await this.serverRegistry.load();
     await this.notes.load();
@@ -386,8 +393,20 @@ export class NoxApp {
     this.workspace.rootPath.subscribe((root) => {
       void this.files.setRoot(root);
       void this.watcher.start(root);
+      // A project's own settings arrive and leave with the project. Closing a
+      // folder must not leave its indentation behind.
+      void this.config.loadWorkspace(root);
       this.#updateWindowTitle();
       this.session.schedule();
+    });
+
+    // `.nox/settings.json` edited in Nox or in another window is the same
+    // event: a file changed. Saving it from a tab arrives here too.
+    this.watcher.onPathsChanged((paths) => {
+      const root = this.workspace.rootPath.get();
+      if (!root) return;
+      if (!paths.has(workspaceConfigPath(root))) return;
+      void this.config.loadWorkspace(root);
     });
 
     // A closed tab should not keep its "changed on disk" warning suppressed.
@@ -2968,6 +2987,30 @@ export class NoxApp {
             this.config.resetAll();
             this.notifications.info('Settings reset to defaults');
           }
+        },
+      },
+
+      {
+        id: 'prefs.openWorkspaceSettings',
+        title: 'Open Workspace Settings',
+        category: 'Preferences',
+        keywords: ['project', 'nox', 'folder', 'settings', 'shared'],
+        // Creating the file is a write, and every command that writes says so.
+        capabilities: ['fs.write'],
+        enabled: this.#hasFolder,
+        run: async () => {
+          const root = this.workspace.rootPath.get();
+          if (!root) return;
+          const path = workspaceConfigPath(root);
+          if (!(await this.platform.exists(path))) {
+            // An empty object rather than a commented template: JSON has no
+            // comments, and a template of keys nobody asked for is a file
+            // that gets committed half-read.
+            const dir = dirname(path);
+            if (!(await this.platform.exists(dir))) await this.platform.createDir(dir);
+            await this.platform.writeTextFile(path, '{}\n');
+          }
+          await this.workspace.open(path);
         },
       },
 

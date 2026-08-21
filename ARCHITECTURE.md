@@ -126,9 +126,10 @@ src/
 │
 ├─ services/             Application logic. Framework-free.
 │  ├─ commands.ts        Command registry
-│  ├─ keymap.ts          Chord parsing, resolution, display formatting
+│  ├─ keymap.ts          Chord parsing, resolution, display formatting;
+│  │                     the default table plus the user rules over it
 │  ├─ config/schema.ts   THE settings schema — types derived from it
-│  ├─ config/index.ts    ConfigService: load, coerce, persist
+│  ├─ config/index.ts    ConfigService: the three layers, coerce, persist
 │  ├─ workspace.ts       Buffers, tabs, dirty tracking, file operations,
 │  │                     change-set application and grouped undo
 │  ├─ transactions.ts    ChangeSet, Author, the transaction log
@@ -222,6 +223,19 @@ category. From it we derive the `Settings` type, the persisted-JSON validator,
 and the entire settings UI. Adding a preference is a one-line change there and
 nowhere else. **No component may hardcode a default.**
 
+**Three layers, and the top one is untrusted.** Effective settings are the
+schema's defaults, then the user's `settings.json`, then the open project's
+`.nox/settings.json`. That last file arrives with a cloned repository, so the
+keys it may supply are an **allowlist on the schema** (`workspace: true`),
+eight wide, holding only facts about the code — indentation, trimming, format
+on save, what to hide. `terminal.shell` is the name that makes the rule
+concrete: a repository that could set it would run a binary of its author's
+choosing the first time you opened a terminal. Nothing naming a program, a
+path or an address goes in the list. Every write still lands in the *user*
+layer; the panel refuses to offer a control for a key the project owns, and
+points at the file instead. Design:
+`docs/superpowers/specs/2026-08-20-workspace-settings-design.md`.
+
 Only non-default values are written to `settings.json`, so upgrading Nox picks
 up new defaults instead of freezing whatever shipped first.
 
@@ -245,6 +259,44 @@ other owns, so there is never a race over `preventDefault`.
 `Escape` is the interesting case: it is bound at app level with a guard
 (`when: () => ui.hasDismissible()`), so it closes an overlay when one is open
 and otherwise falls through to CodeMirror to collapse multi-cursors.
+
+The application layer has **two tiers**: the defaults `app.ts`'s
+`#registerKeybindings` builds with `bind()`, and a list of `KeybindingRule`s
+read from `keybindings.json`. A rule is *applied over* the defaults — the
+default table is never edited — which is what makes resetting a customisation a
+deletion rather than a remembered original. `#rebuild()` replays the defaults
+minus every `(chord, command)` pair a `remove` rule names, then applies the
+additions; additions go last, and `#add` unshifts, so a user binding beats a
+default on the same chord with no extra precedence machinery. `when` cannot be
+serialised and `arg` usually is not, so both are inherited from the command's
+own default — rebinding Escape keeps its guard.
+
+Recording a new chord is a **mode of the service** (`beginCapture` /
+`endCapture`), not a listener in the panel: the service already resolves on the
+window's capture phase, so a claimed chord would be handled before any
+descendant element could see it. While capturing, every key is swallowed and
+handed to the recorder, and nothing runs. Design:
+`docs/superpowers/specs/2026-08-20-keybinding-editor-design.md`.
+
+### The explorer renders a window, and the model never knew
+
+`FileTreeService` has exposed the tree as a flat ordered list since v0.1, with
+a header saying why: flat is what the renderer wants, and it leaves the door
+open for windowing. `ExplorerPanel` now walks through that door alone — no
+service, no test and no `FlatNode` changed. It renders the slice of `nodes`
+the viewport covers plus an overscan, between two `role="presentation"`
+spacers that stand in for the rest, so the scrollbar describes the whole tree
+and every row keeps its true offset. Spacers rather than a transform: the
+container is also the drop target and the keyboard surface, and a transformed
+child changes what `contains()` and `getBoundingClientRect()` mean for both.
+
+Two rules make it safe. **The row height has one home** — a TS constant that
+the stylesheet reads back through `--nox-tree-row-h`, because windowing by
+index breaks silently if the painted height and the arithmetic disagree. And
+**what cannot be measured is not windowed**: a viewport height of zero (before
+layout, or under jsdom) renders every row, since windowing an unmeasured
+viewport would render nothing. Design:
+`docs/superpowers/specs/2026-08-20-explorer-virtualisation-design.md`.
 
 ### Nox draws its own find UI
 
