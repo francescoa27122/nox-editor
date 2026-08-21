@@ -8,6 +8,77 @@ are knowledge.**
 
 ---
 
+## 2026-08-20 (PC, release) — The key ceremony, and v0.5.1
+
+The ceremony (spec §8, "human hands only") ran on Francesco's keyboard; my
+half was everything around it. Key id `A40CD806C398B1A7`.
+
+What went wrong first, and is now in §8 so it does not happen twice:
+
+- **`~` is not expanded for native executables in PowerShell.** I handed over
+  bash commands for a PowerShell prompt, so `tauri signer generate -w
+  ~/.tauri/...` created a **literal `~` directory inside the repository** —
+  the one place §8 says a private key must not go, in a public repo.
+  Assessed before touching anything: untracked, in no commit, never pushed,
+  and `%USERPROFILE%\Desktop` is not OneDrive-redirected, so not synced.
+  **Nothing was exposed and no regeneration was needed.** Moved the pair to
+  `$HOME/.tauri/` and removed the directory, without reading the private
+  half.
+- **PowerShell has no `<` redirection**, so `gh secret set NAME < file` is a
+  parser error rather than a secret. `Get-Content -Raw |` is the form.
+
+- The key is password-protected, **proven rather than assumed**: signing a
+  throwaway file with `-p ""` returned "Wrong password for that key", which
+  is what made `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` a required step and not
+  an optional one.
+- One false alarm I raised and corrected: a checklist line reported the
+  private-key secret `MISSING` because the grep anchored `$` against lines
+  that end in a timestamp. The tool was wrong, not the state — the same
+  "check the tool before believing the measurement" trap as ever.
+
+Shipped:
+
+- **The public key** into `plugins.updater.pubkey` (#55). It landed *before*
+  the secrets could bite: `release.yml`'s guard deliberately fails any build
+  where the private key is set and the pubkey is empty, so between 02:02
+  (secret set) and the merge, a tag would have produced a **failed** release
+  rather than an unsigned one.
+- **v0.5.1** — five version files, the changelog section, and `releaseBody`'s
+  macOS paragraph, which the spec said to soften once a signed release
+  exists: a fresh download still needs `xattr -dr`, an update installed from
+  inside Nox does not, and the notes now say so instead of teaching the
+  ritual as the only path.
+
+**0.5.1 has no feature changes on purpose.** `pubkey` is baked into the
+binary at build time, so every build up to and including 0.5.0 carries an
+empty one and can verify nothing, ever. 0.5.1 exists to be the first build
+that is both signed and able to verify. Everyone on 0.5.0 installs it by
+hand, once.
+
+Verified:
+
+- `npm test` 1421/1421, `npm run check` 473 files 0 errors, build green.
+- The gate's four comparisons run by hand: all five version files read
+  0.5.1.
+- `release.yml` still parses as YAML (both jobs present) and is clean UTF-8
+  with no replacement characters — worth checking, because the console
+  renders its em-dashes as `?` and that looks exactly like corruption.
+- The real proof is the release itself: `latest.json` present on the release
+  and the endpoint returning 200 instead of 404. Nothing before that moment
+  demonstrates the chain works end to end.
+
+Next:
+
+- The 1.0 keyboard pass on the Mac, and the two OS certificates. Those are
+  the last three 1.0 bar rows and none of them is code.
+
+Confidence:
+
+- High on the mechanics; the one thing no local check can establish is
+  whether CI's signing step actually produces a valid signature, since the
+  private key never comes near this machine's build. The release run is the
+  first and only test of that.
+
 ## 2026-08-20 (PC, release) — Cut v0.5.0
 
 PR #53 merged first (`bd14716`, CI green on all five jobs). Then the release,

@@ -198,13 +198,19 @@ jobs:
             xattr -dr com.apple.quarantine /Applications/Nox.app
             ```
 
-            **You will need that command.** The app is ad-hoc signed rather
-            than signed with an Apple Developer ID, so macOS quarantines it on
-            download and refuses to open it with *"Nox is damaged and can't be
-            opened"* — which sounds like a corrupt download but isn't. The
-            command removes the quarantine flag. If you'd rather not run it,
-            build from source instead; `npm run app` does the same thing from
-            code you can read.
+            **You will need that command on a fresh download.** The app is
+            ad-hoc signed rather than signed with an Apple Developer ID, so
+            macOS quarantines it and refuses to open it with *"Nox is damaged
+            and can't be opened"* — which sounds like a corrupt download but
+            isn't. The command removes the quarantine flag. If you'd rather
+            not run it, build from source instead; `npm run app` does the same
+            thing from code you can read.
+
+            **You only need it once.** Updates installed from inside Nox —
+            *Check for Updates…*, or the toast shortly after launch — are
+            verified against the app's own signing key and replace the app in
+            place, so they never re-quarantine it. Only the first install
+            costs you the command.
 
             **Linux** — take the `.deb` or the `.rpm`. Built on Ubuntu 22.04,
             so it needs glibc 2.35 or newer. There is no AppImage.
