@@ -6,6 +6,59 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+A pass over how discoverable Nox is, driven by an audit of the packaged app
+rather than the browser dev target — where more than half the UI is switched
+off and so had never been looked at.
+
+### Added
+
+- **A native menu bar on macOS**, generated from the command table rather than
+  hand-listed, so a command cannot be registered and then be missing from it.
+  Until now the menu was Tauri's default and carried none of Nox's ~140
+  commands, which left the palette as the only index of what the app can do.
+- **An editor context menu.** Right-clicking in the code surface showed
+  WebKit's own menu — Reload, Services, Look Up. It now offers Go to
+  Definition, Find References, Rename Symbol, Format Document, comment
+  toggling, Select All Occurrences and Show Changes, each showing its chord.
+- **Visible ways into the terminal and the agents panel.** Both were reachable
+  only by a shortcut you had to already know, and the terminal shipped a Hide
+  button with no corresponding Show.
+- **Nox remembers your window size and position**, clamped to the display it
+  actually opens on.
+- **Merge conflicts are named.** A conflicted file used to render exactly like
+  one you had edited yourself, with a live stage button; staging it staged the
+  conflict markers. Conflicts now get their own section and refuse to stage.
+- **Advanced settings can be browsed**, not only found by typing the right word.
+
+### Fixed
+
+- **The command palette ran the wrong command.** Results were scored on the
+  rendered `"Category: Title"` string and sorted on score alone, so ties fell
+  to registration order. Typing `undo` and pressing Enter ran *Undo the Last
+  Agent Session* — which reverts an agent's edits across several files with no
+  confirmation — instead of *Edit: Undo*.
+- **The permission prompt defaulted to granting.** `danger` sat on *Deny*, so
+  both the safe-choice focus rule and the primary styling landed on *Allow for
+  this session*. Pressing Enter on reflex granted a session-wide capability.
+- **Unsaved work could be abandoned silently.** A failed backup write was
+  recorded as if it had succeeded, after which that buffer's unsaved text was
+  never written again.
+- **A failed command said nothing at all** — no toast, no dialog, console only,
+  in a build with no devtools. Settings, keybinding and session write failures
+  were equally silent.
+- **The terminal opened 32px tall** regardless of the configured 260px, and its
+  edge was not draggable.
+- **The Welcome screen clipped the shortcuts it exists to teach**, and led with
+  the action a new user is least likely to want.
+- **Search results rendered all at once** — up to 5000 matches — so the panel
+  slowed down exactly while results were arriving.
+- **The focus ring was effectively invisible** at 1.62:1, on a keyboard-first
+  editor. Shortcut hints sat below the legibility threshold too.
+- **Fullscreen left a dead gap** on macOS where the traffic lights had been.
+- Diff added/removed lines no longer rely on colour alone, and the tab strip
+  answers arrow keys.
+
+
 ## [0.5.1] — 2026-08-20
 
 The first signed release. No feature changes: this exists so that updates can

@@ -1370,6 +1370,109 @@ this set too: it is the one place the feature would construct input for git
 (`apply --cached`) rather than naming files, and it gets its own envelope
 read when it is built.
 
+### The native menu is generated from the command table
+
+The menu is not written out anywhere. `services/menu.ts` reads
+`CommandRegistry.all()` and groups it by `category` into the menus `LAYOUT`
+names, and Rust (`src-tauri/src/menu.rs`) only turns that description into
+real items. Two consequences, both deliberate.
+
+**Nothing can be left out.** A hand-written menu would be a second list of
+~140 titles with nothing keeping it in step with the first, and the failure
+mode of that drift is precisely the one the menu exists to fix: a command
+nobody can find. A category no `LAYOUT` entry claims gets its own trailing
+menu rather than disappearing, so adding a command with a new category makes
+the menu untidy, never incomplete. `tests/menu.test.ts` asserts the whole
+palette-visible set appears exactly once.
+
+**Accelerators cannot fire twice, and the reason is mechanical.** A native
+accelerator and Nox's in-page keymap are two routes to one command, and a
+single keypress must not take both. `KeymapService.attach` listens on `window`
+in the **capture** phase and calls `preventDefault()` on every chord it claims,
+whatever has focus; WKWebView's `performKeyEquivalent:` forwards a key
+equivalent to the page and re-dispatches it to the main menu *only* when the
+page did not consume it. Consumed-by-the-page and delivered-to-the-menu are the
+two halves of one branch, never both. The recorded desktop run at
+`.desktop-pass-report.md:38` is the observation that matches: ⌘W sits on both
+`PredefinedMenuItem::close_window` and `file.close`, and it closed the file.
+
+That argument only covers chords *the page* claims, which is why an accelerator
+is attached **only where `KeymapService.chordFor` reports an application
+binding**. Three groups are handled differently, each for a stated reason:
+
+| Group | Treatment | Why |
+|---|---|---|
+| Application keymap (⌘S, ⇧⌘P, …) | Real accelerator | Captured on `window`, so the page always consumes it first |
+| CodeMirror-owned (`keyHint`: ⌘⇧K, ⌥↓, …) | Menu entry, no chord shown | CodeMirror only prevents default while the editor has focus; an accelerator would delete an editor line from inside the search field |
+| Undo/Redo/Cut/Copy/Paste/Select All | `PredefinedMenuItem`, no Nox command listed | They go through the responder chain and act on whatever has focus, which a command dispatched at the editor cannot |
+
+The one case where an accelerator *is* reached by a keypress is a command the
+keymap declined because it is **disabled** — and the menu item dispatches
+through `CommandRegistry.execute`, which refuses a disabled command anyway. So
+the menu can never run something the keyboard would not. Menu items are
+nonetheless always drawn enabled; mirroring ~130 enablement predicates across
+the IPC boundary on every state change is not worth it, and is recorded as debt.
+
+### The window is remembered in Rust, beside the session
+
+Window size and position persist to `window.json` in the app config directory,
+written by `src-tauri/src/window_state.rs` and restored through the same
+`apply_geometry` that `--geometry` uses — so there is exactly one clamp
+(`geometry::clamp`), and a window remembered on a monitor that is no longer
+attached comes back on screen rather than off it.
+
+**Rust rather than a service**, against the usual pull of the `Platform` rule,
+because the *restore* has to land before the webview exists or the window
+visibly jumps after first paint; Rust already owns the window, already resolves
+the config directory, and is where the flag this must lose to is parsed.
+
+**Its own file rather than `session.json`**, for three independently sufficient
+reasons: `session.json` is only read when `workbench.restoreSession` is on, and
+forgetting your window because you turned off tab restore is nobody's
+expectation; `SessionService.clear()` blanks that file, and clearing tabs should
+not move the window; and Rust would have to understand a versioned, migrated
+renderer schema to read four numbers out of it.
+
+Three rules the implementation turns on, each with a test in `geometry.rs`:
+`--geometry` **wins and records nothing** (the flag is a walk affordance; a
+harness-sized window must not overwrite the user's); a fullscreen or maximised
+window is **never stored as a size**, or one ⌃⌘F makes every later launch
+screen-sized; and writes are **debounced 400 ms** on the trailing edge, so a
+drag-resize costs one write rather than one per frame. Coordinates are stored
+work-area-relative, which is the space `clamp` works in and what makes
+"the same place on whatever display it opens on" the degraded behaviour.
+
+Nothing is written for the first second after launch: `set_position` is
+asynchronous on macOS, so a read-back taken that early reports where the window
+*used to be* — and since that is usually the centred default, the remembered
+position would creep back to centre one launch at a time.
+
+### Long panels are windowed, and each publishes its own row height
+
+The explorer and the search results both render flat, uniform-height row
+arrays that can run to thousands of entries — 5000 matches is `MAX_RESULTS`,
+and a directory has no bound at all. Both window: a `viewportHeight > 0` guard
+(so jsdom, which has no layout, still renders everything and tests stay
+meaningful), a `MIN_ROWS_TO_WINDOW` floor so short lists pay nothing, spacer
+divs preserving scrollbar length, and `aria-setsize`/`aria-posinset` on every
+row — mandatory rather than decorative, because the DOM no longer holds the
+full set for a screen reader to count.
+
+Scroll-into-view is **index arithmetic**, not `scrollIntoView` on a
+`.focused` element. The focused row can legitimately be outside the rendered
+window, at which point there is no element to scroll to; a reveal built on the
+DOM silently stops working exactly when the list is long enough to need it.
+
+Each panel publishes its row height as its **own** custom property —
+`--nox-tree-row-h` at 23px, `--nox-search-row-h` at 22px — read back by that
+panel's CSS. One shared name was the obvious simplification and is wrong: the
+two heights differ, and a single inherited property would silently paint one
+list at the other's pitch while the arithmetic used the correct one. The rule
+is that the number the arithmetic uses and the number the CSS paints must be
+the same token, not that all panels share a token.
+
+---
+
 ---
 
 ## 5. How to add a feature
@@ -1419,6 +1522,8 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 
 | Item | Detail |
 |---|---|
+| Problems and References are not windowed | They share the flat-row shape the explorer and search now window (see §4), but their natural limits are lower. Re-decide on their own merits rather than inheriting the explorer spec's out-of-scope line. |
+| Commit is enabled while a merge conflict is unresolved | The panel names conflicts and refuses to stage them, but the Commit button does not know about them. Real git refuses ("committing is not possible because you have unmerged files") and the refusal surfaces through the existing error path, so the outcome is correct and merely late. `MemoryPlatform.gitCommit` does not model the refusal, so nothing tests it. |
 | Dirty flag on huge files | See §4. Above 2 MB, undo-to-saved leaves the tab dirty. |
 | Watch mtime resolution | See §4. A coarse-mtime filesystem can let an external write in the same second as a save be misread as our own. |
 | Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. |
@@ -1433,10 +1538,11 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Splits do not nest | The layout is a flat row or column, not a tree, so you cannot have a column split inside a row. |
 | macOS trash has no "Put Back" | Nox trashes via `NSFileManager` rather than Finder/AppleScript, because the AppleScript path blocks for two minutes and then fails when Finder is unavailable. A trashed file restores to the Trash folder, not its original location. Covered by `tests/fileops_integration.rs`. |
 | Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**; unsaved work does, because it is in the session. The reload also kills any running agent, which is the point — a renderer that no longer exists cannot talk to them. |
-| Explorer is not windowed | The tree renders every visible node. Fine to a few thousand; needs virtualisation beyond that. The flat-node model was chosen to make that a contained change. |
 | Grammar coverage | Parsers ship for TS/JS/JSX/TSX, JSON, HTML, CSS/SCSS, Markdown, Python, Rust. Other languages open and edit correctly but render unhighlighted; the status bar greys the language name to say so. |
-| Keybindings are read-only | The panel lists them; it cannot rebind. Bindings are already data, so this is a UI change. |
-| No custom native menu | The default Tauri menu supplies the system items. A Nox menu dispatching command ids is straightforward. |
+| The native menu is macOS-only | Windows draws its menu bar *inside* the window frame and Nox turns decorations off there to draw its own title bar, so a menu would land underneath it. Linux is not blocked by that but the accelerator argument in §4 is WKWebView's, not WebKitGTK's, and has not been checked against it. `nox_set_menu` returns `Ok(())` without setting a menu on both. |
+| Menu items are always drawn enabled | Enablement is re-checked when the item is chosen (`CommandRegistry.execute` refuses a disabled command), so nothing runs that should not — but a disabled item looks live and does nothing when clicked. Greying them means pushing every state change in the app across the IPC boundary to keep ~130 items in step. |
+| The menu has no Close Window item | `PredefinedMenuItem::close_window` carries ⌘W and Nox binds ⌘W to `file.close`, so both in one menu would be two items claiming one accelerator. Nox has no `window.close` command to offer instead; the traffic light and ⌘Q are the ways out. |
+| `--geometry` suppresses geometry persistence for that launch | Deliberate — see §4 — but it means a walk cannot be used to *set* a remembered window, and a malformed `--geometry` falls back to an ordinary launch that does persist. |
 | Browser build does not persist edits | Deliberate: it is for developing the UI, not storing work. Settings and session do persist via localStorage. |
 | `notes.ts`'s `#doPersist` clears dirty state after the write, not before | Correct and tested — its termination and failure fences hold. But clearing after the write forces the whole design to prove "is this still what I wrote", which needs a revision counter for every kind of dirtiness, a `#savedIndexRevision` shadow, three per-call failure fences, and a comment-only invariant that `create()` must never bump `#indexRevision`. Clearing before the await and letting the next mutation re-arm it would need only a boolean and cut roughly 60 lines to one concept. Do this before the method is next modified, not as a speculative refactor now. |
 | Components embedding CodeMirror are tested for wiring and text, not geometry | `EditorPane` mounts under jsdom (`tests/lsp-rendering.test.ts`, `tests/lsp-paint-target.test.ts`): a diagnostic paints under the text its range names, the picker lists what the server sent, the hover tooltip carries the server's markdown as text. jsdom has no layout, so a tooltip's placement and which symbol was under the pointer are not checkable — `tests/support/jsdom-layout.ts` fills `Range.getClientRects`, the one method CodeMirror needs to *run*, with a single all-zero rectangle whose numbers are jsdom's own and whose existence is the one invented fact, and says what that forbids a test from claiming. The first feature whose claim is geometric (a tooltip that must sit beside the pointer, an inlay hint that must not shift the line) is when vitest browser mode earns its browser download in CI. Of the corrected hover claim, "shows the server's markdown as text" is test-backed; "stays while the pointer is over the span" is read from `@codemirror/view`'s `HoverPlugin` and cannot be driven under zero geometry. |
