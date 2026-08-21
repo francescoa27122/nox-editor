@@ -845,6 +845,33 @@ starts with.
 Spawning is deliberately not reachable from the agent protocol. An agent
 cannot start another agent — only the user, through configuration.
 
+### One reader for every piped stream
+
+Three threads read a child process's output: an agent's stdout and stderr in
+`agent.rs`, and a language server's stderr in `lsp.rs`. All three go through
+`agent::read_lines`, and sharing it is not tidiness — it is the fix for a
+defect all three had.
+
+`BufRead::lines()` yields `Err(InvalidData)` for a chunk that is not valid
+UTF-8, so **one** stray byte ended a reader thread for good. On an agent's
+stdout that cost the exit event too, because the `child.wait()` after the loop
+blocks on a process that is still alive: the panel sat on "Working…" until Nox
+was restarted. On a language server's stderr it was quieter and worse — stdout
+is byte-framed by `MessageStream` and was never affected, so the editor kept
+working while the one channel that explains a misbehaving server went silent.
+A cp1252 console needs a single accented character to produce either.
+
+`read_lines` reads raw bytes and delegates UTF-8 reassembly to
+`pty::Utf8Stream`, which already holds back a character a read boundary cut in
+half and substitutes for bytes that can never become valid. What it adds is
+the line splitting, and the CRLF strip that `BufRead::lines()` gave for free.
+
+Its callback returns `ControlFlow`, and the two answers are not symmetric.
+Agent stdout returns `Break` when an emit fails, because a failed emit means
+the window is gone and there is nowhere to put another line. Both stderr
+readers return `Continue` throughout: a pipe nobody empties eventually blocks
+the process filling it, so a dead window is not a reason to stop draining one.
+
 ### The terminal is a pty, and that is not a detail
 
 `agent.rs` already supervises child processes, so a terminal looks like it
