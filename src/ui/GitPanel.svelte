@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { join } from '@core/path';
-  import type { FileEntry } from '@core/git-status';
+  import { GIT_STATUS_LABEL, type FileEntry } from '@core/git-status';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
   import PanelEmpty from './PanelEmpty.svelte';
@@ -69,24 +69,6 @@
   const NO_TOPLEVEL = 'Cannot locate this file: the repository root could not be determined';
   const DELETED = 'Deleted — nothing to open';
   const CONFLICTED = 'Resolve the conflict before staging';
-
-  /**
-   * The porcelain letter is a term of art, and it was the row's only encoding
-   * besides its colour — so someone who does not already know git, or cannot
-   * separate the amber M from the green A, was told nothing. Spelling it out
-   * gives both the tooltip and the accessible name a word instead of an
-   * initial. `R` covers copies too: `core/git-status.ts` folds porcelain's C
-   * into it deliberately, which is what frees C to mean *conflicted* here —
-   * U was not available, because in this vocabulary U is untracked.
-   */
-  const STATUS_LABEL: Record<FileEntry['status'], string> = {
-    M: 'Modified',
-    A: 'Added',
-    D: 'Deleted',
-    R: 'Renamed or copied',
-    U: 'Untracked',
-    C: 'Conflicted',
-  };
 
   /**
    * A conflict is not an edit, and the panel used to say it was — a `u`
@@ -157,8 +139,8 @@
   <div class="row" title={entry.origPath ? `${entry.origPath} → ${entry.path}` : entry.path}>
     <span
       class="letter letter-{entry.status}"
-      title={STATUS_LABEL[entry.status]}
-      aria-label={STATUS_LABEL[entry.status]}
+      title={GIT_STATUS_LABEL[entry.status]}
+      aria-label={GIT_STATUS_LABEL[entry.status]}
       role="img">{entry.status}</span
     >
     {#if unresolved || deleted}

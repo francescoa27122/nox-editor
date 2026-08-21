@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { serverStatusLabel, serverStatusTitle } from '../src/ui/lsp-status';
+import {
+  activeLanguageStatus,
+  serverStatusLabel,
+  serverStatusTitle,
+} from '../src/ui/lsp-status';
 import type { SessionStatusRow } from '../src/services/lsp';
 
 /**
@@ -14,6 +18,7 @@ function row(overrides: Partial<SessionStatusRow> = {}): SessionStatusRow {
   return {
     name: 'typescript-language-server',
     status: 'running',
+    languages: ['typescript', 'javascript'],
     error: null,
     stderr: [],
     ...overrides,
@@ -53,6 +58,138 @@ describe('the label', () => {
     const label = serverStatusLabel([row(), row({ name: 'rust-analyzer', status: 'failed' })]);
 
     expect(label).toBe('rust-analyzer — failed');
+  });
+});
+
+/**
+ * The defect these guard: `serverStatusLabel` took only `sessions` and picked
+ * the worst of them, so with `typescript-language-server` running, opening
+ * `main.py` left the bar reading `typescript-language-server` — a global
+ * aggregate wearing a per-file label, in the one place a user reads as
+ * "language intelligence for this file". `SessionStatusRow` could not have
+ * done better: it carried no `languages` field, so the active buffer's
+ * language was not an input and could not be.
+ */
+describe('the label, once it knows which file is in front of you', () => {
+  it('never names a server that has nothing to do with this file', () => {
+    const label = serverStatusLabel([row({ languages: ['typescript'] })], 'python');
+
+    expect(label).not.toContain('typescript-language-server');
+    // A count names nobody, and keeps the tooltip — which lists every
+    // server's real state — reachable.
+    expect(label).toBe('1 server');
+  });
+
+  it('names the server that does serve this file', () => {
+    const label = serverStatusLabel(
+      [row({ name: 'pylsp', languages: ['python'] }), row()],
+      'python',
+    );
+
+    expect(label).toBe('pylsp');
+  });
+
+  it('says "starting" only about the server this file is waiting on', () => {
+    const label = serverStatusLabel(
+      [row({ name: 'pylsp', languages: ['python'], status: 'initializing' }), row()],
+      'python',
+    );
+
+    expect(label).toBe('pylsp — starting');
+  });
+
+  it('does not report another language\'s cold start as this file\'s', () => {
+    const label = serverStatusLabel(
+      [row({ name: 'pylsp', languages: ['python'] }), row({ status: 'initializing' })],
+      'python',
+    );
+
+    expect(label).toBe('pylsp');
+  });
+
+  it('still reports a failure anywhere, because a dead server is an alarm', () => {
+    // Not a claim about this file: the word "failed" makes that unambiguous,
+    // and a partial failure nobody is told about is the one people notice
+    // weeks later, wondering why one language never had diagnostics.
+    const label = serverStatusLabel(
+      [row({ name: 'pylsp', languages: ['python'] }), row({ status: 'failed' })],
+      'python',
+    );
+
+    expect(label).toBe('typescript-language-server — failed');
+  });
+
+  it('is unchanged when no file is open', () => {
+    expect(serverStatusLabel([row()], null)).toBe('typescript-language-server');
+  });
+});
+
+/**
+ * The per-file item, which is where "no server for this language" is said out
+ * loud. It reuses the control that already carried exactly this class of fact
+ * — `"Python — no grammar installed"` — rather than inventing a second one.
+ */
+describe('the language item', () => {
+  const python = { id: 'python', name: 'Python', hasGrammar: true };
+
+  it('is a plain name when a server is serving it', () => {
+    const status = activeLanguageStatus(python, [row({ name: 'pylsp', languages: ['python'] })]);
+
+    expect(status.title).toBe('Python — pylsp');
+    expect(status.tone).toBe('normal');
+    expect(status.commandId).toBeNull();
+  });
+
+  it('says out loud that this language has no server, and where to fix it', () => {
+    const status = activeLanguageStatus(python, [row()]);
+
+    expect(status.title).toBe('Python — no language server configured');
+    expect(status.tone).toBe('muted');
+    // Not a dead end: the Language commands grey out on this file, which
+    // reads as "not applicable" rather than "not configured".
+    expect(status.commandId).toBe('lsp.configure');
+  });
+
+  it('says nothing about servers to someone who has configured none', () => {
+    // The same stance the label takes: do not advertise a subsystem to
+    // someone who is not using it.
+    expect(activeLanguageStatus(python, [])).toEqual({
+      title: 'Python',
+      tone: 'normal',
+      commandId: null,
+    });
+  });
+
+  it('keeps the grammar sentence it already had', () => {
+    const status = activeLanguageStatus({ id: 'nix', name: 'Nix', hasGrammar: false }, []);
+
+    expect(status.title).toBe('Nix — no grammar installed');
+    expect(status.tone).toBe('muted');
+  });
+
+  it('says both when neither a grammar nor a server is installed', () => {
+    const status = activeLanguageStatus({ id: 'nix', name: 'Nix', hasGrammar: false }, [row()]);
+
+    expect(status.title).toBe('Nix — no grammar installed, no language server configured');
+    expect(status.commandId).toBe('lsp.configure');
+  });
+
+  it('warns rather than mutes when this language\'s own server died', () => {
+    const status = activeLanguageStatus(python, [
+      row({ name: 'pylsp', languages: ['python'], status: 'failed' }),
+    ]);
+
+    expect(status.title).toBe('Python — pylsp failed');
+    expect(status.tone).toBe('warn');
+  });
+
+  it('says its server is still starting', () => {
+    const status = activeLanguageStatus(python, [
+      row({ name: 'pylsp', languages: ['python'], status: 'initializing' }),
+    ]);
+
+    expect(status.title).toBe('Python — pylsp starting');
+    expect(status.tone).toBe('normal');
   });
 });
 
@@ -102,6 +239,7 @@ describe('announcing a failure', () => {
   const failed = (name: string, error: string | null): SessionStatusRow => ({
     name,
     status: 'failed',
+    languages: ['typescript'],
     error,
     stderr: [],
   });

@@ -1,19 +1,21 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
-  import { canMoveInto, dirname } from '@core/path';
+  import { GIT_STATUS_LABEL, type GitStatusLetter } from '@core/git-status';
+  import { canMoveInto, dirname, join } from '@core/path';
   import { rootLabel } from '@services/filetree';
   import { useApp } from './context';
   import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
   import Icon from './Icon.svelte';
 
   const app = useApp();
-  const { workspace, files, ui, commands } = app;
+  const { workspace, files, ui, commands, git } = app;
 
   const nodes = files.nodes;
   const rootError = files.rootError;
   const rootPath = workspace.rootPath;
   const buffers = workspace.buffers;
   const activeId = workspace.activeId;
+  const gitStatus = git.status;
   const focusRequest = ui.focusExplorerRequest;
   const selection = ui.explorer;
   const selectedPaths = selection.paths;
@@ -80,7 +82,67 @@
   });
 
   const activeBuffer = $derived($buffers.find((b) => b.id === $activeId) ?? null);
-  const openPaths = $derived(new Set($buffers.map((b) => b.path).filter(Boolean) as string[]));
+
+  /**
+   * Which paths are open, and which of those are unsaved — in one pass.
+   *
+   * `workspace.buffers` is republished by `#sync` on every document-changing
+   * transaction (`workspace.ts#applyTransaction`), so anything derived from
+   * it here runs per keystroke and is squarely rule 5 territory. The walk is
+   * over open *tabs* — tens of entries — and never over document text:
+   * `isDirty` is a plain field on the snapshot, computed inside `#sync`
+   * whether or not this panel reads it, and bounded there by
+   * `EXACT_DIRTY_LIMIT` for exactly the 10 MB-file reason. Folding the dirty
+   * set into the walk that already built `openPaths` is what keeps the added
+   * per-keystroke cost at zero extra iterations rather than one more.
+   */
+  const bufferPaths = $derived.by(() => {
+    const open = new Set<string>();
+    const dirty = new Set<string>();
+    for (const buffer of $buffers) {
+      if (!buffer.path) continue;
+      open.add(buffer.path);
+      if (buffer.isDirty) dirty.add(buffer.path);
+    }
+    return { open, dirty };
+  });
+
+  /**
+   * Git's answer per row, keyed by absolute path.
+   *
+   * Deliberately *not* a `FlatNode` field. This is view state layered onto
+   * the model: `FileTreeService` would have to re-run `#flatten` and publish
+   * a new `nodes` array on every status refresh, and that identity change is
+   * what the windowing slice, the `#each` key and every selection derived
+   * all hang off — the whole tree would churn for a fact none of them
+   * depend on. Guarded by `tests/explorer-decorations.test.ts`.
+   *
+   * Recomputes only when `git.status` is republished: a save, an external
+   * change, a `.git` write the meta watcher catches, a root change, or the
+   * explicit refresh command (`services/git.ts`). Typing republishes
+   * `workspace.buffers`, never this, so the map is off the typing path
+   * entirely — its cost is one pass over the changed-file list per git
+   * refresh.
+   *
+   * Status paths are toplevel-relative, and the toplevel is *not* the
+   * workspace root whenever a workspace is opened below it. Joining onto the
+   * wrong one silently decorates a same-named file elsewhere in the tree,
+   * which is the bug `GitStatus.toplevel` exists to prevent — so no
+   * toplevel means no decorations rather than a guess.
+   */
+  const gitLetters = $derived.by(() => {
+    const letters = new Map<string, GitStatusLetter>();
+    const status = $gitStatus;
+    const toplevel = status?.toplevel;
+    if (!status || !toplevel) return letters;
+    // Unstaged is written second so the worktree fact wins: the tree shows
+    // the file on disk, not the index. A conflict only ever arrives
+    // unstaged, so the letter that must never be overwritten cannot be.
+    for (const entry of status.staged) letters.set(join(toplevel, entry.path), entry.status);
+    for (const entry of status.unstaged) letters.set(join(toplevel, entry.path), entry.status);
+    return letters;
+  });
+
   /** Visible rows in display order — the axis every range operation works on. */
   const orderedPaths = $derived($nodes.map((node) => node.path));
   const leadIndex = $derived($nodes.findIndex((n) => n.path === $lead));
@@ -574,7 +636,7 @@
           class="row"
           class:selected={$selectedPaths.has(node.path)}
           class:lead={node.path === $lead}
-          class:open={openPaths.has(node.path)}
+          class:open={bufferPaths.open.has(node.path)}
           class:current={activeBuffer?.path === node.path}
           class:menu-target={menu?.path === node.path}
           class:drop-into={drag?.valid && drag.over === (node.isDirectory ? node.path : null)}
@@ -614,6 +676,49 @@
             <Icon name={node.isDirectory ? 'folder' : 'file'} size={14} />
           </span>
           <span class="name">{node.name}</span>
+          <!--
+            The two questions the tree could not answer: what is unsaved, and
+            what git holds against this file. Both ride the right edge, the
+            same slot the folder notes below use, and the two can never
+            collide — `loading`, `empty` and `error` are only ever set on an
+            expanded *directory*, while a buffer path and a porcelain record
+            both name a file. That is also why the whole group is skipped for
+            directories rather than merely coming up empty: a folder has no
+            answer to either question until roll-up exists.
+
+            Neither marker can change the row height, which the windowing
+            arithmetic depends on: `.row` is a fixed `--nox-tree-row-h` with
+            `flex: none`, and both children are smaller than it. The dot is
+            `Icon`'s filled 8 px glyph — DESIGN.md §8 keeps `dot` filled for
+            exactly this size — and matches the tab strip's dirty dot, since
+            one fact should not have two appearances.
+          -->
+          {#if !node.isDirectory}
+            {@const letter = gitLetters.get(node.path)}
+            {@const dirty = bufferPaths.dirty.has(node.path)}
+            {#if letter || dirty}
+              <span class="marks">
+                {#if letter}
+                  <span
+                    class="git-letter git-{letter}"
+                    role="img"
+                    title={GIT_STATUS_LABEL[letter]}
+                    aria-label={GIT_STATUS_LABEL[letter]}>{letter}</span
+                  >
+                {/if}
+                {#if dirty}
+                  <span
+                    class="dirty-dot"
+                    role="img"
+                    title="Unsaved changes"
+                    aria-label="Unsaved changes"
+                  >
+                    <Icon name="dot" size={8} />
+                  </span>
+                {/if}
+              </span>
+            {/if}
+          {/if}
           <!--
             An unreadable directory used to expand into the same silent
             nothing as an empty one, because `#load`'s catch stores an empty
@@ -860,6 +965,57 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* One wrapper so exactly one child claims the free space. Two siblings
+     each carrying `margin-left: auto` would split it between them and leave
+     both markers stranded in the middle of the row. */
+  .marks {
+    display: flex;
+    align-items: center;
+    gap: var(--nox-sp-2);
+    margin-left: auto;
+    padding-left: var(--nox-sp-2);
+    flex: none;
+  }
+
+  /* The Git panel's tokens, because the two views describe the same fact and
+     must not drift: added and untracked green, modified amber, deleted and
+     conflicted red, a rename informational blue. */
+  .git-letter {
+    flex: none;
+    width: 1.5ch;
+    text-align: center;
+    font-family: var(--nox-font-mono);
+    font-size: var(--nox-fs-2xs);
+    line-height: 1;
+  }
+
+  .git-A,
+  .git-U {
+    color: var(--nox-success);
+  }
+
+  .git-M {
+    color: var(--nox-warning);
+  }
+
+  .git-D,
+  .git-C {
+    color: var(--nox-danger);
+  }
+
+  .git-R {
+    color: var(--nox-info);
+  }
+
+  /* `--nox-modified` is the tab strip's dirty dot; the same fact in two
+     places should not be two colours. */
+  .dirty-dot {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--nox-modified);
   }
 
   /* Pushed to the right edge like the spinner it replaces, and quiet enough

@@ -31,12 +31,13 @@ afterEach(() => {
   teardown = null;
 });
 
-async function mountBar(platform: MemoryPlatform = new MemoryPlatform()) {
+async function mountBar(platform: MemoryPlatform = new MemoryPlatform(), open = '/w/a.ts') {
   platform.mkdirp('/w');
   platform.seedFile('/w/a.ts', 'const a = 1;\n');
+  platform.seedFile('/w/main.py', 'x = 1\n');
   const app = new NoxApp(platform);
   await app.workspace.openFolder('/w');
-  await app.workspace.open('/w/a.ts');
+  await app.workspace.open(open);
 
   const mounted = mountComponent(StatusBar, { app });
   teardown = mounted.unmount;
@@ -113,6 +114,62 @@ describe('the status bar', () => {
     // Whatever `formatChord` renders here — ⌘⇧M on macOS, Ctrl+Shift+M
     // elsewhere — the bar must not have spelled it itself.
     expect(problems!.title).toBe(`Show Problems (${app.keymap.displayFor('problems.focus')})`);
+  });
+
+  /**
+   * The defect this guards: the bar's LSP readout was a global aggregate with
+   * a per-file label, so `typescript-language-server` sat on screen beside an
+   * open `main.py` while nothing anywhere said Python had no server, that Go
+   * to Definition would do nothing here, or what to install.
+   */
+  it('names no server for a file no server serves, and says so where the user looks', async () => {
+    const { app, container } = await mountBar(new MemoryPlatform(), '/w/main.py');
+    app.lsp.sessions.set([
+      {
+        name: 'typescript-language-server',
+        status: 'running',
+        languages: ['typescript', 'javascript'],
+        error: null,
+        stderr: [],
+      },
+    ]);
+    flush();
+
+    const named = [...container.querySelectorAll('button, span')].find((element) =>
+      (element.textContent ?? '').includes('typescript-language-server'),
+    );
+    expect(named, 'the bar named a server that has nothing to do with this file').toBeUndefined();
+
+    // Said out loud in the control that already carried "no grammar
+    // installed", rather than left to the Language commands greying out —
+    // which reads as "not applicable" rather than "not configured".
+    const language = item(container, 'Python');
+    expect(language.title).toBe('Python — no language server configured');
+
+    click(language);
+    flush();
+    expect(app.commands.lastExecuted.get()).toBe('lsp.configure');
+  });
+
+  it('still names the server when it really is the one serving this file', async () => {
+    const { app, container } = await mountBar();
+    app.lsp.sessions.set([
+      {
+        name: 'typescript-language-server',
+        status: 'running',
+        languages: ['typescript', 'javascript'],
+        error: null,
+        stderr: [],
+      },
+    ]);
+    flush();
+
+    expect(item(container, 'typescript-language-server')).toBeDefined();
+    // And the language item stays a readout, because there is nothing to fix.
+    const language = [...container.querySelectorAll('span')].find(
+      (element) => element.textContent?.trim() === 'TypeScript',
+    );
+    expect(language?.getAttribute('title')).toBe('TypeScript — typescript-language-server');
   });
 
   it('offers no terminal on a platform without one', async () => {

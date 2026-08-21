@@ -6,6 +6,26 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **You can see what you granted an agent, and take it back.** Everything
+  "Allow for this session" remembered was previously invisible, and the only
+  way to revoke it was to undo the agent's work — so in practice grants stood
+  until Nox restarted. The Agents panel now lists them, and revoking leaves
+  every line the agent wrote in place.
+- **The file tree shows what changed and what is unsaved.** Modified,
+  untracked and conflicted files carry their git letter; a file with unsaved
+  edits carries a dot. Previously you had to open the Git panel to learn
+  anything had changed and look at the tab strip to learn what was unsaved.
+
+### Fixed
+
+- **The status bar no longer names a language server that has nothing to do
+  with your file.** Opening `main.py` with a TypeScript server running left it
+  reading `typescript-language-server`. It now names the server for the file
+  in front of you, and says `Python — no language server configured` when
+  there is none, with somewhere to click.
+
 ## [0.6.0] — 2026-08-21
 
 A pass over how discoverable Nox is, driven by an audit of the packaged app
