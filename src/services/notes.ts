@@ -77,40 +77,24 @@ export class NotesService {
   #bodyFiles = new Map<string, string>();
   /** Notes whose body has moved since the last successful write. */
   #dirtyBodies = new Set<string>();
-  /**
-   * Note id → the revision its body was at when the *current or most recent*
-   * write for it started. A keystroke bumps this. Comparing it again after
-   * the write's await settles is what tells a persist whether the text it
-   * just wrote is still the text on the note — if not, another keystroke
-   * landed mid-write and the id must stay dirty rather than being cleared
-   * for words that were never persisted.
-   */
-  #bodyRevision = new Map<string, number>();
-  #nextRevision = 1;
   /** Body files of deleted notes, waiting to be blanked. */
   #released = new Set<string>();
   /**
-   * Revision of index-only state — a title, a selection, list membership —
-   * as of the most recent `rename()`/`select()`/`remove()`. `#dirtyBodies`
-   * and `#released` are both body-shaped and cannot see these changes;
-   * without this, the persist loop's exit check would think nothing was
-   * pending and break with an index-only change dropped mid-write, the same
-   * lost-edit shape closed for bodies but reopened here.
+   * Whether index-only state — a title, a selection, list membership — has
+   * moved since the current index write started. Set by `rename()`,
+   * `select()` and `remove()`, which carry no dirty body to ride on;
+   * `#dirtyBodies` and `#released` are both body-shaped and cannot see them.
    *
-   * This has to be a counter, not a boolean, for the same reason
-   * `#bodyRevision` is one: a boolean compared against itself cannot tell
-   * "unchanged since the write started" apart from "changed, and the new
-   * value also happens to be true" — which is exactly what happens when a
-   * second rename lands on an index write that was *already* dirty when it
-   * started (a rename pending, then `flush()`, then another rename mid-write),
-   * or when a rename lands during the second of several passes in the same
-   * call. Comparing the exact revision number captured at write-start against
-   * the exact number after the write settles catches both; a boolean only
-   * catches the first.
+   * A boolean, where this was once a pair of revision counters. The counters
+   * existed because the flag was cleared *after* the write, which made
+   * "unchanged since the write started" indistinguishable from "changed, and
+   * the new value happens to match" — a second rename landing on an index
+   * write that was already dirty when it started. Clearing before the write
+   * removes the ambiguity at the source: the flag is false while the write is
+   * in flight, so anything that sets it is unambiguously newer than the data
+   * being written.
    */
-  #indexRevision = 0;
-  /** Revision of the index last successfully written to disk. */
-  #savedIndexRevision = 0;
+  #indexDirty = false;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Every call to `#persist` chains onto this rather than running
@@ -184,14 +168,13 @@ export class NotesService {
 
     this.#bodyFiles.set(id, `note-${ordinal}.txt`);
     this.#dirtyBodies.add(id);
-    this.#bodyRevision.set(id, this.#nextRevision++);
-    // Deliberately does not bump #indexRevision. A new note is also an
+    // Deliberately does not set #indexDirty. A new note is also an
     // index-only change (its id and title need a row), but it rides on the
     // dirty body instead: that keeps at least one full pass alive, and the
     // index write within that pass is unconditional and reads notes fresh,
     // so the new row is captured regardless. If the index write ever stops
     // being unconditional, this stops being true and create() needs its own
-    // #indexRevision bump.
+    // #indexDirty set.
     // Numbered rather than a shared "Untitled note": the list shows only
     // titles, so three fresh notes with the same default would be three
     // indistinguishable rows. Matches `WorkspaceService.newUntitled`, which
@@ -217,7 +200,6 @@ export class NotesService {
       list.map((note) => (note.id === id ? { ...note, body, updatedAt: now } : note)),
     );
     this.#dirtyBodies.add(id);
-    this.#bodyRevision.set(id, this.#nextRevision++);
     this.#schedule();
   }
 
@@ -234,14 +216,14 @@ export class NotesService {
       list.map((note) => (note.id === id ? { ...note, title: trimmed, updatedAt: now } : note)),
     );
     // Only the index changed; no body is dirty, but the index itself now is.
-    this.#indexRevision = this.#nextRevision++;
+    this.#indexDirty = true;
     this.#schedule();
   }
 
   select(id: string | null): void {
     if (this.selectedId.get() === id) return;
     this.selectedId.set(id);
-    this.#indexRevision = this.#nextRevision++;
+    this.#indexDirty = true;
     // Not needed for correctness — `setBody` already updated the signal the
     // pending write reads. It is a checkpoint: a switch bounds how long a
     // body lives only in memory, where a kill rather than a clean quit would
@@ -260,7 +242,6 @@ export class NotesService {
     if (file) this.#released.add(file);
     this.#bodyFiles.delete(id);
     this.#dirtyBodies.delete(id);
-    this.#bodyRevision.delete(id);
 
     const remaining = list.filter((note) => note.id !== id);
     this.notes.set(remaining);
@@ -270,7 +251,7 @@ export class NotesService {
     if (this.selectedId.get() === id) {
       this.selectedId.set(remaining[index]?.id ?? remaining[index - 1]?.id ?? null);
     }
-    this.#indexRevision = this.#nextRevision++;
+    this.#indexDirty = true;
     this.#schedule();
   }
 
@@ -316,9 +297,9 @@ export class NotesService {
     const failed = new Set<string>();
     const failedReleases = new Set<string>();
     // Whether the index write has already failed once this call — mirrors
-    // `failed` / `failedReleases`: an index write that keeps failing must not
-    // spin the outer loop forever just because `#indexRevision` stays ahead
-    // of `#savedIndexRevision`.
+    // `failed` / `failedReleases`: a failing index write re-arms
+    // `#indexDirty` on its way out, so without this the outer loop would
+    // pick it straight back up and never terminate.
     let indexFailed = false;
 
     // One full pass — bodies, then released files, then the index — and the
@@ -337,10 +318,10 @@ export class NotesService {
       //
       // Drained rather than one pass over a fixed list: a second note's
       // edit can land while an earlier note's write — ahead of it in this
-      // same loop — is still in flight, and that second note's dirty flag
-      // must not be judged against text this call captured before the edit
-      // happened. Looking the note up fresh, immediately before its own
-      // write, is what keeps the text written and the revision compared in
+      // same loop — is still in flight, and writing that note from text this
+      // call captured before the edit happened would persist the stale
+      // version. Looking the note up fresh, immediately before its own
+      // write, is what keeps the text written and the flag cleared for it in
       // the same tick.
       for (;;) {
         const id = [...this.#dirtyBodies].find((candidate) => !failed.has(candidate));
@@ -353,19 +334,19 @@ export class NotesService {
           continue;
         }
 
-        const revisionAtStart = this.#bodyRevision.get(id);
+        // Cleared *before* the write, not after. A setBody landing while the
+        // write is in flight puts the id straight back, which is the whole
+        // mechanism — there is no revision to capture and compare.
+        this.#dirtyBodies.delete(id);
         const problem = await this.#write(file, note.body);
         if (problem) {
-          // Stay dirty on failure so the next save tries again: until this
-          // write lands, the text exists nowhere but memory.
+          // Until this write lands the text exists nowhere but memory, so
+          // re-arm. `failed` is what stops this same call retrying it
+          // forever now that a failure re-dirties the id.
+          this.#dirtyBodies.add(id);
           failure ??= problem;
           failed.add(id);
-          continue;
         }
-        // A setBody landing while the write above was in flight bumped the
-        // revision again — the text just written is already stale, so the
-        // id stays dirty and comes right back around this same loop.
-        if (this.#bodyRevision.get(id) === revisionAtStart) this.#dirtyBodies.delete(id);
       }
 
       for (const file of [...this.#released]) {
@@ -404,25 +385,26 @@ export class NotesService {
       };
       // `rename`/`select`/`remove` change only this index-shaped state — a
       // title, a selection, list membership — with no body write to carry
-      // it, so `#dirtyBodies` and `#released` cannot see them. This is
-      // literally the `#bodyRevision` technique, not just an analogy to it:
-      // snapshot the revision before the write starts, and only treat the
-      // write as current if the revision is still that exact value after it
-      // settles. `data` was built from state as of a moment ago, so any
-      // index-only change during the await — including a second rename
-      // landing on an index write that was already dirty when it started —
-      // bumps the revision to a new, distinguishable number and forces
-      // another pass.
-      const revisionAtStart = this.#indexRevision;
+      // it, so `#dirtyBodies` and `#released` cannot see them. `#indexDirty`
+      // is what catches them, and it is cleared immediately below rather
+      // than after the write: `data` is the state as of this moment, so a
+      // change arriving during the await is unambiguously newer than what
+      // is being written and forces another pass. Clearing afterwards is
+      // what used to need a revision counter, because then a second rename
+      // landing on an already-dirty write could not be told apart from no
+      // rename at all.
+      // Cleared before the write for the same reason as a body: a rename or
+      // a selection landing during the await sets it again by itself. `data`
+      // is built just above and nothing awaits in between, so the flag going
+      // false cannot race the snapshot it corresponds to.
+      this.#indexDirty = false;
       const problem = await this.#write(INDEX_FILE, JSON.stringify(data));
       if (problem) {
+        // Until an index write lands, a rename or a selection change exists
+        // nowhere but memory, so re-arm.
+        this.#indexDirty = true;
         failure ??= problem;
         indexFailed = true;
-        // Leave `#savedIndexRevision` behind `revisionAtStart`: until an
-        // index write lands, a rename or a selection change exists nowhere
-        // but memory.
-      } else if (this.#indexRevision === revisionAtStart) {
-        this.#savedIndexRevision = revisionAtStart;
       }
 
       // Anything that moved on while the released loop or the index write
@@ -430,7 +412,7 @@ export class NotesService {
       // either settled or has already failed once this call.
       const stillDirty = [...this.#dirtyBodies].some((id) => !failed.has(id));
       const stillReleased = [...this.#released].some((file) => !failedReleases.has(file));
-      const stillIndexDirty = this.#indexRevision !== this.#savedIndexRevision && !indexFailed;
+      const stillIndexDirty = this.#indexDirty && !indexFailed;
       if (!stillDirty && !stillReleased && !stillIndexDirty) break;
     }
 

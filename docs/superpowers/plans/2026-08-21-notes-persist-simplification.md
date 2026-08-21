@@ -68,7 +68,11 @@ git checkout -b refactor/notes-persist-simplification
 
 **Interfaces:**
 - Consumes: the baseline count from Task 1
-- Produces: `#bodyRevision` and `#nextRevision` deleted; `#dirtyBodies: Set<string>` remains the only body-dirty state
+- Produces: `#bodyRevision` deleted; `#dirtyBodies: Set<string>` remains the only body-dirty state
+
+> **Corrected during execution.** This originally also deleted `#nextRevision`,
+> which does not compile: its last user is `#indexRevision`, removed in Task 3.
+> `#nextRevision` goes there instead, so that each task is independently green.
 
 - [ ] **Step 1: Confirm the behaviour being preserved, before touching anything**
 
@@ -200,9 +204,16 @@ with:
     this.#indexDirty = true;
 ```
 
-- [ ] **Step 3: Delete the `create()` invariant comment**
+- [ ] **Step 3: Update the `create()` invariant comment — do not delete it**
 
-`create()` carries a comment beginning "Deliberately does not bump #indexRevision" explaining why it must never do so. The hazard it warns about is gone — a mid-write `create()` now re-arms nothing it should not. Delete the comment and leave `create()`'s code as it is.
+`create()` carries a comment beginning "Deliberately does not bump #indexRevision" explaining why it must never do so. Change `#indexRevision` to `#indexDirty` in it and leave `create()`'s code alone.
+
+> **Corrected during execution.** This step originally said to delete the
+> comment, on the grounds that the hazard was gone. It is not gone. A new note
+> still rides on its dirty body to keep a pass alive, and the index write in
+> that pass is still unconditional and still reads notes fresh — so `create()`
+> still must not set the flag itself, and the comment still records a live
+> constraint. Deleting it would have dropped the invariant, not retired it.
 
 - [ ] **Step 4: Invert the index write**
 
