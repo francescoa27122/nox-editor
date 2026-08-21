@@ -393,11 +393,11 @@ describe('a real child process', () => {
    * `StdioTransport` are all exercised against genuine pipes — everything
    * except the Rust plumbing itself, which cannot run without a window.
    */
-  async function spawnNode(script: string): Promise<AgentProcess> {
+  async function spawnNode(script: string, ...args: string[]): Promise<AgentProcess> {
     const { spawn } = await import('node:child_process');
     const { createInterface } = await import('node:readline');
 
-    const child = spawn(process.execPath, [script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [script, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
 
     const lines: ((line: string) => void)[] = [];
     const stderr: ((line: string) => void)[] = [];
@@ -470,6 +470,122 @@ describe('a real child process', () => {
 
     transport.dispose();
   }, 20_000);
+
+  it('runs the orchestrator example with nothing wired in', async () => {
+    const { runtime, review, workspace, a } = await harness();
+    workspace.setActive(a);
+
+    const transport = new StdioTransport(
+      () => spawnNode('examples/orchestrator-agent.mjs'),
+      'orchestrator',
+      { handshakeTimeoutMs: 15_000 },
+    );
+
+    const session = runtime.start(transport, 'Do something');
+    await settle(session);
+
+    // Reaching the end with nothing to propose is an outcome, not a failure —
+    // the adapter still has to say so rather than dying quietly.
+    expect(session.status.get()).toBe('done');
+    expect(session.summary.get()).toBe(
+      'No orchestrator is wired in, so there was nothing to propose.',
+    );
+    expect(review.staged.get()).toBe(null);
+
+    transport.dispose();
+  }, 20_000);
+
+  it('stages what an orchestrator returns, against the revision it declared', async () => {
+    const { runtime, review, workspace, a } = await harness();
+    workspace.setActive(a);
+
+    const transport = new StdioTransport(
+      () => spawnNode('examples/orchestrator-agent.mjs', 'tests/fixtures/orchestrator-append-marker.mjs'),
+      'orchestrator',
+      { handshakeTimeoutMs: 15_000 },
+    );
+
+    const session = runtime.start(transport, 'Mark the file');
+    await settle(session);
+
+    expect(session.status.get()).toBe('awaiting-review');
+    expect(session.summary.get()).toBe('Proposed one line at the end of a.txt.');
+
+    // The edit came back through the proposal rather than through the
+    // filesystem, which is the only reason `apply` has anything to do.
+    expect(review.staged.get()?.description).toBe('Append a marker to a.txt');
+    expect(review.apply().ok).toBe(true);
+    expect(workspace.textOf(a)).toBe('one\ntwo\nthree\n// seen\n');
+
+    transport.dispose();
+  }, 20_000);
+
+  it('never lets an orchestrator reach a side effect', async () => {
+    const { runtime, review, workspace, a } = await harness();
+    workspace.setActive(a);
+
+    const transport = new StdioTransport(
+      () => spawnNode('examples/orchestrator-agent.mjs', 'tests/fixtures/orchestrator-oversteps.mjs'),
+      'orchestrator',
+      { handshakeTimeoutMs: 15_000 },
+    );
+
+    const session = runtime.start(transport, 'Save everything');
+    await settle(session);
+
+    const actions = session.actions.get();
+    // Not "refused" — never asked. The adapter stopped it, so no `command`
+    // action exists to be granted or denied, and nothing was staged either.
+    expect(actions.some((action) => action.kind === 'command')).toBe(false);
+    expect(review.staged.get()).toBe(null);
+    expect(
+      actions.some(
+        (action) => action.kind === 'note' && /may not call command\.execute/.test(action.text),
+      ),
+    ).toBe(true);
+
+    transport.dispose();
+  }, 20_000);
+
+  it('remembers one session in the next one', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+
+    const dir = mkdtempSync(join(tmpdir(), 'nox-agent-memory-'));
+    const store = join(dir, 'memory.jsonl');
+
+    async function runOnce(instruction: string) {
+      const { runtime, workspace, a } = await harness();
+      workspace.setActive(a);
+      const transport = new StdioTransport(
+        () => spawnNode('examples/orchestrator-agent.mjs', 'examples/orchestrators/memory.mjs', store),
+        'orchestrator',
+        { handshakeTimeoutMs: 15_000 },
+      );
+      const session = runtime.start(transport, instruction);
+      await settle(session);
+      transport.dispose();
+      return session;
+    }
+
+    try {
+      const first = await runOnce('Rename the parser module');
+      expect(first.summary.get()).toBe(
+        'Nothing remembered about this workspace yet, and no orchestrator is wired in.',
+      );
+
+      // A separate process, a separate Nox session, a separate workspace
+      // object — the only thing carried across is the file the agent kept on
+      // its own side of the pipe.
+      const second = await runOnce('Rename the parser module again');
+      expect(second.summary.get()).toBe(
+        'Recalled 1 earlier session(s); no orchestrator is wired in, so nothing was proposed.',
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it('surfaces a crashing agent as a failed session', async () => {
     const { runtime } = await harness();
