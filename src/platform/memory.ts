@@ -2,6 +2,8 @@ import { basename, contains, dirname, join, normalize, relative } from '@core/pa
 import { buildSearchRegex, findMatches, globToRegExp, matchesGlobs } from '@core/search-match';
 import {
   PlatformError,
+  type AgentProcess,
+  type AgentProcessSpec,
   type DirEntry,
   type FileStat,
   type JsonLinesSpec,
@@ -703,8 +705,12 @@ export class MemoryPlatform implements Platform {
    * silent no-op would let a session sit waiting for a handshake that could
    * never arrive. Callers check `capabilities.agentProcesses` first, and the
    * transport tests supply their own fake process rather than going near this.
+   *
+   * The spec is declared, and the return type is the interface's rather than
+   * `never`, so a subclass can override this with a process of its own — how
+   * `tests/agent-spawn-cwd.test.ts` observes what the app asked to spawn.
    */
-  async spawnAgent(): Promise<never> {
+  async spawnAgent(_spec: AgentProcessSpec): Promise<AgentProcess> {
     throw new PlatformError(
       'this build cannot start external processes',
       'unsupported',
@@ -766,9 +772,9 @@ export class MemoryPlatform implements Platform {
    * No network in memory. Rejecting is the honest answer: a stream that
    * never emits looks like a slow model rather than a missing one.
    *
-   * Parameters are declared (unlike `spawnAgent`'s bare `()`) so a caller
-   * holding the concrete `MemoryPlatform` type — as the platform-seam tests
-   * do — can still call this with the real argument list under `strict`.
+   * Parameters are declared, as `spawnAgent`'s are, so a caller holding the
+   * concrete `MemoryPlatform` type — as the platform-seam tests do — can
+   * still call this with the real argument list under `strict`.
    */
   async streamJsonLines(
     _spec: JsonLinesSpec,

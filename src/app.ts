@@ -771,10 +771,18 @@ export class NoxApp {
     // rename that lands mid-typing is reflected rather than papered over.
     let label = chosen.label;
     if (isProcessAgent(chosen)) {
+      // Where the child runs. The record wins; otherwise the open project,
+      // which is what `AgentProcessSpec.cwd` documents and what
+      // `TerminalService` and `LspService` already do. Left out entirely when
+      // no folder is open: the alternative is inheriting whatever directory
+      // Nox was launched from — `/` from Finder — against which the relative
+      // `./my-agent.js` in `AGENTS_TEMPLATE` resolves somewhere different
+      // every launch.
+      const cwd = chosen.cwd ?? this.workspace.rootPath.get();
       const spec = {
         command: chosen.command,
         ...(chosen.args ? { args: chosen.args } : {}),
-        ...(chosen.cwd ? { cwd: chosen.cwd } : {}),
+        ...(cwd ? { cwd } : {}),
       };
       transport = StdioTransport.spawnedBy(this.platform, spec, { label: chosen.label });
     } else {
