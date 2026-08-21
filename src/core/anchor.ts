@@ -18,8 +18,12 @@
  * drift, and a far-away identical line — `}` appears hundreds of times in a
  * real file — is more likely a coincidence than the anchor's subject. Past
  * the window the remembered line is the safer answer.
+ *
+ * Exported so a caller can slice just this much text out of a large document
+ * instead of stringifying all of it — the search is bounded, so the read
+ * should be too.
  */
-const WINDOW = 500;
+export const ANCHOR_WINDOW = 500;
 
 /**
  * The 1-based line to jump to for an anchor remembered at `line` holding
@@ -46,7 +50,7 @@ export function resolveAnchorLine(text: string, line: number, snippet: string): 
   // Outward from the remembered line rather than a scan from the top, so the
   // *nearest* match wins. With a non-unique snippet, scanning from the top
   // lands on the first one in the document, which is rarely the right one.
-  for (let distance = 1; distance <= WINDOW; distance++) {
+  for (let distance = 1; distance <= ANCHOR_WINDOW; distance++) {
     const before = start - distance;
     const after = start + distance;
     // Before ahead of after on a tie: an anchor that drifted is usually

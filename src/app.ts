@@ -19,6 +19,7 @@ import { locationRows, referenceTargets, type LocationList } from '@core/lsp-ref
 import { prepareRenameSeed, renameEdits } from '@core/lsp-rename';
 import { changesOf, textEditsOf } from '@core/lsp-text-edit';
 import { offsetAt, positionAt } from '@core/lsp-position';
+import { ANCHOR_WINDOW, resolveAnchorLine } from '@core/anchor';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
 import { pathToUri, uriToPath } from '@core/uri';
@@ -66,7 +67,7 @@ import { ContextService } from '@services/context';
 import { FileTreeService } from '@services/filetree';
 import { KeymapService, platformIsMac } from '@services/keymap';
 import { JobRunner } from '@services/jobs';
-import { NotesService } from '@services/notes';
+import { NotesService, type NoteAnchor } from '@services/notes';
 import { NotificationService } from '@services/notifications';
 import { ReviewService, type ReviewScope } from '@services/review';
 import {
@@ -1662,6 +1663,69 @@ export class NoxApp {
   }
 
   /** Open every selected file. Directories in the selection are skipped. */
+  /**
+   * What a note made from the current selection would contain, or null when
+   * there is nothing to make one from.
+   *
+   * Split out so `enabled` and `run` cannot disagree about what counts as a
+   * usable selection — a command that is offered and then does nothing is
+   * worse than one that is greyed.
+   */
+  #selectionSeed(): { title: string; body: string; anchor: NoteAnchor } | null {
+    const view = this.view.get();
+    const path = this.workspace.activeSnapshot()?.path;
+    if (!view || !path) return null;
+
+    const main = view.state.selection.main;
+    if (main.empty) return null;
+
+    const text = view.state.sliceDoc(main.from, main.to);
+    const line = view.state.doc.lineAt(main.from).number;
+    return {
+      title: `${basename(path)}:${line}`,
+      // Fenced so the code reads as code, and a trailing blank line so the
+      // caret has somewhere to start writing that is not inside the quote.
+      body: `\`\`\`\n${text}\n\`\`\`\n\n`,
+      // The first line only: `core/anchor.ts` matches a line at a time, so a
+      // multi-line snippet could never match one.
+      anchor: { path, line, snippet: (text.split('\n')[0] ?? '').trim() },
+    };
+  }
+
+  #newNoteFromSelection(): void {
+    const seed = this.#selectionSeed();
+    if (!seed) return;
+
+    const id = this.notes.create();
+    this.notes.rename(id, seed.title);
+    this.notes.setBody(id, seed.body);
+    this.notes.setAnchor(id, seed.anchor);
+    this.ui.focusNotes();
+  }
+
+  /**
+   * Open the code a note points at.
+   *
+   * The line is re-found rather than trusted: edits above an anchor move its
+   * subject, and a stale line number points at the wrong code while still
+   * looking right. Only a window around the remembered line is read, so this
+   * costs the same on a 10 MB file as on a small one.
+   */
+  async openNoteAnchor(anchor: NoteAnchor): Promise<void> {
+    await this.openPaths([anchor.path]);
+
+    const view = this.view.get();
+    if (!view) return;
+
+    const doc = view.state.doc;
+    const first = Math.max(1, anchor.line - ANCHOR_WINDOW);
+    const last = Math.min(doc.lines, anchor.line + ANCHOR_WINDOW);
+    const text = doc.sliceString(doc.line(first).from, doc.line(last).to);
+
+    const withinWindow = resolveAnchorLine(text, anchor.line - first + 1, anchor.snippet);
+    this.goToLine(withinWindow + first - 1, 1);
+  }
+
   async openPaths(paths: readonly string[]): Promise<void> {
     for (const path of paths) {
       try {
@@ -3147,6 +3211,16 @@ export class NoxApp {
         keyHint: 'Mod+Shift+N',
         keywords: ['note', 'scratch', 'memo'],
         run: () => this.ui.focusNotes(),
+      },
+      {
+        id: 'notes.newFromSelection',
+        title: 'New Note from Selection',
+        category: 'Notes',
+        keywords: ['note', 'selection', 'quote', 'anchor', 'annotate'],
+        // No `capabilities`: reads the active buffer and writes a note.
+        // Neither touches the workspace filesystem.
+        enabled: () => this.#selectionSeed() !== null,
+        run: () => this.#newNoteFromSelection(),
       },
       {
         id: 'notes.open',

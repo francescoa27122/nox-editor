@@ -929,6 +929,30 @@ index naming a body that is not there. That case is handled by loading the
 note with an empty body rather than dropping it — the title is still worth
 keeping.
 
+A note can point at code, and `NotesService` still cannot reach a workspace.
+An anchor is three primitives — a path, a line, the anchored text — stored
+verbatim and interpreted by nothing in that module. `app.ts` resolves them,
+because it already holds both services and already splits this way for
+`notes.rename`. This is what lets the feature exist without giving the service
+the workspace its isolation depends on not having.
+
+Two failure modes are designed for rather than ignored. **Drift:** a line
+number alone rots, because inserting above an anchor makes it point at the
+wrong code *silently* — worse than pointing nowhere, since it still looks
+right. `core/anchor.ts` re-finds the snippet outward from the remembered line,
+so a non-unique one (`}` appears hundreds of times) lands on the nearest copy;
+past a 500-line window the remembered line is the safer answer, and only that
+window is read, so the cost is the same on a 10 MB file. **The wrong folder:**
+an anchor into a folder that is not open greys its chip and the note is
+otherwise untouched. Dropping the anchor there would let opening a folder
+mutate notes, which is precisely what the service's isolation forbids — doing
+it in the panel instead would not make it acceptable.
+
+Anchors are one-way. A note knows its code; the code does not know its notes.
+A gutter marker means pushing note state into the editor and the tree, and
+buys less than it costs until anchors have been used enough to know whether
+they are kept up to date.
+
 Finding a note is a **view** concern, and stays one. `load()` reads every body
 into the signal, so the whole corpus is already in memory and filtering is a
 pure function over it — `core/note-search.ts`, which is where the matching and
