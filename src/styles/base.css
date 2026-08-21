@@ -123,13 +123,19 @@ button {
   border: 0;
 }
 
+/* A shortcut hint is the mechanism by which a keyboard-first editor teaches
+   itself, so it is body text that must be *read*, not decoration: 4.5:1, not
+   the 3:1 that --nox-text-faint now clears. --nox-text-muted measures 5.17:1
+   over bg-panel and 4.91:1 over bg-raised (the palette and the menus, the
+   worst case). It still sits a step below the label it annotates, which is
+   the hierarchy this rule wanted in the first place. */
 .nox-kbd {
   display: inline-flex;
   align-items: center;
   gap: 1px;
   font-family: var(--nox-font-ui);
   font-size: var(--nox-fs-xs);
-  color: var(--nox-text-faint);
+  color: var(--nox-text-muted);
   letter-spacing: 0.04em;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;

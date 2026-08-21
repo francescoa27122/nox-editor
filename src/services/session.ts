@@ -1,3 +1,4 @@
+import { Signal } from '@core/signal';
 import type { Platform } from '@platform/types';
 import type { SelectionRecord, WorkspaceService } from './workspace';
 
@@ -71,6 +72,18 @@ interface SessionData {
 }
 
 export class SessionService {
+  /**
+   * Why the last session write failed, or null.
+   *
+   * The most load-bearing of the three write-failure signals. README.md:80-86
+   * headlines "It does not lose your work. Ever.", and that promise rests
+   * entirely on this file plus the per-buffer backups: with the write failing
+   * there is no prompt at quit to fall back on, because there deliberately
+   * isn't one (see `NoxApp.#listenForClose`). Saying nothing here means the
+   * user finds out by relaunching into an empty window.
+   */
+  readonly error = new Signal<string | null>(null);
+
   #platform: Platform;
   #workspace: WorkspaceService;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -207,7 +220,8 @@ export class SessionService {
     const layout = this.#workspace.groups.get();
     /** Backups still in use after this save; anything else gets released. */
     const live = new Set<string>();
-    const writes: Promise<void>[] = [];
+    /** Each resolves to the reason its write failed, or null. */
+    const writes: Promise<string | null>[] = [];
 
     const groups: GroupRecord[] = layout.map((group) => {
       const tabs: TabRecord[] = [];
@@ -269,15 +283,20 @@ export class SessionService {
 
     // The backups go first: a session naming a backup that does not exist yet
     // would lose that work if the process died between the two writes.
-    await Promise.all(writes);
-    await this.#writeConfig(SESSION_FILE, JSON.stringify(data));
+    const backupProblems = await Promise.all(writes);
+    const indexProblem = await this.#writeConfig(SESSION_FILE, JSON.stringify(data));
+
+    // The index write is named first when both failed: without it the layout
+    // is gone whatever the backups hold. One reason, not a list — the causes
+    // are almost always the same disk or the same permission.
+    this.error.set(indexProblem ?? backupProblems.find((problem) => problem !== null) ?? null);
   }
 
   /**
    * Ensure this buffer's unsaved text is on disk, and return the file holding
    * it. Writes nothing when the buffer has not moved since the last save.
    */
-  #backUp(bufferId: string, live: Set<string>, writes: Promise<void>[]): string {
+  #backUp(bufferId: string, live: Set<string>, writes: Promise<string | null>[]): string {
     const revision = this.#workspace.revisionOf(bufferId);
     const existing = this.#backups.get(bufferId);
 
@@ -289,15 +308,32 @@ export class SessionService {
     if (existing?.revision === revision) return name;
 
     this.#backups.set(bufferId, { name, revision });
-    writes.push(this.#writeConfig(name, this.#workspace.textOf(bufferId) ?? ''));
+    writes.push(
+      this.#writeConfig(name, this.#workspace.textOf(bufferId) ?? '').then((problem) => {
+        // Keep the file name, drop the revision, when the write did not land.
+        // The record above is set optimistically, before the write resolves,
+        // so leaving it claiming this revision would make the check three
+        // lines up skip this buffer on every later save — its unsaved text
+        // would never be written again, which is the one thing a backup
+        // exists to prevent. -1 matches no revision a buffer can hold.
+        if (problem && this.#backups.get(bufferId)?.revision === revision) {
+          this.#backups.set(bufferId, { name, revision: -1 });
+        }
+        return problem;
+      }),
+    );
     return name;
   }
 
-  async #writeConfig(name: string, contents: string): Promise<void> {
+  /** Resolves to the reason the write failed, or null when it landed. */
+  async #writeConfig(name: string, contents: string): Promise<string | null> {
     try {
       await this.#platform.writeConfigFile(name, contents);
-    } catch {
-      /* A session we cannot persist is not worth an error dialog. */
+      return null;
+    } catch (error) {
+      // Never thrown: a session that cannot be persisted must not interrupt
+      // the editing it is describing. `save()` publishes it on `error`.
+      return error instanceof Error ? error.message : String(error);
     }
   }
 

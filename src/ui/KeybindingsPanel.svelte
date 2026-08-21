@@ -1,6 +1,6 @@
 <script lang="ts">
   import { fuzzyMatch } from '@core/fuzzy';
-  import { formatChord, type Chord } from '@services/keymap';
+  import { formatChord, normalizeChord, type Chord } from '@services/keymap';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
 
@@ -11,6 +11,13 @@
    * to a command that has none is half of what "change the keys" means. The
    * rows are derived from the live keymap on every version bump; the panel
    * keeps no copy of the map, so what is listed is what will run.
+   *
+   * The exception is a command whose key belongs to CodeMirror rather than to
+   * the application keymap. Those carry a `keyHint`, and they are listed once,
+   * in the read-only Editor section, with the chord they actually have. The
+   * cost is that the panel offers no way to *add* an application binding to
+   * one; the alternative was the row that said "Edit: Undo — Unassigned" over
+   * ⌘Z, and a panel that lies is worth less than one that is incomplete.
    *
    * Recording goes through `keymap.beginCapture`, not a listener here: the
    * service listens on the window's capture phase, so a claimed chord is
@@ -73,6 +80,11 @@
     const bound = new Set(rows.map((row) => row.commandId));
     for (const command of commands.all()) {
       if (bound.has(command.id)) continue;
+      // A `keyHint` means CodeMirror owns the key, not the application keymap
+      // — the Editor section below lists those with the chord they actually
+      // have. Leaving them here as well is what produced the panel's worst
+      // lie: "Edit: Undo — Unassigned" on one row and ⌘Z on another.
+      if (command.keyHint) continue;
       rows.push({
         key: `${command.id}::`,
         commandId: command.id,
@@ -107,47 +119,31 @@
     return keymap.conflictsFor(recorded, editing.commandId);
   });
 
-  // Editor-owned keys never appear in the app keymap, so list them explicitly
-  // rather than pretending CodeMirror's bindings do not exist.
-  const EDITOR_KEYS: { chord: string; title: string }[] = [
-    { chord: 'Mod+Z', title: 'Edit: Undo' },
-    { chord: 'Mod+Shift+Z', title: 'Edit: Redo' },
-    { chord: 'Mod+X', title: 'Edit: Cut' },
-    { chord: 'Mod+C', title: 'Edit: Copy' },
-    { chord: 'Mod+V', title: 'Edit: Paste' },
-    { chord: 'Mod+A', title: 'Edit: Select All' },
-    { chord: 'Mod+D', title: 'Edit: Add Selection to Next Match' },
-    { chord: 'Mod+Alt+Up', title: 'Edit: Add Cursor Above' },
-    { chord: 'Mod+Alt+Down', title: 'Edit: Add Cursor Below' },
-    { chord: 'Mod+/', title: 'Edit: Toggle Line Comment' },
-    { chord: 'Alt+Up', title: 'Edit: Move Line Up' },
-    { chord: 'Alt+Down', title: 'Edit: Move Line Down' },
-    { chord: 'Shift+Alt+Down', title: 'Edit: Duplicate Line' },
-    { chord: 'Mod+Shift+K', title: 'Edit: Delete Line' },
-    { chord: 'Mod+]', title: 'Edit: Indent' },
-    { chord: 'Mod+[', title: 'Edit: Outdent' },
-    { chord: 'Tab', title: 'Edit: Indent (or insert tab)' },
-    { chord: 'Escape', title: 'Edit: Collapse Multiple Cursors' },
-  ];
-
+  /**
+   * The keys CodeMirror owns, taken from the command table.
+   *
+   * This was a hand-written array, and it had already drifted: it said "Edit:
+   * Indent" and "Edit: Outdent" for commands titled "Indent Line" and
+   * "Outdent Line". `Command.keyHint` is the one place that records "the
+   * binding is the editor's, and this is the chord" — the palette has always
+   * read it, this panel never did, and the two therefore disagreed. Deriving
+   * the section from it means the panel cannot drift again, and a command
+   * that gains an application binding leaves this list on its own.
+   */
   const editorRows = $derived.by(() => {
+    void $keymapVersion;
     const query = filter.trim();
-    const mapped = EDITOR_KEYS.map((k) => ({ ...k, chord: formatChord(normalize(k.chord)) }));
+    const mapped = commands
+      .all()
+      .filter((command) => command.keyHint && !keymap.displayFor(command.id))
+      .map((command) => ({
+        title: titleOf(command.id),
+        chord: formatChord(normalizeChord(command.keyHint!)),
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title));
     if (query.length === 0) return mapped;
     return mapped.filter((row) => fuzzyMatch(query, row.title) ?? fuzzyMatch(query, row.chord));
   });
-
-  function normalize(chord: string): string {
-    // formatChord expects canonical lowercase tokens.
-    return chord
-      .split('+')
-      .map((p) => (p.toLowerCase() === 'mod' ? modToken() : p.toLowerCase()))
-      .join('+');
-  }
-
-  function modToken(): string {
-    return formatChord('meta+a').startsWith('⌘') ? 'meta' : 'ctrl';
-  }
 
   // --- Recording -----------------------------------------------------------
 
@@ -308,7 +304,12 @@
       {#each editorRows as row (row.title)}
         <div class="row readonly">
           <span class="title">{row.title}</span>
-          <span class="chord"><kbd>{row.chord}</kbd></span>
+          <span class="chord">
+            <!-- The badge repeats the section note per row, because with a
+                 filter applied this may be the only row on screen. -->
+            <span class="owner">editor</span>
+            <kbd>{row.chord}</kbd>
+          </span>
         </div>
       {/each}
     {/if}
@@ -465,6 +466,7 @@
     flex: none;
     display: flex;
     align-items: center;
+    gap: var(--nox-sp-3);
   }
 
   .chord.unassigned {
@@ -533,6 +535,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Quiet enough to read as a label on the chord, not as a second value. */
+  .owner {
+    font-size: var(--nox-fs-2xs);
+    text-transform: uppercase;
+    letter-spacing: var(--nox-tracking-wide);
+    color: var(--nox-text-faint);
   }
 
   .row.readonly .chord kbd {

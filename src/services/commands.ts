@@ -73,12 +73,24 @@ export type CommandGuard = (
   resource: string | undefined,
 ) => Promise<void>;
 
+/**
+ * Told about a command whose `run` threw, before the error is rethrown.
+ *
+ * One sink for every command there will ever be, for the same reason there is
+ * one guard: almost every call site dispatches with `void`, and the release
+ * webview has no devtools, so a `console.error` is a failure that produced no
+ * user-visible artefact at all. Notifying is the app's job, not the registry's
+ * — hence a function, like {@link CommandGuard}.
+ */
+export type CommandFailureSink = (command: Command, error: unknown) => void;
+
 /** How many recently-executed command ids `recentCommands` keeps. */
 const RECENT_LIMIT = 8;
 
 export class CommandRegistry {
   #commands = new Map<string, Command>();
   #guard: CommandGuard | null = null;
+  #failureSink: CommandFailureSink | null = null;
   /** Bumped whenever the set of commands changes, so the palette can react. */
   readonly version = new Signal(0);
   readonly lastExecuted = new Signal<string | null>(null);
@@ -142,6 +154,11 @@ export class CommandRegistry {
     this.#guard = guard;
   }
 
+  /** Install the failure reporter. One sink, one call site. */
+  setFailureSink(sink: CommandFailureSink | null): void {
+    this.#failureSink = sink;
+  }
+
   /**
    * Execute a command. Returns false when the command is unknown or disabled,
    * which the keymap uses to decide whether to swallow the key event.
@@ -179,6 +196,9 @@ export class CommandRegistry {
     } catch (error) {
       // Rethrow shape is normalised by callers; never let it kill the app.
       console.error(`[nox] command "${id}" failed:`, error);
+      // Before the rethrow, so the sink runs even for the ~40 call sites that
+      // discard the promise with `void` and would otherwise report nothing.
+      this.#failureSink?.(command, error);
       throw error;
     }
     return true;

@@ -87,6 +87,58 @@ describe('CommandRegistry', () => {
     expect(registry.version.get()).toBeGreaterThan(before);
   });
 
+  /**
+   * The failure sink. What it guards: a command whose `run` throws producing
+   * nothing a user can see. Nearly every call site dispatches with `void`, and
+   * the release webview has no devtools, so the `console.error` beside this
+   * was the entire report — Save As failing was indistinguishable from Save As
+   * succeeding.
+   */
+  describe('the failure sink', () => {
+    it('is told which command failed, and with what', async () => {
+      const registry = new CommandRegistry();
+      const boom = new Error('no space left on device');
+      registry.register({
+        id: 'file.saveAs',
+        title: 'Save As…',
+        run: () => {
+          throw boom;
+        },
+      });
+
+      const seen: { id: string; error: unknown }[] = [];
+      registry.setFailureSink((command, error) => seen.push({ id: command.id, error }));
+
+      await expect(registry.execute('file.saveAs')).rejects.toThrow(boom);
+      expect(seen).toEqual([{ id: 'file.saveAs', error: boom }]);
+    });
+
+    it('is told about a rejected promise, not only a synchronous throw', async () => {
+      const registry = new CommandRegistry();
+      registry.register({
+        id: 'file.open',
+        title: 'Open File…',
+        run: () => Promise.reject(new Error('dialog unavailable')),
+      });
+
+      const seen: string[] = [];
+      registry.setFailureSink((command) => seen.push(command.id));
+
+      await expect(registry.execute('file.open')).rejects.toThrow('dialog unavailable');
+      expect(seen).toEqual(['file.open']);
+    });
+
+    it('stays quiet for a command that succeeds', async () => {
+      const registry = new CommandRegistry();
+      registry.register({ id: 'fine', title: 'Fine', run: () => {} });
+      const sink = vi.fn();
+      registry.setFailureSink(sink);
+
+      await registry.execute('fine');
+      expect(sink).not.toHaveBeenCalled();
+    });
+  });
+
   // The recent-command list feeding the palette's MRU float. Session-scoped
   // by design (not persisted), so these pin only the in-memory contract.
   describe('recentCommands', () => {

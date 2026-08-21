@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
 import KeybindingsPanel from '../src/ui/KeybindingsPanel.svelte';
+import { formatChord, normalizeChord } from '../src/services/keymap';
 import { flush, mountComponent, type Mounted } from './support/component';
 
 /**
@@ -86,13 +87,55 @@ describe('the keybinding editor', () => {
     expect(rowFor(container, 'view.toggleExplorer').querySelector('.chord')!.textContent).toContain('B');
   });
 
-  it('a command with no key gets a row that says so', () => {
+  it('a command with no key at all gets a row that says so', () => {
     const { container, app } = setup();
-    const unbound = app.commands.all().find((c) => !app.keymap.displayFor(c.id));
+    // Changed 2026-08-20: this used to take the first command with no keymap
+    // binding, which locked in the bug it was meant to guard — a command with
+    // a `keyHint` has a key, CodeMirror's, and rendering "Unassigned" over it
+    // is exactly what made ⌘Z show as unbound. The subject now has neither a
+    // binding nor a hint, which is the only case "Unassigned" is true of.
+    const unbound = app.commands
+      .all()
+      .find((c) => !app.keymap.displayFor(c.id) && !c.keyHint);
     expect(unbound).toBeDefined();
 
     const row = rowFor(container, unbound!.id);
     expect(row.querySelector('.chord')!.textContent).toContain('Unassigned');
+  });
+
+  it('a command whose key belongs to the editor shows that key, once', () => {
+    const { container, app } = setup();
+    const undo = app.commands.get('edit.undo')!;
+    expect(undo.keyHint).toBeDefined();
+    expect(app.keymap.displayFor('edit.undo')).toBeUndefined();
+
+    // Not in the editable Application list: it has no application binding to
+    // edit, and the row that claimed it did said "Unassigned" over ⌘Z.
+    expect(container.querySelector('.row[data-command="edit.undo"]')).toBeNull();
+
+    const editorRows = [...container.querySelectorAll('.row.readonly')];
+    const row = editorRows.find((r) => r.querySelector('.title')?.textContent === 'Edit: Undo');
+    expect(row, editorRows.map((r) => r.querySelector('.title')?.textContent).join(' | ')).toBeDefined();
+    expect(row!.querySelector('.chord')!.textContent).toContain(
+      formatChord(normalizeChord(undo.keyHint!)),
+    );
+    // One row, one answer: the panel used to list this action twice.
+    expect(
+      editorRows.filter((r) => r.querySelector('.title')?.textContent === 'Edit: Undo').length,
+    ).toBe(1);
+  });
+
+  it('the Editor section takes its titles from the command table, so it cannot drift', () => {
+    const { container, app } = setup();
+    // The hand-written array this replaced said "Edit: Indent"; the command
+    // is titled "Indent Line". Deriving the row from the command is what
+    // makes that mismatch impossible rather than merely fixed.
+    const indent = app.commands.get('edit.indent')!;
+    const titles = [...container.querySelectorAll('.row.readonly .title')].map(
+      (t) => t.textContent,
+    );
+    expect(titles).toContain(`${indent.category}: ${indent.title}`);
+    expect(titles).not.toContain('Edit: Indent');
   });
 
   it('recording a chord and accepting rebinds the live keymap', () => {

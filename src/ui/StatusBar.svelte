@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { runnableAgents } from '@services/agent/config';
   import { hasGrammar } from '@editor/languages';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
@@ -6,9 +7,42 @@
   import { problemTotals } from './problems';
 
   const app = useApp();
-  const { workspace, config, commands, files, jobs, review, ui, lsp } = app;
+  const { workspace, config, commands, files, jobs, review, ui, lsp, keymap, agentConfig, agents } =
+    app;
   const diagnostics = lsp.diagnostics;
   const problemCounts = $derived(problemTotals($diagnostics));
+
+  /**
+   * "Label (⌘⇧M)", or just the label when the command has no binding.
+   *
+   * Never an interpolated chord with literal parentheses around it:
+   * `keybindings.json` supports `remove` rules, so every default binding in
+   * the app is reachably unbound, and the hardcoded fallback produced tooltips
+   * reading "Show Problems ()". The chord itself must come from the keymap for
+   * the same reason this bar cannot spell ⌘⇧M itself — Nox ships Windows and
+   * Linux builds, where `formatChord` renders `Ctrl+Shift+M`.
+   */
+  function withChord(label: string, commandId: string): string {
+    const chord = keymap.displayFor(commandId);
+    return chord ? `${label} (${chord})` : label;
+  }
+
+  const terminalOpen = ui.terminalOpen;
+  const agentsOpen = ui.agentsOpen;
+  const configuredAgents = agentConfig.agents;
+  const providers = agents.providers;
+
+  /**
+   * The same availability test `Sidebar.svelte` and `NoxApp.#runnableAgents`
+   * use, so the entry point and the thing it opens cannot disagree about
+   * whether agents exist on this platform at all.
+   */
+  const agentsAvailable = $derived(
+    runnableAgents($configuredAgents, {
+      canSpawn: app.platform.capabilities.agentProcesses,
+      providerIds: new Set($providers.map((provider) => provider.id)),
+    }).length > 0,
+  );
 
   const buffers = workspace.buffers;
   const activeId = workspace.activeId;
@@ -60,6 +94,41 @@
 
 <footer class="nox-statusbar">
   <div class="side">
+    <!--
+      The terminal and the agent runtime are two of the headline desktop
+      capabilities and neither had a single visible entry point: the terminal
+      shipped a Hide button and no way back in, and `agents.show` was reachable
+      only from the palette by someone who already knew its name.
+
+      Both sit first on the bar rather than after the transient items, so the
+      one always-present control on this side does not slide sideways every
+      time a job starts or a file goes dirty.
+    -->
+    {#if app.platform.capabilities.terminals}
+      <button
+        class="item"
+        class:on={$terminalOpen}
+        aria-pressed={$terminalOpen}
+        title={withChord($terminalOpen ? 'Hide Terminal' : 'Show Terminal', 'terminal.toggle')}
+        onclick={() => void commands.execute('terminal.toggle')}
+      >
+        Terminal
+      </button>
+    {/if}
+
+    {#if agentsAvailable}
+      <!-- Not `aria-pressed`: `agents.show` opens the panel and never closes
+           it, so this is a link to a place, not a switch. -->
+      <button
+        class="item"
+        class:on={$agentsOpen}
+        title={withChord('Show Agents', 'agents.show')}
+        onclick={() => void commands.execute('agents.show')}
+      >
+        Agents
+      </button>
+    {/if}
+
     {#if pendingReview}
       <button
         class="item job"
@@ -74,7 +143,7 @@
     {#if problemCounts.errors + problemCounts.warnings > 0}
       <button
         class="item problems"
-        title="Show Problems (⌘⇧M)"
+        title={withChord('Show Problems', 'problems.focus')}
         onclick={() => void commands.execute('problems.focus')}
       >
         {#if problemCounts.errors > 0}
@@ -113,7 +182,18 @@
     {/if}
 
     {#if dirtyCount > 0}
-      <button class="item" onclick={() => void commands.execute('file.saveAll')}>
+      <!-- Reads like the readouts beside it but writes every dirty buffer to
+           disk, so the label has to say so before the click, not after: the
+           natural reading of "3 unsaved" is "show me which". -->
+      <button
+        class="item"
+        title={withChord(
+          `Save all ${dirtyCount} unsaved ${dirtyCount === 1 ? 'file' : 'files'}`,
+          'file.saveAll',
+        )}
+        aria-label={`Save all ${dirtyCount} unsaved ${dirtyCount === 1 ? 'file' : 'files'}`}
+        onclick={() => void commands.execute('file.saveAll')}
+      >
         <Icon name="dot" size={9} />
         {dirtyCount} unsaved
       </button>
@@ -158,10 +238,14 @@
         Ln {$cursor.line} : Col {$cursor.column}
       </button>
 
+      <!-- Through the registry, not `config.set`: a click here is the same
+           action as the palette's "Toggle Tabs and Spaces", and a chrome
+           control that bypasses the command table is an action nobody can
+           find, bind or teach the palette's recency ranking about. -->
       <button
         class="item"
-        title="Toggle spaces and tabs"
-        onclick={() => config.set('editor.insertSpaces', !$settings['editor.insertSpaces'])}
+        title={withChord('Toggle Tabs and Spaces', 'view.toggleIndentType')}
+        onclick={() => void commands.execute('view.toggleIndentType')}
       >
         {indentLabel}
       </button>
@@ -177,8 +261,11 @@
 
       <button
         class="item"
-        title="Switch line endings — what a save writes at each line's end"
-        onclick={() => workspace.setEol(active.id, active.eol === '\r\n' ? '\n' : '\r\n')}
+        title={withChord(
+          "Switch line endings — what a save writes at each line's end",
+          'file.toggleLineEnding',
+        )}
+        onclick={() => void commands.execute('file.toggleLineEnding')}
       >
         {active.eol === '\r\n' ? 'CRLF' : 'LF'}
       </button>
@@ -196,8 +283,9 @@
 
     <button
       class="item"
-      title="Toggle word wrap"
+      title={withChord('Toggle word wrap', 'view.toggleWordWrap')}
       class:on={$settings['editor.wordWrap']}
+      aria-pressed={$settings['editor.wordWrap']}
       onclick={() => void commands.execute('view.toggleWordWrap')}
     >
       Wrap
@@ -287,8 +375,13 @@
     color: var(--nox-danger);
   }
 
+  /* A ground as well as a colour. Accent-on-default was the only signal that
+     wrap was on, which WCAG 1.4.1 rules out and which nothing distinguishes
+     for anyone who cannot tell the two greys apart. Matches the sidebar
+     rail's `.rail-button.active`, which already did this correctly. */
   .item.on {
     color: var(--nox-accent);
+    background: var(--nox-active);
   }
 
   .item.job {

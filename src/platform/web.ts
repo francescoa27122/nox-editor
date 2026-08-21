@@ -39,6 +39,8 @@ export class WebPlatform extends MemoryPlatform {
     // A browser tab cannot replace itself; the inherited model answers absence.
     selfUpdate: false,
     customWindowControls: false,
+    overlayWindowControls: false,
+    applicationMenu: false,
   };
 
   constructor() {

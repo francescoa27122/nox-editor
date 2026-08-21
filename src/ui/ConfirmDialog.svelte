@@ -9,16 +9,28 @@
 
   let container = $state<HTMLElement | null>(null);
 
-  $effect(() => {
-    // The first choice is the default action and takes focus on open —
-    // unless any choice is destructive, in which case the first *safe*
-    // choice does. Enter must never destroy (or grant a permission) as the
-    // zero-keystroke default: the audit found Delete focused in the delete
-    // confirm and "Allow for this session" focused in the permission prompt.
+  /**
+   * The choice Enter picks and the one painted as primary.
+   *
+   * An explicit `defaultChoiceId` wins over everything. Inference is the
+   * fallback, and it is deliberately no longer trusted on its own: the rule
+   * "the first choice, or the first *safe* one when any is destructive"
+   * assumes the dialog's only destructive answer is the dangerous one, which
+   * the permission prompt broke — there `danger` sat on Deny, the *safe*
+   * answer, so both the focus and the accent landed on the session-wide
+   * grant. Enter must never destroy, and it must never grant a capability.
+   */
+  const defaultIndex = $derived.by(() => {
+    const named = request.choices.findIndex((choice) => choice.id === request.defaultChoiceId);
+    if (named >= 0) return named;
     const dangerous = request.choices.some((choice) => choice.danger);
-    const buttons = [...(container?.querySelectorAll('button') ?? [])];
     const safe = request.choices.findIndex((choice) => !choice.danger);
-    (dangerous && safe >= 0 ? buttons[safe] : buttons[0])?.focus();
+    return dangerous && safe >= 0 ? safe : 0;
+  });
+
+  $effect(() => {
+    const buttons = [...(container?.querySelectorAll('button') ?? [])];
+    buttons[defaultIndex]?.focus();
   });
 
   function onKeydown(event: KeyboardEvent) {
@@ -50,7 +62,7 @@
     {#each request.choices as choice, index (choice.id)}
       <button
         class="button"
-        class:primary={index === 0}
+        class:primary={index === defaultIndex}
         class:danger={choice.danger}
         onclick={() => request.resolve(choice.id)}
       >

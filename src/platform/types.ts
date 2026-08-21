@@ -64,6 +64,31 @@ export interface PlatformCapabilities {
    * overlay title bar and is false; Windows hides decorations and is true.
    */
   customWindowControls: boolean;
+  /**
+   * True when the OS draws its own window buttons *on top of* the title bar,
+   * so the bar has to keep its leading edge clear for them.
+   *
+   * The complement of `customWindowControls` rather than its negation: macOS
+   * is the only target where the buttons are the OS's and the bar underneath
+   * them is ours. Windows hides its decorations and draws its own set (see
+   * `TitleBar.svelte`), and a browser tab has neither.
+   *
+   * A capability rather than a `platform.id === 'tauri' && isMac` test,
+   * because that test is structurally unreachable outside the desktop build —
+   * `MemoryPlatform.id` is `readonly 'web'` — which left the inset with no
+   * coverage at all, and it shipped a permanent 78px gap in fullscreen.
+   */
+  overlayWindowControls: boolean;
+  /**
+   * True when `setApplicationMenu` reaches a real menu bar.
+   *
+   * macOS only today. Windows draws a menu bar *inside* the window frame and
+   * Nox turns decorations off there to draw its own title bar, so a menu would
+   * land underneath it; and the accelerator reasoning the menu rests on
+   * (ARCHITECTURE.md §"The native menu") is WKWebView's, not WebView2's or
+   * WebKitGTK's. Both are recorded as debt rather than guessed at.
+   */
+  applicationMenu: boolean;
 }
 
 /** What to start, for `Platform.spawnAgent`. */
@@ -258,6 +283,63 @@ export interface SaveDialogOptions {
   defaultPath?: string;
   defaultName?: string;
 }
+
+/**
+ * A system menu item the OS supplies and Nox must not reimplement.
+ *
+ * These are the items whose behaviour is the platform's, not the app's:
+ * `about` and `services` open OS panels, `quit`/`hide` are the application
+ * lifecycle, and the clipboard six go through the responder chain — which is
+ * why they cut and paste in whatever has focus, including a search field,
+ * where a command dispatched against the editor would be plainly wrong.
+ */
+export type PredefinedMenuItemId =
+  | 'about'
+  | 'services'
+  | 'hide'
+  | 'hideOthers'
+  | 'showAll'
+  | 'quit'
+  | 'undo'
+  | 'redo'
+  | 'cut'
+  | 'copy'
+  | 'paste'
+  | 'selectAll'
+  | 'minimize'
+  | 'maximize'
+  | 'fullscreen';
+
+/**
+ * One entry in the application menu.
+ *
+ * A description rather than a handle: the tree is built in the renderer, where
+ * the command table and the keymap live, and sent across as data. The
+ * alternative — naming every command again in Rust — would be ~140 titles in
+ * two places with nothing to catch them drifting.
+ */
+export type MenuNode =
+  | {
+      kind: 'command';
+      /** Dispatched through the registry, so enablement and permissions still apply. */
+      commandId: string;
+      label: string;
+      /** Native accelerator, e.g. `Cmd+Shift+P`. Omitted means no chord shown. */
+      accelerator?: string;
+    }
+  | { kind: 'separator' }
+  | { kind: 'predefined'; item: PredefinedMenuItemId; label?: string }
+  | {
+      kind: 'submenu';
+      label: string;
+      /**
+       * A menu the OS attaches its own behaviour to — macOS fills the Window
+       * menu with the open windows and puts Help's search field in Help. A
+       * submenu without a role is an ordinary one, however it is labelled.
+       */
+      role?: 'window' | 'help';
+      items: readonly MenuNode[];
+    };
 
 /** A newer build the release feed offers. */
 export interface UpdateInfo {
@@ -519,6 +601,37 @@ export interface Platform {
    * stale the first time any of those is used.
    */
   onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void>;
+
+  /**
+   * Observe whether the window is fullscreen, calling `handler` once with the
+   * current state and again on every change.
+   *
+   * A subscription for the same reason as `onMaximizeChange`, and one the
+   * title bar cannot do without: macOS slides the traffic lights away in
+   * fullscreen, so a bar that reserved room for them at construction keeps a
+   * dead 78px gap for the whole fullscreen session. There is no way in but the
+   * OS's — the green button, ⌃⌘F, the View menu — so nothing in the app would
+   * otherwise know it happened.
+   */
+  onFullscreenChange(handler: (fullscreen: boolean) => void): Promise<() => void>;
+
+  /**
+   * Replace the application menu with `menu`.
+   *
+   * Inert where `capabilities.applicationMenu` is false — a browser tab has no
+   * menu bar, and that is not a failure worth surfacing, the same reasoning as
+   * the window controls above.
+   */
+  setApplicationMenu(menu: readonly MenuNode[]): Promise<void>;
+
+  /**
+   * Observe menu items being chosen, by the `commandId` they carry.
+   *
+   * Ids rather than callbacks because the menu crosses the IPC boundary as
+   * data; the handler dispatches through the command registry, which is what
+   * keeps a menu click identical to a palette entry or a keypress.
+   */
+  onMenuCommand(handler: (commandId: string) => void): Promise<() => void>;
 
   /**
    * Ask the release feed whether a newer build exists.

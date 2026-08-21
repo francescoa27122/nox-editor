@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { NoxApp } from '../src/app';
+import { MemoryPlatform } from '../src/platform/memory';
 import { CommandRegistry, type Command } from '../src/services/commands';
 import {
   PermissionError,
@@ -136,6 +138,26 @@ describe('prompting', () => {
     // Saying yes to one file is not saying yes to the next one.
     await permissions.check({ principal: agent, capability: 'fs.write', resource: '/w/b.ts' });
 
+    expect(prompter).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * The failure this guards: `buffer.edit` remembering at the capability
+   * level. Adding the filename to the prompt narrows only the *question* — the
+   * grant behind it still covered every buffer, so one "Allow for this
+   * session" answered about a scratch file silently covered the next hour of
+   * editing in every other file the user opened.
+   */
+  it('scopes a remembered buffer grant to that buffer', async () => {
+    const { permissions, prompter } = withPrompter('allow-session');
+    permissions.setPolicy(agent, policy({ 'buffer.edit': 'prompt' }));
+
+    await permissions.check({ principal: agent, capability: 'buffer.edit', resource: '/w/a.ts' });
+    await permissions.check({ principal: agent, capability: 'buffer.edit', resource: '/w/b.ts' });
+    expect(prompter).toHaveBeenCalledTimes(2);
+
+    // The same file is still remembered, or the grant would mean nothing.
+    await permissions.check({ principal: agent, capability: 'buffer.edit', resource: '/w/a.ts' });
     expect(prompter).toHaveBeenCalledTimes(2);
   });
 
@@ -324,5 +346,75 @@ describe('enforcement in the dispatcher', () => {
     expect(error).toBeInstanceOf(PermissionError);
     expect((error as PermissionError).capability).toBe('fs.write');
     expect((error as PermissionError).resource).toBe('/w/a.ts');
+  });
+});
+
+/**
+ * The prompt and the declarations the app itself builds — the half of the
+ * model a `PermissionService` test cannot see.
+ */
+describe('the prompt Nox builds', () => {
+  /** An app with one file open, which is what `resourceFrom` reads. */
+  async function appWithFile(): Promise<NoxApp> {
+    const platform = new MemoryPlatform();
+    platform.mkdirp('/w');
+    platform.seedFile('/w/a.ts', 'const a = 1;\n');
+    const app = new NoxApp(platform);
+    await app.workspace.openFolder('/w');
+    await app.workspace.open('/w/a.ts');
+    return app;
+  }
+
+  /**
+   * The failure this guards, and it is the sharpest one in the app: every
+   * mechanism that decides the dialog's default landed on "Allow for this
+   * session" — because `danger` sat on Deny, the safe answer, and both the
+   * focus rule and the primary accent read `danger` or position. Enter on a
+   * prompt the user had not read granted a session-wide capability.
+   */
+  it('defaults to Deny and marks the session-wide grant destructive', async () => {
+    const app = await appWithFile();
+    const pending = app.permissions.check({
+      principal: agent,
+      capability: 'buffer.edit',
+      resource: '/w/a.ts',
+    });
+
+    const request = app.ui.confirm.get();
+    expect(request).not.toBeNull();
+    expect(request!.defaultChoiceId).toBe('deny');
+    expect(request!.choices.find((choice) => choice.id === 'allow-session')?.danger).toBe(true);
+    expect(request!.choices.find((choice) => choice.id === 'deny')?.danger).toBeUndefined();
+    // The path is in the message, so the question names what it is about.
+    expect(request!.message).toContain('a.ts');
+
+    request!.resolve('deny');
+    expect(await pending).toBe(false);
+  });
+
+  /**
+   * The failure this guards: a new `buffer.edit` command landing without a
+   * decision about its subject, so its prompt reads "Allow edit what is open?"
+   * with no filename and its grant covers every buffer at once.
+   */
+  it('names the file behind every buffer.edit command that has one', async () => {
+    const app = await appWithFile();
+    // These three write across a set of files, so naming the active one would
+    // understate the grant; `file.new` is about a buffer that does not exist
+    // yet. Each is commented at its registration in `app.ts`.
+    const unscoped = new Set(['file.new', 'search.replaceAll', 'review.apply']);
+
+    const editing = app.commands
+      .all()
+      .filter((command) => command.capabilities?.includes('buffer.edit'));
+    expect(editing.length).toBeGreaterThan(10);
+
+    for (const command of editing) {
+      if (unscoped.has(command.id)) {
+        expect(command.resourceFrom).toBeUndefined();
+        continue;
+      }
+      expect(command.resourceFrom?.()).toBe('/w/a.ts');
+    }
   });
 });

@@ -93,7 +93,12 @@ describe('parseGitStatus', () => {
     expect(status.unstaged.some((e) => e.path === 'copied-to.txt')).toBe(false);
   });
 
-  it('puts unmerged u-records in unstaged as M', () => {
+  it('gives an unmerged u-record its own letter, not M', () => {
+    // Guards the distinction itself: this record used to land in unstaged as
+    // M, which made a file full of conflict markers render exactly like one
+    // the user edited — same list, same amber letter, same enabled Stage
+    // button. Asserting C rather than "not M" is deliberate: the panel
+    // keys a section, a colour and a disabled action off this letter.
     const unmerged = [
       '# branch.oid 42772c8fbd3f6b6b5ed5d5358a0a7bdf89c99edb',
       '# branch.head main',
@@ -101,8 +106,24 @@ describe('parseGitStatus', () => {
       '',
     ].join('\0');
     const status = parseGitStatus(unmerged);
-    expect(status.unstaged).toContainEqual({ path: 'conflicted.txt', status: 'M' });
+    expect(status.unstaged).toContainEqual({ path: 'conflicted.txt', status: 'C' });
     expect(status.staged.some((e) => e.path === 'conflicted.txt')).toBe(false);
+  });
+
+  it('keeps C free of porcelain\'s copied meaning — a copy is still R', () => {
+    // The letter collision this fix had to route around: porcelain spends C
+    // on "copied", and untracked already owns U here. Copies are folded into
+    // R *before* a FileEntry exists, which is what leaves C spendable on
+    // conflicted; if that folding were ever dropped, one letter would mean
+    // two things and this fails.
+    const copied = [
+      '# branch.head main',
+      '2 C. N... 100644 100644 100644 286c5f5776916d7d7d5849988ca9d83e722cf9c2 286c5f5776916d7d7d5849988ca9d83e722cf9c2 C100 copied-to.txt',
+      'copied-from.txt',
+      '',
+    ].join('\0');
+    const status = parseGitStatus(copied);
+    expect(status.staged.every((e) => e.status !== 'C')).toBe(true);
   });
 });
 

@@ -68,6 +68,37 @@
   /** Explains, to a title attribute, why a row's actions are switched off. */
   const NO_TOPLEVEL = 'Cannot locate this file: the repository root could not be determined';
   const DELETED = 'Deleted — nothing to open';
+  const CONFLICTED = 'Resolve the conflict before staging';
+
+  /**
+   * The porcelain letter is a term of art, and it was the row's only encoding
+   * besides its colour — so someone who does not already know git, or cannot
+   * separate the amber M from the green A, was told nothing. Spelling it out
+   * gives both the tooltip and the accessible name a word instead of an
+   * initial. `R` covers copies too: `core/git-status.ts` folds porcelain's C
+   * into it deliberately, which is what frees C to mean *conflicted* here —
+   * U was not available, because in this vocabulary U is untracked.
+   */
+  const STATUS_LABEL: Record<FileEntry['status'], string> = {
+    M: 'Modified',
+    A: 'Added',
+    D: 'Deleted',
+    R: 'Renamed or copied',
+    U: 'Untracked',
+    C: 'Conflicted',
+  };
+
+  /**
+   * A conflict is not an edit, and the panel used to say it was — a `u`
+   * record parsed to M, so a file full of `<<<<<<<` markers sat under
+   * Changes wearing the same amber letter as a file the user had typed in,
+   * one hover away from a `+` that would `git add` the markers. Splitting
+   * the list is the whole fix: the state is named, it reads first, and the
+   * one action that would do damage is switched off. Resolving still
+   * happens in the editor — opening the file is the row's job.
+   */
+  const conflicts = $derived($status?.unstaged.filter((e) => e.status === 'C') ?? []);
+  const changes = $derived($status?.unstaged.filter((e) => e.status !== 'C') ?? []);
 
   function absoluteOf(path: string): string | null {
     // Status paths are toplevel-relative — joined onto the repository
@@ -121,9 +152,15 @@
   {@const target = absolute(entry)}
   {@const unresolved = target === null}
   {@const deleted = entry.status === 'D'}
+  {@const conflicted = entry.status === 'C'}
   {@const actionTitle = (label: string) => (unresolved ? NO_TOPLEVEL : label)}
   <div class="row" title={entry.origPath ? `${entry.origPath} → ${entry.path}` : entry.path}>
-    <span class="letter letter-{entry.status}">{entry.status}</span>
+    <span
+      class="letter letter-{entry.status}"
+      title={STATUS_LABEL[entry.status]}
+      aria-label={STATUS_LABEL[entry.status]}
+      role="img">{entry.status}</span
+    >
     {#if unresolved || deleted}
       <span class="open disabled" title={unresolved ? NO_TOPLEVEL : DELETED}>{entry.path}</span>
     {:else}
@@ -141,8 +178,8 @@
       {#if section === 'unstaged'}
         <button
           class="nox-button ghost small"
-          title={actionTitle('Stage')}
-          disabled={unresolved}
+          title={actionTitle(conflicted ? CONFLICTED : 'Stage')}
+          disabled={unresolved || conflicted}
           onclick={() => void git.stage(target ? [target] : [])}
         >
           <Icon name="plus" size={11} />
@@ -178,28 +215,14 @@
       <span class="name">{branchLabel}</span>
     </button>
 
-    <div class="lists nox-scroll">
-      {#if $status.staged.length > 0}
-        <section class="section staged" aria-label="Staged changes">
-          <h3>Staged</h3>
-          {#each $status.staged as entry (entry.path)}
-            {@render row(entry, 'staged')}
-          {/each}
-        </section>
-      {/if}
-
-      <section class="section changes" aria-label="Changes">
-        <h3>Changes</h3>
-        {#if $status.unstaged.length === 0}
-          <p class="quiet">No changes.</p>
-        {:else}
-          {#each $status.unstaged as entry (entry.path)}
-            {@render row(entry, 'unstaged')}
-          {/each}
-        {/if}
-      </section>
-    </div>
-
+    <!--
+      The composer sits directly under the branch line, above the changes it
+      commits. It used to be pinned to the bottom of a panel whose list took
+      all the growth, which on a repository with one changed file left the
+      message box roughly 570px below the row it was about — far enough that
+      the two read as unrelated. Above the list there is no gap to leave,
+      whatever the sidebar's height.
+    -->
     <div class="commit">
       <textarea
         class="nox-input"
@@ -217,6 +240,42 @@
       <button class="nox-button primary small" disabled={!canCommit || committing} onclick={() => void commit()}>
         Commit
       </button>
+    </div>
+
+    <div class="lists nox-scroll">
+      <!--
+        Above Staged deliberately: a conflict is what stands between the user
+        and the commit the rest of this panel is for, so it is the first
+        thing the list says.
+      -->
+      {#if conflicts.length > 0}
+        <section class="section conflicts" aria-label="Conflicts">
+          <h3>Conflicts</h3>
+          {#each conflicts as entry (entry.path)}
+            {@render row(entry, 'unstaged')}
+          {/each}
+        </section>
+      {/if}
+
+      {#if $status.staged.length > 0}
+        <section class="section staged" aria-label="Staged changes">
+          <h3>Staged</h3>
+          {#each $status.staged as entry (entry.path)}
+            {@render row(entry, 'staged')}
+          {/each}
+        </section>
+      {/if}
+
+      <section class="section changes" aria-label="Changes">
+        <h3>Changes</h3>
+        {#if changes.length === 0}
+          <p class="quiet">No changes.</p>
+        {:else}
+          {#each changes as entry (entry.path)}
+            {@render row(entry, 'unstaged')}
+          {/each}
+        {/if}
+      </section>
     </div>
   {/if}
 </div>
@@ -300,15 +359,18 @@
 
   /* opacity, not display:none: a hidden button is unfocusable, which took
      stage/unstage/view out of the tab order entirely (keyboard users could
-     never reach them). Revealed on hover for pointer users and on
-     :focus-within so Tab still finds them — the house pattern, see
-     ExplorerPanel.svelte's .header-actions. */
+     never reach them). They are no longer *invisible* at rest either: at
+     opacity 0 they were in the tab order but unfindable, so the only way to
+     learn a row could be staged from the row itself was to hover it — and a
+     keyboard user Tabbing through hit controls that painted nothing.
+     0.7 of --nox-text-muted measures 3.12:1 against bg-panel, which clears
+     WCAG 1.4.11 for an icon control; hover and focus take it to full. */
   .row .actions {
     display: flex;
     align-items: center;
     gap: var(--nox-sp-1);
     flex: none;
-    opacity: 0;
+    opacity: 0.7;
     transition: opacity var(--nox-dur-base) var(--nox-ease);
   }
 
@@ -337,7 +399,15 @@
     color: var(--nox-warning);
   }
 
-  .letter-D {
+  /* Deleted and conflicted share danger: both are the destructive end of
+     the vocabulary, and they never appear in the same section, so the
+     heading above them is what separates the two reds. */
+  .letter-D,
+  .letter-C {
+    color: var(--nox-danger);
+  }
+
+  .section.conflicts h3 {
     color: var(--nox-danger);
   }
 
@@ -349,8 +419,8 @@
     display: flex;
     flex-direction: column;
     gap: var(--nox-sp-2);
-    padding: var(--nox-sp-3) var(--nox-sp-5) var(--nox-sp-4);
-    border-top: 1px solid var(--nox-border);
+    padding: var(--nox-sp-2) var(--nox-sp-5) var(--nox-sp-4);
+    border-bottom: 1px solid var(--nox-border);
     flex: none;
   }
 

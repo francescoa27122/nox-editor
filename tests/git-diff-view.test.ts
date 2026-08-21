@@ -107,8 +107,13 @@ describe('the rendering', () => {
 
     const removed = panel!.container.querySelector<HTMLElement>('.cell.text.removed');
     const added = panel!.container.querySelector<HTMLElement>('.cell.text.added');
-    expect(removed?.textContent).toBe('five');
-    expect(added?.textContent).toBe('FIVE');
+    // The leading glyph is the point, not an artefact: the two halves used to
+    // be told apart by a 12%-alpha wash and nothing else, which is WCAG 1.4.1
+    // and invisible to anyone who cannot separate the red from the green.
+    expect(removed?.querySelector('.sign')?.textContent).toBe('−');
+    expect(added?.querySelector('.sign')?.textContent).toBe('+');
+    expect(removed?.textContent).toBe('−five');
+    expect(added?.textContent).toBe('+FIVE');
     // Line 5 on both sides; the numbers around the change are visible.
     const nums = [...panel!.container.querySelectorAll<HTMLElement>('.cell.num')].map(
       (el) => el.textContent,

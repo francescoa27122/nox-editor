@@ -22,7 +22,7 @@
    */
 
   const app = useApp();
-  const { ui, keymap, agentConfig, agents, config, lsp } = app;
+  const { ui, keymap, agentConfig, agents, commands, lsp } = app;
   const diagnostics = lsp.diagnostics;
   const view = ui.sidebarView;
   // The rail's one ambient status: how many errors the project has. An
@@ -73,7 +73,12 @@
         onclick={() => {
           // Re-clicking the current view collapses the sidebar — the
           // universal rail convention. ⌘B or the title-bar toggle reopens.
-          if ($view === entry.id) config.set('workbench.showExplorer', false);
+          //
+          // Through the command rather than `config.set`, because the collapse
+          // is a user action like any other and `view.toggleExplorer` already
+          // is that action: dispatching it while the sidebar is showing turns
+          // the same setting off, and the palette gets to learn the click.
+          if ($view === entry.id) void commands.execute('view.toggleExplorer');
           else ui.showView(entry.id);
         }}
       >

@@ -8,10 +8,15 @@
  * because it carries branch info and rename detail in one call.
  *
  * Letters follow porcelain: M, A, D, R for tracked changes, U for untracked.
- * Porcelain's C (copied) maps to R — a copy is a rename-shaped fact — and an
- * unmerged (`u`) record lands in unstaged as M: a conflicted file silently
- * missing from the list would be worse than an imprecise letter. Anything
- * unrecognised degrades to M for the same reason.
+ * Porcelain's C (copied) maps to R — a copy is a rename-shaped fact — which
+ * is what leaves C spendable on the one state porcelain has no spare letter
+ * for here: an unmerged (`u`) record becomes C for *conflicted*. It used to
+ * become M, which made a file full of `<<<<<<<` markers indistinguishable
+ * from one the user had edited, in the one state where staging it is
+ * actively harmful. U was not available — this codebase spends it on
+ * untracked, not on porcelain v1's unmerged. Anything unrecognised still
+ * degrades to M: a change silently missing from the list would be worse
+ * than an imprecise letter.
  *
  * See docs/superpowers/specs/2026-08-19-git-stage-commit-design.md §4.
  *
@@ -23,7 +28,7 @@
  * `tests/git-status.test.ts`; restored, suite green.
  */
 
-export type GitStatusLetter = 'M' | 'A' | 'D' | 'R' | 'U';
+export type GitStatusLetter = 'M' | 'A' | 'D' | 'R' | 'U' | 'C';
 
 export interface FileEntry {
   /** Relative to the repository toplevel, exactly as git printed it. */
@@ -110,8 +115,10 @@ export function parseGitStatus(raw: string): GitStatus {
     } else if (record.startsWith('? ')) {
       status.unstaged.push({ path: record.slice(2), status: 'U' });
     } else if (record.startsWith('u ')) {
-      // u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
-      status.unstaged.push({ path: tailAfter(record, 10), status: 'M' });
+      // u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>. Unstaged is
+      // still the right list — a conflict is a worktree fact — but C, not M:
+      // the panel keys its own section and a disabled Stage off this letter.
+      status.unstaged.push({ path: tailAfter(record, 10), status: 'C' });
     }
     // '!' (ignored entries) never appear without --ignored; anything else is
     // a future porcelain addition and is skipped rather than guessed at.

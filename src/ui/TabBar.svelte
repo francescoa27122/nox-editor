@@ -162,6 +162,54 @@
     return location;
   }
 
+  /**
+   * "Label (⌘N)", or just the label when the command has no binding.
+   *
+   * `keybindings.json` can `remove` any default, which turned the interpolated
+   * `?? ''` here into a tooltip reading "New File ()".
+   */
+  function withChord(label: string, commandId: string): string {
+    const chord = app.keymap.displayFor(commandId);
+    return chord ? `${label} (${chord})` : label;
+  }
+
+  /**
+   * Arrow-key navigation across the strip.
+   *
+   * A `role="tablist"` with a roving tabindex promises this: every non-active
+   * tab is `tabindex="-1"`, so without arrow keys no tab but the active one
+   * was reachable from the keyboard *at all* — the widget claimed a contract
+   * and honoured none of it.
+   *
+   * Automatic activation (moving focus selects) rather than the manual
+   * variant, because in an editor "focus a tab without showing it" is not a
+   * state anyone wants: selecting is the only thing a tab does. Focus is then
+   * moved by hand, since the newly-active tab is the one that just became
+   * `tabindex="0"` and the old one stops being focusable.
+   */
+  function onStripKeydown(event: KeyboardEvent, index: number): boolean {
+    const last = buffers.length - 1;
+    let target: number;
+    if (event.key === 'ArrowRight') target = index === last ? 0 : index + 1;
+    else if (event.key === 'ArrowLeft') target = index === 0 ? last : index - 1;
+    else if (event.key === 'Home') target = 0;
+    else if (event.key === 'End') target = last;
+    else return false;
+
+    const buffer = buffers[target];
+    if (!buffer) return true;
+    event.preventDefault();
+    workspace.setActive(buffer.id);
+    // After the DOM has caught up with the new `tabindex`; focusing an element
+    // that is still `-1` works, but the roving state would then disagree with
+    // where focus actually is.
+    queueMicrotask(() => {
+      const node = strip?.querySelector(`[data-tab="${buffer.id}"]`);
+      if (node instanceof HTMLElement) node.focus();
+    });
+    return true;
+  }
+
   function onPointerDown(event: MouseEvent, id: string) {
     // Middle-click closes, matching every browser and editor.
     if (event.button === 1) {
@@ -233,7 +281,9 @@
           onmousedown={(event) => onPointerDown(event, buffer.id)}
           oncontextmenu={(event) => openTabMenu(event, buffer.id)}
           onkeydown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
+            if (onStripKeydown(event, index)) {
+              // Handled: moving along the strip is not also a tab activation.
+            } else if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault();
               workspace.setActive(buffer.id);
             } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
@@ -285,7 +335,7 @@
 
   <button
     class="new-tab"
-    title="New File ({app.keymap.displayFor('file.new') ?? ''})"
+    title={withChord('New File', 'file.new')}
     aria-label="New file"
     onclick={() => {
       workspace.focusGroup(groupId);
@@ -293,6 +343,27 @@
     }}
   >
     <Icon name="plus" size={14} />
+  </button>
+
+  <!--
+    Splitting had no visible affordance anywhere: its only UI reference was
+    inside the tab right-click menu, which itself has nothing hinting it
+    exists. The strip already spends a slot on "Close this pane" once a split
+    exists, so the way out was visible while the way in was not.
+
+    `sidebar` is the icon: a rectangle with a vertical divider is the
+    universal split-editor glyph, and the set has no dedicated one.
+  -->
+  <button
+    class="new-tab"
+    title={withChord('Split Editor', 'view.splitEditor')}
+    aria-label="Split editor"
+    onclick={() => {
+      workspace.focusGroup(groupId);
+      void commands.execute('view.splitEditor');
+    }}
+  >
+    <Icon name="sidebar" size={13} />
   </button>
 
   {#if canClose}

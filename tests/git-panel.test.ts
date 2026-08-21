@@ -54,6 +54,18 @@ describe('the git panel, read-only', () => {
     expect(texts.some((t) => t.includes('clean.ts'))).toBe(false);
   });
 
+  it('spells the porcelain letter out for anyone who does not read git', async () => {
+    // The letter was the row's only encoding besides its colour, so it had to
+    // be already known to be read at all. Guards the accessible name, which
+    // is the half a tooltip cannot give a screen reader.
+    const { container } = await setup();
+    const letters = [...container.querySelectorAll('.section.changes .row .letter')];
+    const named = letters.map((el) => [el.textContent, el.getAttribute('aria-label')]);
+    expect(named).toContainEqual(['M', 'Modified']);
+    expect(named).toContainEqual(['U', 'Untracked']);
+    for (const el of letters) expect(el.getAttribute('title')).toBe(el.getAttribute('aria-label'));
+  });
+
   it('shows the staged section only when something is staged', async () => {
     const { container, platform, app } = await setup();
     expect(container.querySelector('.section.staged')).toBeNull();
@@ -358,6 +370,86 @@ describe('the branch picker mode', () => {
   });
 });
 
+describe('a conflicted file', () => {
+  /**
+   * Mid-merge, with markers in the file. Before this, the `u` record parsed
+   * to M and the row sat under Changes wearing the same amber letter as a
+   * file the user had edited themselves — and offering the same enabled
+   * Stage button, which would `git add` the markers.
+   */
+  async function setupConflicted() {
+    mounted = mountComponent(GitPanel);
+    const { app, platform, container } = mounted;
+    app.git.start();
+    platform.seedGitRepo('/w');
+    platform.seedGitBase('/w/edited.ts', 'one\n');
+    platform.seedFile('/w/edited.ts', 'one\ntwo\n');
+    platform.seedGitConflict(
+      '/w/merged.ts',
+      '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> other\n',
+    );
+    await app.workspace.openFolder('/w');
+    await settle();
+    return { app, platform, container };
+  }
+
+  it('gets its own section, above Staged and out of Changes', async () => {
+    const { app, platform, container } = await setupConflicted();
+    await platform.gitStage('/w', ['/w/edited.ts']);
+    await app.git.refreshStatus();
+    await settle();
+
+    const conflicts = container.querySelector('.section.conflicts');
+    expect(conflicts, 'expected a Conflicts section').not.toBeNull();
+    expect(conflicts!.textContent).toContain('merged.ts');
+    // Not also listed as an ordinary change — one file, one honest place.
+    expect(container.querySelector('.section.changes')!.textContent).not.toContain('merged.ts');
+
+    // Above Staged: the one thing that blocks the commit reads first.
+    const staged = container.querySelector('.section.staged')!;
+    expect(
+      conflicts!.compareDocumentPosition(staged) & Node.DOCUMENT_POSITION_FOLLOWING,
+      'Conflicts must render above Staged',
+    ).toBeTruthy();
+  });
+
+  it('spells the letter out, so colour is not the only signal', async () => {
+    // Same rule as every other row: the letter is a term of art and red is
+    // not readable by everyone, so the accessible name carries the word.
+    const { container } = await setupConflicted();
+    const letter = container.querySelector('.section.conflicts .row .letter')!;
+    expect(letter.textContent).toBe('C');
+    expect(letter.getAttribute('aria-label')).toBe('Conflicted');
+    expect(letter.getAttribute('title')).toBe(letter.getAttribute('aria-label'));
+  });
+
+  it('refuses to stage it, and says why', async () => {
+    // The whole point: `git add` on a file full of markers is the one stage
+    // that is actively harmful, and it used to be one hover away.
+    const { container, platform } = await setupConflicted();
+    const row = container.querySelector('.section.conflicts .row')!;
+    const stage = row.querySelector('.actions button:last-of-type') as HTMLButtonElement;
+    expect(stage.disabled).toBe(true);
+    expect(stage.getAttribute('title') ?? '').toMatch(/resolve the conflict/i);
+
+    stage.click();
+    await settle();
+    await settle();
+    // Nothing reached the index — the refusal is real, not just a grey tint.
+    const after = parseGitStatus(await platform.gitStatus('/w'));
+    expect(after.staged.some((e) => e.path === 'merged.ts')).toBe(false);
+  });
+
+  it('still opens the file, which is where a conflict is actually resolved', async () => {
+    const { container, app } = await setupConflicted();
+    const open = container.querySelector('.section.conflicts .row .open') as HTMLElement;
+    expect(open.tagName).toBe('BUTTON');
+    open.click();
+    await settle();
+    expect(app.workspace.buffers.get().some((b) => b.path === '/w/merged.ts')).toBe(true);
+  });
+});
+
 describe('row actions stay in the tab order', () => {
   // jsdom does not apply CSS layout — a stylesheet rule of `display: none`
   // does not stop `.focus()` from landing there in this harness (verified:
@@ -371,12 +463,32 @@ describe('row actions stay in the tab order', () => {
     const source = readFileSync('src/ui/GitPanel.svelte', 'utf8');
     const baseRule = /\.row \.actions \{([^}]*)\}/.exec(source)?.[1];
     expect(baseRule, 'expected a .row .actions rule in GitPanel.svelte').toBeDefined();
-    expect(baseRule).toMatch(/opacity:\s*0/);
     expect(baseRule).not.toMatch(/display:\s*none/);
+
+    // What this replaced: `expect(baseRule).toMatch(/opacity:\s*0/)`, which
+    // matches `opacity: 0.7` exactly as happily as `opacity: 0` — the rule
+    // was changed from one to the other and the assertion passed on both
+    // sides, so it pinned nothing. Read the number out and assert the range
+    // instead. `> 0` is the actual regression: at 0 the actions are in the
+    // tab order but paint nothing, so a keyboard user activates a control
+    // they never saw and a mouse user cannot learn a row is stageable
+    // without hovering it. `< 1` is the other half of the intent — resting
+    // state is secondary to the row's filename, not competing with it.
+    const resting = Number(/opacity:\s*([\d.]+)/.exec(baseRule!)?.[1]);
+    expect(resting, 'expected a resting opacity on .row .actions').not.toBeNaN();
+    expect(resting).toBeGreaterThan(0);
+    expect(resting).toBeLessThan(1);
+
     // The reveal must fire on focus, not only on pointer hover — otherwise
-    // a keyboard user tabbing to a hidden-by-opacity button can activate it
-    // (opacity does not block focus) but never sees it happen.
-    expect(source).toMatch(/\.actions:focus-within/);
+    // a keyboard user tabbing to a not-fully-opaque button can activate it
+    // (opacity does not block focus) but never sees it happen. Both
+    // selectors must land on opacity 1: naming `:focus-within` somewhere in
+    // the file is not the same as it actually revealing anything.
+    const revealRule = /\.row:hover \.actions,\s*\.row \.actions:focus-within \{([^}]*)\}/.exec(
+      source,
+    )?.[1];
+    expect(revealRule, 'expected hover and focus-within to share one reveal rule').toBeDefined();
+    expect(revealRule).toMatch(/opacity:\s*1\s*;/);
   });
 });
 

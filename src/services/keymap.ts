@@ -251,6 +251,15 @@ export class KeymapService {
   #saving: Promise<void> = Promise.resolve();
 
   readonly version = new Signal(0);
+  /**
+   * Why the last write to `keybindings.json` failed, or null.
+   *
+   * Same shape and same reasoning as `ConfigService.error`: the rebind works
+   * for this session either way, so nothing should break — but the user has
+   * just rebound a key that will be back to its default next launch, and only
+   * they can fix the reason.
+   */
+  readonly error = new Signal<string | null>(null);
 
   constructor(commands: CommandRegistry, platform?: Platform) {
     this.#commands = commands;
@@ -412,8 +421,15 @@ export class KeymapService {
     const contents = this.#userRules.length === 0 ? '' : this.serializeUserRules();
     this.#saving = this.#saving
       .then(() => platform.writeConfigFile(USER_BINDINGS_FILE, contents))
-      .catch(() => {
-        /* Keybindings that cannot be written must not break the session. */
+      .then(() => {
+        // Cleared only on a write that lands, so one bad write does not nag
+        // forever once the next one succeeds.
+        if (this.error.get() !== null) this.error.set(null);
+      })
+      .catch((error: unknown) => {
+        // Keybindings that cannot be written must not break the session — but
+        // they must be mentioned, or the rebind silently expires at quit.
+        this.error.set(error instanceof Error ? error.message : String(error));
       });
   }
 
@@ -500,6 +516,18 @@ export class KeymapService {
 
   get capturing(): boolean {
     return this.#capture !== null;
+  }
+
+  /**
+   * The command's primary binding in canonical form, or undefined.
+   *
+   * `displayFor` renders for a human (⇧⌘P); this is the machine-readable
+   * chord a native menu accelerator is built from. Undefined is meaningful to
+   * that caller: it means the application keymap does not claim this chord, so
+   * an accelerator must not be attached — see `services/menu.ts`.
+   */
+  chordFor(commandId: string): Chord | undefined {
+    return this.#commandToChord.get(commandId);
   }
 
   /** Display string for the command's primary binding, for palette + menus. */

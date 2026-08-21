@@ -174,9 +174,21 @@
     background: var(--nox-accent-dim);
   }
 
+  /*
+    Same reasoning as App.svelte's sidebar splitter: this is a tab stop with
+    arrow-key resize, so focus has to be distinguishable from hover rather
+    than sharing its 1px tint. The global ring stays suppressed because a
+    box-shadow on a 1px line bleeds over both panes; the ::after already
+    reserves the wider gutter, so painting it puts a 9px --nox-accent-dim
+    band (5.18:1 against the editor surface) exactly where the splitter is.
+  */
   .divider:focus-visible {
     box-shadow: none;
     outline: none;
+  }
+
+  .divider:focus-visible::after {
+    background: var(--nox-accent-dim);
   }
 
   :global(.is-resizing *) {

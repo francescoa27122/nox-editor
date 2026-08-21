@@ -43,7 +43,18 @@
   --nox-text: #c8d2e4;
   --nox-text-bright: #e9eff9;
   --nox-text-muted: #7a8699;
-  --nox-text-faint: #4c5768;
+  /* Lifted from #4c5768 (2.60:1 over bg-panel) to #626d80 on 2026-08-20.
+     DESIGN.md §2 licenses "near-invisible everywhere else", and that licence
+     is real — but it applies to *decoration*, and this token had quietly
+     become load-bearing: the sidebar rail's nav icons, the tab close and
+     new-tab glyphs, non-leaf breadcrumbs and every `.nox-kbd` hint were all
+     painted with it. Icons and glyphs are non-text UI, so WCAG 1.4.11 asks
+     3:1; #626d80 measures 3.64:1 over bg-panel and 3.46:1 over bg-raised,
+     the lightest surface and therefore the worst case. It stays a clear step
+     below --nox-text-muted (5.17:1), so the three-level text hierarchy
+     survives. Genuinely inert *text* is unaffected: syntax comments carry
+     their own --nox-syn-comment, which keeps the original #4c5768. */
+  --nox-text-faint: #626d80;
   --nox-text-on-accent: #04161a;
 
   /* --- Accents ---------------------------------------------------------- */
@@ -168,7 +179,22 @@
      numbers live in config (workbench.explorerWidth) and App.svelte. */
 
   /* --- Focus ---------------------------------------------------------------- */
-  --nox-focus-ring: 0 0 0 1px var(--nox-bg-base), 0 0 0 3px var(--nox-accent-glow);
+  /* The ring is opaque, not a wash. --nox-accent-glow (22% cyan) composited
+     over the surfaces measures 1.54–1.65:1, which is not a focus indicator —
+     WCAG 2.4.11 and 1.4.11 both want 3:1. --nox-accent-dim measures
+     4.85:1 over bg-raised (the lightest surface, so the worst case) and
+     5.10–5.40:1 everywhere else. Full --nox-accent would clear 10:1 but
+     reads as a neon outline on chrome, which DESIGN.md §1 rules out.
+
+     The 1px gap is bg-void rather than bg-base: it used to name the title
+     bar's colour, which is the correct ground on exactly one of the five
+     surfaces and wrong on the other four. bg-void is the darkest surface, so
+     it always reads as a separating shadow and never as a lighter halo —
+     including under the focused element's own fill (a `.primary` button is
+     accent-coloured, and the gap is what keeps the ring from merging with
+     it). */
+  --nox-focus-ring-color: var(--nox-accent-dim);
+  --nox-focus-ring: 0 0 0 1px var(--nox-bg-void), 0 0 0 3px var(--nox-focus-ring-color);
 
   /* --- Z-index scale --------------------------------------------------------- */
   --nox-z-panel: 10;

@@ -45,8 +45,17 @@ export interface PromptRequest {
 export interface ConfirmRequest {
   title: string;
   message: string;
-  /** First choice is the default; `danger` renders it in the warning colour. */
+  /** `danger` marks a choice destructive: it never becomes the default. */
   choices: { id: string; label: string; danger?: boolean }[];
+  /**
+   * Which choice Enter picks, and which one wears the primary colour.
+   *
+   * Name it whenever the safe answer is not simply "the first non-danger
+   * choice". The permission prompt is exactly that case — its three choices
+   * are two grants and a refusal, so inferring the default from position or
+   * from `danger` alone put the keyboard on "Allow for this session".
+   */
+  defaultChoiceId?: string;
   resolve: (choiceId: string | null) => void;
 }
 
