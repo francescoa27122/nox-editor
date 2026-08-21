@@ -38,6 +38,8 @@ export interface Note {
   body: string;
   createdAt: number;
   updatedAt: number;
+  /** Held at the top of the list. Organisational, not content. */
+  pinned: boolean;
 }
 
 /** A note in the index. The body lives in the file this names. */
@@ -48,6 +50,14 @@ interface NoteRecord {
   updatedAt: number;
   /** Config-relative file holding the body. */
   body: string;
+  /**
+   * Optional on disk on purpose. `load()` discards the whole file when
+   * `version` does not match, so bumping VERSION for a new field would make
+   * an older index take every note down with it. Absent reads as `false`,
+   * and an older build ignores a key it does not know — compatible in both
+   * directions without a bump.
+   */
+  pinned?: boolean;
 }
 
 interface NotesFile {
@@ -150,6 +160,7 @@ export class NotesService {
         body: (await this.#read(record.body)) ?? '',
         createdAt: record.createdAt ?? 0,
         updatedAt: record.updatedAt ?? 0,
+        pinned: record.pinned ?? false,
       });
     }
 
@@ -183,7 +194,7 @@ export class NotesService {
     // Newest first, and the list never re-sorts afterwards: this is the only
     // place order is decided.
     this.notes.update((list) => [
-      { id, title, body: '', createdAt: now, updatedAt: now },
+      { id, title, body: '', createdAt: now, updatedAt: now, pinned: false },
       ...list,
     ]);
     this.selectedId.set(id);
@@ -216,6 +227,26 @@ export class NotesService {
       list.map((note) => (note.id === id ? { ...note, title: trimmed, updatedAt: now } : note)),
     );
     // Only the index changed; no body is dirty, but the index itself now is.
+    this.#indexDirty = true;
+    this.#schedule();
+  }
+
+  /**
+   * Hold a note at the top of the list, or release it.
+   *
+   * Deliberately does not touch `updatedAt`: pinning is organisational, and a
+   * note that says it was edited when it was only filed is lying about the
+   * one timestamp a reader trusts.
+   */
+  pin(id: string, pinned: boolean): void {
+    const current = this.notes.get().find((note) => note.id === id);
+    if (!current || current.pinned === pinned) return;
+
+    this.notes.update((list) =>
+      list.map((note) => (note.id === id ? { ...note, pinned } : note)),
+    );
+    // Index-only, exactly like `rename()`: no body moved and nothing was
+    // released, so this flag is the only thing that will carry it.
     this.#indexDirty = true;
     this.#schedule();
   }
@@ -378,6 +409,7 @@ export class NotesService {
                   createdAt: note.createdAt,
                   updatedAt: note.updatedAt,
                   body: file,
+                  pinned: note.pinned,
                 },
               ]
             : [];
