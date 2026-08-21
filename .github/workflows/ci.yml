@@ -14,14 +14,22 @@ concurrency:
 
 jobs:
   web:
-    name: web (node ${{ matrix.node }})
-    runs-on: ubuntu-22.04
+    name: web (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # 20 is the floor the README promises; 22 is what development uses.
         # Testing both is what keeps that promise from going stale.
         node: [20, 22]
+        # Windows is here because the suite spawns real child processes and
+        # asserts exact document text, and this is the platform where that
+        # class of thing has actually broken before — the `rust` job proves
+        # the Rust side compiles on Windows and says nothing about vitest.
+        # Both Node versions rather than one: ESM and fs behaviour on Windows
+        # is where the versions differ, so pinning it to a single version
+        # would test the least interesting half.
+        os: [ubuntu-22.04, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
