@@ -15,6 +15,12 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# Legacy text encodings, both directions. The WHATWG Encoding Standard
+# implementation Firefox and ripgrep use. It has to be here rather than in the
+# renderer because the webview's `TextEncoder` is UTF-8 only — a JS decoder
+# could open a windows-1252 file and then be structurally unable to save it
+# back as one.
+encoding_rs = "0.8"
 tauri-plugin-dialog = "2"
 # Self-update: checks the signed latest.json on the newest published GitHub
 # release and swaps the binary. All network traffic and all signature

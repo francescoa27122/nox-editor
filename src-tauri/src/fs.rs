@@ -64,12 +64,58 @@ fn dirs_home() -> Option<PathBuf> {
     }
 }
 
+/// A file's text and the charset it was read as. The charset comes back
+/// because the caller has to write it again with the same one.
+#[derive(serde::Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct EncodedText {
+    pub text: String,
+    pub encoding: String,
+}
+
 #[tauri::command]
 pub fn nox_read_text_file(path: String) -> Result<String> {
     let target = Path::new(&path);
     let bytes = fs::read(target).map_err(|e| describe(&e, target))?;
     String::from_utf8(bytes)
         .map_err(|_| format!("not-text: {path} is not valid UTF-8"))
+}
+
+/// Read a file that may not be UTF-8.
+///
+/// `encoding` names the charset to use; omit it and only what can be *proved*
+/// is accepted — a byte-order mark, or the whole file being valid UTF-8.
+/// Anything else is refused with `not-text:`, exactly as before, because the
+/// alternative is guessing and then saving the guess.
+///
+/// `nox_read_text_file` above is deliberately left strict. It is what config,
+/// workspace settings and git read through, and those are Nox's own files:
+/// UTF-8 or nothing is correct there.
+#[tauri::command]
+pub fn nox_read_encoded_file(path: String, encoding: Option<String>) -> Result<EncodedText> {
+    let target = Path::new(&path);
+    let bytes = fs::read(target).map_err(|e| describe(&e, target))?;
+
+    let label = match encoding {
+        Some(label) => label,
+        None => crate::encoding::detect(&bytes).ok_or_else(|| {
+            format!("not-text: {path} is not valid UTF-8 and has no byte-order mark")
+        })?,
+    };
+
+    let text = crate::encoding::decode(&bytes, &label)?;
+    Ok(EncodedText { text, encoding: label })
+}
+
+/// Write a file back in the charset it was read as.
+///
+/// Refuses rather than substitutes when the text will not fit the charset —
+/// see `encoding::encode`. The refusal happens before the file is touched, so
+/// a save that cannot be done faithfully leaves the original alone.
+#[tauri::command]
+pub fn nox_write_encoded_file(path: String, contents: String, encoding: String) -> Result<()> {
+    let bytes = crate::encoding::encode(&contents, &encoding)?;
+    write_atomic(&path, &bytes)
 }
 
 /// Write a file so that a failure part-way through cannot destroy it.
@@ -87,7 +133,17 @@ pub fn nox_read_text_file(path: String) -> Result<String> {
 /// which would put the truncation risk straight back.
 #[tauri::command]
 pub fn nox_write_text_file(path: String, contents: String) -> Result<()> {
-    let requested = Path::new(&path);
+    write_atomic(&path, contents.as_bytes())
+}
+
+/// The body of `nox_write_text_file`, taking bytes.
+///
+/// Shared with `nox_write_encoded_file` rather than copied: the temp-sibling,
+/// `sync_all`, permission-carrying and symlink-canonicalising behaviour above
+/// is the part that must not be got wrong twice, and sharing it means the
+/// existing `fs.rs` tests cover the encoded path too.
+fn write_atomic(path: &str, bytes: &[u8]) -> Result<()> {
+    let requested = Path::new(path);
     if let Some(parent) = requested.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
             fs::create_dir_all(parent).map_err(|e| describe(&e, parent))?;
@@ -105,11 +161,11 @@ pub fn nox_write_text_file(path: String, contents: String) -> Result<()> {
     if !has_directory {
         // A bare filename with no directory to put a sibling in. Nothing to be
         // clever with, and a direct write is still better than refusing.
-        return fs::write(&target, contents).map_err(|e| describe(&e, &target));
+        return fs::write(&target, bytes).map_err(|e| describe(&e, &target));
     }
 
     let temp = temp_path_for(&target);
-    let outcome = write_then_rename(&temp, &target, contents.as_bytes());
+    let outcome = write_then_rename(&temp, &target, bytes);
 
     if outcome.is_err() {
         // Never leave litter next to the user's file.
@@ -538,6 +594,58 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    /// The failure this prevents: a save that cannot be done faithfully
+    /// destroying the file it could not write. `encoding::encode` refuses
+    /// text the charset has no room for, and that refusal has to happen
+    /// *before* the atomic write starts — otherwise the original is already
+    /// gone by the time anyone finds out.
+    #[test]
+    fn an_unmappable_save_leaves_the_original_untouched() {
+        let scratch = Scratch::new("write-unmappable");
+        let path = scratch.join("notes.txt");
+        let original = [0x63, 0x61, 0x66, 0xE9];
+        fs::write(&path, original).unwrap();
+
+        let problem = nox_write_encoded_file(
+            path.to_string_lossy().into_owned(),
+            "caf\u{e9} \u{1F600}".to_string(),
+            "windows-1252".to_string(),
+        )
+        .unwrap_err();
+
+        assert!(problem.starts_with("unmappable:"), "{problem}");
+        assert_eq!(fs::read(&path).unwrap(), original, "the file was written anyway");
+    }
+
+    /// Round trip through the two commands, which is what a save actually is.
+    #[test]
+    fn reads_back_what_it_wrote_in_a_legacy_charset() {
+        let scratch = Scratch::new("write-1252");
+        let path = scratch.join("caf.txt");
+        let name = path.to_string_lossy().into_owned();
+
+        nox_write_encoded_file(name.clone(), "caf\u{e9}".to_string(), "windows-1252".to_string())
+            .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), [0x63, 0x61, 0x66, 0xE9]);
+
+        let back = nox_read_encoded_file(name, Some("windows-1252".to_string())).unwrap();
+        assert_eq!(back.text, "caf\u{e9}");
+        assert_eq!(back.encoding, "windows-1252");
+    }
+
+    /// Without a charset, only what can be proved is accepted — the same
+    /// refusal `nox_read_text_file` has always given, which is what sends the
+    /// user to the picker rather than to mojibake.
+    #[test]
+    fn refuses_an_unmarked_legacy_file_until_told_what_it_is() {
+        let scratch = Scratch::new("read-unmarked");
+        let path = scratch.join("caf.txt");
+        fs::write(&path, [0x63, 0x61, 0x66, 0xE9]).unwrap();
+
+        let problem = nox_read_encoded_file(path.to_string_lossy().into_owned(), None).unwrap_err();
+        assert!(problem.starts_with("not-text:"), "{problem}");
+    }
+
     fn preserves_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
