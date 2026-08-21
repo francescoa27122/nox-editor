@@ -229,8 +229,8 @@ export class TauriPlatform implements Platform {
     };
   }
 
-  async pickFolder(): Promise<string | null> {
-    const picked = await openDialog({ directory: true, multiple: false, title: 'Open Folder' });
+  async pickFolder(title = 'Open Folder'): Promise<string | null> {
+    const picked = await openDialog({ directory: true, multiple: false, title });
     return typeof picked === 'string' ? picked : null;
   }
 

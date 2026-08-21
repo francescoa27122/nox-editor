@@ -948,7 +948,7 @@ export class MemoryPlatform implements Platform {
     this.#config.set(name, contents);
   }
 
-  async pickFolder(): Promise<string | null> {
+  async pickFolder(_title?: string): Promise<string | null> {
     return null;
   }
 

@@ -27,7 +27,11 @@ class PickingPlatform extends MemoryPlatform {
     (this.capabilities as { nativeDialogs: boolean }).nativeDialogs = true;
   }
 
-  override async pickFolder(): Promise<string | null> {
+  /** Captions the picker was asked for, in order. */
+  readonly pickerTitles: (string | undefined)[] = [];
+
+  override async pickFolder(title?: string): Promise<string | null> {
+    this.pickerTitles.push(title);
     return this.folder;
   }
 }
@@ -161,5 +165,33 @@ describe('importing', () => {
     await app.importNotes();
 
     expect(app.notes.notes.get()).toHaveLength(1);
+  });
+});
+
+describe('the folder picker caption', () => {
+  /**
+   * The failure this prevents: both commands opening a dialog captioned
+   * "Open Folder", which is `pickFolder`'s default and reads as "open this as
+   * a workspace" — the opposite of writing files into it. Only the caller
+   * knows why a folder is being asked for.
+   *
+   * Not observable in the browser build, where both commands are disabled for
+   * want of a dialog, which is why it went unnoticed until the release check.
+   */
+  it('says what the folder is for when exporting', async () => {
+    const { app, platform } = appWith([{ title: 'n', body: '' }]);
+
+    await app.exportNotes();
+
+    expect(platform.pickerTitles).toEqual(['Export Notes Into Folder']);
+  });
+
+  it('says what the folder is for when importing', async () => {
+    const platform = new PickingPlatform(FOLDER);
+    const app = new NoxApp(platform);
+
+    await app.importNotes();
+
+    expect(platform.pickerTitles).toEqual(['Import Notes From Folder']);
   });
 });
