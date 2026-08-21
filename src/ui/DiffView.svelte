@@ -173,28 +173,45 @@
     {:else if rows.length === 0}
       <p class="empty">No changes — the file matches what the index holds.</p>
     {:else if layout === 'side-by-side'}
-      <div class="table side" role="table" aria-label="Side-by-side diff">
+      <!--
+        `role="presentation"` rather than `role="table"`: this is a CSS grid
+        whose cells are direct children, so there is nowhere to hang the
+        `row`/`cell` roles a table role obliges. Claiming to be a table with
+        no rows in it is a worse answer for a screen reader than claiming
+        nothing; the section around it is already the labelled landmark.
+      -->
+      <div class="table side" role="presentation">
         {#each rows as row, index (index)}
           {#if row.kind === 'fold'}
             <button class="fold" onclick={expand}>⋯ {row.count} unchanged lines</button>
           {:else}
             <div class="cell num">{row.before?.line ?? ''}</div>
+            <!--
+              The −/+ glyph is not decoration. Both halves were distinguished
+              by a 12%-alpha wash and nothing else, which is WCAG 1.4.1
+              (colour alone) and unreadable to anyone who cannot separate the
+              red from the green. The sign column keeps its 1.2em even when
+              empty, so context rows stay aligned with changed ones.
+            -->
             <div
               class="cell text"
               class:removed={row.kind === 'change' && row.before !== null}
               class:pad={row.before === null}
-            >{row.before?.text ?? ''}</div>
+            ><span class="sign">{row.kind === 'change' && row.before !== null ? '−' : ''}</span
+              >{row.before?.text ?? ''}</div>
             <div class="cell num">{row.after?.line ?? ''}</div>
             <div
               class="cell text"
               class:added={row.kind === 'change' && row.after !== null}
               class:pad={row.after === null}
-            >{row.after?.text ?? ''}</div>
+            ><span class="sign">{row.kind === 'change' && row.after !== null ? '+' : ''}</span
+              >{row.after?.text ?? ''}</div>
           {/if}
         {/each}
       </div>
     {:else}
-      <div class="table inline" role="table" aria-label="Inline diff">
+      <!-- Presentational for the same reason as the side-by-side grid above. -->
+      <div class="table inline" role="presentation">
         {#each inline as row, index (index)}
           {#if row.kind === 'fold'}
             <button class="fold" onclick={expand}>⋯ {row.count} unchanged lines</button>

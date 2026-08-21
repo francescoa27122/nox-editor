@@ -1,16 +1,32 @@
 <script lang="ts">
   import { basename, join, tildify } from '@core/path';
-  import { platformIsMac } from '@services/keymap';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
 
   const app = useApp();
-  const { workspace, ui, commands, keymap } = app;
+  const { workspace, ui, commands, keymap, config } = app;
 
   const buffers = workspace.buffers;
   const activeId = workspace.activeId;
   const rootPath = workspace.rootPath;
   const homeDir = app.homeDir;
+  const settings = config.settings;
+  const overlay = ui.overlay;
+
+  const explorerShown = $derived($settings['workbench.showExplorer']);
+  const settingsShown = $derived($overlay === 'settings');
+
+  /**
+   * "Label (⌘B)", or just the label when the command has no binding.
+   *
+   * Interpolating `?? ''` into literal parentheses is what this replaces: a
+   * `remove` rule in `keybindings.json` unbinds any default, and the tooltip
+   * then read "Toggle Explorer ()". `Sidebar.svelte` already got this right.
+   */
+  function withChord(label: string, commandId: string): string {
+    const chord = keymap.displayFor(commandId);
+    return chord ? `${label} (${chord})` : label;
+  }
 
   const active = $derived($buffers.find((b) => b.id === $activeId) ?? null);
   const rootName = $derived($rootPath ? basename($rootPath) : null);
@@ -18,8 +34,22 @@
   /**
    * On macOS the window uses an overlay title bar, so the traffic lights sit
    * on top of this element and we reserve room for them.
+   *
+   * Read off a capability rather than `platform.id === 'tauri' && isMac`:
+   * `MemoryPlatform.id` is `readonly 'web'`, so that condition could not be
+   * made true from a test or the browser target and the inset had no coverage
+   * at all — which is how it shipped a permanent gap in fullscreen.
    */
-  const reserveTrafficLights = app.platform.id === 'tauri' && platformIsMac;
+  const overlayChrome = app.platform.capabilities.overlayWindowControls;
+
+  let fullscreen = $state(false);
+
+  /**
+   * Fullscreen takes the traffic lights away, so the room reserved for them
+   * has to go with them — otherwise the bar keeps a dead 78px inset with
+   * nothing in it for the whole fullscreen session.
+   */
+  const reserveTrafficLights = $derived(overlayChrome && !fullscreen);
 
   /**
    * Windows hides its decorations, so this bar is the only window chrome
@@ -40,6 +70,25 @@
     // The subscription is async, so a teardown can land first. Without the
     // flag the listener outlives the component and writes to dead state.
     void app.platform.onMaximizeChange((value) => (maximized = value)).then((unlisten) => {
+      if (cancelled) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  });
+
+  /**
+   * Deliberately *not* behind `drawWindowControls`, which is false on macOS —
+   * the only platform that has an inset to give back. Behind `overlayChrome`
+   * instead, so the subscription exists exactly where it can matter.
+   */
+  $effect(() => {
+    if (!overlayChrome) return;
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void app.platform.onFullscreenChange((value) => (fullscreen = value)).then((unlisten) => {
       if (cancelled) unlisten();
       else stop = unlisten;
     });
@@ -151,23 +200,36 @@
     >
       <Icon name="search" size={13} />
       <span>Commands</span>
-      <kbd class="nox-kbd">{paletteHint}</kbd>
+      <!-- Omitted rather than empty when the palette has been unbound: the
+           `<kbd>` carries a divider rule, and an empty one is a stray line. -->
+      {#if paletteHint}<kbd class="nox-kbd">{paletteHint}</kbd>{/if}
     </button>
 
+    <!-- `aria-pressed` and `.active`, both. This button looked byte-identical
+         whether the explorer was open or closed and said "Toggle Explorer"
+         either way, so it announced nothing at all about the state it
+         controls. The sidebar rail's buttons already work this way. -->
     <button
       class="icon-button"
+      class:active={explorerShown}
       onclick={() => void commands.execute('view.toggleExplorer')}
-      title="Toggle Explorer ({keymap.displayFor('view.toggleExplorer') ?? ''})"
+      title={withChord(explorerShown ? 'Hide Explorer' : 'Show Explorer', 'view.toggleExplorer')}
       aria-label="Toggle explorer"
+      aria-pressed={explorerShown}
     >
       <Icon name="sidebar" size={15} />
     </button>
 
+    <!-- `prefs.open` rather than `ui.toggleOverlay` directly: the command is
+         what the palette, the keybinding editor and any future menu dispatch,
+         and it does exactly this. -->
     <button
       class="icon-button"
-      onclick={() => ui.toggleOverlay('settings')}
-      title="Settings ({keymap.displayFor('prefs.open') ?? ''})"
+      class:active={settingsShown}
+      onclick={() => void commands.execute('prefs.open')}
+      title={withChord('Settings', 'prefs.open')}
       aria-label="Settings"
+      aria-pressed={settingsShown}
     >
       <Icon name="settings" size={15} />
     </button>
@@ -360,6 +422,12 @@
   .icon-button:hover {
     background: var(--nox-hover);
     color: var(--nox-text-bright);
+  }
+
+  /* The non-colour half of the state signal, matching the sidebar rail. */
+  .icon-button.active {
+    background: var(--nox-active);
+    color: var(--nox-accent);
   }
 
   /*

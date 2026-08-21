@@ -19,6 +19,7 @@ import {
   type JsonLinesStream,
   type LanguageServerProcess,
   type LanguageServerSpec,
+  type MenuNode,
   type SaveDialogOptions,
   type SearchFileResult,
   type SearchHandle,
@@ -44,6 +45,10 @@ import {
  */
 const PLATFORM_IS_WINDOWS =
   typeof navigator !== 'undefined' && /Win/.test(navigator.platform ?? navigator.userAgent);
+
+/** The same read, for the two capabilities that are macOS's alone. */
+const PLATFORM_IS_MAC =
+  typeof navigator !== 'undefined' && /Mac/.test(navigator.platform ?? navigator.userAgent);
 
 /**
  * Desktop target. Every method here is a thin adapter over a Rust command —
@@ -84,6 +89,11 @@ export class TauriPlatform implements Platform {
     // `lib.rs`'s setup hook. macOS keeps its traffic lights over an overlay
     // title bar and must not draw a second set beside them.
     customWindowControls: PLATFORM_IS_WINDOWS,
+    // macOS keeps its traffic lights over the overlay title bar — the one
+    // target where the buttons are the OS's and the bar under them is ours.
+    overlayWindowControls: PLATFORM_IS_MAC,
+    // macOS only; `PlatformCapabilities.applicationMenu` says why.
+    applicationMenu: PLATFORM_IS_MAC,
   };
 
   async homeDir(): Promise<string | null> {
@@ -272,6 +282,27 @@ export class TauriPlatform implements Platform {
     const unlisten = await window.onResized(() => {
       void window.isMaximized().then(handler);
     });
+    return unlisten;
+  }
+
+  async onFullscreenChange(handler: (fullscreen: boolean) => void): Promise<() => void> {
+    const window = getCurrentWindow();
+    handler(await window.isFullscreen());
+    // Resize for the same reason `onMaximizeChange` uses it: there is no
+    // fullscreen event to listen for, and every route in — the green button,
+    // ⌃⌘F, the View menu, a swipe — resizes the window to the display.
+    const unlisten = await window.onResized(() => {
+      void window.isFullscreen().then(handler);
+    });
+    return unlisten;
+  }
+
+  async setApplicationMenu(menu: readonly MenuNode[]): Promise<void> {
+    await call<void>('nox_set_menu', { menu });
+  }
+
+  async onMenuCommand(handler: (commandId: string) => void): Promise<() => void> {
+    const unlisten = await listen<string>('nox://menu', (event) => handler(event.payload));
     return unlisten;
   }
 

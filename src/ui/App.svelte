@@ -217,9 +217,23 @@
     background: var(--nox-accent-dim);
   }
 
+  /*
+    The splitter is a real tab stop with arrow-key resize, so it needs a focus
+    indicator that is both visible and *not* the hover treatment — tinting the
+    same 1px hairline told a keyboard user nothing they could tell apart from
+    a stray pointer. The global ring is still suppressed because a box-shadow
+    on a 1px column spreads outward over both neighbouring panes; painting the
+    ::after instead keeps the indicator inside the gutter the splitter already
+    reserves for its hit area, and 9px of --nox-accent-dim measures 5.10:1
+    against the panel beside it.
+  */
   .nox-resizer:focus-visible {
     box-shadow: none;
     outline: none;
+  }
+
+  .nox-resizer:focus-visible::after {
+    background: var(--nox-accent-dim);
   }
 
   .nox-main {

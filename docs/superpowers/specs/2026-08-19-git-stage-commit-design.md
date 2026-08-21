@@ -57,7 +57,12 @@ A **Git** sidebar view (rail entry beside Problems and References):
   - Row click opens the file; the diff view remains the place to *look*
     at a change (a "view" affordance per row opens Show Changes for it).
   - Status letters follow porcelain (`M`, `A`, `D`, `R`, `U`), rendered
-    with the tokens the gutter already uses.
+    with the tokens the gutter already uses — plus `C` for conflicted,
+    which porcelain spells `u`. `U` was already spent on *untracked*
+    here, and porcelain's own `C` (copied) is folded into `R` before a
+    `FileEntry` exists, so `C` was free. A conflicted row gets its own
+    section above Staged and refuses to stage: `git add` on an unmerged
+    path is the resolution, not a routine stage.
 - **Commit box**: a message field and one Commit button, enabled only
   when the staged list is non-empty and the message is non-blank. On
   success the box clears and a notification names the short hash and

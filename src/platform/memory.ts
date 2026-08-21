@@ -9,6 +9,7 @@ import {
   type JsonLinesSpec,
   type LanguageServerProcess,
   type LanguageServerSpec,
+  type MenuNode,
   type Platform,
   type PlatformCapabilities,
   type SaveDialogOptions,
@@ -53,6 +54,11 @@ export class MemoryPlatform implements Platform {
     // A browser tab's chrome is the browser's. Nothing to hide, nothing to
     // draw in its place.
     customWindowControls: false,
+    // …and nothing drawn on top of the title bar, so nothing to reserve for.
+    overlayWindowControls: false,
+    // No menu bar in a browser tab. The description is still accepted and
+    // kept, because that is what makes the menu testable at all.
+    applicationMenu: false,
   };
 
   /** path -> contents. Directories are stored with a null value. */
@@ -103,6 +109,7 @@ export class MemoryPlatform implements Platform {
       heads: new Map([[branch, new Map()]]),
       index: new Map(),
       commits: [],
+      conflicts: new Set(),
     });
   }
 
@@ -120,6 +127,36 @@ export class MemoryPlatform implements Platform {
     const rel = relative(root, p);
     repo.heads.get(repo.branch)!.set(rel, contents);
     repo.index.set(rel, contents);
+  }
+
+  /**
+   * Leave `path` mid-merge: HEAD and the index keep the pre-merge text, the
+   * worktree gets `contents` (in a real conflict, marker soup), and
+   * `gitStatus` reports it as a porcelain `u` record instead of an ordinary
+   * worktree edit.
+   *
+   * The model has no merge machinery and does not need any — what a test
+   * needs is the one record shape the seeds could not otherwise produce.
+   * Without it the fake could emit only `?` and `1` records, so the single
+   * state where staging is dangerous was the single state no test could
+   * reach.
+   */
+  seedGitConflict(path: string, contents: string): void {
+    const p = normalize(path);
+    if (!this.#repoFor(p)) this.seedGitRepo(dirname(p));
+    const [root, repo] = this.#repoEntryFor(p)!;
+    const rel = relative(root, p);
+    // Whatever HEAD already held stays HEAD's; a path conflicted out of
+    // nowhere gets `contents` as its base so it is still a tracked file.
+    const head = repo.heads.get(repo.branch)!;
+    const base = head.get(rel) ?? contents;
+    head.set(rel, base);
+    // There are no stages 1/2/3 here. Nothing reads the index for a path git
+    // calls unmerged, so it holds the base and the `u` record carries the
+    // fact that matters.
+    repo.index.set(rel, base);
+    repo.conflicts.add(rel);
+    this.seedFile(p, contents);
   }
 
   /** Inspection for tests: the current branch, every branch, the log. */
@@ -300,6 +337,14 @@ export class MemoryPlatform implements Platform {
       const inIndex = repo.index.has(rel);
       const inHead = head.has(rel);
 
+      if (repo.conflicts.has(rel)) {
+        // u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>. UU (both
+        // modified) is the conflict a text merge leaves; the record shape,
+        // not the XY pair, is what the parser reads.
+        records.push(`u UU N... 100644 100644 100644 100644 ${zeros} ${zeros} ${zeros} ${rel}`);
+        continue;
+      }
+
       if (!inIndex && !inHead) {
         if (inWork) records.push(`? ${rel}`);
         continue;
@@ -331,6 +376,10 @@ export class MemoryPlatform implements Platform {
       const p = normalize(path);
       const rel = relative(repoRoot, p);
       const text = this.#nodes.get(p);
+      // `git add` on an unmerged path *is* the resolution: it collapses the
+      // stages into one index entry, so the conflict has to lift here too or
+      // the model would report a file as conflicted forever.
+      repo.conflicts.delete(rel);
       if (typeof text === 'string') repo.index.set(rel, text);
       else if (repo.index.has(rel)) repo.index.delete(rel); // staging a deletion
       else {
@@ -833,6 +882,42 @@ export class MemoryPlatform implements Platform {
     handler(false);
     return () => {};
   }
+
+  /**
+   * The last menu `setApplicationMenu` was given, for tests.
+   *
+   * Kept rather than dropped even though this platform has no menu bar: the
+   * tree is built by a service from the command table, and what it *contains*
+   * is the half of the feature that can be checked without a window.
+   */
+  installedMenu: readonly MenuNode[] | null = null;
+
+  #menuHandlers = new Set<(commandId: string) => void>();
+
+  async setApplicationMenu(menu: readonly MenuNode[]): Promise<void> {
+    this.installedMenu = menu;
+  }
+
+  async onMenuCommand(handler: (commandId: string) => void): Promise<() => void> {
+    this.#menuHandlers.add(handler);
+    return () => {
+      this.#menuHandlers.delete(handler);
+    };
+  }
+
+  /** Seam: what the OS would do when a menu item is chosen. Tests only. */
+  chooseMenuItem(commandId: string): void {
+    for (const handler of [...this.#menuHandlers]) handler(commandId);
+  }
+
+  async onFullscreenChange(handler: (fullscreen: boolean) => void): Promise<() => void> {
+    // Honest no-op: nothing here can go fullscreen, and there is no OS to hear
+    // it from. A test that needs the transition subclasses this and keeps the
+    // handler — `onMaximizeChange` is faked the same way in
+    // `tests/title-bar-window-controls.test.ts`.
+    handler(false);
+    return () => {};
+  }
 }
 
 /**
@@ -863,6 +948,12 @@ interface FakeGitRepo {
   heads: Map<string, Map<string, string>>;
   index: Map<string, string>;
   commits: { hash: string; subject: string }[];
+  /**
+   * Repo-relative paths git would call unmerged. Set by `seedGitConflict`
+   * and cleared by staging the path; there is no merge to enter or finish
+   * here, only the state a merge leaves behind.
+   */
+  conflicts: Set<string>;
 }
 
 /** Directories first, then case-insensitive name order. Shared by platforms. */

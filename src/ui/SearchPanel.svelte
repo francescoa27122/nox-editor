@@ -31,6 +31,9 @@
   let listElement = $state<HTMLElement | null>(null);
   let showFilters = $state(false);
 
+  let scrollTop = $state(0);
+  let viewportHeight = $state(0);
+
   /**
    * The replacement preview, as a *derived closure*.
    *
@@ -53,6 +56,67 @@
     void $results;
     void $collapsed;
     return search.rows();
+  });
+
+  /**
+   * Windowing — the explorer's, over a list that fits it better.
+   *
+   * A search can put `MAX_RESULTS` (5000, `services/search.ts:43`) match rows
+   * of six elements each in here, appended while the walk is still streaming,
+   * which is exactly when the panel needs to stay responsive.
+   * `search.rows()` is already the flat, ordered axis the arrows navigate, so
+   * the window is a slice of it and nothing in the service changes. See
+   * `docs/superpowers/specs/2026-08-20-explorer-virtualisation-design.md`.
+   *
+   * The height lives here and the CSS reads it back through
+   * `--nox-search-row-h`, so the number the arithmetic uses and the number the
+   * browser paints cannot drift apart. Its own property rather than the
+   * explorer's `--nox-tree-row-h` because the two lists are different heights,
+   * and a shared name would inherit one panel's row height into the other.
+   *
+   * Both kinds of row must be that one height for index arithmetic to be
+   * valid: `.row` sets it, and `.row.file` / `.row.match` below vary only
+   * padding, colour and font. Give either its own height and this breaks.
+   */
+  const ROW_HEIGHT = 22;
+  const OVERSCAN = 8;
+  /** Below this, the extra state costs more than the skipped rows save. */
+  const MIN_ROWS_TO_WINDOW = 200;
+
+  /**
+   * What cannot be measured is not windowed.
+   *
+   * A viewport height of zero means "before layout" — or jsdom, which has no
+   * layout at all. Windowing on that would render nothing, which is a far
+   * worse failure than rendering too much.
+   */
+  const windowed = $derived(viewportHeight > 0 && rows.length > MIN_ROWS_TO_WINDOW);
+
+  const firstIndex = $derived(
+    windowed ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN) : 0,
+  );
+  const endIndex = $derived(
+    windowed
+      ? Math.min(rows.length, firstIndex + Math.ceil(viewportHeight / ROW_HEIGHT) + OVERSCAN * 2)
+      : rows.length,
+  );
+  const visibleRows = $derived(rows.slice(firstIndex, endIndex));
+  const padTop = $derived(firstIndex * ROW_HEIGHT);
+  const padBottom = $derived((rows.length - endIndex) * ROW_HEIGHT);
+
+  function measure(): void {
+    const height = listElement?.clientHeight ?? 0;
+    if (height !== viewportHeight) viewportHeight = height;
+  }
+
+  $effect(() => {
+    const element = listElement;
+    if (!element) return;
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(element);
+    return () => observer.disconnect();
   });
 
   const totals = $derived.by(() => {
@@ -80,12 +144,37 @@
     input?.select();
   });
 
-  // Keep the focused row on screen when the arrows move it.
+  /**
+   * Keep the focused row on screen, by arithmetic rather than by element.
+   *
+   * This was `querySelector('.row.focused')?.scrollIntoView()`, which stopped
+   * being possible the moment the focused row can be outside the window —
+   * precisely when scrolling to it matters. Working from the index needs no
+   * row in the DOM, and no `scrollIntoView`, which jsdom does not implement.
+   */
+  function revealFocused(): void {
+    const element = listElement;
+    const index = $focused;
+    if (!element || index < 0) return;
+
+    measure();
+    const height = viewportHeight || element.clientHeight;
+    if (height <= 0) return;
+
+    const top = index * ROW_HEIGHT;
+    if (top < element.scrollTop) element.scrollTop = top;
+    else if (top + ROW_HEIGHT > element.scrollTop + height) {
+      element.scrollTop = top + ROW_HEIGHT - height;
+    }
+    // Written back here rather than waited for: setting `scrollTop` does not
+    // reliably emit a scroll event, and the next window must not lag a frame
+    // behind the row it was asked to show.
+    scrollTop = element.scrollTop;
+  }
+
   $effect(() => {
     void $focused;
-    queueMicrotask(() => {
-      listElement?.querySelector('.row.focused')?.scrollIntoView?.({ block: 'nearest' });
-    });
+    queueMicrotask(revealFocused);
   });
 
   function onQueryKeydown(event: KeyboardEvent) {
@@ -334,9 +423,24 @@
       aria-label="Search results"
       tabindex="0"
       bind:this={listElement}
+      style="--nox-search-row-h: {ROW_HEIGHT}px"
+      onscroll={(event) => {
+        // Two number writes per scroll event, against the several thousand
+        // elements the unwindowed list put in the DOM — the cheapest half of
+        // this trade by a wide margin.
+        scrollTop = event.currentTarget.scrollTop;
+        measure();
+      }}
       onkeydown={onListKeydown}
     >
-      {#each rows as row, index (row.kind + row.fileIndex + ':' + row.matchIndex)}
+      {#if padTop > 0}
+        <div class="spacer" style="height: {padTop}px" role="presentation"></div>
+      {/if}
+      <!-- `aria-setsize` / `aria-posinset` below are mandatory, not decorative:
+           once rows leave the DOM a screen reader would otherwise be told the
+           result list is exactly as long as the window. -->
+      {#each visibleRows as row, offset (row.kind + row.fileIndex + ':' + row.matchIndex)}
+        {@const index = firstIndex + offset}
         {@const file = $results[row.fileIndex]}
         {#if file}
           {#if row.kind === 'file'}
@@ -346,6 +450,8 @@
               class:focused={index === $focused}
               role="option"
               aria-selected={index === $focused}
+              aria-setsize={rows.length}
+              aria-posinset={index + 1}
               tabindex="-1"
               title={file.path}
               onclick={() => {
@@ -395,6 +501,8 @@
                 class:focused={index === $focused}
                 role="option"
                 aria-selected={index === $focused}
+                aria-setsize={rows.length}
+                aria-posinset={index + 1}
                 tabindex="-1"
                 title="Line {match.line}"
                 onclick={() => {
@@ -419,6 +527,9 @@
           {/if}
         {/if}
       {/each}
+      {#if padBottom > 0}
+        <div class="spacer" style="height: {padBottom}px" role="presentation"></div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -571,8 +682,8 @@
     flex: none;
     margin: 0 var(--nox-sp-3) var(--nox-sp-3);
     padding: var(--nox-sp-2) var(--nox-sp-2) var(--nox-sp-2) var(--nox-sp-4);
-    background: rgba(123, 216, 143, 0.08);
-    border: 1px solid rgba(123, 216, 143, 0.28);
+    background: color-mix(in srgb, var(--nox-success) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--nox-success) 28%, transparent);
     border-radius: var(--nox-r-md);
     font-size: var(--nox-fs-xs);
     color: var(--nox-text-muted);
@@ -716,11 +827,20 @@
     border-radius: 0;
   }
 
+  /* Spacers stand in for the rows outside the window, so the scrollbar
+     describes the whole result list and every rendered row keeps its true
+     offset. */
+  .spacer {
+    flex: none;
+  }
+
   .row {
     display: flex;
     align-items: center;
     gap: var(--nox-sp-2);
-    height: 22px;
+    /* Set from ROW_HEIGHT above: the arithmetic and the paint share one
+       number, and both kinds of row must keep it. */
+    height: var(--nox-search-row-h, 22px);
     padding-right: var(--nox-sp-2);
     font-size: var(--nox-fs-sm);
     cursor: default;
@@ -832,24 +952,24 @@
 
   /* Replace preview reads as a diff: what goes, then what arrives. */
   .preview mark.removed {
-    background: rgba(240, 97, 109, 0.16);
+    background: color-mix(in srgb, var(--nox-danger) 16%, transparent);
     color: var(--nox-danger);
     text-decoration: line-through;
-    text-decoration-color: rgba(240, 97, 109, 0.6);
+    text-decoration-color: color-mix(in srgb, var(--nox-danger) 60%, transparent);
   }
 
   .preview mark.added {
-    background: rgba(123, 216, 143, 0.16);
+    background: color-mix(in srgb, var(--nox-success) 16%, transparent);
     color: var(--nox-success);
     text-decoration: none;
   }
 
   .row.focused .preview mark.removed {
-    background: rgba(240, 97, 109, 0.24);
+    background: color-mix(in srgb, var(--nox-danger) 24%, transparent);
   }
 
   .row.focused .preview mark.added {
-    background: rgba(123, 216, 143, 0.24);
+    background: color-mix(in srgb, var(--nox-success) 24%, transparent);
   }
 
   .lead,

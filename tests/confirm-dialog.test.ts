@@ -135,4 +135,69 @@ describe('the confirm dialog', () => {
 
     unmount();
   });
+
+  /**
+   * The failure this guards: `defaultChoiceId` being ignored, so focus and the
+   * primary accent fall back to position or to "the first non-danger choice".
+   * That fallback is what put both of them on "Allow for this session" in the
+   * permission prompt — where `danger` marks Deny, the *safe* answer — so
+   * Enter on an unread prompt granted a session-wide capability.
+   */
+  it('focuses and paints the named default choice, wherever it sits', () => {
+    const { resolve, calls } = tracked();
+    const request: ConfirmRequest = {
+      title: 'Allow edit what is open?',
+      message: 'An agent wants to edit what is open.',
+      choices: [
+        { id: 'allow-session', label: 'Allow for this session', danger: true },
+        { id: 'allow-once', label: 'Allow once' },
+        { id: 'deny', label: 'Deny' },
+      ],
+      defaultChoiceId: 'deny',
+      resolve,
+    };
+
+    const { container, unmount } = mountComponent(ConfirmDialog, { props: { request } });
+    flush();
+
+    const buttons = [...container.querySelectorAll('button')];
+    expect(document.activeElement).toBe(buttons[2]);
+    expect(buttons[2]?.classList.contains('primary')).toBe(true);
+    // And the accent is *only* there: a primary grant is the whole bug.
+    expect(buttons[0]?.classList.contains('primary')).toBe(false);
+    expect(buttons[1]?.classList.contains('primary')).toBe(false);
+
+    // What Enter on the untouched dialog would do.
+    (document.activeElement as HTMLButtonElement).click();
+    expect(calls).toEqual(['deny']);
+
+    unmount();
+  });
+
+  /**
+   * The failure this guards: the fix for the prompt above breaking every other
+   * call site, which names no default and relies on "the first safe choice
+   * when any choice is destructive" — the delete confirm among them.
+   */
+  it('still falls back to the first safe choice when no default is named', () => {
+    const { resolve } = tracked();
+    const request: ConfirmRequest = {
+      title: 'Delete file?',
+      message: 'This cannot be undone.',
+      choices: [
+        { id: 'delete', label: 'Delete', danger: true },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+      resolve,
+    };
+
+    const { container, unmount } = mountComponent(ConfirmDialog, { props: { request } });
+    flush();
+
+    const buttons = [...container.querySelectorAll('button')];
+    expect(document.activeElement).toBe(buttons[1]);
+    expect(buttons[1]?.classList.contains('primary')).toBe(true);
+
+    unmount();
+  });
 });

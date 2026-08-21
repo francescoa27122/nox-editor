@@ -137,6 +137,12 @@
      */
     keyword?: string;
     disabled?: boolean;
+    /**
+     * Native tooltip. The list is one line per row with no space for a
+     * sentence, and a greyed row with no explanation anywhere in the UI is
+     * the question "why is Save As… grey?" with no answer.
+     */
+    tooltip?: string;
     icon: IconName;
     accept: () => void;
   }
@@ -183,14 +189,65 @@
     input?.focus();
   });
 
+  /**
+   * What a category hit is worth next to a title hit.
+   *
+   * The palette used to score the rendered `"Category: Title"` label as one
+   * string, which let category *length* decide the winner: "Preferences"
+   * contains r-e-f-e-r-e-n-c-e from index 0 and collects `BONUS_FIRST`, while
+   * "Language: Find References" pays `PENALTY_LEADING` for its 15-character
+   * prefix — so typing "reference" put four Preferences commands above both
+   * References commands. Scoring title and category separately and weighting
+   * the category down restores what a category was ever meant to be: a
+   * secondary signal, not the deciding one.
+   */
+  const CATEGORY_WEIGHT = 0.25;
+
+  /** How far a command is greyed out of the ranking. Disabled always loses. */
+  const DISABLED_PENALTY = 1000;
+
+  interface CommandHit {
+    score: number;
+    /** Positions into the rendered label, not into whichever part matched. */
+    positions: number[];
+    keyword?: string;
+  }
+
+  /**
+   * Score one command against the query.
+   *
+   * Four sources in decreasing authority: the title, the category, the two
+   * concatenated, and the keywords. The concatenation survives only as a
+   * fallback for a query that straddles the separator ("file save") — the
+   * row would otherwise vanish, and *that* is the only thing scoring the
+   * label was ever buying us.
+   */
+  function scoreCommand(query: string, command: Command, label: string): CommandHit | null {
+    const titleOffset = label.length - command.title.length;
+    const title = fuzzyMatch(query, command.title);
+    const category = command.category ? fuzzyMatch(query, command.category) : null;
+
+    if (title) {
+      return {
+        score: title.score + CATEGORY_WEIGHT * (category?.score ?? 0),
+        positions: title.positions.map((p) => p + titleOffset),
+      };
+    }
+    // A category-only hit lists the whole category, well below any title hit.
+    if (category) return { score: CATEGORY_WEIGHT * category.score, positions: category.positions };
+
+    const spanning = fuzzyMatch(query, label);
+    if (spanning) return { score: spanning.score, positions: spanning.positions };
+
+    return matchAgainstKeywords(query, command);
+  }
+
   function commandRows(query: string): RowsResult {
-    const scored: { row: Row; score: number }[] = [];
+    const scored: { row: Row; score: number; title: string }[] = [];
 
     for (const command of commands.palette()) {
       const label = command.category ? `${command.category}: ${command.title}` : command.title;
-      const match = fuzzyMatch(query, label);
-      const keywordMatch = match ? null : matchAgainstKeywords(query, command);
-      const won = match ?? keywordMatch;
+      const won = scoreCommand(query, command, label);
       if (!won) continue;
 
       const enabled = commands.isEnabled(command.id);
@@ -199,17 +256,19 @@
         keymap.displayFor(command.id) ??
         (command.keyHint ? formatChord(normalizeChord(command.keyHint)) : undefined);
       scored.push({
-        score: won.score - (enabled ? 0 : 1000),
+        score: won.score - (enabled ? 0 : DISABLED_PENALTY),
+        title: command.title,
         row: {
           key: command.id,
           title: label,
-          positions: match ? match.positions : [],
+          positions: won.positions,
           disabled: !enabled,
+          tooltip: tooltipFor(label, enabled, hint),
           icon: 'command',
           ...(hint ? { hint } : {}),
           // Only a keyword-won match carries the chip; a title hit already
           // shows where it landed via the highlights.
-          ...(keywordMatch ? { keyword: keywordMatch.keyword } : {}),
+          ...(won.keyword ? { keyword: won.keyword } : {}),
           accept: () => {
             ui.closeOverlay();
             void commands.execute(command.id);
@@ -218,15 +277,16 @@
       });
     }
 
-    scored.sort((a, b) => b.score - a.score);
-
     // With an empty query, float this session's recently-run commands to the
     // top in most-recent-first order, skipping any that are disabled right
-    // now; everything else keeps its order below. With a query the ranking
-    // stays pure fuzzy score — no recency blending. Decision: the command set
-    // is small, and a predictable "what you typed wins" ranking beats a
-    // cleverer one that reorders under your fingers.
+    // now; everything else keeps its order below.
+    //
+    // Registration order in `app.ts` is a curated, category-grouped list, and
+    // with every score equal a stable sort is what preserves it — which is
+    // why the empty-query branch sorts on score alone and the tie-break below
+    // is reserved for a real query.
     if (query.length === 0) {
+      scored.sort((a, b) => b.score - a.score);
       const rank = new Map(commands.recentCommands().map((id, index) => [id, index]));
       const recent: typeof scored = [];
       const rest: typeof scored = [];
@@ -237,12 +297,61 @@
       recent.sort((a, b) => rank.get(a.row.key)! - rank.get(b.row.key)!);
       scored.length = 0;
       scored.push(...recent, ...rest);
+      return { rows: scored.slice(0, 200).map((s) => s.row), total: scored.length };
     }
+
+    // Under a query the sort had no tie-break at all, so `Array.sort` being
+    // stable meant every tie was decided by registration order — by accident.
+    // That is how ">undo" ran `agents.undoLastSession`, which reverts an
+    // agent's edits across files with no confirmation, instead of `edit.undo`;
+    // and how ">close" ran `file.closeFolder` and dropped the workspace
+    // instead of `file.close`. The keys below, in order:
+    //
+    // 1. Score. What you typed still decides, outright.
+    // 2. Shorter title. Among equally-good matches the terser title is the
+    //    more general action — "Undo" over "Undo the Last Agent Session",
+    //    "Close File" over "Close Files to the Right", "Save" over "Save As…".
+    // 3. Recency, this session. The previous comment here argued against
+    //    blending recency under a query, on the grounds that a ranking which
+    //    reorders under your fingers is worse than a predictable one. That
+    //    reasoning is kept and the conclusion narrowed rather than reversed:
+    //    recency is a *tie-break*, never a bonus, so it can only order rows
+    //    the query itself scored identically — no row ever overtakes a
+    //    better-matching one because of what you ran earlier. As a bonus it
+    //    would also be actively unsafe here, since running the agent undo
+    //    once would float it back above `edit.undo` for ">undo".
+    // 4. The id, so the order is total and reproducible in a test.
+    const rank = new Map(commands.recentCommands().map((id, index) => [id, index]));
+    const recencyOf = (id: string) => rank.get(id) ?? Number.MAX_SAFE_INTEGER;
+    scored.sort(
+      (a, b) =>
+        b.score - a.score ||
+        a.title.length - b.title.length ||
+        recencyOf(a.row.key) - recencyOf(b.row.key) ||
+        (a.row.key < b.row.key ? -1 : a.row.key > b.row.key ? 1 : 0),
+    );
 
     return { rows: scored.slice(0, 200).map((s) => s.row), total: scored.length };
   }
 
-  function matchAgainstKeywords(query: string, command: Command) {
+  /**
+   * What a row says on hover.
+   *
+   * A disabled row is drawn at 0.42 opacity and explains itself nowhere, so
+   * the honest answer is the one given here. It cannot name the actual reason
+   * — enablement is an opaque `() => boolean` on `Command`, with no companion
+   * that says why — so it names the usual causes and does not pretend to more
+   * than it knows. A first-class `disabledReason?: () => string` on `Command`
+   * would replace this; that lives in `services/commands.ts`.
+   */
+  function tooltipFor(label: string, enabled: boolean, hint: string | undefined): string {
+    if (!enabled) {
+      return `${label} — unavailable right now, usually because no file or folder is open, or no language server is running for this file`;
+    }
+    return hint ? `${label} — ${hint}` : label;
+  }
+
+  function matchAgainstKeywords(query: string, command: Command): CommandHit | null {
     for (const keyword of command.keywords ?? []) {
       const match = fuzzyMatch(query, keyword);
       // Keyword hits rank below title hits so exact titles always win. The
@@ -573,6 +682,31 @@
     return { rows, total: matches.length + (state.partial ? 1 : 0) };
   }
 
+  /**
+   * What to try next when nothing matched.
+   *
+   * "No matches" is a dead end, and a measured one: "zoom", "quit" and
+   * "minimap" all return nothing, and every mode has an escape hatch the user
+   * cannot be expected to have read off the footer legend. Naming the query
+   * back also makes a stale or mistyped term obvious.
+   */
+  const emptyHint = $derived.by(() => {
+    switch (effectiveMode) {
+      case 'commands':
+        return 'Try a shorter word, or ~ for an open file, : for a line, @ for a symbol.';
+      case 'buffers':
+        return 'Only files that are already open are listed — delete the ~ to search the whole folder.';
+      case 'symbols':
+        return 'Only structure is listed, not variables — delete the @ to search files instead.';
+      case 'branches':
+        return 'Choose "Create branch…" above to make one with that name.';
+      case 'files':
+        return 'Try part of the file name, or > for commands and ~ for an open file.';
+      default:
+        return '';
+    }
+  });
+
   function move(delta: number) {
     if (rows.length === 0) return;
     selected = (selected + delta + rows.length) % rows.length;
@@ -644,6 +778,7 @@
         class:selected={index === selected}
         class:disabled={row.disabled}
         id="nox-row-{index}"
+        title={row.tooltip}
         role="option"
         aria-selected={index === selected}
         tabindex="-1"
@@ -679,8 +814,13 @@
       <p class="nox-empty">
         {#if effectiveMode === 'files' && $fileIndex.length === 0}
           No folder open — press {keymap.displayFor('file.openFolder') ?? '⇧⌘O'} to open one.
-        {:else}
+        {:else if term.length === 0}
           No matches
+        {:else}
+          <span class="empty-query">Nothing matches “{term}”</span>
+          {#if emptyHint}
+            <span class="empty-hint">{emptyHint}</span>
+          {/if}
         {/if}
       </p>
     {/each}
@@ -838,6 +978,17 @@
 
   .row.selected .hint {
     color: var(--nox-text-muted);
+  }
+
+  /* The query, quoted back, is the line that gets read first. */
+  .empty-query {
+    color: var(--nox-text-muted);
+  }
+
+  .empty-hint {
+    max-width: 46ch;
+    font-size: var(--nox-fs-xs);
+    line-height: var(--nox-lh-ui);
   }
 
   .footer {

@@ -226,6 +226,15 @@
   .nox-terminal {
     display: flex;
     flex-direction: column;
+    /*
+      `flex: none` is load-bearing, not tidiness. The sibling `.nox-main-content`
+      is `flex: 1 1 auto`, and its flex-basis resolves to CodeMirror's full
+      document height — thousands of pixels. Shrinkage is distributed in
+      proportion to basis, so a shrinkable terminal surrenders
+      `overflow x 260/(260 + docHeight)` of its height and collapses to ~32px
+      no matter what `terminal.height` says. Measured, not theorised.
+    */
+    flex: none;
     min-height: 0;
     border-top: 1px solid var(--nox-border);
     background: var(--nox-bg-editor);

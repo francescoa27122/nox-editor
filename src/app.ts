@@ -71,11 +71,13 @@ import { NotificationService } from '@services/notifications';
 import { ReviewService, type ReviewScope } from '@services/review';
 import {
   describeCapability,
+  PermissionError,
   PermissionService,
   type PermissionRequest,
   type PromptAnswer,
 } from '@services/permissions';
 import { SearchService } from '@services/search';
+import { MenuService } from '@services/menu';
 import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
 import { UIService } from '@services/ui';
@@ -148,6 +150,8 @@ export class NoxApp {
   readonly notes: NotesService;
   /** Checks for, and installs, newer releases. See `updates.ts`. */
   readonly updates: UpdateService;
+  /** The native menu, built from the command table. See `menu.ts`. */
+  readonly menu: MenuService;
 
   /** Set by EditorPane once a view exists. Null when no tab is open. */
   readonly view = new Signal<EditorView | null>(null);
@@ -169,6 +173,15 @@ export class NoxApp {
 
   #disposeDropListener: (() => void) | null = null;
   #disposeCloseListener: (() => void) | null = null;
+  #disposeRejectionListener: (() => void) | null = null;
+  /**
+   * Errors already turned into a notification by the command failure sink.
+   *
+   * `CommandRegistry.execute` reports *and* rethrows, and nearly every call
+   * site discards the promise — so the rejection backstop sees the same error
+   * a moment later. Without this the user gets two toasts for one failure.
+   */
+  #reportedErrors = new WeakSet<object>();
 
   constructor(platform: Platform) {
     this.platform = platform;
@@ -208,6 +221,11 @@ export class NoxApp {
         });
       }
     });
+    // The one place a failed command becomes something the user can see.
+    this.commands.setFailureSink((command, error) => {
+      this.#reportFailure(`${command.title} failed`, error);
+    });
+    this.#installRejectionBackstop();
 
     this.agentConfig = new AgentConfigService(platform);
     this.serverRegistry = new ServerRegistry(platform);
@@ -250,6 +268,11 @@ export class NoxApp {
     // Behind the capability, like git: a platform that cannot replace
     // itself would make every check a no-op. Tests start it directly.
     if (platform.capabilities.selfUpdate) this.updates.start();
+
+    // Constructed here but installed in `#boot`: it reads the command table
+    // and the keymap when it builds the tree, and neither is complete until
+    // the registrations below and the user's own rules have both landed.
+    this.menu = new MenuService(platform, this.commands, this.keymap);
 
     this.#wireServices();
     this.#registerCommands();
@@ -297,10 +320,28 @@ export class NoxApp {
     await this.files.setRoot(this.workspace.rootPath.get());
     await this.#listenForExternalDrops();
     await this.#listenForClose();
+    await this.#installMenu();
     this.#applyTheme();
     this.#updateWindowTitle();
     // Only now is it safe to persist: everything the session describes exists.
     this.session.markReady();
+  }
+
+  /**
+   * Put the command table in the menu bar.
+   *
+   * Behind the capability like git and the updater: a target with no menu bar
+   * would be building a tree for nothing. Failure is warned about and not
+   * fatal — an editor with no menu still edits, and refusing to boot over the
+   * chrome would be the worse trade.
+   */
+  async #installMenu(): Promise<void> {
+    if (!this.platform.capabilities.applicationMenu) return;
+    try {
+      await this.menu.start();
+    } catch (error) {
+      console.warn('[nox] application menu unavailable:', error);
+    }
   }
 
   async #listenForExternalDrops(): Promise<void> {
@@ -433,6 +474,37 @@ export class NoxApp {
     // land means the text exists only in memory, so it is worth saying.
     this.notes.error.subscribe((message) => {
       if (message) this.notifications.error('Could not save notes', message);
+    });
+
+    // The same treatment for the three writes that used to fail in silence.
+    // Each message says what is actually at stake rather than "write failed",
+    // because the consequence is different every time and only the user can
+    // do anything about the cause.
+    this.config.error.subscribe((message) => {
+      if (message) {
+        this.notifications.error(
+          'Could not save your settings',
+          `${message}\n\nNox is using your changes now, but they will be back to their previous values next launch.`,
+        );
+      }
+    });
+
+    this.keymap.error.subscribe((message) => {
+      if (message) {
+        this.notifications.error(
+          'Could not save your keyboard shortcuts',
+          `${message}\n\nYour rebindings work for this session and will be gone next launch.`,
+        );
+      }
+    });
+
+    this.session.error.subscribe((message) => {
+      if (message) {
+        this.notifications.error(
+          'Could not save your session',
+          `${message}\n\nUnsaved work is only in memory. Save anything you cannot lose before quitting.`,
+        );
+      }
     });
 
     // Each configured local model becomes a provider the agent panel can start
@@ -573,10 +645,57 @@ export class NoxApp {
   }
 
   /**
+   * Turn a thrown thing into a notification, once.
+   *
+   * `PermissionError` is skipped: a refusal is the permission model working,
+   * and the person who answered the prompt does not need to be told what they
+   * just said. Everything else is a fault, and a fault with no artefact is
+   * indistinguishable from success — which is why "Save As…" was the worst
+   * case of this: silence there reads as "saved".
+   */
+  #reportFailure(headline: string, error: unknown): void {
+    if (error instanceof PermissionError) return;
+    if (typeof error === 'object' && error !== null) {
+      if (this.#reportedErrors.has(error)) return;
+      this.#reportedErrors.add(error);
+    }
+    this.notifications.error(headline, error instanceof Error ? error.message : String(error));
+  }
+
+  /**
+   * Catch promise rejections nothing else caught.
+   *
+   * The failure sink covers commands, which is most of the app; this covers
+   * the rest — a rejected `void`-ed promise in a component effect, a service
+   * callback, a listener. There is no devtools console in the release
+   * webview, so without this those genuinely vanish.
+   */
+  #installRejectionBackstop(): void {
+    // Node has no `addEventListener` on `globalThis`, so the headless test
+    // environment simply gets no backstop rather than a crash at construction.
+    if (typeof globalThis.addEventListener !== 'function') return;
+
+    const onRejection = (event: Event) => {
+      // Typed structurally rather than as `PromiseRejectionEvent`: the handler
+      // is registered on `globalThis`, whose listener signature is `Event`.
+      const { reason } = event as Event & { reason?: unknown };
+      this.#reportFailure('Something went wrong', reason);
+    };
+
+    globalThis.addEventListener('unhandledrejection', onRejection);
+    this.#disposeRejectionListener = () =>
+      globalThis.removeEventListener('unhandledrejection', onRejection);
+  }
+
+  /**
    * Ask the user to decide a permission.
    *
    * Dismissing the dialog is a denial: an unanswered question about whether
-   * something may change your files has exactly one safe reading.
+   * something may change your files has exactly one safe reading. So is
+   * pressing Enter the instant the prompt appears, which is why `deny` is
+   * named as the default and the session-wide grant — the widest answer on
+   * offer, and the only one that keeps applying after this question — is the
+   * one marked destructive.
    */
   async #askPermission(request: PermissionRequest): Promise<PromptAnswer> {
     const who = request.principal.kind === 'agent' ? request.principal.label : 'A plugin';
@@ -588,10 +707,11 @@ export class NoxApp {
         request.description ? ` (${request.description})` : ''
       }.${where}`,
       choices: [
-        { id: 'allow-session', label: 'Allow for this session' },
+        { id: 'allow-session', label: 'Allow for this session', danger: true },
         { id: 'allow-once', label: 'Allow once' },
-        { id: 'deny', label: 'Deny', danger: true },
+        { id: 'deny', label: 'Deny' },
       ],
+      defaultChoiceId: 'deny',
     });
 
     return choice === 'allow-session' || choice === 'allow-once' ? choice : 'deny';
@@ -1618,6 +1738,9 @@ export class NoxApp {
       // --- File ---------------------------------------------------------
       {
         id: 'file.new',
+        // Deliberately no `resourceFrom`, unlike its twelve `buffer.edit`
+        // siblings: the buffer this creates does not exist yet, so the active
+        // file is the one file the prompt must not name.
         capabilities: ['buffer.edit'],
         title: 'New File',
         category: 'File',
@@ -1697,6 +1820,22 @@ export class NoxApp {
         category: 'File',
         enabled: () => this.workspace.hasUnsavedChanges(),
         run: () => this.saveAll(),
+      },
+      {
+        id: 'file.toggleLineEnding',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        // Dirties the buffer — `WorkspaceService.setEol` says why — so it is
+        // as much an edit as typing is.
+        capabilities: ['buffer.edit'],
+        title: 'Switch Line Endings',
+        category: 'File',
+        keywords: ['eol', 'crlf', 'lf', 'windows', 'unix', 'line endings'],
+        enabled: bufferEnabled,
+        run: () => {
+          const active = this.workspace.activeSnapshot();
+          if (!active) return;
+          this.workspace.setEol(active.id, active.eol === '\r\n' ? '\n' : '\r\n');
+        },
       },
       {
         id: 'file.revert',
@@ -1828,32 +1967,32 @@ export class NoxApp {
       },
       {
         id: 'search.toggleCase',
-        title: 'Search: Toggle Match Case',
+        title: 'Toggle Match Case',
         category: 'Search',
         run: () => this.search.toggle('caseSensitive'),
       },
       {
         id: 'search.toggleWholeWord',
-        title: 'Search: Toggle Whole Word',
+        title: 'Toggle Whole Word',
         category: 'Search',
         run: () => this.search.toggle('wholeWord'),
       },
       {
         id: 'search.toggleRegexp',
-        title: 'Search: Toggle Regular Expression',
+        title: 'Toggle Regular Expression',
         category: 'Search',
         run: () => this.search.toggle('regexp'),
       },
       {
         id: 'search.togglePreserveCase',
-        title: 'Search: Toggle Preserve Case',
+        title: 'Toggle Preserve Case',
         category: 'Search',
         keywords: ['case', 'preserve', 'AB'],
         run: () => this.search.toggle('preserveCase'),
       },
       {
         id: 'search.toggleGitIgnore',
-        title: 'Search: Toggle Respect .gitignore',
+        title: 'Toggle Respect .gitignore',
         category: 'Search',
         run: () => this.search.toggle('respectGitIgnore'),
       },
@@ -1875,7 +2014,7 @@ export class NoxApp {
       },
       {
         id: 'search.collapseAll',
-        title: 'Search: Collapse All Results',
+        title: 'Collapse All Results',
         category: 'Search',
         run: () => this.search.collapseAll(),
       },
@@ -2214,6 +2353,7 @@ export class NoxApp {
       },
       {
         id: 'lsp.renameSymbol',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         title: 'Rename Symbol',
         category: 'Language',
         keywords: ['rename', 'refactor', 'symbol', 'lsp'],
@@ -2227,6 +2367,7 @@ export class NoxApp {
       },
       {
         id: 'lsp.formatDocument',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         title: 'Format Document',
         category: 'Language',
         keywords: ['format', 'prettify', 'indent', 'lsp'],
@@ -2346,6 +2487,9 @@ export class NoxApp {
         title: 'Apply Reviewed Changes',
         category: 'Review',
         keywords: ['accept', 'diff', 'staged'],
+        // No `resourceFrom` here or on `search.replaceAll`: both write across
+        // every file in a set, and naming the active one would understate the
+        // reach of the grant rather than narrow it.
         capabilities: ['buffer.edit'],
         enabled: () => this.review.acceptedCount().hunks > 0,
         run: () => this.applyReview(),
@@ -2467,6 +2611,7 @@ export class NoxApp {
       // --- Edit -----------------------------------------------------------
       {
         id: 'edit.undo',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Undo',
         keyHint: 'Mod+Z',
@@ -2476,6 +2621,7 @@ export class NoxApp {
       },
       {
         id: 'edit.redo',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Redo',
         keyHint: 'Mod+Shift+Z',
@@ -2504,6 +2650,7 @@ export class NoxApp {
       },
       {
         id: 'edit.replace',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Replace',
         category: 'Edit',
@@ -2616,6 +2763,7 @@ export class NoxApp {
       },
       {
         id: 'edit.toggleComment',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Toggle Line Comment',
         keyHint: 'Mod+/',
@@ -2633,6 +2781,7 @@ export class NoxApp {
       })),
       {
         id: 'edit.duplicateLine',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Duplicate Line',
         keyHint: 'Shift+Alt+Down',
@@ -2642,6 +2791,7 @@ export class NoxApp {
       },
       {
         id: 'edit.deleteLine',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Delete Line',
         keyHint: 'Mod+Shift+K',
@@ -2651,6 +2801,7 @@ export class NoxApp {
       },
       {
         id: 'edit.moveLineUp',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Move Line Up',
         keyHint: 'Alt+Up',
@@ -2660,6 +2811,7 @@ export class NoxApp {
       },
       {
         id: 'edit.moveLineDown',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Move Line Down',
         keyHint: 'Alt+Down',
@@ -2669,6 +2821,7 @@ export class NoxApp {
       },
       {
         id: 'edit.indent',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Indent Line',
         keyHint: 'Mod+]',
@@ -2678,6 +2831,7 @@ export class NoxApp {
       },
       {
         id: 'edit.outdent',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
         title: 'Outdent Line',
         keyHint: 'Mod+[',
@@ -2781,6 +2935,14 @@ export class NoxApp {
         run: () => this.config.set('editor.wordWrap', !this.config.get('editor.wordWrap')),
       },
       {
+        id: 'view.toggleIndentType',
+        title: 'Toggle Tabs and Spaces',
+        category: 'View',
+        keywords: ['indent', 'indentation', 'tab size', 'whitespace'],
+        run: () =>
+          this.config.set('editor.insertSpaces', !this.config.get('editor.insertSpaces')),
+      },
+      {
         id: 'view.toggleLineNumbers',
         title: 'Toggle Line Numbers',
         category: 'View',
@@ -2811,18 +2973,23 @@ export class NoxApp {
         id: 'view.increaseFontSize',
         title: 'Increase Font Size',
         category: 'View',
+        // "Zoom" is what every other editor calls this, and without the synonym
+        // the palette returns nothing at all for the word.
+        keywords: ['zoom', 'zoom in', 'bigger', 'larger', 'text size'],
         run: () => this.config.set('editor.fontSize', this.config.get('editor.fontSize') + 1),
       },
       {
         id: 'view.decreaseFontSize',
         title: 'Decrease Font Size',
         category: 'View',
+        keywords: ['zoom', 'zoom out', 'smaller', 'text size'],
         run: () => this.config.set('editor.fontSize', this.config.get('editor.fontSize') - 1),
       },
       {
         id: 'view.resetFontSize',
         title: 'Reset Font Size',
         category: 'View',
+        keywords: ['zoom', 'zoom reset', 'actual size', 'text size'],
         run: () => this.config.reset('editor.fontSize'),
       },
       {
@@ -3075,6 +3242,11 @@ export class NoxApp {
       // natural entry is Shift+F12, which already fills and shows the view.
       'Mod+Shift+M': 'problems.focus',
       'Mod+Shift+A': 'answers.focus',
+      // The agents panel had no chord and no button, so the only way to it was
+      // knowing its name in the palette. ⇧⌘Y because the mnemonic letters are
+      // all taken — A is Answers, G is Find Previous — and Y is free on every
+      // platform and unclaimed by CodeMirror's keymap.
+      'Mod+Shift+Y': 'agents.show',
 
       // Edit
       'Mod+F': 'edit.find',
@@ -3505,7 +3677,10 @@ export class NoxApp {
     this.#disposeDropListener = null;
     this.#disposeCloseListener?.();
     this.#disposeCloseListener = null;
+    this.#disposeRejectionListener?.();
+    this.#disposeRejectionListener = null;
     this.keymap.detach();
+    this.menu.dispose();
     this.watcher.stop();
     this.updates.stop();
     // Notes first: settings and session each have an on-disk original to

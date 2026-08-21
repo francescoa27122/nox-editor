@@ -111,5 +111,14 @@ listeners use.
 - **Windowing anything else.** Search results, Problems and References have
   their own row models and their own natural limits; this change does not
   reach into them.
+
+  **Superseded for search on 2026-08-21.** `SearchPanel` now uses this exact
+  mechanism — same `MIN_ROWS_TO_WINDOW`, same `viewportHeight > 0` guard, same
+  index-arithmetic reveal. It is the second instance of the shared-constant
+  rule, and it publishes its own `--nox-search-row-h` rather than reusing
+  `--nox-tree-row-h`: the two lists are 22px and 23px, so one shared name
+  would inherit the wrong height into one of them. Problems and References
+  remain unwindowed, and that should be re-decided on their own merits rather
+  than inherited from this line.
 - **Loading rows on scroll.** Directories already load lazily on expand; the
   flat list is fully in memory by construction.

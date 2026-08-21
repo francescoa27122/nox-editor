@@ -7,17 +7,60 @@
 
 mod agent;
 mod fs;
+mod geometry;
 mod git;
 mod http;
 mod lsp;
+#[cfg(desktop)]
+mod menu;
 mod pty;
 mod search;
 mod watcher;
+#[cfg(desktop)]
+mod window_state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|_app| {
+            // `--geometry WxH+X+Y` — a launch-time window size for repeatable
+            // desktop walks. See `geometry.rs` for why it is a test affordance
+            // rather than a user feature (a Finder-launched .app gets no argv).
+            //
+            // Applied here rather than in tauri.conf.json because the value is
+            // only known at launch, and clamped against the monitor's work
+            // area because a window taller than the screen hides its own
+            // bottom rows — which reads as a missing status bar rather than as
+            // bad input, and has already cost this project a false finding.
+            #[cfg(desktop)]
+            {
+                use tauri::Manager;
+                let handle = _app.handle().clone();
+                let (launch, warning) = geometry::decide_launch(
+                    geometry::geometry_from_args(std::env::args()),
+                    window_state::remembered(&handle),
+                );
+                // Loud and ignored, never silently ignored: a walk that
+                // believes it asked for a size it did not get measures
+                // everything against the wrong window.
+                if let Some(message) = warning {
+                    eprintln!("nox: --geometry ignored — {message}");
+                }
+                if let Some(window) = _app.get_webview_window("main") {
+                    match launch {
+                        geometry::Launch::Flag(requested) => {
+                            apply_geometry(&handle, &window, requested, true);
+                        }
+                        geometry::Launch::Remembered(remembered) => {
+                            if let Some(remembered) = remembered {
+                                apply_geometry(&handle, &window, remembered, false);
+                            }
+                            window_state::watch(&handle, &window);
+                        }
+                    }
+                }
+            }
+
             // Windows keeps its native title bar unless told otherwise, and
             // Nox draws its own — so without this you get two stacked bars.
             // `titleBarStyle` and `hiddenTitle` in tauri.conf.json do not
@@ -40,6 +83,19 @@ pub fn run() {
                 }
             }
             Ok(())
+        })
+        // One handler for every menu item there will ever be. Predefined
+        // system items act on their own and are filtered out here; a Nox
+        // command is forwarded by id and dispatched through the registry in
+        // the renderer, exactly like a palette entry or a keypress.
+        .on_menu_event(|app, event| {
+            #[cfg(desktop)]
+            if let Some(command_id) = menu::command_id_from(event.id().as_ref()) {
+                use tauri::Emitter;
+                // Fire and forget: an emit that fails means the window has
+                // gone, and there is nothing left to dispatch into.
+                let _ = app.emit(menu::EVENT, command_id);
+            }
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -95,7 +151,112 @@ pub fn run() {
             lsp::nox_lsp_send,
             lsp::nox_lsp_stop,
             lsp::nox_lsp_stop_all,
+            #[cfg(desktop)]
+            menu::nox_set_menu,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Nox");
+}
+
+/// Size and place the main window — for `--geometry`, and for the geometry the
+/// last session left behind (`window_state`), which is clamped by the same
+/// call rather than by a second copy of the rule.
+///
+/// `announce` echoes what it resolved to on stdout, so a walk harness can
+/// anchor on the number rather than measuring a screenshot (screenshots come
+/// back scaled by the display's factor, so measuring them is how points and
+/// pixels get confused). Only the flag announces: a restored window printing
+/// that line on every ordinary launch would be a second, unasked-for source of
+/// the string the harness greps for.
+#[cfg(desktop)]
+fn apply_geometry<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    window: &tauri::WebviewWindow<R>,
+    requested: geometry::Geometry,
+    announce: bool,
+) {
+    // The minimums come from tauri.conf.json rather than being restated here:
+    // two copies of 640x420 would drift, and a window below its own minimum
+    // renders a layout no user could ever produce.
+    let config = app.config();
+    let window_config = config.app.windows.first();
+    let minimum = (
+        window_config.and_then(|w| w.min_width).unwrap_or(0.0),
+        window_config.and_then(|w| w.min_height).unwrap_or(0.0),
+    );
+
+    // Work area, not full monitor size: the menu bar and dock are not usable
+    // space, and treating them as usable is exactly the off-by-a-menu-bar that
+    // pushes the status bar off screen.
+    let (visible, origin) = match window.current_monitor() {
+        Ok(Some(monitor)) => {
+            let scale = monitor.scale_factor();
+            let area = monitor.work_area();
+            (
+                (
+                    f64::from(area.size.width) / scale,
+                    f64::from(area.size.height) / scale,
+                ),
+                // The work area does not start at the screen origin — the menu
+                // bar sits above it. Offsets are therefore relative to the
+                // usable area, so `+0+0` means its top-left corner rather than
+                // a y that macOS will silently push down.
+                (
+                    f64::from(area.position.x) / scale,
+                    f64::from(area.position.y) / scale,
+                ),
+            )
+        }
+        // No monitor to measure against means no clamp is possible. Honour the
+        // request rather than inventing a bound.
+        _ => ((f64::INFINITY, f64::INFINITY), (0.0, 0.0)),
+    };
+
+    let fitted = geometry::clamp(requested, visible, minimum);
+
+    if let Err(error) = window.set_size(tauri::LogicalSize::new(fitted.width, fitted.height)) {
+        eprintln!("nox: --geometry could not set the size — {error}");
+        return;
+    }
+
+    match fitted.position {
+        Some((x, y)) => {
+            if let Err(error) =
+                window.set_position(tauri::LogicalPosition::new(x + origin.0, y + origin.1))
+            {
+                eprintln!("nox: --geometry could not set the position — {error}");
+                return;
+            }
+        }
+        // tauri.conf.json asks for a centred window, but centring happened at
+        // the old size, so a size-only --geometry would leave it off-centre.
+        None => {
+            let _ = window.center();
+        }
+    }
+
+    // Echo the resolved request, in absolute screen points so it matches what
+    // any external tool measures.
+    //
+    // Reading the values back off the window instead was tried and reverted:
+    // `set_position` is asynchronous on macOS, so `outer_position()` called
+    // immediately after it returns the *previous* position — measured, it
+    // reported the centred +96+77 for a window that had already been placed at
+    // +0+33. A read-back that races is worse than arithmetic, because it looks
+    // authoritative. If you need the window's true bounds later, read them
+    // with CoreGraphics (`scripts/window-id.swift`).
+    if !announce {
+        return;
+    }
+
+    match fitted.position {
+        Some((x, y)) => println!(
+            "nox: geometry {}x{}+{}+{}",
+            fitted.width,
+            fitted.height,
+            x + origin.0,
+            y + origin.1
+        ),
+        None => println!("nox: geometry {}x{}", fitted.width, fitted.height),
+    }
 }

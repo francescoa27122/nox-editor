@@ -37,6 +37,20 @@
   let filter = $state('');
   let activeCategory = $state<SettingCategory | 'All'>('All');
   let searchInput = $state<HTMLInputElement | null>(null);
+  /**
+   * Whether the `advanced` settings are listed while browsing.
+   *
+   * They used to be reachable *only* by searching, which hid them from every
+   * browse path including their own category tab: opening Settings → Terminal
+   * showed two rows and no hint that `terminal.height` existed, so the honest
+   * conclusion was that Nox could not do it. Off by default — the point of the
+   * flag is still to keep the first read of each category short.
+   */
+  let showAdvanced = $state(false);
+
+  const advancedCount = $derived(
+    SETTING_KEYS.filter((key) => SETTINGS_SCHEMA[key].advanced).length,
+  );
 
   $effect(() => {
     searchInput?.focus();
@@ -46,7 +60,9 @@
     const query = filter.trim();
     return SETTING_KEYS.filter((key) => {
       const descriptor = SETTINGS_SCHEMA[key];
-      if (descriptor.advanced && query.length === 0) return false;
+      // A search still reaches an advanced key regardless of the toggle:
+      // someone who typed its name has already asked for it by name.
+      if (descriptor.advanced && !showAdvanced && query.length === 0) return false;
       if (activeCategory !== 'All' && descriptor.category !== activeCategory) return false;
       if (query.length === 0) return true;
       return Boolean(
@@ -220,6 +236,13 @@
     </button>
     <button class="link" onclick={() => ui.openOverlay('keybindings')}>
       Keyboard shortcuts
+    </button>
+    <button
+      class="link"
+      aria-pressed={showAdvanced}
+      onclick={() => (showAdvanced = !showAdvanced)}
+    >
+      {showAdvanced ? 'Hide' : 'Show'} advanced ({advancedCount})
     </button>
     {#if $rootPath}
       <button
@@ -521,6 +544,11 @@
   }
 
   .link:hover {
+    color: var(--nox-accent);
+  }
+
+  /* The one control in this row that is a state rather than a destination. */
+  .link[aria-pressed='true'] {
     color: var(--nox-accent);
   }
 

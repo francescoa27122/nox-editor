@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
+import type { DirEntry } from '../src/platform/types';
 import { FileTreeService } from '../src/services/filetree';
 
 function setup() {
@@ -112,5 +113,82 @@ describe('FileTreeService', () => {
     await tree.toggle('/w/README.md');
 
     expect(tree.nodes.get().length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A disk on which one directory refuses to be read.
+ *
+ * `MemoryPlatform` only rejects for "not found" and "not a directory", so a
+ * permission denial — the case the explorer actually has to survive on a real
+ * machine — has to be arranged. Everything else is the real implementation.
+ */
+class DeniedPlatform extends MemoryPlatform {
+  denied = '';
+
+  override async readDir(path: string): Promise<DirEntry[]> {
+    if (path === this.denied) throw new Error('EACCES: permission denied');
+    return super.readDir(path);
+  }
+}
+
+/**
+ * Guards the bug these tests were written for: `#load` had recorded the read
+ * failure since the tree was written, but `FlatNode` had nowhere to put it and
+ * `#flatten` never looked — and because the catch stores `entries: []`, an
+ * unreadable directory expanded into exactly the same silent nothing as an
+ * empty one. Which of the two it is, is the only thing the user needs.
+ */
+describe('FileTreeService and directories it cannot read', () => {
+  function denied(path: string) {
+    const platform = new DeniedPlatform();
+    platform.seedFile('/w/README.md', '#');
+    platform.seedFile('/w/secret/inside.ts', '');
+    platform.mkdirp('/w/empty');
+    platform.denied = path;
+    return { platform, tree: new FileTreeService(platform) };
+  }
+
+  it('says why a directory is empty when it is not empty but unreadable', async () => {
+    const { tree } = denied('/w/secret');
+    await tree.setRoot('/w');
+    await tree.toggle('/w/secret');
+
+    const node = tree.nodes.get().find((n) => n.name === 'secret');
+    expect(node?.error).toContain('permission denied');
+  });
+
+  it('leaves a genuinely empty directory distinguishable from that', async () => {
+    const { tree } = denied('/w/secret');
+    await tree.setRoot('/w');
+    await tree.toggle('/w/empty');
+
+    const node = tree.nodes.get().find((n) => n.name === 'empty');
+    expect(node?.empty).toBe(true);
+    expect(node?.error).toBeNull();
+  });
+
+  it('carries no error on a directory that read fine', async () => {
+    const { tree } = denied('/w/nothing-is-denied');
+    await tree.setRoot('/w');
+    await tree.toggle('/w/secret');
+
+    expect(tree.nodes.get().every((n) => n.error === null)).toBe(true);
+  });
+
+  it('reports an unreadable root separately — it has no row to hang it on', async () => {
+    const { tree } = denied('/w');
+    await tree.setRoot('/w');
+
+    expect(tree.nodes.get()).toEqual([]);
+    expect(tree.rootError.get()).toContain('permission denied');
+  });
+
+  it('clears the root error when the folder is closed', async () => {
+    const { tree } = denied('/w');
+    await tree.setRoot('/w');
+    await tree.setRoot(null);
+
+    expect(tree.rootError.get()).toBeNull();
   });
 });

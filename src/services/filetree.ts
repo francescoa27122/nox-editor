@@ -20,6 +20,16 @@ export interface FlatNode {
   loading: boolean;
   /** True for a directory known to contain nothing. */
   empty: boolean;
+  /**
+   * Why an expanded directory could not be read, or `null`.
+   *
+   * `#load` has recorded this since the tree was written, but nothing ever
+   * carried it out of `DirState`, so a permission-denied or since-deleted
+   * directory expanded into the same silent nothing as a genuinely empty one
+   * — `#load`'s catch stores `entries: []`, which makes `empty` true as well.
+   * Read `error` first: it is the more specific answer.
+   */
+  error: string | null;
 }
 
 interface DirState {
@@ -36,6 +46,15 @@ export class FileTreeService {
   readonly nodes = new Signal<FlatNode[]>([]);
   readonly fileIndex = new Signal<string[]>([]);
   readonly indexing = new Signal(false);
+  /**
+   * Why the workspace root itself could not be read, or `null`.
+   *
+   * The root has no row of its own to hang an error on — it is the tree — so
+   * an unreadable root produced an empty node list and the explorer said
+   * "This folder is empty." Kept separate from the per-node `error` for that
+   * one reason.
+   */
+  readonly rootError = new Signal<string | null>(null);
 
   #platform: Platform;
   #root: string | null = null;
@@ -71,6 +90,7 @@ export class FileTreeService {
     this.fileIndex.set([]);
     if (!path) {
       this.nodes.set([]);
+      this.rootError.set(null);
       return;
     }
     this.#expanded.add(path);
@@ -195,8 +215,10 @@ export class FileTreeService {
     const root = this.#root;
     if (!root) {
       this.nodes.set([]);
+      this.rootError.set(null);
       return;
     }
+    this.rootError.set(this.#dirs.get(root)?.error ?? null);
 
     const out: FlatNode[] = [];
     const walk = (path: string, depth: number): void => {
@@ -214,6 +236,7 @@ export class FileTreeService {
           expanded,
           loading: expanded && (childState?.loading ?? true),
           empty: expanded && childState?.entries?.length === 0,
+          error: expanded ? (childState?.error ?? null) : null,
         });
         if (expanded) walk(entry.path, depth + 1);
       }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import { canMoveInto, dirname } from '@core/path';
   import { rootLabel } from '@services/filetree';
   import { useApp } from './context';
@@ -10,6 +10,7 @@
   const { workspace, files, ui, commands } = app;
 
   const nodes = files.nodes;
+  const rootError = files.rootError;
   const rootPath = workspace.rootPath;
   const buffers = workspace.buffers;
   const activeId = workspace.activeId;
@@ -93,13 +94,27 @@
     return node.isDirectory ? node.path : dirname(node.path);
   });
 
+  /**
+   * The focus request, and *only* the focus request, may re-run this effect.
+   *
+   * It used to read `$lead` and `$nodes` in its tracked body, which coupled it
+   * to the effect below — and that one writes the lead on every active-buffer
+   * change. So clicking a tab or accepting a quick-open re-ran this and pulled
+   * keyboard focus out of the editor and into the tree: `↓` then scrolled the
+   * file list instead of moving the cursor, and `Backspace` fired
+   * `explorer.delete`, popping a Move-to-Trash dialog over the document the
+   * user believed they were typing in. `untrack` keeps the seeding read
+   * without re-establishing that dependency. Guarded by
+   * `tests/explorer-focus.test.ts`.
+   */
   $effect(() => {
-    // Track the request counter so a focus command re-runs this effect.
     void $focusRequest;
-    if (listElement) {
+    const element = listElement;
+    if (!element) return;
+    untrack(() => {
       if (!$lead && $nodes.length > 0) selection.set($nodes[0]!.path);
-      listElement.focus();
-    }
+    });
+    element.focus();
   });
 
   // Follow the active tab in the tree, the way every good explorer does — but
@@ -599,12 +614,32 @@
             <Icon name={node.isDirectory ? 'folder' : 'file'} size={14} />
           </span>
           <span class="name">{node.name}</span>
+          <!--
+            An unreadable directory used to expand into the same silent
+            nothing as an empty one, because `#load`'s catch stores an empty
+            entry list. The note rides on the folder's own row rather than a
+            child row of its own: the tree is windowed on a fixed row height
+            (`ROW_HEIGHT` above), and `explorer.selectAll` maps `files.nodes`
+            straight to paths, so any row that is not a real node would put
+            both of those out by one. `error` wins over `empty` — it is the
+            more specific answer, and the catch sets both.
+          -->
           {#if node.loading}
             <span class="spinner" aria-hidden="true"></span>
+          {:else if node.error}
+            <span class="note unreadable" title={node.error}>unreadable</span>
+          {:else if node.empty}
+            <span class="note">empty</span>
           {/if}
         </div>
       {:else}
-        <p class="nox-empty">This folder is empty.</p>
+        <p class="nox-empty">
+          {#if $rootError}
+            This folder could not be read: {$rootError}
+          {:else}
+            This folder is empty.
+          {/if}
+        </p>
       {/each}
       {#if padBottom > 0}
         <div class="spacer" style="height: {padBottom}px" role="presentation"></div>
@@ -825,6 +860,21 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Pushed to the right edge like the spinner it replaces, and quiet enough
+     that a tree full of empty folders does not read as a wall of warnings. */
+  .note {
+    flex: none;
+    margin-left: auto;
+    font-size: var(--nox-fs-2xs);
+    letter-spacing: var(--nox-tracking-wide);
+    text-transform: uppercase;
+    color: var(--nox-text-faint);
+  }
+
+  .note.unreadable {
+    color: var(--nox-danger);
   }
 
   .spinner {

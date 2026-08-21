@@ -1,6 +1,30 @@
+<script lang="ts" module>
+  /**
+   * What right-clicking the code surface offers, in order.
+   *
+   * Ids only: the label, the chord and the enablement are all read back from
+   * the command registry when the menu opens, so this list cannot drift from
+   * the palette, from a rebound key, or from a command that grew an `enabled`
+   * predicate. The four LSP entries are the reason the menu exists at all —
+   * they are otherwise reachable only through F12 / ⇧F12 / F2 / ⇧⌥F, which a
+   * default-configured Mac laptop hides behind `fn`.
+   */
+  const MENU_COMMANDS: readonly { id: string; separatorBefore?: boolean }[] = [
+    { id: 'lsp.goToDefinition' },
+    { id: 'lsp.findReferences' },
+    { id: 'lsp.renameSymbol' },
+    { id: 'lsp.formatDocument' },
+    { id: 'edit.toggleComment', separatorBefore: true },
+    { id: 'edit.selectAllMatches' },
+    { id: 'git.showDiff', separatorBefore: true },
+  ];
+</script>
+
 <script lang="ts">
+  import { EditorSelection } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
   import { onMount } from 'svelte';
+  import { formatChord, normalizeChord } from '@services/keymap';
   import { cursorInfo } from '@editor/commands';
   import {
     lspCompartment,
@@ -15,6 +39,7 @@
   import { applyDiagnostics } from '@editor/lsp';
   import { pathToUri } from '@core/uri';
   import { useApp } from './context';
+  import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
 
   /**
    * Host for the CodeMirror view.
@@ -44,6 +69,7 @@
   let host = $state<HTMLElement | null>(null);
   let view: EditorView | null = null;
   let currentId: string | null = null;
+  let menu = $state<{ anchor: MenuAnchor; returnTo: HTMLElement | null } | null>(null);
 
   /**
    * Built once per pane, not per tab: `documentOf` closes over `currentId`,
@@ -259,6 +285,103 @@
     const buffer = id ? workspace.buffers.get().find((b) => b.id === id) : null;
     if (id && buffer?.isDirty && !buffer.isUntitled) void app.save(id);
   }
+
+  // --- Context menu --------------------------------------------------------
+
+  /**
+   * Built when the menu opens, from the registry rather than from literals.
+   *
+   * Reading `menu` first is what makes this a snapshot: `enabled()` and
+   * `displayFor()` consult live state through plain getters that Svelte does
+   * not track, so recomputing is tied to the one event that matters — the
+   * menu being opened.
+   */
+  const menuItems = $derived.by<MenuItem[]>(() => {
+    if (!menu) return [];
+    return MENU_COMMANDS.flatMap(({ id, separatorBefore }) => {
+      const command = app.commands.get(id);
+      if (!command) return [];
+      // Application bindings win; `keyHint` covers the CodeMirror-owned ones.
+      // Left undefined when there is neither, so the menu renders no chord
+      // rather than an empty one — `keybindings.json` can `remove` a default.
+      const hint =
+        app.keymap.displayFor(id) ??
+        (command.keyHint ? formatChord(normalizeChord(command.keyHint)) : undefined);
+      // Disabled, never omitted: a user who cannot format this file still
+      // learns that Nox formats files, and which key does it.
+      return [
+        {
+          id,
+          label: command.title,
+          hint,
+          disabled: !app.commands.isEnabled(id),
+          separatorBefore,
+        },
+      ];
+    });
+  });
+
+  /**
+   * Right-clicking inside the selection keeps it; right-clicking outside
+   * collapses the caret to where the pointer landed. That is the convention
+   * `ExplorerPanel` follows for rows, and it exists for the same reason: a
+   * menu that acts on something other than what you pointed at silently
+   * destroys work — here, a multi-line selection about to be commented out.
+   *
+   * The `preventDefault` is the defect this whole handler replaces. Without
+   * it the packaged app answers a right-click with WebKit's menu — Reload,
+   * Services, Look Up — on its most central surface.
+   */
+  function openMenu(event: MouseEvent) {
+    event.preventDefault();
+
+    if (view) {
+      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      const inside =
+        pos !== null &&
+        view.state.selection.ranges.some(
+          (range) => !range.empty && pos >= range.from && pos <= range.to,
+        );
+      if (pos !== null && !inside) view.dispatch({ selection: EditorSelection.cursor(pos) });
+    }
+
+    menu = { anchor: { x: event.clientX, y: event.clientY }, returnTo: view?.contentDOM ?? null };
+  }
+
+  /**
+   * Keyboard equivalent, anchored to the caret rather than to a pointer.
+   *
+   * `coordsAtPos` needs real layout, so the host's own box is the fallback —
+   * which is also the only branch jsdom can ever take.
+   */
+  function openMenuFromKeyboard() {
+    const coords = view ? view.coordsAtPos(view.state.selection.main.head) : null;
+    const rect = host?.getBoundingClientRect();
+    menu = {
+      anchor: coords
+        ? { x: coords.left, y: coords.bottom }
+        : { x: (rect?.left ?? 0) + 24, y: (rect?.top ?? 0) + 24 },
+      returnTo: view?.contentDOM ?? null,
+    };
+  }
+
+  /**
+   * This listener does sit on the typing path, so it is written to leave it
+   * immediately: two comparisons and a return for every key that is not one
+   * of the two menu keys. Nothing here scales with document size.
+   */
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+    event.preventDefault();
+    openMenuFromKeyboard();
+  }
+
+  function runMenuItem(id: string) {
+    menu = null;
+    // By id, like every other user action, so the palette and the keybinding
+    // reference keep describing the same thing this menu does.
+    void app.commands.execute(id);
+  }
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -269,8 +392,23 @@
   onfocusout={onBlur}
   onfocusin={() => workspace.focusGroup(groupId)}
   onpointerdown={() => workspace.focusGroup(groupId)}
+  oncontextmenu={openMenu}
+  onkeydown={onKeydown}
   aria-label="Editor"
 ></section>
+
+{#if menu}
+  <!-- Keyed so each invocation is a fresh menu with its own initial state. -->
+  {#key `${menu.anchor.x}:${menu.anchor.y}`}
+    <ContextMenu
+      items={menuItems}
+      anchor={menu.anchor}
+      onSelect={runMenuItem}
+      onDismiss={() => (menu = null)}
+      returnFocusTo={menu.returnTo}
+    />
+  {/key}
+{/if}
 
 <style>
   .nox-editor-pane {

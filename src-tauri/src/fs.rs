@@ -362,7 +362,7 @@ pub fn nox_reveal(path: String) -> Result<()> {
 /// Resolve `<app config dir>/<name>`, creating the directory on demand.
 /// `name` is rejected if it contains separators — config keys are bare
 /// filenames, and treating them otherwise would be a path-traversal hole.
-fn config_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf> {
+pub(crate) fn config_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf> {
     if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
         return Err(format!("io: invalid config name {name}"));
     }
@@ -407,7 +407,7 @@ pub fn nox_read_config(app: tauri::AppHandle, name: String) -> Result<Option<Str
 
 /// The write itself, split from the command so it can be tested without an
 /// `AppHandle`.
-fn write_config_atomically(path: &Path, contents: &str) -> Result<()> {
+pub(crate) fn write_config_atomically(path: &Path, contents: &str) -> Result<()> {
     // Same reasoning as a file save: truncate-then-write leaves a window where
     // a crash costs the whole file. A config path always has a parent
     // directory, so the sibling temp always has somewhere to live.

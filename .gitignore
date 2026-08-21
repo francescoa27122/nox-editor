@@ -8,10 +8,16 @@ src-tauri/gen/
 coverage/
 
 # Editor/agent tooling config, not part of the project.
-.claude/
+#
+# `.claude/*` rather than `.claude/`: git will not descend into an excluded
+# *directory*, so a bare `.claude/` makes the re-includes below unreachable —
+# and the obvious repair, adding `!.claude/`, negates the exclusion entirely
+# and drags every agent's local config (launch.json, settings.local.json) back
+# in. Excluding the contents instead leaves the directory walkable, so the
+# re-includes actually apply.
+.claude/*
 # …except the project skills, which are documentation: they encode subsystem
 # invariants the same way ARCHITECTURE.md does, and CLAUDE.md references them.
-!.claude/
 !.claude/skills/
 !.claude/skills/**
 

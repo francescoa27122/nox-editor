@@ -51,6 +51,17 @@ export class ConfigService {
    * about ownership, not about the value.
    */
   readonly workspaceScope: Signal<ReadonlySet<SettingKey>>;
+  /**
+   * Why the last write to `settings.json` failed, or null.
+   *
+   * A settings file that cannot be written must not break the session — that
+   * part was always right. But "must not break the session" is not "must not
+   * be mentioned": every preference the user changes from here on is lost at
+   * quit, and only they can do anything about a full disk or a bad
+   * permission. Published the way `NotesService` publishes its own write
+   * failures, and toasted in `NoxApp.#wireServices`.
+   */
+  readonly error = new Signal<string | null>(null);
 
   #platform: Platform;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -259,8 +270,13 @@ export class ConfigService {
   async #save(): Promise<void> {
     try {
       await this.#platform.writeConfigFile(CONFIG_FILE, this.serialize());
-    } catch {
-      /* Settings that cannot be written should not break the session. */
+      // Cleared only on a write that lands, so a transient failure followed by
+      // a successful one stops nagging on its own.
+      if (this.error.get() !== null) this.error.set(null);
+    } catch (error) {
+      // Reported, never thrown: the settings are already correct in memory and
+      // the session carries on with them.
+      this.error.set(error instanceof Error ? error.message : String(error));
     }
   }
 }
