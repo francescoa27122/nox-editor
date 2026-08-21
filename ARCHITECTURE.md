@@ -929,6 +929,17 @@ index naming a body that is not there. That case is handled by loading the
 note with an empty body rather than dropping it — the title is still worth
 keeping.
 
+A note's dirty flag is cleared **before** its write, not after. The
+difference is not stylistic: clearing afterwards means the write has to prove
+that what it wrote is still what the note says, which took a revision counter
+per kind of dirtiness and a saved-revision shadow to compare against. Clearing
+first inverts it — the flag is false for as long as the write is in flight, so
+an edit landing during it re-arms the flag by itself and is unambiguously
+newer than the data being written. A failed write re-arms the flag on its way
+out, which is why the per-call failure fences matter more under this scheme
+rather than less: without them a failing write would be picked straight back
+up by the same drain loop.
+
 Notes always autosave, on a 400 ms debounce, and do not follow
 `files.autoSave`. That setting exists because writing a file is an
 outward-facing act with other observers; a note has none. There is no setting
@@ -1607,5 +1618,4 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | The menu has no Close Window item | `PredefinedMenuItem::close_window` carries ⌘W and Nox binds ⌘W to `file.close`, so both in one menu would be two items claiming one accelerator. Nox has no `window.close` command to offer instead; the traffic light and ⌘Q are the ways out. |
 | `--geometry` suppresses geometry persistence for that launch | Deliberate — see §4 — but it means a walk cannot be used to *set* a remembered window, and a malformed `--geometry` falls back to an ordinary launch that does persist. |
 | Browser build does not persist edits | Deliberate: it is for developing the UI, not storing work. Settings and session do persist via localStorage. |
-| `notes.ts`'s `#doPersist` clears dirty state after the write, not before | Correct and tested — its termination and failure fences hold. But clearing after the write forces the whole design to prove "is this still what I wrote", which needs a revision counter for every kind of dirtiness, a `#savedIndexRevision` shadow, three per-call failure fences, and a comment-only invariant that `create()` must never bump `#indexRevision`. Clearing before the await and letting the next mutation re-arm it would need only a boolean and cut roughly 60 lines to one concept. Do this before the method is next modified, not as a speculative refactor now. |
 | Components embedding CodeMirror are tested for wiring and text, not geometry | `EditorPane` mounts under jsdom (`tests/lsp-rendering.test.ts`, `tests/lsp-paint-target.test.ts`): a diagnostic paints under the text its range names, the picker lists what the server sent, the hover tooltip carries the server's markdown as text. jsdom has no layout, so a tooltip's placement and which symbol was under the pointer are not checkable — `tests/support/jsdom-layout.ts` fills `Range.getClientRects`, the one method CodeMirror needs to *run*, with a single all-zero rectangle whose numbers are jsdom's own and whose existence is the one invented fact, and says what that forbids a test from claiming. The first feature whose claim is geometric (a tooltip that must sit beside the pointer, an inlay hint that must not shift the line) is when vitest browser mode earns its browser download in CI. Of the corrected hover claim, "shows the server's markdown as text" is test-backed; "stays while the pointer is over the span" is read from `@codemirror/view`'s `HoverPlugin` and cannot be driven under zero geometry. |

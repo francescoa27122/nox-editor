@@ -318,10 +318,10 @@ export class NotesService {
       //
       // Drained rather than one pass over a fixed list: a second note's
       // edit can land while an earlier note's write — ahead of it in this
-      // same loop — is still in flight, and that second note's dirty flag
-      // must not be judged against text this call captured before the edit
-      // happened. Looking the note up fresh, immediately before its own
-      // write, is what keeps the text written and the revision compared in
+      // same loop — is still in flight, and writing that note from text this
+      // call captured before the edit happened would persist the stale
+      // version. Looking the note up fresh, immediately before its own
+      // write, is what keeps the text written and the flag cleared for it in
       // the same tick.
       for (;;) {
         const id = [...this.#dirtyBodies].find((candidate) => !failed.has(candidate));
