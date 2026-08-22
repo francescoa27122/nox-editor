@@ -1856,6 +1856,50 @@ tests were *not* shaped to see:
   the first pane instead. `TabBar` knew its `groupId` all along. `Close All
   Files` had the same root: it iterated the deduplicated `buffers` list, so a
   mirrored file was closed once and survived in the other pane.
+### An auto-import is a second edit, and it arrives late
+
+`additionalTextEdits` is how the protocol says "and also make these other
+changes" — the import an auto-import completion needs. `LspCompletionItem` had
+no such field, so accepting `readFileSync` inserted the symbol and dropped the
+import the server had already computed. Silent wrong output, not a missing
+feature: the completion appears to work and produces code that does not
+compile.
+
+Two server shapes had to work, and only one of them can be atomic. Some
+servers send the edits in the completion list; **tsserver sends them only on
+`completionItem/resolve`**, which is a round trip that happens after the user
+has already pressed Enter.
+
+`CONTRIBUTING.md:65-69` decides the shape, with format-on-save as the
+precedent — *"the save always happens… a late answer is dropped, a keystroke
+during the request wins"*. So the completion is inserted **synchronously,
+always**: accepting one never gets slower than it was, whatever the server is
+doing. The import goes in the same transaction when the edits are already
+known, and in a second one when they are not.
+
+**The tooltip is what makes the atomic path the common one.** `info` was
+already a lazy resolve, and CodeMirror calls it when an item is *highlighted*
+— before Enter for a keyboard user, and always for a tsserver item, because
+those carry no documentation in the list. Caching that resolved item and
+reading it from `apply` is the whole reason the asynchronous path is rare
+enough to accept, rather than a bolt-on optimisation.
+
+**Offsets are request-time coordinates, and they are checked rather than
+trusted.** The list is filtered locally while the user keeps typing
+(`validFor`), so no new request is made and the offsets go stale by however
+many characters were typed at the cursor — all of them *after* an import at
+the top of the file. So the guard is a prefix compare: the current document
+and the request-time document must still agree on everything up to the last
+position the edits touch. If they do, the offsets mean what they said; if they
+do not, the edits are **dropped rather than written at a position that now
+means something else**, which is the call `undoLastReplace` and rename already
+make.
+
+The conversion is `changesOf` from `core/lsp-text-edit.ts`, which rename and
+formatting already share — one reading of `TextEdit`, one conversion.
+
+---
+
 ### UTF-16 is the one charset `encoding_rs` will not write
 
 `encode` delegated every non-UTF-8 charset to `encoding_rs`, which is right
@@ -2035,6 +2079,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | A damaged config file is preserved, but never repaired | `<name>.damaged.<ext>` is a copy, not a merge: Nox does not attempt to recover the *contents* of an index it could not parse, only the one counter that stops the next write destroying a body file. Recovering a truncated `notes.json`'s rows is possible and unbuilt. |
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
+| A completion's own `textEdit` range is computed and never used | `toCodeMirrorCompletions` reads the server's `textEdit` into `from`/`to` on each converted item — believed "over any range the client would guess", says its comment — and the source then inserts at the *list-level* `from` instead, the start of the word being typed. The two usually agree, which is why it has gone unnoticed; they do not for a completion that replaces more than the word. Honouring it needs its own answer for a range that has gone stale, the same question `additionalTextEdits` answers with a prefix compare. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
 | No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |

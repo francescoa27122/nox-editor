@@ -21,6 +21,19 @@ export interface LspCompletionItem {
   /** 1 plain text, 2 snippet. */
   insertTextFormat?: 1 | 2;
   textEdit?: { range: { start: LspPosition; end: LspPosition }; newText: string };
+  /**
+   * Other changes to make when this item is chosen — the import an
+   * auto-import completion needs.
+   *
+   * Deliberately `unknown`: it arrives from a third-party process and is
+   * validated by `textEditsOf` rather than trusted by its type. Ranges are in
+   * the coordinates of the document the *request* was made against, and the
+   * protocol requires them not to overlap `textEdit`'s range.
+   *
+   * Read by `editor/completion.ts`, not here: applying it needs a view, and
+   * this module must keep running under Node.
+   */
+  additionalTextEdits?: unknown;
   /** Opaque to Nox; handed back verbatim on `completionItem/resolve`. */
   data?: unknown;
 }
