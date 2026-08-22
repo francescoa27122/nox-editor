@@ -102,10 +102,17 @@
     letter-spacing: var(--nox-tracking-tight);
   }
 
+  /* The same call `.nox-kbd` made in base.css, for the same reason. This line
+     is the path the operation lands on — `src/ui` for a new file, the full
+     file path for a rename — so it is the one thing in the dialog that must be
+     *read* before pressing Enter, not decoration. `--nox-text-faint` is tuned
+     for non-text UI at 3:1 and measured 3.46:1 here; `--nox-text-muted` is
+     4.91:1 on `--nox-bg-raised`, the dialog's surface and the worst case, and
+     still sits a step below the title above it. */
   .context {
     margin: var(--nox-sp-1) 0 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
