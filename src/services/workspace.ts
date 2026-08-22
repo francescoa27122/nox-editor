@@ -10,6 +10,7 @@ import {
   type Transaction,
   type TransactionSpec,
 } from '@codemirror/state';
+import type { Encoding } from '@core/encoding';
 import { Emitter } from '@core/emitter';
 import { detectLanguage, languageById, type LanguageInfo } from '@core/languages';
 import { basename, canMoveInto, contains, dirname, join, topLevelPaths } from '@core/path';
@@ -55,7 +56,9 @@ export type Eol = '\n' | '\r\n';
  * there (or adding one that was not) is a diff nobody asked for. Legacy
  * encodings are recorded as known debt rather than half-supported.
  */
-export type Encoding = 'utf-8' | 'utf-8-bom';
+// Declared in `core/encoding.ts` now that `Platform` names it too, and
+// re-exported here so every existing importer is unaffected.
+export type { Encoding };
 
 /** A selection flattened to offsets so it can be written to disk as JSON. */
 export interface SelectionRecord {
@@ -340,7 +343,7 @@ export class WorkspaceService {
   // --- Buffer lifecycle --------------------------------------------------
 
   /** Open a file, or focus the tab already showing it. Returns the buffer id. */
-  async open(path: string): Promise<BufferId | null> {
+  async open(path: string, options: { encoding?: Encoding } = {}): Promise<BufferId | null> {
     const existing = this.findByPath(path);
     if (existing) {
       this.setActive(existing.id);
@@ -351,6 +354,7 @@ export class WorkspaceService {
     }
 
     let raw: string;
+    let readEncoding: Encoding = 'utf-8';
     let mtime = 0;
     try {
       const stat = await this.#platform.stat(path);
@@ -363,7 +367,12 @@ export class WorkspaceService {
         return null;
       }
       mtime = stat.modified;
-      raw = await this.#platform.readTextFile(path);
+      // `readEncodedFile` with no charset accepts only what can be proved —
+      // a byte-order mark, or valid UTF-8. Anything else rejects, which is
+      // what sends the user to the picker rather than to mojibake.
+      const read = await this.#platform.readEncodedFile(path, options.encoding);
+      raw = read.text;
+      readEncoding = read.encoding;
     } catch (error) {
       this.#fail(`Could not open ${basename(path)}.`, describe(error));
       return null;
@@ -374,7 +383,7 @@ export class WorkspaceService {
       return null;
     }
 
-    const { doc, eol, encoding } = decode(raw);
+    const { doc, eol, encoding } = decode(raw, readEncoding);
     const language = detectLanguage(path);
 
     const buffer = new Buffer({
@@ -726,7 +735,10 @@ export class WorkspaceService {
     const onDisk = encode(text, buffer.eol, buffer.encoding);
 
     try {
-      await this.#platform.writeTextFile(buffer.path, onDisk);
+      // `writeEncodedFile`, never `writeTextFile`: the charset is whatever
+      // the file was read as, and writing UTF-8 over a windows-1252 file
+      // would change its bytes under a user who only pressed save.
+      await this.#platform.writeEncodedFile(buffer.path, onDisk, buffer.encoding);
     } catch (error) {
       this.#fail(`Could not save ${buffer.name}.`, describe(error));
       return false;
@@ -801,14 +813,22 @@ export class WorkspaceService {
    * the undo stack — so a surprise reload is recoverable. The buffer ends
    * clean because `savedDoc` moves with it.
    */
-  async reloadFromDisk(id: BufferId): Promise<boolean> {
+  async reloadFromDisk(id: BufferId, readAs?: Encoding): Promise<boolean> {
     const buffer = this.#map.get(id);
     if (!buffer || buffer.path === null) return false;
+
+    // Re-reading in a *different* charset is the same operation as reloading,
+    // so it is the same method: the bytes on disk have not changed, only the
+    // way they are being read. Passing one adopts it for every later save.
+    const charset = readAs ?? buffer.encoding;
 
     let raw: string;
     let mtime = 0;
     try {
-      raw = await this.#platform.readTextFile(buffer.path);
+      // Pinned, not re-detected. Re-guessing on every external write is
+      // exactly where mojibake creeps in: one reload of a legacy file with
+      // no mark would otherwise refuse, or worse, come back as something else.
+      raw = (await this.#platform.readEncodedFile(buffer.path, charset)).text;
       mtime = (await this.#platform.stat(buffer.path)).modified;
     } catch (error) {
       this.#fail(`Could not reload ${buffer.name}.`, describe(error));
@@ -817,7 +837,10 @@ export class WorkspaceService {
 
     // A rewrite can change the line endings or add a BOM; the buffer should
     // follow the file rather than keep asserting what it used to be.
-    const { doc, eol, encoding } = decode(raw);
+    // The charset is the one the buffer already has, not one re-inferred
+    // from the new bytes: a legacy file has nothing in it to infer from, and
+    // guessing again on every external write is where mojibake creeps in.
+    const { doc, eol, encoding } = decode(raw, charset);
     buffer.eol = eol;
     buffer.savedEol = eol;
     buffer.encoding = encoding;
@@ -1591,9 +1614,17 @@ export class WorkspaceService {
  * layer and the diff of a dirty buffer see one canonical shape. `encode`
  * reverses this exactly at save time.
  */
-function decode(raw: string): { doc: string; eol: Eol; encoding: Encoding } {
-  const encoding: Encoding = raw.startsWith(BOM) ? 'utf-8-bom' : 'utf-8';
-  const body = encoding === 'utf-8-bom' ? raw.slice(BOM.length) : raw;
+function decode(raw: string, reported: Encoding = 'utf-8'): { doc: string; eol: Eol; encoding: Encoding } {
+  // The BOM still decides between the two UTF-8 spellings, because the mark
+  // arrives in the string and has to be stripped from the document either
+  // way. For anything else the platform's answer is authoritative — nothing
+  // in the text can tell windows-1252 from shift_jis.
+  const encoding: Encoding = raw.startsWith(BOM)
+    ? 'utf-8-bom'
+    : reported === 'utf-8-bom'
+      ? 'utf-8'
+      : reported;
+  const body = raw.startsWith(BOM) ? raw.slice(BOM.length) : raw;
   const eol: Eol = body.includes('\r\n') ? '\r\n' : '\n';
   return { doc: eol === '\r\n' ? body.replace(/\r\n/g, '\n') : body, eol, encoding };
 }

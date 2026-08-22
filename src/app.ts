@@ -20,6 +20,7 @@ import { prepareRenameSeed, renameEdits } from '@core/lsp-rename';
 import { changesOf, textEditsOf } from '@core/lsp-text-edit';
 import { offsetAt, positionAt } from '@core/lsp-position';
 import { ANCHOR_WINDOW, resolveAnchor } from '@core/anchor';
+import { ENCODING_CHOICES, type Encoding } from '@core/encoding';
 import { formatNoteFile, noteFileName, parseNoteFile } from '@core/note-file';
 import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
@@ -1911,6 +1912,28 @@ export class NoxApp {
     }
   }
 
+  /**
+   * Ask which charset a file really is, and read it again as that.
+   *
+   * This is the way out of the refusal. Nothing can tell windows-1252 from
+   * shift_jis by looking, so Nox does not try — it opens what it can prove
+   * and offers this for the rest, where the person who knows makes the call.
+   */
+  async reopenWithEncoding(): Promise<void> {
+    const active = this.workspace.activeSnapshot();
+    if (!active?.path) return;
+
+    const chosen = await this.ui.askToConfirm({
+      title: `Reopen ${active.name}`,
+      message: 'Read the file again using a different character encoding.',
+      choices: ENCODING_CHOICES.map((choice) => ({ id: choice.id, label: choice.label })),
+      defaultChoiceId: active.encoding,
+    });
+    if (!chosen) return;
+
+    await this.workspace.reloadFromDisk(active.id, chosen as Encoding);
+  }
+
   async openPaths(paths: readonly string[]): Promise<void> {
     for (const path of paths) {
       try {
@@ -3406,6 +3429,16 @@ export class NoxApp {
         keyHint: 'Mod+Shift+N',
         keywords: ['note', 'scratch', 'memo'],
         run: () => this.revealNotes(),
+      },
+      {
+        id: 'file.reopenWithEncoding',
+        title: 'Reopen with Encoding…',
+        category: 'File',
+        keywords: ['encoding', 'charset', 'utf', 'latin', 'reopen', 'mojibake'],
+        // Reads a file that is already open, in a different charset. No new
+        // path is reached and nothing is written, so no `capabilities`.
+        enabled: () => this.workspace.activeSnapshot()?.path != null,
+        run: () => void this.reopenWithEncoding(),
       },
       {
         id: 'notes.newFromSelection',

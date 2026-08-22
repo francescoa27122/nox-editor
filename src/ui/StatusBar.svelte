@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { encodingLabel } from '@core/encoding';
   import { runnableAgents } from '@services/agent/config';
   import { hasGrammar } from '@editor/languages';
   import { useApp } from './context';
@@ -274,14 +275,15 @@
         {indentLabel}
       </button>
 
-      <span
-        class="item static"
-        title={active.encoding === 'utf-8-bom'
-          ? 'UTF-8 with a byte-order mark — preserved on save'
-          : 'UTF-8'}
+      <!-- A button now, not a label: this is the way out of the refusal when
+           a file is not UTF-8, and the slot was already sitting here. -->
+      <button
+        class="item"
+        title={withChord('Reopen with a different encoding', 'file.reopenWithEncoding')}
+        onclick={() => void commands.execute('file.reopenWithEncoding')}
       >
-        {active.encoding === 'utf-8-bom' ? 'UTF-8 BOM' : 'UTF-8'}
-      </span>
+        {encodingLabel(active.encoding)}
+      </button>
 
       <button
         class="item"

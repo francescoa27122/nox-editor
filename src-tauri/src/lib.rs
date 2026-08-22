@@ -6,6 +6,7 @@
 //! model lives in the renderer where the editing happens.
 
 mod agent;
+mod encoding;
 mod fs;
 mod geometry;
 mod git;
@@ -110,6 +111,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             fs::nox_home_dir,
             fs::nox_read_text_file,
+            fs::nox_read_encoded_file,
+            fs::nox_write_encoded_file,
             fs::nox_write_text_file,
             fs::nox_read_dir,
             fs::nox_exists,

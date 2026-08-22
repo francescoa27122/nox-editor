@@ -105,9 +105,19 @@
 
   .actions {
     display: flex;
+    /* Wrap rather than squeeze. Two or three choices sit on one row exactly
+       as before; the encoding picker's six were compressed until every label
+       broke across three lines. */
+    flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--nox-sp-3);
     margin-top: var(--nox-sp-6);
+  }
+
+  /* A choice is as wide as its words. Without this the row shares the width
+     out evenly and long labels lose. */
+  .actions :global(.button) {
+    flex: none;
   }
 
   .button {
