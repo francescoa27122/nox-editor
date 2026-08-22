@@ -144,8 +144,15 @@
         groupId,
         // Pulled at save time rather than published: a cursor moves on every
         // keystroke, and only the session ever reads it.
-        readSelection: () => {
-          if (!view) return null;
+        //
+        // Answered **only for the tab this pane is currently showing**. A
+        // view's live selection is its active tab's, so answering for any
+        // buffer handed the foreground tab's cursor back for every background
+        // tab in this pane — which is what the session then wrote down.
+        // Declining lets the workspace fall back to that buffer's own state,
+        // which is where a background tab's cursor actually lives.
+        readSelection: (id) => {
+          if (!view || id !== currentId) return null;
           const selection = view.state.selection;
           return {
             ranges: selection.ranges.map((r) => [r.anchor, r.head] as [number, number]),

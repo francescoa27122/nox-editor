@@ -1369,8 +1369,19 @@ export class NoxApp {
     }
   }
 
-  /** Close a tab, asking about unsaved changes first. */
-  async closeBuffer(id = this.workspace.activeId.get()): Promise<boolean> {
+  /**
+   * Close a tab, asking about unsaved changes first.
+   *
+   * `group` says *which pane's* tab to close, and matters whenever one file is
+   * shown in two. `workspace.close` has always taken it and its tests have
+   * always driven it, but no production caller passed one — so `#groupOf` fell
+   * back to "the first group showing this buffer" and ⌘W in the second pane of
+   * a mirrored file closed the tab in the first, taking that pane with it.
+   */
+  async closeBuffer(
+    id = this.workspace.activeId.get(),
+    options: { group?: string } = {},
+  ): Promise<boolean> {
     if (!id) return false;
     const buffer = this.workspace.buffers.get().find((b) => b.id === id);
     if (!buffer) return true;
@@ -1389,7 +1400,25 @@ export class NoxApp {
       if (choice === 'save' && !(await this.save(id))) return false;
     }
 
-    return this.workspace.close(id, { force: true });
+    return this.workspace.close(id, {
+      force: true,
+      ...(this.#closeGroupFor(id, options.group) ?? {}),
+    });
+  }
+
+  /**
+   * The pane a close should happen in, when the caller did not say.
+   *
+   * The active pane, but only when it is actually showing this tab: closing
+   * from the palette can name a buffer that lives somewhere else entirely, and
+   * a wrong group id is worse than none — `#groupOf` returns undefined for
+   * one, which leaves the tab in place while the buffer goes.
+   */
+  #closeGroupFor(id: string, explicit?: string): { group: string } | null {
+    if (explicit !== undefined) return { group: explicit };
+    const active = this.workspace.activeGroupId.get();
+    const group = this.workspace.groups.get().find((candidate) => candidate.id === active);
+    return group?.tabs.some((tab) => tab.id === id) ? { group: active } : null;
   }
 
   async newFileInFolder(directory: string): Promise<void> {
@@ -1989,6 +2018,26 @@ export class NoxApp {
       defaultChoiceId: active.encoding,
     });
     if (!chosen) return;
+    if (chosen === active.encoding) return;
+
+    // The same guard `file.revert` has, for the same reason and against a
+    // worse trap: this command is reachable by *clicking the encoding label
+    // in the status bar*, which reads as inspecting a setting rather than
+    // discarding work. `reloadFromDisk` replaces the document and then marks
+    // it clean, so the dirty dot vanishes, the next session save releases the
+    // buffer's backup, and the edits are gone at quit.
+    const buffer = this.workspace.buffers.get().find((candidate) => candidate.id === active.id);
+    if (buffer?.isDirty) {
+      const choice = await this.ui.askToConfirm({
+        title: `Discard changes to ${buffer.name}?`,
+        message: 'Reading the file again replaces your unsaved changes with what is on disk.',
+        choices: [
+          { id: 'reopen', label: 'Discard & Reopen', danger: true },
+          { id: 'cancel', label: 'Cancel' },
+        ],
+      });
+      if (choice !== 'reopen') return;
+    }
 
     await this.workspace.reloadFromDisk(active.id, chosen as Encoding);
   }
@@ -2251,8 +2300,16 @@ export class NoxApp {
         category: 'File',
         enabled: bufferEnabled,
         run: async () => {
-          for (const buffer of [...this.workspace.buffers.get()]) {
-            if (!(await this.closeBuffer(buffer.id))) break;
+          // Over tabs, not over `buffers`: that list is deduplicated, so a
+          // file shown in two panes was closed once and survived "Close All
+          // Files" in the other. The layout is re-read each time rather than
+          // snapshotted, because closing a tab can fold its pane away.
+          let remaining = this.workspace.groups.get().reduce((n, g) => n + g.tabs.length, 0);
+          while (remaining-- > 0) {
+            const group = this.workspace.groups.get().find((g) => g.tabs.length > 0);
+            const tab = group?.tabs[0];
+            if (!group || !tab) break;
+            if (!(await this.closeBuffer(tab.id, { group: group.id }))) break;
           }
         },
       },
@@ -2270,8 +2327,8 @@ export class NoxApp {
           const keep = typeof arg === 'string' ? arg : this.workspace.activeId.get();
           if (!keep) return;
           const group = this.workspace.groups.get().find((g) => g.tabs.some((t) => t.id === keep));
-          for (const tab of group?.tabs ?? []) {
-            if (tab.id !== keep && !(await this.closeBuffer(tab.id))) break;
+          for (const tab of [...(group?.tabs ?? [])]) {
+            if (tab.id !== keep && !(await this.closeBuffer(tab.id, { group: group!.id }))) break;
           }
         },
       },
@@ -2287,7 +2344,7 @@ export class NoxApp {
           const index = group ? group.tabs.findIndex((t) => t.id === anchorId) : -1;
           if (!group || index < 0) return;
           for (const tab of group.tabs.slice(index + 1)) {
-            if (!(await this.closeBuffer(tab.id))) break;
+            if (!(await this.closeBuffer(tab.id, { group: group.id }))) break;
           }
         },
       },

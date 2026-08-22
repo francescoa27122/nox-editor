@@ -132,7 +132,7 @@
     if (!target) return;
     switch (itemId) {
       case 'close':
-        void app.closeBuffer(target.id);
+        void app.closeBuffer(target.id, { group: groupId });
         break;
       case 'closeOthers':
         void commands.execute('file.closeOthers', target.id);
@@ -214,7 +214,7 @@
     // Middle-click closes, matching every browser and editor.
     if (event.button === 1) {
       event.preventDefault();
-      void app.closeBuffer(id);
+      void app.closeBuffer(id, { group: groupId });
     }
   }
 
@@ -317,7 +317,7 @@
             title="Close"
             onclick={(event) => {
               event.stopPropagation();
-              void app.closeBuffer(buffer.id);
+              void app.closeBuffer(buffer.id, { group: groupId });
             }}
           >
             {#if buffer.isDirty}
