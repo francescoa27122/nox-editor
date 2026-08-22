@@ -138,8 +138,21 @@
         view.dispatch(spec);
         return true;
       },
-      // Identifies this pane, so an edit it originated is not sent back to it.
-      view,
+      {
+        // Identifies this pane, so an edit it originated is not sent back.
+        owner: view,
+        groupId,
+        // Pulled at save time rather than published: a cursor moves on every
+        // keystroke, and only the session ever reads it.
+        readSelection: () => {
+          if (!view) return null;
+          const selection = view.state.selection;
+          return {
+            ranges: selection.ranges.map((r) => [r.anchor, r.head] as [number, number]),
+            main: selection.mainIndex,
+          };
+        },
+      },
     );
 
     // Diagnostics are painted from here rather than from the app, because
@@ -228,6 +241,21 @@
     if (!state) return;
 
     view.setState(state);
+
+    // A cursor this pane was restored with, if any. `setState` above adopted
+    // the buffer's, which is the other pane's when one file is in two.
+    const restored = workspace.takePaneSelection(groupId, id);
+    if (restored && restored.ranges.length > 0) {
+      const limit = view.state.doc.length;
+      const clamp = (n: number) => Math.max(0, Math.min(limit, n));
+      view.dispatch({
+        selection: EditorSelection.create(
+          restored.ranges.map(([anchor, head]) => EditorSelection.range(clamp(anchor), clamp(head))),
+          Math.max(0, Math.min(restored.ranges.length - 1, restored.main)),
+        ),
+        scrollIntoView: true,
+      });
+    }
 
     // Background buffers may have been created under older settings, and a
     // state swap does not carry compartment configuration across.

@@ -244,6 +244,16 @@ export type ViewDispatcher = (id: BufferId, spec: TransactionSpec | Transaction)
 interface PaneChannel {
   dispatch: ViewDispatcher;
   owner: object | undefined;
+  /** Which pane this is, when the caller said. */
+  groupId: GroupId | undefined;
+  /**
+   * This pane's own cursor, asked for rather than pushed.
+   *
+   * A selection changes on every cursor move, so publishing one would put
+   * work on the typing path for something only the session ever reads. It is
+   * pulled at save time instead.
+   */
+  readSelection: (() => SelectionRecord | null) | undefined;
 }
 
 export class WorkspaceService {
@@ -306,8 +316,16 @@ export class WorkspaceService {
    * channel. Edits aimed at any other pane's buffer took the background path
    * and left that pane's view showing stale text.
    */
-  addViewDispatcher(dispatch: ViewDispatcher, owner?: object): () => void {
-    const channel: PaneChannel = { dispatch, owner };
+  addViewDispatcher(
+    dispatch: ViewDispatcher,
+    options: { owner?: object; groupId?: GroupId; readSelection?: () => SelectionRecord | null } = {},
+  ): () => void {
+    const channel: PaneChannel = {
+      dispatch,
+      owner: options.owner,
+      groupId: options.groupId,
+      readSelection: options.readSelection,
+    };
     this.#viewDispatchers.add(channel);
     return () => this.#viewDispatchers.delete(channel);
   }
@@ -1060,7 +1078,17 @@ export class WorkspaceService {
    * Deliberately not an `EditorSelection`: what is written to `session.json`
    * has to be data, not a class the next launch has to reconstruct.
    */
-  selectionOf(id: BufferId): SelectionRecord | null {
+  selectionOf(id: BufferId, groupId?: GroupId): SelectionRecord | null {
+    if (groupId !== undefined) {
+      // One file can be shown in two panes, each with its own cursor. The
+      // buffer's state carries whichever pane last dispatched, so the pane
+      // has to be asked directly or both are recorded in the same place.
+      for (const channel of this.#viewDispatchers) {
+        if (channel.groupId !== groupId || !channel.readSelection) continue;
+        const live = channel.readSelection();
+        if (live) return live;
+      }
+    }
     const state = this.#map.get(id)?.state;
     if (!state) return null;
     return {
@@ -1077,6 +1105,28 @@ export class WorkspaceService {
    * than degrading. A record that cannot be honoured collapses to a cursor at
    * the nearest valid offset instead of failing the whole restore.
    */
+  /**
+   * Cursor to give a pane the first time it shows a buffer, keyed by both.
+   *
+   * Restore runs before any `EditorView` exists, and a pane adopts the
+   * buffer's state when it mounts — so two panes showing one file would land
+   * on the same line. This is where the second one's cursor waits.
+   */
+  #pendingSelections = new Map<string, SelectionRecord>();
+
+  /** Remember a cursor for a pane that is not showing yet. */
+  setPaneSelection(groupId: GroupId, id: BufferId, selection: SelectionRecord): void {
+    this.#pendingSelections.set(`${groupId}\u0000${id}`, selection);
+  }
+
+  /** Take it, once. A pane applies it on mount and never again. */
+  takePaneSelection(groupId: GroupId, id: BufferId): SelectionRecord | null {
+    const key = `${groupId}\u0000${id}`;
+    const found = this.#pendingSelections.get(key) ?? null;
+    if (found) this.#pendingSelections.delete(key);
+    return found;
+  }
+
   setSelection(id: BufferId, selection: SelectionRecord): void {
     const buffer = this.#map.get(id);
     if (!buffer || selection.ranges.length === 0) return;

@@ -541,6 +541,14 @@ how the watcher's fake pane found this, as `RangeError: Applying change set to
 a document with the wrong length`. A caller that does not identify itself gets
 the behaviour it had before panes could be mirrored.
 
+Each pane keeps its own cursor, saved and restored. `selectionOf(id, groupId)`
+asks *that pane* rather than the buffer, whose state carries whichever view
+moved last — the selection is **pulled** at save time, never published, because
+a cursor moves on every keystroke and only the session ever reads it. Coming
+back, the mirror's cursor is parked in `takePaneSelection` for the pane to
+claim when it mounts, rather than written through `setSelection`, which moves
+the buffer and would drag the first pane along with it.
+
 A mirrored pane survives a restart. `TabRecord` carries `mirror: true` on the
 second and later appearances of a buffer, and `restore` calls `mirrorInto`
 for those rather than `open`, which would focus the tab an earlier group had
@@ -1801,7 +1809,6 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | The transaction log does not survive a restart | Deliberate — see §4. Undo history does not either, so a persisted log would list changes it could not undo. |
 | Agent processes are not sandboxed | A configured agent runs with Nox's own privileges. The permission model governs what it may ask *Nox* to do, not what its own process can reach — a stdio agent is trusted code you chose to run, like a shell plugin. |
 | No model provider ships | Deliberate: a default provider would be a vendor in the core. The Agents panel says so rather than offering an input that cannot work. |
-| A mirrored pane restores without its own cursor | The pane comes back (§4), but `SelectionRecord` is stored per *buffer*, so both views reopen on the same line. Per-pane cursor and scroll need the selection read from each view at save time rather than from the buffer. |
 | Splits do not nest | The layout is a flat row or column, not a tree, so you cannot have a column split inside a row. |
 | macOS trash has no "Put Back" | Nox trashes via `NSFileManager` rather than Finder/AppleScript, because the AppleScript path blocks for two minutes and then fails when Finder is unavailable. A trashed file restores to the Trash folder, not its original location. Covered by `tests/fileops_integration.rs`. |
 | Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**; unsaved work does, because it is in the session. The reload also kills any running agent, which is the point — a renderer that no longer exists cannot talk to them. |
