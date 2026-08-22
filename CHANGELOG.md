@@ -27,6 +27,11 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the old chord — while macOS's native menu, which reloads on exactly that
   event, showed the new one. The bar reads the same table the native menu
   does; it just was not listening for the half that moved.
+- **The browser build searched `node_modules`.** The desktop build has always
+  pruned machine directories — `.git`, `node_modules`, `target`, `dist` and
+  friends — and the in-memory workspace the dev target and every test run
+  against did not, so the two disagreed about what a project contains. They
+  now share one list and one precedence rule.
 
 - **Saving a UTF-16 file wrote a UTF-8 one.** The bytes went out as UTF-8 while
   the status bar still said UTF-16 LE, so a file that had to stay UTF-16 — a
