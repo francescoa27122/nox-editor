@@ -78,9 +78,38 @@ The palette follows one rule so it stays coherent as languages are added:
 | Variables | Default text | The baseline; most of the file |
 | Properties | Soft blue | Identity, one step back from functions |
 | Operators, punctuation | Muted | **Inert** — recedes toward the background |
-| Comments | Faint, italic | **Inert** — present, never competing |
+| Comments | Muted, italic | **Inert** — present, never competing |
 
 Structure is violet, data is warm, identity is cool, everything inert recedes.
+
+### How far "recedes" goes
+
+Not below 4.5:1. Syntax is the text a person spends the day reading, so WCAG
+1.4.3 applies to it exactly as it applies to the chrome, and "editors have
+always dimmed comments" is not a reason one has to be unreadable. Comments were
+`#4c5768` — **2.64:1** on the writing surface — until 2026-08-22.
+
+Comments now sit at 4.60:1 and are still the quietest thing in the buffer;
+*italic*, not dimness, is what separates them from code. Operators and
+punctuation are one token rather than two, which is what this table always
+said they were — the second value was undocumented drift, and at 3.95:1 it was
+also under the floor. `tests/token-contrast.test.ts` holds every
+`--nox-syn-*` above 4.5:1 and holds that ordering.
+
+The inert band is narrow now: 4.60 for comments, 5.24 for operators, 5.84 for
+keywords. That compression is the cost of the floor and it is the right trade,
+but it means a new syntax colour has less room than it looks — reach for hue to
+separate a new category, not for lightness.
+
+**Where the floor still does not hold.** A translucent highlight changes the
+ground under the text it covers, and the dimmest tokens have no headroom left.
+On a non-active search match a comment measures 3.01:1, and inside a selection
+3.21:1. The **active** match was the indefensible one — 1.63:1, on the single
+piece of text the user is definitely looking at — so it takes an explicit
+`--nox-text-bright` foreground and measures 5.91:1, losing its syntax hue in
+exchange. The other two keep their colour: they mark where something *is*
+rather than asking to be read, and forcing a foreground across every selection
+is a larger decision than this pass was making.
 
 ---
 

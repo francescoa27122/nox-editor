@@ -204,6 +204,20 @@ export function noxTheme(options: ThemeOptions): Extension {
         outline: '1px solid rgba(227, 179, 65, 0.32)',
         borderRadius: '2px',
       },
+      // The active match takes an explicit foreground, and the descendant
+      // selector is the point of it: syntax highlighting paints the spans
+      // *inside* this mark, so colouring the mark alone changes nothing.
+      //
+      // Without it the match keeps whatever syntax colour it had, over a 45%
+      // yellow wash. A comment came out at 1.63:1 — the one piece of text the
+      // user is definitely looking at, and the least readable on screen.
+      // --nox-text-bright measures 5.91:1 on that composite in Eclipse and
+      // 6.61:1 in Umbra. Losing the syntax hue inside the active match is the
+      // trade, and it is the one every editor makes here.
+      '.cm-searchMatch.cm-searchMatch-selected, .cm-searchMatch.cm-searchMatch-selected span':
+        {
+          color: 'var(--nox-text-bright)',
+        },
       '.cm-searchMatch.cm-searchMatch-selected': {
         backgroundColor: 'var(--nox-search-match-active)',
         outline: '1px solid rgba(227, 179, 65, 0.7)',
