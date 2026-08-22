@@ -302,11 +302,20 @@ export class WorkspaceService {
   }
 
   /** True when some view was showing the buffer and took the change. */
+  /**
+   * Hand a change to every view showing `id`, and say whether any took it.
+   *
+   * Broadcast rather than first-wins: with a file in two panes, stopping at
+   * the first acceptor would update one and leave the other showing text
+   * that no longer exists — reloads, grouped undo and agent change sets all
+   * come through here.
+   */
   #dispatchToView(id: BufferId, spec: TransactionSpec | Transaction): boolean {
+    let accepted = false;
     for (const dispatch of this.#viewDispatchers) {
-      if (dispatch(id, spec)) return true;
+      if (dispatch(id, spec)) accepted = true;
     }
-    return false;
+    return accepted;
   }
 
   // --- Accessors ---------------------------------------------------------
@@ -430,12 +439,12 @@ export class WorkspaceService {
    * Close a tab. Refuses when the buffer is dirty unless `force` is set —
    * the confirmation prompt is the caller's job, not the model's.
    */
-  close(id: BufferId, options: { force?: boolean } = {}): boolean {
+  close(id: BufferId, options: { force?: boolean; group?: GroupId } = {}): boolean {
     const buffer = this.#map.get(id);
     if (!buffer) return true;
     if (buffer.isDirty && !options.force) return false;
 
-    const group = this.#groupOf(id);
+    const group = this.#groupOf(id, options.group);
     if (group) {
       const index = group.order.indexOf(id);
       group.order.splice(index, 1);
@@ -443,6 +452,19 @@ export class WorkspaceService {
         group.activeId = group.order[Math.min(index, group.order.length - 1)] ?? null;
       }
     }
+
+    // The document outlives a tab that was only one of its views. Deleting it
+    // here would take the text out from under the pane still showing it —
+    // which is what happened before a buffer could be in two groups.
+    const stillShown = this.#groupsShowing(id).length > 0;
+    if (stillShown) {
+      if (group && group.order.length === 0 && this.#groups.length > 1) {
+        this.#removeGroup(group.id);
+      }
+      this.#sync();
+      return true;
+    }
+
     this.#map.delete(id);
     const mruIndex = this.#mru.indexOf(id);
     if (mruIndex >= 0) this.#mru.splice(mruIndex, 1);
@@ -651,8 +673,43 @@ export class WorkspaceService {
     return this.#group(this.#activeGroupId) ?? this.#groups[0]!;
   }
 
-  #groupOf(bufferId: BufferId): EditorGroup | undefined {
+  /**
+   * The group showing `bufferId`, or a named one when the caller knows which.
+   *
+   * A buffer can now be in two groups, so `find` alone silently addresses
+   * whichever comes first — which is right for the common case and wrong for
+   * every caller acting on a specific pane. Passing `groupId` says which.
+   */
+  #groupOf(bufferId: BufferId, groupId?: GroupId): EditorGroup | undefined {
+    if (groupId !== undefined) {
+      const named = this.#groups.find((group) => group.id === groupId);
+      return named?.order.includes(bufferId) ? named : undefined;
+    }
     return this.#groups.find((group) => group.order.includes(bufferId));
+  }
+
+  /** Every group showing `bufferId`. */
+  #groupsShowing(bufferId: BufferId): EditorGroup[] {
+    return this.#groups.filter((group) => group.order.includes(bufferId));
+  }
+
+  /**
+   * Show a buffer that is already open in a second group.
+   *
+   * The buffer is not copied — both tabs point at one `Buffer`, so there is
+   * still one document, one dirty flag and one undo history. That is what
+   * keeps saving, replace and the transaction log untouched by this feature.
+   */
+  mirrorInto(groupId: GroupId, bufferId: BufferId): boolean {
+    const group = this.#groups.find((candidate) => candidate.id === groupId);
+    if (!group || !this.#map.has(bufferId)) return false;
+    // Already here: a tab cannot be shown twice in one pane.
+    if (group.order.includes(bufferId)) return false;
+
+    group.order.push(bufferId);
+    group.activeId = bufferId;
+    this.#sync();
+    return true;
   }
 
   #removeGroup(id: GroupId): void {
@@ -1595,7 +1652,15 @@ export class WorkspaceService {
 
     this.groups.set(snapshots);
     this.activeGroupId.set(this.#activeGroupId);
-    this.buffers.set(snapshots.flatMap((group) => group.tabs));
+    // Deduplicated by id: `tabs` is per pane, and a file shown in two panes
+    // is still one open file. Anything counting or iterating open buffers —
+    // save-all, the buffer switcher — must not see it twice.
+    const seen = new Set<BufferId>();
+    this.buffers.set(
+      snapshots
+        .flatMap((group) => group.tabs)
+        .filter((tab) => !seen.has(tab.id) && seen.add(tab.id)),
+    );
     this.activeId.set(this.#activeGroup().activeId);
   }
 

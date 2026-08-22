@@ -522,7 +522,21 @@ CodeMirror view does not. A manual walk of both panels is its only coverage, and
 the plan that introduced this split treats that walk as a required step rather
 than a formality.
 
-### Split panes: one buffer, one group
+### Split panes: one document, however many tabs show it
+
+A buffer used to belong to exactly one group, and four things quietly relied
+on it: `#groupOf` was a `find` and so addressed whichever pane came first;
+`close` deleted the document rather than the tab; `buffers` was every group's
+tabs flattened, so a file in two panes appeared twice; and `#dispatchToView`
+stopped at the first view that accepted a change, which would update one pane
+and leave the other showing text that no longer exists.
+
+All four now take the second pane into account, and `mirrorInto(groupId,
+bufferId)` is how a second tab is made. What did **not** change is the part
+worth protecting: both tabs point at one `Buffer`, so there is still one
+`state`, one dirty flag, one undo history and one entry in `buffers`. Saving,
+replace, the transaction log and the watcher are untouched by this, which is
+the whole reason it is shaped this way rather than by copying the document.
 
 The workspace holds a flat list of **editor groups**, each with its own tab
 order and active tab. `activeId` is now *derived* — the active buffer of the
