@@ -85,12 +85,23 @@ Verified:
   its toast, and the row height was **measured** at 22px because
   `SearchPanel.svelte:81` says the windowing arithmetic breaks otherwise.
 
-Left on the table, and now the top of the list: **a completion's own
-`textEdit` range is computed and never used** — `toCodeMirrorCompletions`
-reads it into `from`/`to`, "believed over any range the client would guess",
-and the source inserts at the list-level `from` instead. Same family as the
-`skip` set and `additionalTextEdits`: converted, and then dropped. In the debt
-table with the reasoning.
+~~Left on the table: a completion's own `textEdit` range, computed and never
+used.~~ **Fixed on request in #101**, and it turned out to carry a latent
+crash with it: `InsertReplaceEdit` has no `range` field, so
+`item.textEdit.range.start` threw a `TypeError` out of the completion source
+and killed completions for that server silently.
+
+The range's **start** is applied and its **end** deliberately is not — the end
+is replace mode, which LSP gates behind `insertReplaceSupport`, a capability
+`session.ts` does not advertise, and insert mode is every editor's default.
+That is now a debt row phrased as a decision rather than an omission.
+
+**Three in three days of one shape** — the `skip` set on
+`computeReplacements`, `additionalTextEdits`, and this range: a value
+converted carefully, *tested at the conversion*, and never consumed. The
+conversion being covered is precisely what hides it, because the test passes
+while exercising a function whose output goes nowhere. Worth a grep next time
+something looks well-tested: who reads this?
 
 Next: **the desktop keyboard pass.** `.desktop-pass-report.md` has 12 of 17
 items UNSEEN, and it is one of only two things between here and 1.0. It needs
