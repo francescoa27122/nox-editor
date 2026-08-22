@@ -292,7 +292,7 @@
   }
 
   .field input::placeholder {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-family: var(--nox-font-ui);
   }
 

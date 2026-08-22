@@ -265,7 +265,7 @@
     gap: var(--nox-sp-1) var(--nox-sp-3);
     margin: var(--nox-sp-2) 0 0;
     font-size: var(--nox-fs-2xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .where {
@@ -304,7 +304,7 @@
   .state {
     margin: var(--nox-sp-3) 0 0;
     font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .body {

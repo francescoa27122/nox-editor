@@ -172,7 +172,7 @@
   .tagline {
     margin: var(--nox-sp-1) 0 0;
     font-size: var(--nox-fs-md);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   /*
@@ -207,7 +207,7 @@
     font-weight: var(--nox-fw-semibold);
     text-transform: uppercase;
     letter-spacing: var(--nox-tracking-wide);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   h2.spaced {
@@ -284,7 +284,7 @@
     flex: 1;
     min-width: 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -936,13 +936,13 @@
   }
 
   .input-row input::placeholder {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .result-count {
     flex: none;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-variant-numeric: tabular-nums;
   }
 
@@ -1001,7 +1001,7 @@
   .keyword {
     flex: none;
     font-size: var(--nox-fs-2xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     border: 1px solid var(--nox-border);
     border-radius: var(--nox-r-full);
     padding: 0 var(--nox-sp-3);
@@ -1013,7 +1013,7 @@
     flex: 1;
     min-width: 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1059,7 +1059,7 @@
     border-top: 1px solid var(--nox-border);
     background: var(--nox-bg-base);
     font-size: var(--nox-fs-2xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .hint-group {

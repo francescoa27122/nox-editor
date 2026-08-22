@@ -326,7 +326,7 @@
   header p {
     margin: var(--nox-sp-1) 0 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .actions {
@@ -351,7 +351,7 @@
   }
 
   .empty .aside {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-size: var(--nox-fs-xs);
   }
 
@@ -401,7 +401,7 @@
     gap: var(--nox-sp-2);
     margin: var(--nox-sp-1) 0 0 calc(11px + var(--nox-sp-2));
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .spacer {
@@ -452,7 +452,7 @@
     margin: var(--nox-sp-2) 0 0;
     font-size: var(--nox-fs-xs);
     line-height: 1.6;
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .grants ul {

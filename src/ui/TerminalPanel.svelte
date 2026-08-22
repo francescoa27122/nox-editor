@@ -272,7 +272,7 @@
   }
 
   .nox-terminal-note[data-tone='muted'] {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .nox-terminal-note[data-tone='danger'] {

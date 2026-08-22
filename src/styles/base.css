@@ -148,7 +148,7 @@ button {
   justify-content: center;
   gap: var(--nox-sp-3);
   padding: var(--nox-sp-7) var(--nox-sp-6);
-  color: var(--nox-text-faint);
+  color: var(--nox-text-muted);
   font-size: var(--nox-fs-sm);
   text-align: center;
 }

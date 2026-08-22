@@ -126,7 +126,7 @@
   .detail {
     margin: 3px 0 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     line-height: 1.5;
     word-break: break-word;
   }

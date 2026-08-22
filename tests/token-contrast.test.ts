@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -121,6 +121,87 @@ const TEXT_TOKENS = [
   '--nox-warning',
   '--nox-info',
 ];
+
+/**
+ * Where `--nox-text-faint` is still allowed, and why each one is not text.
+ *
+ * The token clears WCAG 1.4.11's 3:1 for non-text UI and fails 1.4.3's 4.5:1
+ * for text, so its whole safety argument is that it never paints anything
+ * anyone has to read. That held by review and quietly stopped holding: a sweep
+ * on 2026-08-22 found it on section headings, breadcrumbs, empty-state copy,
+ * status-bar readouts and four placeholders — 44 sites — and moved them to
+ * `--nox-text-muted`.
+ *
+ * An allow-list rather than a per-site comment because a comment cannot fail.
+ * Adding a row here is a claim that the thing is a glyph, an icon or an
+ * inactive control; if it has words a user is meant to read, it belongs on
+ * `--nox-text-muted` instead.
+ */
+const NON_TEXT_FAINT_USES: Record<string, string> = {
+  // Inactive controls are exempt from 1.4.3 by name, and dimming is how this
+  // one says so.
+  'AnswersPanel.svelte .where:disabled': 'disabled control',
+
+  // Icons and glyph buttons: no words, so 1.4.11's 3:1 is the right bar.
+  'CommandPalette.svelte .row :global(.row-icon)': 'row icon',
+  'ExplorerPanel.svelte .twisty': 'aria-hidden disclosure chevron',
+  'ExplorerPanel.svelte .icon': 'aria-hidden file icon',
+  'FindPanel.svelte .mode-toggle': 'icon-only button',
+  'FindPanel.svelte .field :global(.field-icon)': 'field icon',
+  'FindPanel.svelte .toggle': 'icon-only option buttons',
+  'KeybindingsPanel.svelte .search': 'wrapper, paints its search icon',
+  'NotesPanel.svelte .icon-button': 'icon-only button',
+  'NotesPanel.svelte .filter': 'wrapper, paints its search icon',
+  'NotesPanel.svelte .pin-button': 'icon-only button',
+  'SearchPanel.svelte .row.file :global(.twisty)': 'disclosure chevron',
+  'SearchPanel.svelte .row-action': 'icon-only row buttons',
+  'SettingsPanel.svelte .search': 'wrapper, paints its search icon',
+  'SettingsPanel.svelte .knob': 'the toggle knob itself, not a label',
+  'Sidebar.svelte .rail-button': 'rail icons — the case tokens.css was lifted for',
+  'TabBar.svelte .close': 'close glyph',
+  'TabBar.svelte .new-tab': 'plus glyph',
+  'TitleBar.svelte .divider': 'aria-hidden separator',
+  'TitleBar.svelte .crumb-sep': 'aria-hidden breadcrumb separator',
+  'Toasts.svelte .dismiss': 'icon-only button',
+};
+
+/** Every rule in a component or stylesheet that names a token. */
+function rulesUsing(css: string, token: string): string[] {
+  const masked = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => ' '.repeat(comment.length));
+  const found: string[] = [];
+  for (let i = masked.indexOf(token); i !== -1; i = masked.indexOf(token, i + 1)) {
+    let depth = 0;
+    let open = i;
+    for (; open >= 0; open--) {
+      if (masked[open] === '}') depth++;
+      else if (masked[open] === '{') {
+        if (depth === 0) break;
+        depth--;
+      }
+    }
+    let start = open - 1;
+    while (start >= 0 && masked[start] !== '{' && masked[start] !== '}') start--;
+    found.push(masked.slice(start + 1, open).split(/\s+/).filter(Boolean).join(' '));
+  }
+  return found;
+}
+
+describe('--nox-text-faint', () => {
+  it('paints only non-text UI', () => {
+    const sources = [
+      ...readdirSync(new URL('../src/ui/', import.meta.url))
+        .filter((name) => name.endsWith('.svelte') && !name.endsWith('.stories.svelte'))
+        .map((name) => [name, readFileSync(new URL(`../src/ui/${name}`, import.meta.url), 'utf8')] as const),
+      ['base.css', readFileSync(new URL('../src/styles/base.css', import.meta.url), 'utf8')] as const,
+    ];
+
+    const used = sources
+      .flatMap(([name, css]) => rulesUsing(css, '--nox-text-faint').map((rule) => `${name} ${rule}`))
+      .sort();
+
+    expect(used).toEqual(Object.keys(NON_TEXT_FAINT_USES).sort());
+  });
+});
 
 describe.each(themes)('%s', (_theme, tokens) => {
   it.each(TEXT_TOKENS)('%s is legible as text on every surface', (name) => {

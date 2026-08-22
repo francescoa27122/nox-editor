@@ -355,7 +355,7 @@
   header p {
     margin: var(--nox-sp-1) 0 0;
     font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .count {
@@ -416,14 +416,14 @@
     font-weight: var(--nox-fw-semibold);
     text-transform: uppercase;
     letter-spacing: var(--nox-tracking-wide);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .note {
     margin: 0 0 var(--nox-sp-2);
     padding: 0 var(--nox-sp-3);
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .row {
@@ -471,7 +471,7 @@
 
   .chord.unassigned {
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-style: italic;
   }
 
@@ -524,7 +524,7 @@
   }
 
   .recorded.empty {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-style: italic;
   }
 
@@ -542,7 +542,7 @@
     font-size: var(--nox-fs-2xs);
     text-transform: uppercase;
     letter-spacing: var(--nox-tracking-wide);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .row.readonly .chord kbd {

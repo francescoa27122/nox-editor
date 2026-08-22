@@ -313,7 +313,7 @@
   .no-matches {
     margin: 0;
     padding: var(--nox-sp-2) var(--nox-sp-4);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-size: var(--nox-fs-sm);
   }
 
@@ -369,7 +369,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-size: var(--nox-fs-xs);
   }
 
@@ -486,6 +486,6 @@
   }
 
   .body::placeholder {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 </style>
