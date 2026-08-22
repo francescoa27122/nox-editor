@@ -6,10 +6,14 @@ import { WorkspaceService } from '../src/services/workspace';
 /**
  * Editor groups (split panes).
  *
- * The invariant everything rests on: a buffer belongs to exactly one group.
- * That is what keeps `buffer.state` the single source of truth for saving,
- * dirty tracking and replace — so most of these tests are about the layout
- * staying consistent as tabs move, close and take groups with them.
+ * The invariant everything rests on: **one document, however many tabs show
+ * it.** `buffer.state` is the single source of truth for saving, dirty
+ * tracking and replace, and a file open in two panes is still one entry in
+ * `buffers`, one dirty flag, one undo history.
+ *
+ * It used to be stronger — a buffer belonged to exactly one group — and the
+ * last describe below is what changed, along with the four places that had
+ * quietly assumed it.
  */
 
 function setup() {
@@ -311,6 +315,155 @@ describe('session persistence', () => {
 
     // Losing your tabs on upgrade is a bad first impression of a new version.
     expect(await session.restore()).toBe(true);
+    expect(layout(workspace)).toEqual([['a.ts']]);
+  });
+});
+
+describe('one file in two groups', () => {
+  /**
+   * The invariant at the top of this file — a buffer belongs to exactly one
+   * group — is what these change. Everything below is the machinery that
+   * assumed it, found by reading each caller rather than by waiting for a
+   * bug report.
+   *
+   * `buffer.state` stays the single source of truth. Two *tabs* point at one
+   * buffer; there is still only one document, one dirty flag and one undo
+   * history, which is what keeps saving and replace untouched.
+   */
+
+  it('shows the same buffer in both groups', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.splitEditor();
+
+    workspace.mirrorInto(workspace.groups.get()[1]!.id, id);
+
+    expect(layout(workspace)).toEqual([['a.ts'], ['a.ts']]);
+  });
+
+  /**
+   * The failure this prevents: `buffers` is built by flattening every group's
+   * tabs, so a mirrored file appeared twice in the app-wide buffer list —
+   * once per pane. Anything counting open files, or iterating them to save,
+   * would have seen it double.
+   */
+  it('is still one entry in the app-wide buffer list', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.splitEditor();
+    workspace.mirrorInto(workspace.groups.get()[1]!.id, id);
+
+    expect(workspace.buffers.get().filter((b) => b.id === id)).toHaveLength(1);
+  });
+
+  /**
+   * The failure this prevents, and the worst one available here: `close`
+   * deleted the buffer from `#map` outright, so closing one of two tabs threw
+   * the document away and left the other pane pointing at nothing.
+   */
+  it('keeps the document when one of the two tabs is closed', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.splitEditor();
+    const second = workspace.groups.get()[1]!.id;
+    workspace.mirrorInto(second, id);
+
+    workspace.close(id, { group: second });
+
+    expect(layout(workspace)).toEqual([['a.ts']]);
+    expect(workspace.get(id), 'the document survived').toBeTruthy();
+    expect(workspace.stateOf(id)?.doc.toString()).toBe('a\n');
+  });
+
+  it('closes the document for good once the last tab goes', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.splitEditor();
+    const second = workspace.groups.get()[1]!.id;
+    workspace.mirrorInto(second, id);
+
+    workspace.close(id, { group: second });
+    workspace.close(id, { group: workspace.groups.get()[0]!.id });
+
+    expect(workspace.get(id)).toBeUndefined();
+    expect(workspace.buffers.get()).toHaveLength(0);
+  });
+
+  /**
+   * The failure this prevents: `#groupOf` is `find(...)` — first match wins —
+   * so every caller addressed whichever pane happened to come first. Closing
+   * the tab in the second pane would have closed the one in the first.
+   */
+  it('closes the tab in the group it was told, not the first one found', async () => {
+    const { workspace } = setup();
+    await workspace.open('/w/b.ts');
+    const id = (await workspace.open('/w/a.ts'))!;
+    // `splitEditor` *moves* the active tab, so a.ts lands in the second group
+    // and b.ts stays in the first. Mirroring it back into the first is what
+    // puts one file in both.
+    workspace.splitEditor();
+    const [first, second] = workspace.groups.get();
+    workspace.mirrorInto(first!.id, id);
+
+    workspace.close(id, { group: second!.id });
+
+    expect(layout(workspace)).toEqual([['b.ts', 'a.ts']]);
+  });
+
+  /** One document means one dirty flag, however many panes show it. */
+  it('has one dirty flag for both tabs', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.splitEditor();
+    workspace.mirrorInto(workspace.groups.get()[1]!.id, id);
+
+    workspace.applyTransaction(id, workspace.stateOf(id)!.update({ changes: { from: 0, insert: 'X' } }));
+
+    const shown = workspace.groups.get().flatMap((g) => g.tabs).filter((t) => t.id === id);
+    expect(shown).toHaveLength(2);
+    expect(shown.every((t) => t.isDirty)).toBe(true);
+  });
+
+  /**
+   * The failure this prevents: `#dispatchToView` stopped at the first view
+   * that accepted a change. With one file in two panes that updates one and
+   * leaves the other showing text that no longer exists — and every reload,
+   * grouped undo and agent change set goes through that path, so the stale
+   * pane would then compute its next edit against the wrong document.
+   *
+   * Driven through `reloadFromDisk`, which is the cheapest public route to
+   * it. Two fake views stand in for two `EditorPane`s; no DOM is involved.
+   */
+  it('hands a change to every pane showing the file, not just the first', async () => {
+    const { platform, workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.splitEditor();
+    workspace.mirrorInto(workspace.groups.get()[0]!.id, id);
+
+    const reached: string[] = [];
+    workspace.addViewDispatcher((target) => {
+      if (target !== id) return false;
+      reached.push('pane-one');
+      return true;
+    });
+    workspace.addViewDispatcher((target) => {
+      if (target !== id) return false;
+      reached.push('pane-two');
+      return true;
+    });
+
+    platform.seedFile('/w/a.ts', 'changed on disk\n');
+    await workspace.reloadFromDisk(id);
+
+    expect(reached).toEqual(['pane-one', 'pane-two']);
+  });
+
+  it('refuses to mirror a buffer into the group it is already in', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+
+    workspace.mirrorInto(workspace.groups.get()[0]!.id, id);
+
     expect(layout(workspace)).toEqual([['a.ts']]);
   });
 });
