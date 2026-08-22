@@ -19,7 +19,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Both from the keyboard**, as *Dismiss Search Result* and *Replace Search
   Result*, acting on the focused row. The results list is arrow-key navigable
   and its `×` was mouse-only.
+
 ### Fixed
+
+- **Saving a UTF-16 file wrote a UTF-8 one.** The bytes went out as UTF-8 while
+  the status bar still said UTF-16 LE, so a file that had to stay UTF-16 — a
+  PowerShell script, a `.reg` file, XML that declares it — quietly stopped
+  being one the first time you pressed ⌘S. Nox now writes real UTF-16, with its
+  byte-order mark, in the byte order you opened it in. A UTF-16 file you opened
+  by picking the charset by hand gains a mark on save, because that mark is the
+  only thing that makes it openable again.
 
 - **A settings, shortcuts, notes or session file Nox could not read was
   quietly replaced.** If one of those four files would not parse — a stray

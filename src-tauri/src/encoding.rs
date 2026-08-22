@@ -104,6 +104,17 @@ pub fn encode(text: &str, label: &str) -> Result<Vec<u8>, String> {
         return Ok(text.as_bytes().to_vec());
     }
 
+    // **Not through `encoding_rs`.** Its `encode` follows the WHATWG Encoding
+    // Standard, in which UTF-16 is a decode-only encoding: `UTF_16LE.encode`
+    // quietly uses `output_encoding()`, which is UTF-8, and reports no
+    // unmappable characters while doing it. So this branch used to write a
+    // UTF-8 file, return `Ok`, and leave the status bar saying UTF-16 LE.
+    // The returned encoding — the tuple's second item, discarded below — was
+    // the only sign, and nothing read it.
+    if label == UTF16LE || label == UTF16BE {
+        return Ok(encode_utf16(text, label == UTF16BE));
+    }
+
     let (bytes, _, had_unmappable) = encoding.encode(text);
     if had_unmappable {
         return Err(format!(
@@ -111,6 +122,38 @@ pub fn encode(text: &str, label: &str) -> Result<Vec<u8>, String> {
         ));
     }
     Ok(bytes.into_owned())
+}
+
+/// UTF-16 code units, little- or big-endian, behind a byte-order mark.
+///
+/// **The mark is always written**, and that is a decision rather than a
+/// detail. `detect` recognises UTF-16 only by its mark, and bytes without one
+/// are worse than undetectable: little-endian ASCII is `h\0i\0`, which
+/// `std::str::from_utf8` accepts — NUL is valid UTF-8 — so a mark-less file
+/// would be detected as UTF-8 and then refused by the renderer's binary check
+/// for containing NULs. Writing the mark is what makes the file one Nox can
+/// open again.
+///
+/// The cost is that a UTF-16 file that arrived *without* a mark gains one on
+/// its first save. That is only reachable by choosing the charset by hand —
+/// nothing detects mark-less UTF-16 — and it is the same trade the format
+/// itself makes: without a mark, the endianness is a guess.
+///
+/// Total, unlike the legacy charsets: every `str` is valid Unicode and every
+/// scalar value has a UTF-16 form, so there is no unmappable case to refuse.
+/// An astral character becomes a surrogate pair, which is why the capacity
+/// below is a floor and not an exact size.
+fn encode_utf16(text: &str, big_endian: bool) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(2 + text.len() * 2);
+    let mark: [u8; 2] = if big_endian { [0xFE, 0xFF] } else { [0xFF, 0xFE] };
+    bytes.extend_from_slice(&mark);
+
+    for unit in text.encode_utf16() {
+        let pair = if big_endian { unit.to_be_bytes() } else { unit.to_le_bytes() };
+        bytes.extend_from_slice(&pair);
+    }
+
+    bytes
 }
 
 #[cfg(test)]
@@ -177,6 +220,88 @@ mod tests {
     fn refuses_text_the_charset_cannot_hold() {
         let problem = encode("hello 😀", SJIS).unwrap_err();
         assert!(problem.starts_with("unmappable:"), "{problem}");
+    }
+
+    /// The failure this prevents, and it is the quietest one in this module:
+    /// `encoding_rs` implements the WHATWG Encoding Standard, in which UTF-16
+    /// is decode-only. `UTF_16LE.encode` therefore uses `output_encoding()` —
+    /// UTF-8 — and reports no unmappable characters, so `encode` returned
+    /// `Ok` with UTF-8 bytes in it while the status bar still said UTF-16 LE.
+    /// A PowerShell script or a `.reg` file saved from Nox stopped being
+    /// UTF-16 without a word.
+    ///
+    /// The expected bytes are not hand-written: they come from Python's
+    /// `codecs.BOM_UTF16_LE + "hi".encode("utf-16-le")`, so this asserts
+    /// against an independent implementation rather than against itself.
+    #[test]
+    fn writes_utf16le_rather_than_utf8_wearing_its_label() {
+        let bytes = encode("hi", UTF16LE).unwrap();
+        assert_eq!(bytes, vec![0xFF, 0xFE, 0x68, 0x00, 0x69, 0x00]);
+        // The shape of the old bug: two ASCII bytes and no mark at all.
+        assert_ne!(bytes, b"hi".to_vec());
+    }
+
+    #[test]
+    fn writes_utf16be_in_the_other_order() {
+        assert_eq!(
+            encode("hi", UTF16BE).unwrap(),
+            vec![0xFE, 0xFF, 0x00, 0x68, 0x00, 0x69]
+        );
+    }
+
+    #[test]
+    fn writes_non_ascii_as_two_bytes_a_unit() {
+        assert_eq!(
+            encode("caf\u{e9}", UTF16LE).unwrap(),
+            vec![0xFF, 0xFE, 0x63, 0x00, 0x61, 0x00, 0x66, 0x00, 0xE9, 0x00]
+        );
+    }
+
+    /// An astral character is two code units, not one — the case a naive
+    /// "one char, two bytes" encoder gets wrong. `U+1F600` is `D83D DE00`.
+    #[test]
+    fn writes_surrogate_pairs_for_astral_characters() {
+        assert_eq!(
+            encode("a\u{1F600}b", UTF16LE).unwrap(),
+            vec![0xFF, 0xFE, 0x61, 0x00, 0x3D, 0xD8, 0x00, 0xDE, 0x62, 0x00]
+        );
+        assert_eq!(
+            encode("a\u{1F600}b", UTF16BE).unwrap(),
+            vec![0xFE, 0xFF, 0x00, 0x61, 0xD8, 0x3D, 0xDE, 0x00, 0x00, 0x62]
+        );
+    }
+
+    /// The property that actually broke: a file Nox writes is a file Nox can
+    /// open again. Detection is what makes the mark load-bearing — without it
+    /// `detect` reads little-endian ASCII as UTF-8, because NUL is valid
+    /// UTF-8, and the renderer then refuses the file for containing NULs.
+    #[test]
+    fn a_utf16_file_nox_wrote_is_one_nox_can_reopen() {
+        for label in [UTF16LE, UTF16BE] {
+            for text in ["hi", "caf\u{e9}", "a\u{1F600}b", "line\nline\n"] {
+                let bytes = encode(text, label).unwrap();
+                assert_eq!(detect(&bytes).as_deref(), Some(label), "{label} {text:?}");
+                assert_eq!(decode(&bytes, label).unwrap(), text, "{label} {text:?}");
+            }
+        }
+    }
+
+    /// Empty is the edge that a "write the mark only if there is content"
+    /// shortcut would get wrong, and an empty file must still be UTF-16.
+    #[test]
+    fn writes_the_mark_even_for_an_empty_file() {
+        assert_eq!(encode("", UTF16LE).unwrap(), vec![0xFF, 0xFE]);
+        assert_eq!(detect(&encode("", UTF16BE).unwrap()).as_deref(), Some(UTF16BE));
+    }
+
+    /// UTF-16 can hold every scalar value, so unlike Shift_JIS it has nothing
+    /// to refuse. The same emoji that Shift_JIS rejects two tests above must
+    /// go through here, or the `unmappable` path has leaked into a charset
+    /// that cannot produce it.
+    #[test]
+    fn refuses_nothing_it_is_asked_to_write() {
+        assert!(encode("hello \u{1F600}", UTF16LE).is_ok());
+        assert!(encode("hello \u{1F600}", UTF16BE).is_ok());
     }
 
     #[test]

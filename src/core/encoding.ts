@@ -21,9 +21,15 @@ export type Encoding =
  * What the user may choose from, with the wording they see.
  *
  * UTF-16 is *detected* from its byte-order mark and never needs choosing, but
- * a file whose mark was stripped can still be opened by picking it. The two
- * legacy charsets are choice-only: nothing detects them, because nothing
- * honestly can — see `encoding.rs`.
+ * a file whose mark was stripped can still be opened by picking it. **Saving
+ * that file writes the mark back on**, which is the one case where Nox
+ * changes a file's shape rather than preserving it: mark-less UTF-16 is
+ * undetectable — little-endian ASCII is valid UTF-8, so it would be read back
+ * as UTF-8 full of NULs and refused as binary — so the mark is what makes it
+ * a file Nox can open again. See `encode_utf16` in `encoding.rs`.
+ *
+ * The two legacy charsets are choice-only: nothing detects them, because
+ * nothing honestly can — see `encoding.rs`.
  */
 export const ENCODING_CHOICES: readonly { id: Encoding; label: string }[] = [
   { id: 'utf-8', label: 'UTF-8' },
