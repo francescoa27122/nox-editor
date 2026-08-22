@@ -161,8 +161,14 @@ describe('an untracked directory', () => {
     expect(letterOf(container, 'tracked.ts')).toBeNull();
   });
 
-  /** The directory row itself stays bare: a folder is not a changed file. */
-  it('still leaves the folder row unmarked', async () => {
+  /**
+   * The folder row itself, which was the one row this record could not reach.
+   * The marks group used to be skipped for every directory, so `? lib/` — the
+   * single case where git names a *folder* directly — decorated everything
+   * inside `lib` and left `lib` bare. Collapsed, it is now the only row there
+   * is, and it answers.
+   */
+  it('marks the folder row git named directly', async () => {
     mounted = mountComponent(ExplorerPanel);
     const { app, platform, container } = mounted;
     app.git.start();
@@ -174,7 +180,7 @@ describe('an untracked directory', () => {
     await app.files.setRoot('/w');
     await settle();
 
-    expect(letterOf(container, 'lib')).toBeNull();
+    expect(letterOf(container, 'lib')).toEqual(['U', 'Contains untracked files']);
   });
 });
 
@@ -254,11 +260,11 @@ describe('git status on the tree', () => {
     expect(letterOf(container, 'loose.ts')).toBeNull();
   });
 
-  it('directories carry no marker', async () => {
-    // Porcelain lists files, and a folder has no answer to either question
-    // until roll-up exists — but the row also shares its right edge with the
-    // `empty` / `unreadable` notes, and an empty marks wrapper there would
-    // claim the free space those notes need.
+  it('a folder with nothing changed inside it carries no marker', async () => {
+    // The roll-up must stay silent as readily as it speaks: a wrapper that
+    // renders empty would claim the free space the `empty` / `unreadable`
+    // notes need at the same right edge, and a tree of quiet folders would
+    // read as a wall of markers. `/w/sub` holds nothing at all.
     const { container } = await setup();
 
     expect(row(container, 'sub').querySelector('.marks')).toBeNull();
@@ -332,5 +338,148 @@ describe('unsaved files on the tree', () => {
 
     expect(letterOf(container, 'edited.ts')?.[0]).toBe('M');
     expect(hasDot(container, 'edited.ts')).toBe(true);
+  });
+});
+
+describe('a collapsed folder', () => {
+  /**
+   * A repository whose changes all sit below `/w/src`, so the row under test
+   * is a folder the tree has **never expanded**. That is the property the
+   * roll-up turns on: `FileTreeService` loads directories lazily, so `#dirs`
+   * holds no entries for `src` at all here, and anything deriving the marker
+   * by walking the tree would answer "nothing in here" for exactly the
+   * folders nobody has looked inside yet.
+   */
+  async function nested() {
+    mounted = mountComponent(ExplorerPanel);
+    const { app, platform, container } = mounted;
+    app.git.start();
+    platform.seedGitRepo('/w');
+    platform.seedGitBase('/w/src/edited.ts', 'one\n');
+    platform.seedFile('/w/src/edited.ts', 'one\ntwo\n');
+    platform.seedGitBase('/w/src/deep/buried.ts', 'one\n');
+    platform.seedFile('/w/src/deep/buried.ts', 'one\ntwo\n');
+    platform.seedGitBase('/w/quiet.ts', 'same\n');
+    platform.seedFile('/w/quiet.ts', 'same\n');
+    await app.workspace.openFolder('/w');
+    await app.files.setRoot('/w');
+    await settle();
+    return { app, platform, container };
+  }
+
+  it('says a change is inside it, and a quiet sibling still says nothing', async () => {
+    const { container } = await nested();
+
+    expect(letterOf(container, 'src')?.[0]).toBe('M');
+    expect(letterOf(container, 'quiet.ts')).toBeNull();
+  });
+
+  it('shows the worst letter beneath it, not the first or the commonest', async () => {
+    // Thirty ordinary edits must not bury the one file where staging the
+    // folder would do damage. `deep/buried.ts` is two levels down, so this
+    // also proves the fold survives the climb rather than only comparing
+    // siblings.
+    const { app, platform, container } = await nested();
+    platform.seedGitConflict('/w/src/deep/buried.ts', '<<<<<<< HEAD\n');
+    await app.git.refreshStatus();
+    await settle();
+
+    expect(letterOf(container, 'src')?.[0]).toBe('C');
+  });
+
+  it('says the letter is about its contents, not about itself', async () => {
+    // A folder is not a modified file, and the accessible name is the only
+    // place that distinction can live: the character and its colour are the
+    // file vocabulary exactly, deliberately, so there is one visual language
+    // rather than two.
+    const { container } = await nested();
+
+    expect(letterOf(container, 'src')).toEqual(['M', 'Contains modified files']);
+    const element = row(container, 'src').querySelector('.git-letter')!;
+    expect(element.getAttribute('title')).toBe(element.getAttribute('aria-label'));
+  });
+
+  it('hands the summary back to the detail when it is expanded', async () => {
+    // The marker answers "is it worth opening this". Once it is open the rows
+    // themselves answer, and leaving it would stack the same letter up every
+    // ancestor of whatever file you were reading.
+    const { app, container } = await nested();
+    expect(letterOf(container, 'src')?.[0]).toBe('M');
+
+    await app.files.toggle('/w/src');
+    await settle();
+
+    expect(letterOf(container, 'src')).toBeNull();
+    expect(letterOf(container, 'edited.ts')).toEqual(['M', 'Modified']);
+    expect(letterOf(container, 'deep')?.[0]).toBe('M');
+  });
+
+  it('clears when the change beneath it does', async () => {
+    const { app, platform, container } = await nested();
+    expect(letterOf(container, 'src')?.[0]).toBe('M');
+
+    platform.seedFile('/w/src/edited.ts', 'one\n');
+    platform.seedFile('/w/src/deep/buried.ts', 'one\n');
+    await app.git.refreshStatus();
+    await settle();
+
+    expect(letterOf(container, 'src')).toBeNull();
+  });
+
+  it('carries the unsaved dot for a file inside it', async () => {
+    // Opening a file reveals it, which expands every folder above it — so the
+    // collapse is not test scaffolding, it is the gesture the feature exists
+    // for: edit a file, fold the folder away, and it still says so.
+    const { app, container } = await nested();
+    expect(hasDot(container, 'src')).toBe(false);
+
+    const id = (await app.workspace.open('/w/src/deep/buried.ts'))!;
+    typeInto(app, id);
+    await settle();
+    expect(hasDot(container, 'src')).toBe(false);
+
+    await app.files.toggle('/w/src');
+    await settle();
+
+    expect(hasDot(container, 'src')).toBe(true);
+    expect(row(container, 'src').querySelector('.dirty-dot')!.getAttribute('aria-label')).toBe(
+      'Contains unsaved changes',
+    );
+  });
+
+  it('shows both when it holds a conflict and an unsaved file', async () => {
+    // One wrapper holds both, so the failure mode is one silently pushing the
+    // other out of the row — the same shape as the file-row case, which is
+    // why it is worth asserting again a level up.
+    const { app, platform, container } = await nested();
+    platform.seedGitConflict('/w/src/deep/buried.ts', '<<<<<<< HEAD\n');
+    await app.git.refreshStatus();
+    const id = (await app.workspace.open('/w/src/edited.ts'))!;
+    typeInto(app, id);
+    await settle();
+    await app.files.toggle('/w/src'); // opening revealed it; fold it back
+    await settle();
+
+    expect(letterOf(container, 'src')?.[0]).toBe('C');
+    expect(hasDot(container, 'src')).toBe(true);
+  });
+
+  it('is marked even when it is the repository toplevel that differs', async () => {
+    // The wrong-file bug the per-file map exists to prevent, one level up: a
+    // roll-up joined onto the workspace root instead of `status.toplevel`
+    // would mark `/repo/w/src` from a record about `/repo/src`.
+    mounted = mountComponent(ExplorerPanel);
+    const { app, platform, container } = mounted;
+    app.git.start();
+    platform.seedGitRepo('/repo');
+    platform.seedGitBase('/repo/src/outer.ts', 'one\n');
+    platform.seedFile('/repo/src/outer.ts', 'one\ntwo\n');
+    platform.seedGitBase('/repo/w/src/quiet.ts', 'same\n');
+    platform.seedFile('/repo/w/src/quiet.ts', 'same\n');
+    await app.workspace.openFolder('/repo/w');
+    await app.files.setRoot('/repo/w');
+    await settle();
+
+    expect(letterOf(container, 'src')).toBeNull();
   });
 });

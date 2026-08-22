@@ -1,8 +1,9 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte';
   import { GIT_STATUS_LABEL, type GitStatusLetter } from '@core/git-status';
+  import { FOLDER_STATUS_LABEL, rollUpLetters, rollUpPaths } from '@core/folder-marks';
   import { canMoveInto, dirname, join, separatorOf } from '@core/path';
-  import { rootLabel } from '@services/filetree';
+  import { rootLabel, type FlatNode } from '@services/filetree';
   import { useApp } from './context';
   import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
   import Icon from './Icon.svelte';
@@ -95,6 +96,16 @@
    * `EXACT_DIRTY_LIMIT` for exactly the 10 MB-file reason. Folding the dirty
    * set into the walk that already built `openPaths` is what keeps the added
    * per-keystroke cost at zero extra iterations rather than one more.
+   *
+   * `dirtyAncestors` is the folder roll-up, and it is the one thing here that
+   * is not free. It rides this trigger rather than `git.status` because this
+   * is where dirtiness lives — the brief's "same trigger as the git map" does
+   * not apply to the half of the answer git does not hold. What keeps it
+   * inside rule 5 is that it climbs the *dirty* set, not the open one: with
+   * nothing unsaved it does no work at all, and with one unsaved file it is
+   * a handful of `dirname` calls bounded by that file's depth, against a
+   * keystroke that has already run a CodeMirror transaction and a full
+   * `#sync` over every buffer.
    */
   const bufferPaths = $derived.by(() => {
     const open = new Set<string>();
@@ -104,7 +115,12 @@
       open.add(buffer.path);
       if (buffer.isDirty) dirty.add(buffer.path);
     }
-    return { open, dirty };
+    const root = $rootPath;
+    return {
+      open,
+      dirty,
+      dirtyAncestors: root ? rollUpPaths(dirty, root) : new Set<string>(),
+    };
   });
 
   /**
@@ -145,7 +161,10 @@
     const untrackedDirectories: string[] = [];
     const status = $gitStatus;
     const toplevel = status?.toplevel;
-    if (!status || !toplevel) return { letters, untrackedDirectories };
+    const root = $rootPath;
+    if (!status || !toplevel || !root) {
+      return { letters, untrackedDirectories, ancestors: new Map<string, GitStatusLetter>() };
+    }
     // Unstaged is written second so the worktree fact wins: the tree shows
     // the file on disk, not the index. A conflict only ever arrives
     // unstaged, so the letter that must never be overwritten cannot be.
@@ -160,20 +179,82 @@
         untrackedDirectories.push(absolute + separatorOf(absolute));
       }
     }
-    return { letters, untrackedDirectories };
+    /*
+      The folder roll-up. A second pass, over the map the first two built
+      rather than over the status records again — deduplicating first is what
+      lets the climb visit each distinct ancestor once — and inside this same
+      derivation, so it rides `git.status` exactly as the per-file map does.
+
+      Bounded by the *workspace* root rather than the toplevel: those differ
+      whenever a workspace is opened below its repo root, and only rows at or
+      below the workspace root exist to be marked, so climbing past it would
+      be work spent on paths the tree can never show. `rollUpLetters` skips
+      any status path outside that root for the same reason `gitLetters` joins
+      onto `toplevel` at all: a change in a sibling directory of the workspace
+      is not this tree's business.
+    */
+    return { letters, untrackedDirectories, ancestors: rollUpLetters(letters, root) };
   });
 
   /**
    * The letter for one row, exact match first and then the untracked-directory
    * prefixes. Prefix matching is last because it is the rarer and more
    * expensive answer, and a file git named directly must win over an ancestor.
+   *
+   * A directory takes the roll-up in between the two: what is actually inside
+   * it is a more specific answer than an ancestor git collapsed into a single
+   * `? dir/` record. The exact match still comes first, and it is what finally
+   * puts a marker on that `? dir/` row itself — the marks group used to be
+   * skipped for every directory, so the one folder git *had* named directly
+   * was the one folder that showed nothing.
    */
-  function letterFor(path: string): GitStatusLetter | undefined {
+  function letterFor(path: string, isDirectory: boolean): GitStatusLetter | undefined {
     const exact = gitLetters.letters.get(path);
     if (exact) return exact;
+    if (isDirectory) {
+      const rolled = gitLetters.ancestors.get(path);
+      if (rolled) return rolled;
+    }
     return gitLetters.untrackedDirectories.some((prefix) => path.startsWith(prefix))
       ? 'U'
       : undefined;
+  }
+
+  /**
+   * The markers one row carries, or null for a row that carries none.
+   *
+   * A file answers for itself and a **collapsed** directory answers for what
+   * is under it; an expanded directory answers for neither, because the rows
+   * below it now do — leaving it marked would stack the same letter up every
+   * ancestor of whatever file you were reading, and the marker exists to say
+   * "is this worth opening", which an open folder has already answered.
+   *
+   * That rule is also what keeps the right edge single-occupancy. `#flatten`
+   * gates `loading`, `empty` and `error` on `expanded`
+   * (`services/filetree.ts`), so a collapsed directory has all three falsy by
+   * construction: a row that can show a marker can never also want the note
+   * slot the marker's wrapper claims, and the two need no precedence rule
+   * between them.
+   */
+  function marksFor(node: FlatNode): {
+    letter: GitStatusLetter | undefined;
+    letterLabel: string;
+    dirty: boolean;
+    dotLabel: string;
+  } | null {
+    if (node.isDirectory && node.expanded) return null;
+    const rolled = node.isDirectory;
+    const letter = letterFor(node.path, rolled);
+    const dirty = rolled
+      ? bufferPaths.dirtyAncestors.has(node.path)
+      : bufferPaths.dirty.has(node.path);
+    if (!letter && !dirty) return null;
+    return {
+      letter,
+      letterLabel: letter ? (rolled ? FOLDER_STATUS_LABEL : GIT_STATUS_LABEL)[letter] : '',
+      dirty,
+      dotLabel: rolled ? 'Contains unsaved changes' : 'Unsaved changes',
+    };
   }
 
   /** Visible rows in display order — the axis every range operation works on. */
@@ -665,6 +746,7 @@
            once rows leave the DOM a screen reader would otherwise be told the
            tree is exactly as long as the window. -->
       {#each visibleNodes as node, index (node.path)}
+        {@const marks = marksFor(node)}
         <div
           class="row"
           class:selected={$selectedPaths.has(node.path)}
@@ -711,46 +793,44 @@
           <span class="name">{node.name}</span>
           <!--
             The two questions the tree could not answer: what is unsaved, and
-            what git holds against this file. Both ride the right edge, the
+            what git holds against this row. Both ride the right edge, the
             same slot the folder notes below use, and the two can never
-            collide — `loading`, `empty` and `error` are only ever set on an
-            expanded *directory*, while a buffer path and a porcelain record
-            both name a file. That is also why the whole group is skipped for
-            directories rather than merely coming up empty: a folder has no
-            answer to either question until roll-up exists.
+            collide — `marksFor` answers only for files and *collapsed*
+            directories, and `#flatten` gates `loading`, `empty` and `error`
+            on `expanded`, so no row can want both.
 
             Neither marker can change the row height, which the windowing
             arithmetic depends on: `.row` is a fixed `--nox-tree-row-h` with
             `flex: none`, and both children are smaller than it. The dot is
             `Icon`'s filled 8 px glyph — DESIGN.md §8 keeps `dot` filled for
             exactly this size — and matches the tab strip's dirty dot, since
-            one fact should not have two appearances.
+            one fact should not have two appearances. A folder's markers are
+            the file markers unchanged for the same reason: the twisty and
+            the folder icon already say which kind of row this is, so a
+            second visual tier would be a new language for a distinction the
+            row has already made. Only the accessible name differs.
           -->
-          {#if !node.isDirectory}
-            {@const letter = letterFor(node.path)}
-            {@const dirty = bufferPaths.dirty.has(node.path)}
-            {#if letter || dirty}
-              <span class="marks">
-                {#if letter}
-                  <span
-                    class="git-letter git-{letter}"
-                    role="img"
-                    title={GIT_STATUS_LABEL[letter]}
-                    aria-label={GIT_STATUS_LABEL[letter]}>{letter}</span
-                  >
-                {/if}
-                {#if dirty}
-                  <span
-                    class="dirty-dot"
-                    role="img"
-                    title="Unsaved changes"
-                    aria-label="Unsaved changes"
-                  >
-                    <Icon name="dot" size={8} />
-                  </span>
-                {/if}
-              </span>
-            {/if}
+          {#if marks}
+            <span class="marks">
+              {#if marks.letter}
+                <span
+                  class="git-letter git-{marks.letter}"
+                  role="img"
+                  title={marks.letterLabel}
+                  aria-label={marks.letterLabel}>{marks.letter}</span
+                >
+              {/if}
+              {#if marks.dirty}
+                <span
+                  class="dirty-dot"
+                  role="img"
+                  title={marks.dotLabel}
+                  aria-label={marks.dotLabel}
+                >
+                  <Icon name="dot" size={8} />
+                </span>
+              {/if}
+            </span>
           {/if}
           <!--
             An unreadable directory used to expand into the same silent
