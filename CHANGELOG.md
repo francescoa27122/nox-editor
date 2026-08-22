@@ -6,6 +6,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-08-22
+
+### Added
+
+- **A collapsed folder now says what changed inside it.** The tree marked
+  changed and unsaved files, so folding `src/` over forty changes read exactly
+  like folding one over none. A collapsed folder carries the worst git letter
+  beneath it — a conflict outranks everything, untracked ranks last — and the
+  unsaved dot when a file under it has unsaved edits. Expanding hands the
+  summary back to the rows themselves. A gitignored folder is exempt from the
+  letter, because git never reports what is inside it.
+- **The one folder git names directly is marked at last.** git collapses an
+  untracked directory into a single `? lib/` record, and the tree skipped
+  markers for every folder — so the one folder git *had* named was the one
+  folder that showed nothing.
+
 ## [0.8.2] — 2026-08-21
 
 ### Fixed
@@ -1206,7 +1222,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/francescoa27122/nox-editor/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/francescoa27122/nox-editor/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/francescoa27122/nox-editor/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/francescoa27122/nox-editor/compare/v0.7.0...v0.8.0
