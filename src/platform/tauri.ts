@@ -1,3 +1,4 @@
+import type { Encoding } from '@core/encoding';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -31,6 +32,7 @@ import {
   type UpdateInfo,
   type UpdateProgress,
   type WatchEvent,
+  type EncodedText,
 } from './types';
 
 /**
@@ -151,6 +153,14 @@ export class TauriPlatform implements Platform {
 
   async writeTextFile(path: string, contents: string): Promise<void> {
     await call<void>('nox_write_text_file', { path, contents });
+  }
+
+  async readEncodedFile(path: string, encoding?: Encoding): Promise<EncodedText> {
+    return call<EncodedText>('nox_read_encoded_file', { path, encoding: encoding ?? null });
+  }
+
+  async writeEncodedFile(path: string, contents: string, encoding: Encoding): Promise<void> {
+    await call<void>('nox_write_encoded_file', { path, contents, encoding });
   }
 
   async readDir(path: string): Promise<DirEntry[]> {

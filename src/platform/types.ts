@@ -1,3 +1,4 @@
+import type { Encoding } from '@core/encoding';
 /**
  * The Platform boundary.
  *
@@ -12,6 +13,12 @@
  *
  * When Tauri's API changes, exactly one file changes: `platform/tauri.ts`.
  */
+
+/** A file's text and the charset it was read as. */
+export interface EncodedText {
+  text: string;
+  encoding: Encoding;
+}
 
 export interface DirEntry {
   name: string;
@@ -363,6 +370,18 @@ export interface Platform {
   homeDir(): Promise<string | null>;
 
   readTextFile(path: string): Promise<string>;
+  /**
+   * Read a file that may not be UTF-8.
+   *
+   * Omit `encoding` and only what can be *proved* is accepted — a byte-order
+   * mark, or the whole file being valid UTF-8. Anything else rejects with
+   * `not-text:`, which is the signal to ask the user which charset it is
+   * rather than to guess on their behalf.
+   *
+   * Returns the charset used, because the caller has to save with the same
+   * one or silently convert the file.
+   */
+  readEncodedFile(path: string, encoding?: Encoding): Promise<EncodedText>;
 
   /**
    * The version of `path` that git's index holds, or null.
@@ -427,6 +446,12 @@ export interface Platform {
   watchGitMeta(root: string, onChange: () => void): Promise<Unwatch>;
 
   writeTextFile(path: string, contents: string): Promise<void>;
+  /**
+   * Write a file in `encoding`. Rejects with `unmappable:` when the text will
+   * not fit the charset, *before* touching the file — a save that cannot be
+   * done faithfully must not destroy the original.
+   */
+  writeEncodedFile(path: string, contents: string, encoding: Encoding): Promise<void>;
   /** Directory children, already sorted: directories first, then by name. */
   readDir(path: string): Promise<DirEntry[]>;
   exists(path: string): Promise<boolean>;

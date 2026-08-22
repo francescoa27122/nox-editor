@@ -1,8 +1,10 @@
+import type { Encoding } from '@core/encoding';
 import { basename, contains, dirname, join, normalize, relative } from '@core/path';
 import { buildSearchRegex, findMatches, globToRegExp, matchesGlobs } from '@core/search-match';
 import {
   PlatformError,
   type AgentProcess,
+  type EncodedText,
   type AgentProcessSpec,
   type DirEntry,
   type FileStat,
@@ -597,6 +599,50 @@ export class MemoryPlatform implements Platform {
     }
   }
 
+  /**
+   * Charset per path, for files seeded as something other than UTF-8.
+   *
+   * The fake does no codec work — it records the *tag* and asserts the tag
+   * comes back. What matters to a service test is that a file opened as
+   * windows-1252 is written as windows-1252, and that is a bookkeeping claim,
+   * not a decoding one. Real decoding is `encoding.rs`'s, and tested there.
+   */
+  readonly #encodings = new Map<string, Encoding>();
+
+  /** Seed a file that is not UTF-8, so a test can open one. */
+  seedEncodedFile(path: string, text: string, encoding: Encoding): void {
+    this.seedFile(path, text);
+    this.#encodings.set(normalize(path), encoding);
+  }
+
+  async readEncodedFile(path: string, encoding?: Encoding): Promise<EncodedText> {
+    const text = await this.readTextFile(path);
+    const seeded = this.#encodings.get(normalize(path));
+    if (encoding === undefined && seeded !== undefined && seeded !== 'utf-8') {
+      // Nothing detects a legacy charset — see `encoding.rs`. The fake has to
+      // refuse the same way, or a service test would pass against behaviour
+      // the real platform does not have.
+      throw new Error(`not-text: ${path} is not valid UTF-8 and has no byte-order mark`);
+    }
+    return { text, encoding: encoding ?? seeded ?? 'utf-8' };
+  }
+
+  async writeEncodedFile(path: string, contents: string, encoding: Encoding): Promise<void> {
+    await this.writeTextFile(path, contents);
+    this.#encodings.set(normalize(path), encoding);
+  }
+
+  /** What charset the fake last recorded for `path`. For assertions. */
+  encodingOf(path: string): Encoding | undefined {
+    return this.#encodings.get(normalize(path));
+  }
+
+  /**
+   * Note the encoding bookkeeping: `writeTextFile` writes **UTF-8**, so it
+   * records UTF-8. Leaving the previous charset in place would let a test
+   * pass whether the service saved faithfully or silently converted the file
+   * — the fake would be certifying behaviour the real platform does not have.
+   */
   async writeTextFile(path: string, contents: string): Promise<void> {
     const p = normalize(path);
     const existing = this.#nodes.get(p);
@@ -609,6 +655,7 @@ export class MemoryPlatform implements Platform {
     this.#nodes.set(p, contents);
     this.#mtimes.set(p, this.#clock++);
     this.#notify(existed ? 'modify' : 'create', [p]);
+    this.#encodings.set(normalize(path), 'utf-8');
   }
 
   async readDir(path: string): Promise<DirEntry[]> {

@@ -436,3 +436,85 @@ describe('the revision a buffer publishes', () => {
     expect(workspace.revisionOf(id)).toBe(-1);
   });
 });
+
+describe('files that are not UTF-8', () => {
+  const LEGACY = '/w/caf.txt';
+
+  /**
+   * The failure this whole feature exists to prevent: a text editor that
+   * cannot open a text file. Nox refused anything that was not valid UTF-8,
+   * which protected the file but left it unopenable.
+   */
+  it('opens a file in the charset it is told', async () => {
+    const platform = new MemoryPlatform();
+    platform.seedEncodedFile(LEGACY, 'caf\u00e9', 'windows-1252');
+    const workspace = new WorkspaceService(platform, () => []);
+
+    await workspace.open(LEGACY, { encoding: 'windows-1252' });
+
+    const buffer = workspace.buffers.get()[0]!;
+    expect(buffer.encoding).toBe('windows-1252');
+  });
+
+  /**
+   * The failure this prevents, and the reason the decoder is in Rust: saving
+   * a windows-1252 file back as UTF-8. The bytes on disk would change under
+   * a user who only pressed ⌘S, and nothing would say so.
+   */
+  it('saves it back in the same charset', async () => {
+    const platform = new MemoryPlatform();
+    platform.seedEncodedFile(LEGACY, 'caf\u00e9', 'windows-1252');
+    const workspace = new WorkspaceService(platform, () => []);
+    await workspace.open(LEGACY, { encoding: 'windows-1252' });
+
+    const id = workspace.buffers.get()[0]!.id;
+    expect(await workspace.save(id)).toBe(true);
+
+    expect(platform.encodingOf(LEGACY)).toBe('windows-1252');
+  });
+
+  /**
+   * Nothing detects a legacy charset, so opening one without being told must
+   * fail rather than mojibake — that refusal is what sends the user to the
+   * picker.
+   */
+  it('refuses to guess when it is not told', async () => {
+    const platform = new MemoryPlatform();
+    platform.seedEncodedFile(LEGACY, 'caf\u00e9', 'windows-1252');
+    const workspace = new WorkspaceService(platform, () => []);
+
+    // `open` reports through the notification path and returns null rather
+    // than throwing — the same shape every other unopenable file uses.
+    expect(await workspace.open(LEGACY)).toBeNull();
+    expect(workspace.buffers.get()).toHaveLength(0);
+  });
+
+  /** A plain UTF-8 file still opens with no ceremony at all. */
+  it('leaves an ordinary file alone', async () => {
+    const platform = new MemoryPlatform();
+    platform.seedFile('/w/plain.txt', 'hello');
+    const workspace = new WorkspaceService(platform, () => []);
+
+    await workspace.open('/w/plain.txt');
+
+    expect(workspace.buffers.get()[0]!.encoding).toBe('utf-8');
+  });
+
+  /**
+   * The failure this prevents: re-detecting on every external write. A file
+   * reloaded after something else touched it must keep the charset it was
+   * opened with, or one reload turns it into mojibake.
+   */
+  it('keeps the charset across a reload from disk', async () => {
+    const platform = new MemoryPlatform();
+    platform.seedEncodedFile(LEGACY, 'caf\u00e9', 'windows-1252');
+    const workspace = new WorkspaceService(platform, () => []);
+    await workspace.open(LEGACY, { encoding: 'windows-1252' });
+
+    const id = workspace.buffers.get()[0]!.id;
+    platform.seedFile(LEGACY, 'changed underneath');
+    await workspace.reloadFromDisk(id);
+
+    expect(workspace.buffers.get()[0]!.encoding).toBe('windows-1252');
+  });
+});
