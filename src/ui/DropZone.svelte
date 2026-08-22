@@ -81,7 +81,7 @@
     margin: 0;
     max-width: 34ch;
     font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     line-height: 1.5;
   }
 </style>

@@ -89,7 +89,7 @@
     align-items: center;
     justify-content: center;
     gap: var(--nox-sp-4);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .empty :global(.mark) {

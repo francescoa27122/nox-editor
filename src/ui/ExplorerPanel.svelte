@@ -1139,7 +1139,7 @@
     font-size: var(--nox-fs-2xs);
     letter-spacing: var(--nox-tracking-wide);
     text-transform: uppercase;
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .note.unreadable {

@@ -391,7 +391,7 @@
     cursor: default;
     /* Visibly not a control: the audit found clickable and inert items
        identical, discoverable only by accidental hover. */
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .item.static:hover {
@@ -413,7 +413,7 @@
   }
 
   .item.muted {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .item.accent {

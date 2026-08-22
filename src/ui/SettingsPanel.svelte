@@ -291,7 +291,7 @@
   .heading p {
     margin: var(--nox-sp-1) 0 0;
     font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   code {
@@ -392,7 +392,7 @@
     font-weight: var(--nox-fw-semibold);
     text-transform: uppercase;
     letter-spacing: var(--nox-tracking-wide);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .setting {
@@ -423,7 +423,7 @@
   .meta p {
     margin: 2px 0 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     line-height: 1.5;
   }
 
@@ -442,7 +442,7 @@
     font-weight: var(--nox-fw-semibold);
     text-transform: uppercase;
     letter-spacing: var(--nox-tracking-wide);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     vertical-align: middle;
   }
 
@@ -555,7 +555,7 @@
   .version {
     margin-left: auto;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-variant-numeric: tabular-nums;
   }
 </style>

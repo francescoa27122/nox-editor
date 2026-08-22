@@ -877,7 +877,7 @@
     flex: 1;
     min-width: 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

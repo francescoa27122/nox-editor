@@ -53,7 +53,21 @@
      the lightest surface and therefore the worst case. It stays a clear step
      below --nox-text-muted (5.17:1), so the three-level text hierarchy
      survives. Genuinely inert *text* is unaffected: syntax comments carry
-     their own --nox-syn-comment, which keeps the original #4c5768. */
+     their own --nox-syn-comment, which keeps the original #4c5768.
+
+     That pass fixed the colour and left the *rule* unwritten, so the token
+     kept spreading onto text: a sweep on 2026-08-22 found 44 more sites —
+     section headings in Settings and Keybindings, the title bar breadcrumb,
+     empty-state copy, status-bar readouts, "Unassigned", "Press a key…" and
+     four placeholders — every one of them words a user is meant to read at
+     3.46–4.02:1. They now use --nox-text-muted (4.91–5.70:1 on every surface
+     in both themes).
+
+     So the rule, finally stated: this token paints glyphs, icons and inactive
+     controls. Anything with words belongs on --nox-text-muted. The 21 uses
+     that survive are listed with a reason each in
+     tests/token-contrast.test.ts, which fails on the 22nd — a comment could
+     not have stopped any of the 44. */
   --nox-text-faint: #626d80;
   --nox-text-on-accent: #04161a;
 

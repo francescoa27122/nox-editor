@@ -393,7 +393,7 @@
     padding: 2px var(--nox-sp-3);
     font-family: var(--nox-font-mono);
     font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     background: var(--nox-bg-panel);
   }
 

@@ -345,7 +345,7 @@
     align-items: center;
     gap: var(--nox-sp-2);
     font-size: var(--nox-fs-sm);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     white-space: nowrap;
     overflow: hidden;
   }

@@ -145,7 +145,7 @@
   header p {
     margin: var(--nox-sp-1) 0 0;
     font-size: var(--nox-fs-xs);
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .actions {
@@ -181,7 +181,7 @@
   }
 
   .folder {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
   }
 
   .spacer {
@@ -189,7 +189,7 @@
   }
 
   .tally {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-variant-numeric: tabular-nums;
   }
 
@@ -226,7 +226,7 @@
   }
 
   .scope-note {
-    color: var(--nox-text-faint);
+    color: var(--nox-text-muted);
     font-size: var(--nox-fs-xs);
     margin-left: var(--nox-sp-2);
   }
