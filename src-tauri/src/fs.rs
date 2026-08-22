@@ -592,8 +592,6 @@ mod tests {
         assert!(left.is_empty(), "temp files left behind: {left:?}");
     }
 
-    #[cfg(unix)]
-    #[test]
     /// The failure this prevents: a save that cannot be done faithfully
     /// destroying the file it could not write. `encoding::encode` refuses
     /// text the charset has no room for, and that refusal has to happen
@@ -646,6 +644,8 @@ mod tests {
         assert!(problem.starts_with("not-text:"), "{problem}");
     }
 
+    #[cfg(unix)]
+    #[test]
     fn preserves_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
