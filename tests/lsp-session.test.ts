@@ -119,6 +119,22 @@ describe('starting', () => {
       // once asked.
       textDocument: { rename: { prepareSupport: true } },
     });
+    // Without `codeActionLiteralSupport` a server may answer with the pre-3.8
+    // bare `Command` shape, which is precisely the half Nox cannot run — so
+    // the feature would look broken against a conforming server.
+    expect(initialize?.params?.capabilities).toMatchObject({
+      textDocument: {
+        codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [] } } },
+      },
+    });
+    // Not claimed, deliberately: Nox does not resolve a stub action, so a
+    // server must send complete ones.
+    const codeAction = (
+      (initialize?.params?.capabilities as { textDocument?: Record<string, unknown> })?.textDocument
+        ?.codeAction ?? {}
+    ) as Record<string, unknown>;
+    expect(codeAction.resolveSupport).toBeUndefined();
+    expect(codeAction.dataSupport).toBeUndefined();
   });
 
   it('is running once the handshake completes', async () => {

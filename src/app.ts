@@ -16,7 +16,9 @@ import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
 import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
-import { prepareRenameSeed, renameEdits } from '@core/lsp-rename';
+import { codeActionsOf, overlapping, type CodeAction } from '@core/lsp-code-action';
+import { prepareRenameSeed } from '@core/lsp-rename';
+import { workspaceEditPlan } from '@core/lsp-workspace-edit';
 import { changesOf, textEditsOf } from '@core/lsp-text-edit';
 import { offsetAt, positionAt } from '@core/lsp-position';
 import { ANCHOR_WINDOW, resolveAnchor } from '@core/anchor';
@@ -2845,6 +2847,20 @@ export class NoxApp {
         run: () => this.#findReferences(),
       },
       {
+        id: 'lsp.codeAction',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        title: 'Quick Fix\u2026',
+        category: 'Language',
+        keywords: ['code action', 'quick fix', 'refactor', 'lightbulb', 'lsp'],
+        capabilities: ['buffer.edit'],
+        enabled: () => {
+          const snapshot = this.workspace.activeSnapshot();
+          if (!snapshot?.path) return false;
+          return Boolean(this.lsp.capabilitiesFor(snapshot.languageId)?.codeActionProvider);
+        },
+        run: () => this.#codeAction(),
+      },
+      {
         id: 'lsp.renameSymbol',
         resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         title: 'Rename Symbol',
@@ -3878,6 +3894,8 @@ export class NoxApp {
       'Shift+F12': 'lsp.findReferences',
       F2: 'lsp.renameSymbol',
       'Shift+Alt+F': 'lsp.formatDocument',
+      // The chord every editor uses for the lightbulb.
+      'Mod+.': 'lsp.codeAction',
 
       // View
       'Mod+B': 'view.toggleExplorer',
@@ -4122,7 +4140,7 @@ export class NoxApp {
       return;
     }
 
-    const plan = renameEdits(response);
+    const plan = workspaceEditPlan(response);
     if (plan.unsupported.length > 0) {
       this.notifications.warn(
         'Rename needs file operations Nox does not perform',
@@ -4172,6 +4190,158 @@ export class NoxApp {
     if (!staged) {
       this.notifications.info('Nothing to rename', 'The server’s edit would change nothing.');
     }
+  }
+
+  /**
+   * Ask the server what it can do here, and offer the answers.
+   *
+   * The request's `context.diagnostics` is the load-bearing part and the
+   * easiest to leave out: it is what a server keys its quick fixes off, and
+   * sending none makes tsserver answer with refactors only — "no quick fix
+   * here" would then be Nox's fault rather than the server's.
+   *
+   * The range is the selection, or the caret as an empty one. Both are what
+   * the user is pointing at, and a server reads them the same way.
+   */
+  async #codeAction(): Promise<void> {
+    const snapshot = this.workspace.activeSnapshot();
+    if (!snapshot?.path) return;
+
+    const { languageId, path, id } = snapshot;
+    // Read from the workspace rather than the view, unlike rename beside it.
+    // `buffer.state` is the authoritative copy — a pane routes every
+    // transaction back into it — so this needs no `EditorView`, which is what
+    // lets the whole feature be driven under Node.
+    const text = this.workspace.textOf(id);
+    const state = this.workspace.stateOf(id);
+    if (text === undefined || !state) return;
+
+    const selection = state.selection.main;
+    const range = {
+      start: positionAt(text, selection.from),
+      end: positionAt(text, selection.to),
+    };
+    const uri = pathToUri(path);
+    // Captured with the request, compared before applying: the picker is open
+    // in between, and while the overlay has focus an external change can still
+    // land. Project replace's rule — a computed edit is refused rather than
+    // applied to a buffer that has moved under it.
+    const revision = this.workspace.revisionOf(id);
+
+    let response: unknown;
+    try {
+      response = await this.lsp.requestFor(languageId, 'textDocument/codeAction', {
+        textDocument: { uri },
+        range,
+        context: { diagnostics: overlapping(this.lsp.diagnosticsFor(uri), range) },
+      });
+    } catch (error) {
+      this.notifications.error(
+        'Could not read the code actions',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const actions = codeActionsOf(response);
+    if (actions.length === 0) {
+      this.notifications.info('No code actions here');
+      return;
+    }
+
+    this.#pendingCodeActions = { actions, bufferId: id, revision };
+    this.ui.codeActions.set(
+      actions.map((action) => ({
+        title: action.title,
+        kind: action.kind,
+        preferred: action.preferred,
+        runnable: action.runnable,
+        reason: action.reason,
+      })),
+    );
+    this.ui.openOverlay('code-action');
+  }
+
+  /**
+   * What `#codeAction` last offered, and the buffer state it was computed for.
+   *
+   * The picker hands back an index rather than an action: the edits are not
+   * data a component should be carrying, and the index is all it needs to
+   * name a row.
+   */
+  #pendingCodeActions: {
+    actions: readonly CodeAction[];
+    bufferId: BufferId;
+    revision: number;
+  } | null = null;
+
+  /**
+   * Apply the code action at `index`.
+   *
+   * **One file lands directly; more than one is staged.** The split is not
+   * quick-fix-versus-refactor — the server's `kind` is a hint and servers
+   * disagree about it — but how far the change reaches. A change inside the
+   * file you are looking at, that you asked for at your caret, is not a
+   * proposal, and putting it behind a diff would make Format Document's
+   * argument ("a format is not a proposal") apply to it and be ignored. A
+   * change to files you have not opened is exactly what review is for, and it
+   * is the shape rename already produces.
+   */
+  async applyCodeAction(index: number): Promise<void> {
+    const pending = this.#pendingCodeActions;
+    this.#pendingCodeActions = null;
+    const action = pending?.actions[index];
+    if (!pending || !action?.runnable || !action.plan) return;
+
+    if (this.workspace.revisionOf(pending.bufferId) !== pending.revision) {
+      this.notifications.warn(
+        `${action.title} was not applied`,
+        'The file changed after the server answered. Ask again.',
+      );
+      return;
+    }
+
+    const files = action.plan.files;
+    const edits: ChangeSetSpec['edits'] = [];
+    for (const file of files) {
+      let filePath: string;
+      try {
+        filePath = uriToPath(file.uri);
+      } catch {
+        this.notifications.warn(`${action.title} touches a file Nox cannot open`, `${file.uri} \u2014 nothing was changed.`);
+        return;
+      }
+      // Open before staging anything, so every buffer holds the text the
+      // server saw — rename's reason, and the same all-or-nothing refusal.
+      const bufferId = await this.workspace.open(filePath);
+      if (!bufferId) {
+        this.notifications.warn(`${action.title} stopped`, `${basename(filePath)} could not be opened, so nothing was changed.`);
+        return;
+      }
+      const bufferText = this.workspace.textOf(bufferId);
+      if (bufferText === undefined) return;
+      edits.push({ bufferId, changes: changesOf(bufferText, file.edits) });
+    }
+
+    if (edits.length === 1) {
+      const only = edits[0]!;
+      const applied = this.workspace.applyEdits(only.bufferId, only.changes as { from: number; to: number; insert: string }[]);
+      if (!applied) {
+        this.notifications.warn(`${action.title} was not applied`, 'The server\u2019s edit does not fit the file any more.');
+      }
+      return;
+    }
+
+    // Opening activates, and the user asked from their own file: the review
+    // panel is what they look at next, and their file is what should be behind
+    // it.
+    this.workspace.setActive(pending.bufferId);
+    const staged = this.review.stage({
+      description: action.title,
+      author: { kind: 'user' },
+      edits,
+    });
+    if (!staged) this.notifications.info('Nothing to change', 'That action would change nothing.');
   }
 
   /**

@@ -1856,6 +1856,59 @@ tests were *not* shaped to see:
   the first pane instead. `TabBar` knew its `groupId` all along. `Close All
   Files` had the same root: it iterated the deduplicated `buffers` list, so a
   mirrored file was closed once and survived in the other pane.
+### A code action lands where it reaches, not where it is classified
+
+The eighth `textDocument/*` feature, and the one the others were leading to:
+seven of them tell you about your code and this is the one that changes it.
+
+**Where an action lands is the decision.** The codebase already splits this
+two ways and both ends are argued for: rename stages in the review panel
+because it is a refactor across files you are not looking at, and Format
+Document applies directly, "not through review, because a format is not a
+proposal". A code action is sometimes one and sometimes the other.
+
+The line is **not** the server's `kind`. Servers disagree about whether
+something is a `quickfix` or a `refactor`, and a client that branched on it
+would inherit that disagreement. The line is how far the change reaches:
+
+> One file: applied directly, as one transaction. More than one: staged.
+
+A change inside the file you are looking at, that you asked for at your caret,
+is not a proposal — putting it behind a diff would make Format Document's
+argument apply to it and be ignored. A change to files you have not opened is
+exactly what review is for, and it is the shape rename already produces.
+
+**The half Nox cannot run is shown, not hidden.** An action may carry a
+`Command` instead of an edit; running one means `workspace/executeCommand`,
+and the server answers by calling `workspace/applyEdit` *back* — which needs
+the server-request handler (`JsonRpcTransport.onRequest`, still zero callers)
+and a decision about whether a server-named command may write to buffers
+unprompted. Neither gets answered in passing. So those actions are listed and
+disabled with the reason: a picker that hid them would say the server offered
+nothing where it offered something unbuilt, and the user would conclude their
+language server was broken rather than that Nox has not built that half.
+
+Three smaller things worth keeping:
+
+- **`context.diagnostics` is load-bearing, not decoration.** It is what a
+  server keys its quick fixes off; send none and tsserver answers with
+  refactors only, so "no quick fix here" would be Nox's fault rather than the
+  server's. `overlapping` picks the ones the range touches, edges included —
+  a caret resting on the end of a squiggle is still on it.
+- **`codeActionLiteralSupport` has to be advertised** or a server is entitled
+  to answer with the pre-3.8 bare `Command` shape, which is precisely the half
+  Nox cannot run. `resolveSupport` and `dataSupport` stay unclaimed, so a
+  server must send complete actions rather than stubs.
+- **The request reads the workspace, not the view.** `buffer.state` is the
+  authoritative copy — a pane routes every transaction back into it — so this
+  feature needs no `EditorView` and is drivable under Node, which is why it
+  has app-level tests where rename beside it has none.
+
+`workspaceEditPlan` moved out of `lsp-rename.ts` on the way: one reader, two
+callers, and a `WorkspaceEdit` is not a rename concept.
+
+---
+
 ### The server names the start; the editor keeps the end
 
 `toCodeMirrorCompletions` has read `textEdit.range` into `from`/`to` since it
@@ -2128,6 +2181,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
 | Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default — so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
+| A code action that is a server command cannot be run | Listed and disabled with the reason, never hidden. Running one needs `workspace/executeCommand` plus a handler for the `workspace/applyEdit` the server sends back — `JsonRpcTransport.onRequest` exists with zero callers — and a decision about whether a server-named command may write to buffers unprompted. That handler is also what `workspace/configuration`, `client/registerCapability` and work-done progress each wait on, so it is one seam and four features. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
 | No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |

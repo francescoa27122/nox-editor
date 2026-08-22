@@ -8,6 +8,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Quick fixes.** Nox could show you an error and not fix it. `Ctrl+.` (`⌘.`)
+  now asks the language server what it can do where you are — add the missing
+  import, remove the unused variable, whatever it offers — and lists the
+  answers. Choosing one applies it: straight into the file when that is all it
+  touches, and through the review panel, hunk by hunk, when it reaches files
+  you have not opened. Anything Nox cannot yet run is still listed, greyed,
+  with the reason, so the list says what your server actually offered.
 - **Take one match out of a replace.** Search results have always been
   dismissable a whole file at a time, which is no help when thirty-eight of
   forty matches are the ones you want. Each match row now has its own `×`, and

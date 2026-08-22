@@ -28,6 +28,7 @@
 
   const app = useApp();
   const { commands, workspace, files, keymap, ui } = app;
+  const codeActions = ui.codeActions;
 
   const fileIndex = files.fileIndex;
   const buffers = workspace.buffers;
@@ -54,7 +55,7 @@
 
   /** The active mode, which the prefix can change without reopening. */
   const effectiveMode = $derived.by<
-    'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches' | 'notes'
+    'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches' | 'notes' | 'actions'
   >(
     () => {
       // The branch picker is a picker, not the multiplexed palette: no prefix
@@ -64,6 +65,9 @@
       // Same reasoning as the branch picker: a dedicated picker, so no
       // prefix may switch it. A note title may legitimately start with '>'.
       if (mode === 'note-open') return 'notes';
+      // Same again: an action's title is the server's prose and may start with
+      // anything, so no prefix may switch this one either.
+      if (mode === 'code-action') return 'actions';
       if (text.startsWith('>')) return 'commands';
       if (text.startsWith('~')) return 'buffers';
       if (text.startsWith(':')) return 'line';
@@ -73,7 +77,10 @@
   );
 
   const term = $derived(
-    effectiveMode === 'files' || effectiveMode === 'branches' || effectiveMode === 'notes'
+    effectiveMode === 'files' ||
+    effectiveMode === 'branches' ||
+    effectiveMode === 'notes' ||
+    effectiveMode === 'actions'
       ? text.trim()
       : text.slice(1).trim(),
   );
@@ -92,6 +99,8 @@
         return 'Switch to a branch, or create one…';
       case 'notes':
         return 'Go to a note…';
+      case 'actions':
+        return 'Choose a fix…';
       default:
         return 'Search files by name…';
     }
@@ -111,6 +120,8 @@
         return 'branch';
       case 'notes':
         return 'note';
+      case 'actions':
+        return 'lightbulb';
       default:
         return 'search';
     }
@@ -176,6 +187,7 @@
     if (effectiveMode === 'symbols') return symbolRows(term);
     if (effectiveMode === 'branches') return branchRows(term);
     if (effectiveMode === 'notes') return noteRows(term);
+    if (effectiveMode === 'actions') return actionRows(term);
     return fileRows(term);
   });
   const rows = $derived(result.rows);
@@ -470,6 +482,40 @@
    * Titles only — the body is what the panel searches, and a palette row has
    * nowhere to put a matching line.
    */
+  /**
+   * The code actions the server offered.
+   *
+   * Server order is kept — it is the server's ranking, and it knows more about
+   * which fix is likely than a fuzzy score does — so filtering narrows the
+   * list without re-sorting it. Only a typed query scores at all.
+   *
+   * An action Nox cannot run is **listed and disabled**, never hidden: a
+   * picker that hid them would say the server offered nothing where it offered
+   * something Nox has not built, and the user would blame their server.
+   */
+  function actionRows(query: string): RowsResult {
+    const rows: Row[] = [];
+    for (const [index, action] of $codeActions.entries()) {
+      const match =
+        query.length === 0 ? { score: 0, positions: [] as number[] } : fuzzyMatch(query, action.title);
+      if (!match) continue;
+      rows.push({
+        key: `action:${index}`,
+        title: action.title,
+        positions: match.positions,
+        icon: 'lightbulb',
+        ...(action.kind ? { detail: action.kind } : {}),
+        ...(action.preferred ? { badge: 'preferred' } : {}),
+        ...(action.runnable ? {} : { disabled: true, hint: action.reason ?? 'Not available' }),
+        accept: () => {
+          ui.closeOverlay();
+          void app.applyCodeAction(index);
+        },
+      });
+    }
+    return { rows, total: rows.length };
+  }
+
   function noteRows(query: string): RowsResult {
     const all = app.notes.notes.get();
     const scored: { row: Row; score: number; pinned: boolean }[] = [];
@@ -758,6 +804,8 @@
         return 'Choose "Create branch…" above to make one with that name.';
       case 'notes':
         return 'Titles only here — use the filter box in the Notes panel to search inside a note.';
+      case 'actions':
+        return 'No action here matches that.';
       case 'files':
         return 'Try part of the file name, or > for commands and ~ for an open file.';
       default:

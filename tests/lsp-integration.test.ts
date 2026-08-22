@@ -7,7 +7,8 @@ import { LspSession } from '../src/services/lsp/session';
 import { hoverBlocks } from '../src/core/lsp-hover';
 import { definitionTargets } from '../src/core/lsp-definition';
 import { referenceTargets } from '../src/core/lsp-references';
-import { prepareRenameSeed, renameEdits } from '../src/core/lsp-rename';
+import { prepareRenameSeed } from '../src/core/lsp-rename';
+import { workspaceEditPlan } from '../src/core/lsp-workspace-edit';
 import { changesOf, textEditsOf } from '../src/core/lsp-text-edit';
 import { spawnLanguageServer } from './support/lsp-child';
 
@@ -494,7 +495,7 @@ describe('rename from a real typescript-language-server', () => {
     });
     await session.stop();
 
-    const plan = renameEdits(response);
+    const plan = workspaceEditPlan(response);
     expect(plan.unsupported).toEqual([]);
     expect(plan.files).toHaveLength(1);
     expect(plan.files[0]!.uri).toBe(pathToUri(filePath));

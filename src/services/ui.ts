@@ -17,12 +17,23 @@ export type OverlayKind =
   | 'go-to-line'
   | 'go-to-symbol'
   | 'git-branch'
+  | 'code-action'
   // Not 'notes': `SidebarView` and `FocusZone` below both already have one,
   // and three unions sharing a member name makes a bare string literal
   // ambiguous at every call site.
   | 'note-open'
   | 'settings'
   | 'keybindings';
+
+/** One row of the code-action picker. */
+export interface CodeActionChoice {
+  title: string;
+  kind: string | undefined;
+  preferred: boolean;
+  runnable: boolean;
+  /** Why it cannot be run, shown on the row. */
+  reason: string | undefined;
+}
 
 /** Which panel the sidebar is showing. */
 export type SidebarView =
@@ -78,6 +89,20 @@ export type FocusZone =
 
 export class UIService {
   readonly overlay = new Signal<OverlayKind | null>(null);
+  /**
+   * The code actions the picker is showing.
+   *
+   * Filled by `NoxApp` before the overlay opens, rather than fetched by the
+   * component the way the branch picker fetches its branches. Asking for them
+   * needs the caret, the selection and the diagnostics that overlap it, and
+   * deciding which of those to send is a service's job — a component that
+   * assembled an LSP request would be the `if` about what should happen that
+   * rule 1 keeps out of components.
+   *
+   * Plain data on purpose: a title, whether it can be run, and why not. What
+   * running one *means* stays behind `NoxApp.applyCodeAction`.
+   */
+  readonly codeActions = new Signal<readonly CodeActionChoice[]>([]);
   /**
    * What is highlighted in the explorer. Lifted out of the component so
    * commands can act on it from the palette, and so it survives a remount.
