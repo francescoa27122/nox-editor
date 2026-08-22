@@ -22,6 +22,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A completion could leave part of what it replaced behind.** When the
+  language server asked to replace more than the last word — a path inside a
+  string, a longer expression — Nox inserted at the start of the word instead,
+  so completing `'src/ut'` gave you `'src/src/utils'`. It now replaces what the
+  server named, and falls back to its own judgement only when the text has
+  moved since the server answered.
+- **A completion list from a server using the newer edit format could vanish
+  silently.** One item in the 3.16 `InsertReplaceEdit` shape threw, and took
+  every completion for that language with it.
+
 - **The menu bar kept offering a shortcut you had changed.** On Windows and
   Linux, where Nox draws its own menu, rebinding a key left the menu showing
   the old chord — while macOS's native menu, which reloads on exactly that

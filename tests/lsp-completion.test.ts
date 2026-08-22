@@ -61,6 +61,30 @@ describe('what gets inserted', () => {
     expect(converted).toMatchObject({ apply: 'log', from: 8, to: 8 });
   });
 
+  /**
+   * `InsertReplaceEdit` — the 3.16 shape, `{ newText, insert, replace }` —
+   * has no `range` at all. Reaching into it threw a `TypeError` out of the
+   * completion source, which kills completions for that server and says
+   * nothing. Nox does not advertise `insertReplaceSupport`, so no conforming
+   * server should send one; this module reads a third-party process and does
+   * not get to rely on that.
+   */
+  it('keeps the text and drops the range when the range is not one', () => {
+    const [converted] = toCodeMirrorCompletions(DOC, [
+      item({
+        textEdit: {
+          newText: 'log',
+          insert: { start: { line: 0, character: 8 }, end: { line: 0, character: 8 } },
+          replace: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+        } as never,
+      }),
+    ]);
+
+    expect(converted?.apply).toBe('log');
+    expect(converted?.from).toBeUndefined();
+    expect(converted?.to).toBeUndefined();
+  });
+
   it('uses insertText when there is no textEdit', () => {
     expect(toCodeMirrorCompletions(DOC, [item({ insertText: 'logged' })])[0]?.apply).toBe('logged');
   });

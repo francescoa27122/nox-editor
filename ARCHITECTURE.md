@@ -1856,6 +1856,54 @@ tests were *not* shaped to see:
   the first pane instead. `TabBar` knew its `groupId` all along. `Close All
   Files` had the same root: it iterated the deduplicated `buffers` list, so a
   mirrored file was closed once and survived in the other pane.
+### The server names the start; the editor keeps the end
+
+`toCodeMirrorCompletions` has read `textEdit.range` into `from`/`to` since it
+was written — "believed over any range the client would guess", says its
+comment, and "ignoring it is how `console.log` becomes `console.console.log`",
+says its test. **Nothing read the result.** The source inserted at the
+list-level `from`, the start of whatever CodeMirror's own `[\w$]+` matched,
+and the two only *usually* agree. They part company wherever the server wants
+to rewrite more than the last word — a path inside a string, a member
+expression — and accepting left the rest of the range sitting in front of the
+insertion, which is the failure that comment describes.
+
+Third of the same shape found in as many days, after the `skip` set on
+`computeReplacements` and `additionalTextEdits`: a value converted carefully,
+tested at the conversion, and never consumed. The conversion being covered is
+what makes it invisible — the test passes, and it is testing a function whose
+output goes nowhere.
+
+**The start is applied and the end is not**, and that split is the whole
+decision:
+
+- The **start** is the half the server knows better and the half that does not
+  drift: everything typed while the list filters locally is at the caret, and
+  the caret is after it.
+- The **end** is the half that cannot survive that. A range may also end
+  *after* the caret — "replace the whole word I am standing in the middle of"
+  — which is replace mode, gated in LSP behind `insertReplaceSupport`, a
+  capability `session.ts` does not advertise on the stated principle that Nox
+  claims nothing it does not implement. Insert mode is also every editor's
+  default. So `to` stays CodeMirror's, which maps with assoc 1 and therefore
+  follows the caret.
+
+The staleness test is not a heuristic. The range is in the coordinates of the
+document the completion was *requested* against, and CodeMirror hands `apply`
+a `from` it has mapped forward through every change since
+(`ActiveResult.updateFor`). Keeping the request-time value of that same
+position makes `from === requestFrom` an exact test for "nothing before the
+completion has moved" — and when something has, the editor's own mapping is
+the answer and the server's raw offset is not.
+
+One latent crash went with it. `InsertReplaceEdit` is `{ newText, insert,
+replace }` with **no `range`**, and `item.textEdit.range.start` threw a
+`TypeError` out of the completion source — which kills completions for that
+server and says nothing at all. The range is validated with `isLspRange` now,
+the same predicate rename and formatting read their edits through.
+
+---
+
 ### An auto-import is a second edit, and it arrives late
 
 `additionalTextEdits` is how the protocol says "and also make these other
@@ -2079,7 +2127,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | A damaged config file is preserved, but never repaired | `<name>.damaged.<ext>` is a copy, not a merge: Nox does not attempt to recover the *contents* of an index it could not parse, only the one counter that stops the next write destroying a body file. Recovering a truncated `notes.json`'s rows is possible and unbuilt. |
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
-| A completion's own `textEdit` range is computed and never used | `toCodeMirrorCompletions` reads the server's `textEdit` into `from`/`to` on each converted item — believed "over any range the client would guess", says its comment — and the source then inserts at the *list-level* `from` instead, the start of the word being typed. The two usually agree, which is why it has gone unnoticed; they do not for a completion that replaces more than the word. Honouring it needs its own answer for a range that has gone stale, the same question `additionalTextEdits` answers with a prefix compare. |
+| Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default — so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
 | No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |

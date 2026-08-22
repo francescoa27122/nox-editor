@@ -89,6 +89,43 @@ function trustedChanges(
   return changes;
 }
 
+/**
+ * Where the replacement begins: the server's range, or CodeMirror's word.
+ *
+ * `toCodeMirrorCompletions` reads `textEdit.range` — "believed over any range
+ * the client would guess" — and until now nothing applied it. The source
+ * inserted at the list-level `from`, the start of whatever `[\w$]+` matched,
+ * and the two only *usually* agree. They part company for a path inside a
+ * string, a member expression, anything the server wants to rewrite more of
+ * than the last word: accepting left the rest of the range in place, which is
+ * how `console.log` becomes `console.console.log`.
+ *
+ * The range is in the coordinates of the document the completion was
+ * *requested* against, and CodeMirror hands `apply` positions it has mapped
+ * forward through everything since (`ActiveResult.updateFor`). `requestFrom`
+ * is the request-time value of that same mapped position, so `from ===
+ * requestFrom` is exactly the test for "nothing before the completion has
+ * moved" — and when something has, the editor's mapping is the answer and the
+ * server's raw offset is not.
+ *
+ * `to` is CodeMirror's throughout, never the server's: it is mapped with
+ * assoc 1, so it follows the caret through the characters typed while the
+ * list was being filtered locally. See `ConvertedCompletion` for why the
+ * server's end is read and deliberately not applied.
+ */
+function startFor(
+  named: number | undefined,
+  requestFrom: number,
+  from: number,
+  to: number,
+): number {
+  if (named === undefined || from !== requestFrom) return from;
+  // A range that begins after the caret cannot be what the user is
+  // completing; fall back rather than dispatch a backwards change.
+  if (named < 0 || named > to) return from;
+  return named;
+}
+
 export function createLspCompletionSource(deps: CompletionDeps): CompletionSource {
   return async (context): Promise<CompletionResult | null> => {
     const document_ = deps.documentOf();
@@ -129,6 +166,11 @@ export function createLspCompletionSource(deps: CompletionDeps): CompletionSourc
     const items = list.items ?? [];
 
     const options = toCodeMirrorCompletions(text, items);
+    /**
+     * The list-level `from`, before CodeMirror maps it. Kept so `apply` can
+     * tell whether the document has moved under the server's own offsets.
+     */
+    const requestFrom = word?.from ?? context.pos;
 
     for (const [index, option] of options.entries()) {
       const item = items[index]!;
@@ -171,9 +213,20 @@ export function createLspCompletionSource(deps: CompletionDeps): CompletionSourc
         };
       }
 
-      // Only items that could carry other edits get a callback; everything
-      // else keeps the plain string `apply` and CodeMirror's own insertion.
-      if (item.additionalTextEdits === undefined && !provider.resolveProvider) continue;
+      // Only items with something to decide get a callback; everything else
+      // keeps the plain string `apply` and CodeMirror's own insertion. A
+      // named range is one of those things — it is the difference between
+      // replacing `src/ut` and replacing `ut`.
+      if (
+        item.additionalTextEdits === undefined &&
+        !provider.resolveProvider &&
+        option.from === undefined
+      ) {
+        continue;
+      }
+
+      /** The server's own start, in request-time coordinates. */
+      const named = option.from;
 
       const insert = typeof option.apply === 'string' ? option.apply : option.label;
 
@@ -183,7 +236,7 @@ export function createLspCompletionSource(deps: CompletionDeps): CompletionSourc
         // The completion itself goes in through the same helper CodeMirror's
         // string `apply` uses, so the transaction carries `input.complete`
         // and the `pickedCompletion` annotation exactly as it did before.
-        const main = insertCompletionText(view.state, insert, from, to);
+        const main = insertCompletionText(view.state, insert, startFor(named, requestFrom, from, to), to);
         if (known) {
           // One transaction, so one undo: a symbol without its import is not
           // a state the user asked for, and must not be one undo stops at.
@@ -209,7 +262,7 @@ export function createLspCompletionSource(deps: CompletionDeps): CompletionSourc
     }
 
     return {
-      from: word?.from ?? context.pos,
+      from: requestFrom,
       options,
       // `isIncomplete` is the server saying "ask again on the next
       // character". Caching such a list shows suggestions for a prefix the
