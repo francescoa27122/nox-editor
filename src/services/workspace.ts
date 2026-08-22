@@ -25,6 +25,7 @@ import {
   type ChangeSetSpec,
   type Edit,
   type Provenance,
+  mirroredAnnotation,
 } from './transactions';
 
 /**
@@ -236,6 +237,15 @@ export interface WorkspaceEvents {
  */
 export type ViewDispatcher = (id: BufferId, spec: TransactionSpec | Transaction) => boolean;
 
+/**
+ * A registered pane. `owner` is the pane's own view, used only to tell it
+ * apart from its siblings — the workspace never looks inside it.
+ */
+interface PaneChannel {
+  dispatch: ViewDispatcher;
+  owner: object | undefined;
+}
+
 export class WorkspaceService {
   /** Every open buffer, in group then tab order. */
   readonly buffers = new Signal<BufferSnapshot[]>([]);
@@ -267,7 +277,7 @@ export class WorkspaceService {
   #mru: BufferId[] = [];
   #nextId = 1;
   #untitledCounter = 0;
-  #viewDispatchers = new Set<ViewDispatcher>();
+  #viewDispatchers = new Set<PaneChannel>();
   #nextChangeSetId = 1;
   /**
    * Per buffer, the change sets sitting in its undo history, innermost last,
@@ -296,9 +306,10 @@ export class WorkspaceService {
    * channel. Edits aimed at any other pane's buffer took the background path
    * and left that pane's view showing stale text.
    */
-  addViewDispatcher(dispatch: ViewDispatcher): () => void {
-    this.#viewDispatchers.add(dispatch);
-    return () => this.#viewDispatchers.delete(dispatch);
+  addViewDispatcher(dispatch: ViewDispatcher, owner?: object): () => void {
+    const channel: PaneChannel = { dispatch, owner };
+    this.#viewDispatchers.add(channel);
+    return () => this.#viewDispatchers.delete(channel);
   }
 
   /** True when some view was showing the buffer and took the change. */
@@ -310,10 +321,17 @@ export class WorkspaceService {
    * that no longer exists — reloads, grouped undo and agent change sets all
    * come through here.
    */
-  #dispatchToView(id: BufferId, spec: TransactionSpec | Transaction): boolean {
+  #dispatchToView(
+    id: BufferId,
+    spec: TransactionSpec | Transaction,
+    exclude?: object,
+  ): boolean {
     let accepted = false;
-    for (const dispatch of this.#viewDispatchers) {
-      if (dispatch(id, spec)) accepted = true;
+    for (const channel of this.#viewDispatchers) {
+      // The pane an edit came from has already applied it locally; sending it
+      // back would apply it twice.
+      if (exclude !== undefined && channel.owner === exclude) continue;
+      if (channel.dispatch(id, spec)) accepted = true;
     }
     return accepted;
   }
@@ -598,6 +616,40 @@ export class WorkspaceService {
    * single tab there is nothing useful to move, so the new group starts empty
    * and waits for you to open something into it.
    */
+  /**
+   * Show the active file in a second pane, side by side with this one.
+   *
+   * Unlike `splitEditor`, which *moves* a tab, this leaves it where it is and
+   * adds a second view of the same document — the thing people mostly split
+   * for: watching one part of a long file while editing another.
+   *
+   * Returns null when there is nothing to copy.
+   */
+  openCopyToSide(): GroupId | null {
+    const source = this.#activeGroup();
+    const id = source.activeId;
+    if (id === null) return null;
+
+    // The pane beside this one, either side, before making a new one — with a
+    // layout that already has two, "to the side" means the one that is there.
+    const index = this.#groups.indexOf(source);
+    let group = this.#groups[index + 1] ?? this.#groups[index - 1];
+
+    if (!group) {
+      // Built here rather than through `splitEditor`, which *moves* the
+      // active tab when its group has more than one. A copy must leave the
+      // original where it is, or this is the split command under a new name.
+      group = { id: `group-${this.#nextGroupId++}`, order: [], activeId: null };
+      this.#groups.splice(index + 1, 0, group);
+    }
+
+    if (!group.order.includes(id)) group.order.push(id);
+    group.activeId = id;
+    this.#activeGroupId = group.id;
+    this.#sync();
+    return group.id;
+  }
+
   splitEditor(): GroupId {
     const source = this.#activeGroup();
     const group: EditorGroup = { id: `group-${this.#nextGroupId++}`, order: [], activeId: null };
@@ -728,11 +780,36 @@ export class WorkspaceService {
    * here rather than mutating its own state so the workspace always holds the
    * authoritative state for every tab, including background ones.
    */
-  applyTransaction(id: BufferId, transaction: Transaction): void {
+  applyTransaction(id: BufferId, transaction: Transaction, origin?: object): void {
     const buffer = this.#map.get(id);
     if (!buffer) return;
     buffer.state = transaction.state;
     if (transaction.docChanged) {
+      // A transaction that is *itself* a mirror is never forwarded again.
+      // The guard belongs here rather than in the panes: a consumer that
+      // re-enters this method without checking would otherwise bounce one
+      // keystroke between two views forever, and the workspace should not
+      // depend on every caller's discipline for that.
+      const isMirror = transaction.annotation(mirroredAnnotation) === true;
+      // Forwarded only when the caller says which pane it is. Without that
+      // there is no way to skip the sender, and it would receive its own
+      // change and apply it twice — `RangeError: Applying change set to a
+      // document with the wrong length`, which is how the watcher's fake
+      // pane found this. A caller that does not identify itself gets exactly
+      // the behaviour it had before panes could be mirrored.
+      // Every other pane showing this file gets the change, or its own
+      // `EditorState` goes stale — and its next edit would then be computed
+      // against a document that no longer exists and silently discard this
+      // one. Only the changes are forwarded, never the `Transaction` itself:
+      // `@codemirror/view` rejects a transaction that does not start from the
+      // state it is being applied to.
+      if (!isMirror && origin !== undefined) {
+        this.#dispatchToView(
+          id,
+          { changes: transaction.changes, annotations: [mirroredAnnotation.of(true)] },
+          origin,
+        );
+      }
       buffer.changeCount++;
       buffer.revision++;
       this.#sync();

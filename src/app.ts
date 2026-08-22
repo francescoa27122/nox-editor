@@ -3191,6 +3191,19 @@ export class NoxApp {
         run: () => this.config.set('workbench.showExplorer', !this.config.get('workbench.showExplorer')),
       },
       {
+        id: 'view.openCopyToSide',
+        title: 'Open Copy to the Side',
+        category: 'View',
+        keywords: ['split', 'same file', 'twice', 'two panes', 'compare', 'mirror'],
+        // Rearranges panes over a file that is already open. Nothing new is
+        // read or written, so no `capabilities`.
+        enabled: () => this.workspace.activeId.get() !== null,
+        run: () => {
+          this.workspace.openCopyToSide();
+          this.ui.focusEditor();
+        },
+      },
+      {
         id: 'view.splitEditor',
         title: 'Split Editor',
         category: 'View',

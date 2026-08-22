@@ -458,6 +458,106 @@ describe('one file in two groups', () => {
     expect(reached).toEqual(['pane-one', 'pane-two']);
   });
 
+  /**
+   * The failure this prevents, and the reason this feature is dangerous:
+   * without forwarding, a pane's `EditorState` goes stale the moment the
+   * other pane types. Its *next* edit is then computed against a document
+   * that no longer exists, and applying it silently discards the first pane's
+   * work. Not a rendering glitch — lost text.
+   *
+   * Two real `EditorState`s here, driven the way `EditorPane` drives them:
+   * update locally, then hand the transaction to the workspace.
+   */
+  it('replays one pane\u2019s edit into the other', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.splitEditor();
+    workspace.mirrorInto(workspace.groups.get()[0]!.id, id);
+
+    // Two views over the same document, each with its own state.
+    const paneA = { state: workspace.stateOf(id)! };
+    const paneB = { state: workspace.stateOf(id)! };
+
+    workspace.addViewDispatcher((target, spec) => {
+      if (target !== id) return false;
+      paneB.state = paneB.state.update(spec as Parameters<typeof paneB.state.update>[0]).state;
+      return true;
+    }, paneB);
+
+    // Pane A types, exactly as `dispatchTransactions` does it.
+    const typed = paneA.state.update({ changes: { from: 0, insert: 'X' } });
+    paneA.state = typed.state;
+    workspace.applyTransaction(id, typed, paneA);
+
+    expect(paneB.state.doc.toString(), 'the other pane must see it').toBe('Xa\n');
+    expect(workspace.stateOf(id)!.doc.toString()).toBe('Xa\n');
+  });
+
+  /**
+   * The failure this prevents: the change bouncing back. The pane an edit
+   * came from has already applied it locally, so sending it there again
+   * would apply it twice — `XX` from one keystroke.
+   */
+  it('does not send an edit back to the pane it came from', async () => {
+    const { workspace } = setup();
+    const id = (await workspace.open('/w/a.ts'))!;
+
+    const paneA = { received: 0 };
+    workspace.addViewDispatcher((target) => {
+      if (target !== id) return false;
+      paneA.received++;
+      return true;
+    }, paneA);
+
+    const typed = workspace.stateOf(id)!.update({ changes: { from: 0, insert: 'X' } });
+    workspace.applyTransaction(id, typed, paneA);
+
+    expect(paneA.received).toBe(0);
+  });
+
+  describe('opening a copy to the side', () => {
+    it('shows the file in a second pane without moving it', async () => {
+      const { workspace } = setup();
+      await workspace.open('/w/a.ts');
+
+      workspace.openCopyToSide();
+
+      expect(layout(workspace)).toEqual([['a.ts'], ['a.ts']]);
+    });
+
+    /**
+     * `splitEditor` *moves* the active tab when the group has more than one.
+     * A copy must not — the file has to stay where it was and also appear
+     * beside it, or this is just the split command with a different name.
+     */
+    it('leaves the original tab where it was', async () => {
+      const { workspace } = setup();
+      await workspace.open('/w/a.ts');
+      await workspace.open('/w/b.ts');
+
+      workspace.openCopyToSide();
+
+      expect(layout(workspace)).toEqual([['a.ts', 'b.ts'], ['b.ts']]);
+    });
+
+    it('uses the pane beside it rather than making a third', async () => {
+      const { workspace } = setup();
+      await workspace.open('/w/a.ts');
+      await workspace.open('/w/b.ts');
+      workspace.splitEditor();
+
+      workspace.openCopyToSide();
+
+      expect(workspace.groups.get()).toHaveLength(2);
+    });
+
+    it('does nothing with no file open', () => {
+      const { workspace } = setup();
+
+      expect(workspace.openCopyToSide()).toBeNull();
+    });
+  });
+
   it('refuses to mirror a buffer into the group it is already in', async () => {
     const { workspace } = setup();
     const id = (await workspace.open('/w/a.ts'))!;

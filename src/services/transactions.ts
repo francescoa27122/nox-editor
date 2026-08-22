@@ -111,6 +111,16 @@ export type ApplyResult =
  */
 export const changeSetAnnotation = Annotation.define<Provenance>();
 
+/**
+ * Marks a transaction as one pane's edit being replayed into another.
+ *
+ * A file open in two panes has two `EditorView`s over one document. When one
+ * types, its change is forwarded to the other — and the receiving pane must
+ * not send it back, or the two bounce it between them forever. This is how it
+ * tells a forwarded change from one of its own.
+ */
+export const mirroredAnnotation = Annotation.define<true>();
+
 /** How many applied change sets the log keeps before dropping the oldest. */
 const LOG_LIMIT = 200;
 
