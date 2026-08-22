@@ -159,11 +159,12 @@
       `MemoryPlatform` only ever emitted `? <file>`.
     */
     const untrackedDirectories: string[] = [];
-    const ancestors = new Map<string, GitStatusLetter>();
     const status = $gitStatus;
     const toplevel = status?.toplevel;
     const root = $rootPath;
-    if (!status || !toplevel || !root) return { letters, untrackedDirectories, ancestors };
+    if (!status || !toplevel || !root) {
+      return { letters, untrackedDirectories, ancestors: new Map<string, GitStatusLetter>() };
+    }
     // Unstaged is written second so the worktree fact wins: the tree shows
     // the file on disk, not the index. A conflict only ever arrives
     // unstaged, so the letter that must never be overwritten cannot be.
@@ -179,14 +180,18 @@
       }
     }
     /*
-      The folder roll-up, in the same pass and on the same trigger. Bounded by
-      the *workspace* root rather than the toplevel: those differ whenever a
-      workspace is opened below its repo root, and only rows at or below the
-      workspace root exist to be marked — so climbing past it would be work
-      spent on paths the tree can never show. `rollUpLetters` skips any status
-      path outside that root for the same reason `gitLetters` joins onto
-      `toplevel` at all: a change in a sibling directory of the workspace is
-      not this tree's business.
+      The folder roll-up. A second pass, over the map the first two built
+      rather than over the status records again — deduplicating first is what
+      lets the climb visit each distinct ancestor once — and inside this same
+      derivation, so it rides `git.status` exactly as the per-file map does.
+
+      Bounded by the *workspace* root rather than the toplevel: those differ
+      whenever a workspace is opened below its repo root, and only rows at or
+      below the workspace root exist to be marked, so climbing past it would
+      be work spent on paths the tree can never show. `rollUpLetters` skips
+      any status path outside that root for the same reason `gitLetters` joins
+      onto `toplevel` at all: a change in a sibling directory of the workspace
+      is not this tree's business.
     */
     return { letters, untrackedDirectories, ancestors: rollUpLetters(letters, root) };
   });
