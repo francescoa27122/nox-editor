@@ -813,9 +813,14 @@ export class WorkspaceService {
    * the undo stack — so a surprise reload is recoverable. The buffer ends
    * clean because `savedDoc` moves with it.
    */
-  async reloadFromDisk(id: BufferId): Promise<boolean> {
+  async reloadFromDisk(id: BufferId, readAs?: Encoding): Promise<boolean> {
     const buffer = this.#map.get(id);
     if (!buffer || buffer.path === null) return false;
+
+    // Re-reading in a *different* charset is the same operation as reloading,
+    // so it is the same method: the bytes on disk have not changed, only the
+    // way they are being read. Passing one adopts it for every later save.
+    const charset = readAs ?? buffer.encoding;
 
     let raw: string;
     let mtime = 0;
@@ -823,7 +828,7 @@ export class WorkspaceService {
       // Pinned, not re-detected. Re-guessing on every external write is
       // exactly where mojibake creeps in: one reload of a legacy file with
       // no mark would otherwise refuse, or worse, come back as something else.
-      raw = (await this.#platform.readEncodedFile(buffer.path, buffer.encoding)).text;
+      raw = (await this.#platform.readEncodedFile(buffer.path, charset)).text;
       mtime = (await this.#platform.stat(buffer.path)).modified;
     } catch (error) {
       this.#fail(`Could not reload ${buffer.name}.`, describe(error));
@@ -835,7 +840,7 @@ export class WorkspaceService {
     // The charset is the one the buffer already has, not one re-inferred
     // from the new bytes: a legacy file has nothing in it to infer from, and
     // guessing again on every external write is where mojibake creeps in.
-    const { doc, eol, encoding } = decode(raw, buffer.encoding);
+    const { doc, eol, encoding } = decode(raw, charset);
     buffer.eol = eol;
     buffer.savedEol = eol;
     buffer.encoding = encoding;

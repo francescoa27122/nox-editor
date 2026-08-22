@@ -812,6 +812,39 @@ effect, and staging has none.
 
 See [AGENT-PLATFORM.md](AGENT-PLATFORM.md) §3.
 
+### A file's charset is carried, never guessed
+
+Nox refused anything that was not valid UTF-8. That protected the file — a
+guess, saved, is corruption — but it meant a text editor that could not open a
+text file. It now reads legacy charsets, and the shape is chosen so the
+protection survives.
+
+**The decoder is in Rust because it has to be.** The webview's `TextDecoder`
+decodes legacy charsets; its `TextEncoder` only ever produces UTF-8. A decoder
+in the renderer could open a windows-1252 file and then be structurally
+incapable of writing it back as one, so the file would convert silently on its
+first save. `encoding.rs` over `encoding_rs` does both directions.
+
+**Detection stays honest.** A byte-order mark is a fact and valid UTF-8 is a
+fact; nothing else is knowable, so `detect` returns them and refuses the rest.
+The refusal is the feature — it is what routes the user to
+`file.reopenWithEncoding` and the status-bar picker, where the person who
+knows what the file is makes the call. UTF-16 with a mark is therefore the
+only charset newly opened *automatically*; the rest are reachable by choice.
+
+**Encoding refuses rather than substitutes.** `encoding_rs` writes an HTML
+numeric reference for a character the charset cannot hold, so an emoji typed
+into a Shift_JIS file would save as the literal `&#128512;` — corruption
+wearing the face of a successful save. The refusal happens before the atomic
+write begins, so the original survives it.
+
+`nox_read_text_file` and `nox_write_text_file` stay strict: they are what
+config, workspace settings and git read through, and UTF-8 or nothing is right
+for Nox's own files. `save` writes with the buffer's charset and
+`reloadFromDisk` pins it rather than re-inferring, because a legacy file has
+nothing in it to infer from and re-guessing on every external write is exactly
+where mojibake creeps in.
+
 ### Saves are written to a sibling, then renamed
 
 `fs::write` truncates before it fills, so a crash, a power cut or a full disk
@@ -1714,7 +1747,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. |
 | Folds are not persisted across sessions | Fold state lives in the buffer's `EditorState`, so it survives tab switches but not a restart. Cursor positions *are* persisted — see §4. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
-| Only UTF-8 is read and written | With or without a BOM, which is detected and preserved. A file in a legacy encoding does **not** open as mojibake — `nox_read_text_file` refuses it with `not-text: … is not valid UTF-8`, so nothing can be written back corrupted. The cost is that such a file cannot be opened at all. Real support means a decoder in Rust, not a heuristic in TS. |
+| No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |
 | The transaction log does not survive a restart | Deliberate — see §4. Undo history does not either, so a persisted log would list changes it could not undo. |
 | Agent processes are not sandboxed | A configured agent runs with Nox's own privileges. The permission model governs what it may ask *Nox* to do, not what its own process can reach — a stdio agent is trusted code you chose to run, like a shell plugin. |
