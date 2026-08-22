@@ -85,6 +85,13 @@ Verified:
   its toast, and the row height was **measured** at 22px because
   `SearchPanel.svelte:81` says the windowing arithmetic breaks otherwise.
 
+Left on the table, and now the top of the list: **a completion's own
+`textEdit` range is computed and never used** — `toCodeMirrorCompletions`
+reads it into `from`/`to`, "believed over any range the client would guess",
+and the source inserts at the list-level `from` instead. Same family as the
+`skip` set and `additionalTextEdits`: converted, and then dropped. In the debt
+table with the reasoning.
+
 Next: **the desktop keyboard pass.** `.desktop-pass-report.md` has 12 of 17
 items UNSEEN, and it is one of only two things between here and 1.0. It needs
 a real keyboard on macOS and it is not doable from this machine. Everything
@@ -102,13 +109,27 @@ Blocked:
   were checked against Python's `codecs` over 4020 strings first, and the
   compile-and-run half is CI's on all three platforms rather than a local
   claim.
-- Smaller, unfixed, all found and not chased: `MenuBar.svelte:32` tracks
-  `commandVersion` but not `keymap.version`, so the in-window menu shows stale
-  accelerators after a rebind; `MemoryPlatform.searchProject` has no
-  always-exclude list, so the browser target searches `node_modules` while the
-  desktop build prunes it; `additionalTextEdits` is dropped from LSP
-  completions, so accepting an auto-import inserts the symbol and never the
-  import.
+- ~~Smaller, unfixed: stale menu accelerators, the fake's missing
+  always-exclude list, `additionalTextEdits`.~~ **All three fixed the same
+  day, on request** — #97, #98 and #99. Nothing from this session's findings
+  is left open.
+  - **#97** `MenuBar` derived from `commands.version` alone while its own
+    comment claimed it rebuilt when "the command table *or a keybinding*"
+    moved. One line, plus the comment saying why it is not optional. The
+    first draft of its test asserted on `menu.describe()` and passed against
+    the bug; the shipped one reads the rendered popup.
+  - **#98** `core/search-match.ts` exists to mirror `search.rs` and had no
+    `ALWAYS_EXCLUDE`, so the browser target and every service test walked
+    `node_modules`. The three-group precedence was copied with the list,
+    because it is the whole policy: always-excludes are the *weakest* group,
+    so an explicit include reaches into them.
+  - **#99** the substantial one. Auto-import completions inserted the symbol
+    and dropped the import — silent wrong output from the most-used LSP path.
+    The completion is inserted synchronously and the import joins it in the
+    same transaction when known, a second one when the server only computes
+    it on resolve. `info`'s existing lazy resolve is cached and read by
+    `apply`, which is what makes the atomic path the common one rather than
+    the exception.
 
 Confidence:
 
