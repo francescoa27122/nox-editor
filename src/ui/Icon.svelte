@@ -64,6 +64,13 @@
     logo: '',
   } as const;
 
+  /**
+   * Every drawable name, in declaration order. Exported so a gallery — the
+   * Storybook one, or any future icon sheet — is generated from the set
+   * rather than restating it, which is the only way the two cannot drift.
+   */
+  export const ICON_NAMES = Object.keys(PATHS) as IconName[];
+
   const FILLED = new Set<string>(['dot', 'folder']);
 </script>
 

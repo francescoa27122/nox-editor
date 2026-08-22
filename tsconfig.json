@@ -24,6 +24,15 @@
       "@ui/*": ["./src/ui/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "tests/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.svelte",
+    "tests/**/*.ts",
+    // Storybook config and its story-support components. Included so
+    // `npm run check` covers them: a story that imports a wrapper is
+    // only type-checked if the wrapper resolves as a module.
+    ".storybook/**/*.ts",
+    ".storybook/**/*.svelte"
+  ],
   "exclude": ["node_modules", "dist", "src-tauri"]
 }

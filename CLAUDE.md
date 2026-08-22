@@ -18,6 +18,7 @@ Rust: `cargo test --manifest-path src-tauri/Cargo.toml`. **`cargo` may not be in
 | Desktop dev | `npm run app` |
 | Desktop build | `npm run app:build` |
 | Tests, watch | `npm run test:watch` |
+| Component workbench | `npm run storybook` |
 
 ## Read before changing code
 

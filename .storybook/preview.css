@@ -1,0 +1,24 @@
+/*
+ * Preview-only corrections. Not shipped, and deliberately tiny — anything that
+ * grows here is a sign a story is being propped up rather than fixed.
+ *
+ * `base.css` pins the document to `height: 100%; overflow: hidden` because the
+ * app is a window, not a page. A story is a page again, so that is undone here
+ * and the document scrolls normally.
+ *
+ * Scrolling the document rather than a wrapper is the whole point: giving
+ * `#storybook-root` its own `overflow: auto` also works, but axe then reports
+ * `scrollable-region-focusable` (serious) on every story, because a scrollable
+ * element that is not keyboard-reachable is a real defect. The document
+ * scroller is exempt, so this keeps the a11y panel reporting Nox's problems
+ * instead of the harness's.
+ */
+html,
+body {
+  height: auto;
+  overflow: visible;
+}
+
+#storybook-root {
+  min-height: 100%;
+}

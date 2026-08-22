@@ -23,3 +23,8 @@ coverage/
 
 # Compiled helper, rebuilt on demand.
 scripts/.window-id.bin
+
+# Storybook's static build and its crash log. The config in `.storybook/`
+# is source and stays tracked.
+storybook-static/
+*storybook.log
