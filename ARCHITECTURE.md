@@ -298,6 +298,52 @@ layout, or under jsdom) renders every row, since windowing an unmeasured
 viewport would render nothing. Design:
 `docs/superpowers/specs/2026-08-20-explorer-virtualisation-design.md`.
 
+### A collapsed folder answers for what is inside it
+
+The tree marked changed and unsaved *files*, so folding `src/` over forty
+changes made it read exactly like folding one over none. `core/folder-marks.ts`
+turns the two per-file facts the panel already holds into per-folder ones.
+
+**The roll-up is built from the status list, never by walking the tree.** That
+is the whole reason it works: `FileTreeService` loads directories lazily, so a
+folder nobody has expanded has no entries to walk, and a tree-walking roll-up
+would answer "nothing in here" for exactly the folders the user has not looked
+inside. Git and the buffer list know about paths whether or not the tree does.
+Climbing stops once an ancestor already holds a letter at least as severe —
+the walk that set it had already raised everything above it — which costs one
+visit per distinct ancestor rather than one per file per level. Comparing
+*presence* instead of severity is the bug that shape invites: a conflict
+arriving after an ordinary edit had claimed the folder above it would never
+reach the rows above that.
+
+**A folder shows the worst letter beneath it, and only while collapsed.**
+Worst rather than a count: a count answers "how much" when the question is
+"should I open this", loses the conflict entirely, and does not fit the rail.
+`C` outranks everything because staging a conflict is the one action that is
+actively harmful — the same argument that spends a scarce letter on it in
+`core/git-status.ts` — and `U` ranks last because a folder of untracked build
+output would otherwise shout over a real change above it. Collapsed-only
+because an expanded folder's rows already answer, and because it makes the
+right edge single-occupancy by construction: `#flatten` gates `loading`,
+`empty` and `error` on `expanded`, so a row that can carry a marker can never
+also want the note slot, and the two need no precedence rule between them.
+
+The character, its colour token and the 8 px dot are the file markers
+unchanged — the twisty and the folder icon already say which kind of row this
+is, so a second visual tier would be a new language for a distinction the row
+has made. Only the accessible name differs: *Contains modified files*, not
+*Modified*, which is also what keeps the difference off colour alone
+(WCAG 1.4.1).
+
+Two consequences worth naming. A **gitignored** folder is exempt from the
+letter for free — `git.rs` runs without `--ignored`, so those paths never
+reach the status list and there is nothing to roll up — but deliberately not
+exempt from the dot, because unsaved is not a git fact and you opened that
+file on purpose. And the git half rides `git.status` as the per-file map does,
+while the dirty half rides `workspace.buffers` and is therefore on the typing
+path: it stays inside rule 5 by climbing the *dirty* set rather than the open
+one, so nothing unsaved costs nothing at all.
+
 ### Nox draws its own find UI
 
 CodeMirror's search *engine* is excellent and its panel looks nothing like Nox.
@@ -1794,7 +1840,6 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Commit is enabled while a merge conflict is unresolved | The panel names conflicts and refuses to stage them, but the Commit button does not know about them. Real git refuses ("committing is not possible because you have unmerged files") and the refusal surfaces through the existing error path, so the outcome is correct and merely late. `MemoryPlatform.gitCommit` does not model the refusal, so nothing tests it. |
 | `undoSession` still revokes grants as a side effect | Revocation is its own command now (`permissions.revokeGrants`), so undoing an agent's *work* arguably should leave its *permissions* alone. The two are still welded in `agent/runtime.ts`; the panel's toast says so rather than surprising the user. |
 | The explorer does not dim gitignored files | `git.rs` runs `--porcelain=v2 --branch -z` without `--ignored`, so the `!` records never arrive. Real support is a Rust change plus a Platform-boundary change, not a component one. |
-| A collapsed folder shows nothing about what is inside it | The tree marks changed and unsaved *files*; a collapsed `src/` hiding forty changes still reads as quiet. Needs an ancestor-prefix set — cheap, and on the same off-typing-path trigger — plus a decision about what a folder's marker looks like. |
 | A save can still refresh the whole tree | FSEvents flags are sticky per path, so an in-place rewrite of a file renamed earlier in the session arrives as `Modify(Name(_))` and is classified a rename; Nox's own atomic save adds a `Create` and three renames of its own. The event kind cannot tell a sticky flag from a real rename — only re-reading the tree can — so the fix belongs in `FileTreeService.refresh()` reporting whether anything actually changed. |
 | The quick-open index still starves during a sustained write storm | The 1 s coalesce ceiling bounds the *flush*, but each structural flush resets `REINDEX_MS`, so the project re-walk still waits for the storm to end. Deliberate — the full walk is the expensive one — but worth revisiting. |
 | `search_integration.rs` re-types the walker configuration | Its `walk()` helper is a hand-copy of `search.rs`'s builder with a truncated exclude list and no include handling, which is why four integration tests passed throughout both search defects. Importing the real `plan_walk` needs `pub mod search` in `lib.rs`. |
