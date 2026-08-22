@@ -6,6 +6,38 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-08-21
+
+Three things Nox could not do: show a menu on Windows or Linux, open a file
+that is not UTF-8, and put one file in two panes.
+
+### Added
+
+- **Windows and Linux have a menu bar.** There was none at all — every command
+  was reachable by palette or keyboard, but nothing was *discoverable*. It
+  reads the same table macOS's native menu does, so the two cannot drift, and
+  it greys out what you cannot currently do, which the native menu has never
+  been able to. F10 focuses it. macOS keeps its own menu, unchanged.
+- **Files that are not UTF-8 open.** Nox used to refuse them outright — safer
+  than mangling them, but it meant a text editor that could not open a text
+  file. UTF-16 with a byte-order mark now opens on its own; for anything else,
+  click the encoding in the status bar and say what it is. The file is written
+  back in the encoding it came in, and a save that cannot be done faithfully —
+  an emoji in a Shift JIS file — stops and tells you instead of quietly
+  mangling the text.
+- **One file, two panes.** *Open Copy to the Side* shows the file you are in
+  beside itself, so you can watch one part while editing another. Both panes
+  stay in step as you type, and it is still one file: one set of unsaved
+  changes, one undo history, saved once.
+
+### Fixed
+
+- **Notes commands did nothing visible when the sidebar was closed.** Creating
+  a note, or pressing ⇧⌘N, chose the notes panel without opening the sidebar to
+  show it.
+- Dialogs with several choices no longer squeeze them until the labels break
+  across three lines.
+
 ## [0.7.0] — 2026-08-21
 
 Notes stop being a scratchpad you cannot search and start being somewhere you
@@ -1157,7 +1189,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/francescoa27122/nox-editor/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francescoa27122/nox-editor/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/francescoa27122/nox-editor/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/francescoa27122/nox-editor/compare/v0.5.0...v0.5.1
