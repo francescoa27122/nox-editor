@@ -327,6 +327,74 @@ describe('session persistence', () => {
     expect(layout(restored)).toEqual([['a.ts'], ['b.ts']]);
   });
 
+  /**
+   * The failure this prevents: two panes on one file reopening on the same
+   * line. `selectionOf` reads the *buffer's* state, which carries whichever
+   * pane's cursor moved last — so the session recorded one cursor twice.
+   */
+  it('records each pane\u2019s own cursor', async () => {
+    const { platform, workspace } = setup();
+    await workspace.openFolder('/w');
+    const id = (await workspace.open('/w/a.ts'))!;
+    workspace.openCopyToSide();
+    const [first, second] = workspace.groups.get();
+
+    // Two panes, two cursors — as two mounted views would report them.
+    workspace.addViewDispatcher(() => false, {
+      groupId: first!.id,
+      readSelection: () => ({ ranges: [[0, 0]], main: 0 }),
+    });
+    workspace.addViewDispatcher(() => false, {
+      groupId: second!.id,
+      readSelection: () => ({ ranges: [[2, 2]], main: 0 }),
+    });
+
+    await persist(workspace, platform);
+
+    const raw = JSON.parse((await platform.readConfigFile('session.json'))!);
+    const cursors = raw.groups.map((g: { tabs: { selection?: { ranges: number[][] } }[] }) =>
+      g.tabs[0]?.selection?.ranges[0]?.[0],
+    );
+    expect(cursors, 'each pane records where its own caret is').toEqual([0, 2]);
+    expect(id).toBeTruthy();
+  });
+
+  /**
+   * And the mirror's cursor is held for the pane rather than written to the
+   * buffer, which would drag the first pane to the same line.
+   */
+  it('holds the mirrored pane\u2019s cursor for that pane alone', async () => {
+    const { platform, workspace } = setup();
+    await workspace.openFolder('/w');
+    await workspace.open('/w/a.ts');
+    workspace.openCopyToSide();
+    const [first, second] = workspace.groups.get();
+    workspace.addViewDispatcher(() => false, {
+      groupId: first!.id,
+      readSelection: () => ({ ranges: [[0, 0]], main: 0 }),
+    });
+    workspace.addViewDispatcher(() => false, {
+      groupId: second!.id,
+      readSelection: () => ({ ranges: [[2, 2]], main: 0 }),
+    });
+    await persist(workspace, platform);
+
+    const restored = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, restored);
+    session.markReady();
+    await session.restore();
+
+    const groups = restored.groups.get();
+    const bufferId = groups[1]!.tabs[0]!.id;
+    const waiting = restored.takePaneSelection(groups[1]!.id, bufferId);
+
+    expect(waiting?.ranges[0]?.[0], 'the second pane has its own cursor waiting').toBe(2);
+    expect(
+      restored.takePaneSelection(groups[1]!.id, bufferId),
+      'and it is handed over only once',
+    ).toBeNull();
+  });
+
   it('round-trips a split layout', async () => {
     const { platform, workspace } = setup();
     await workspace.openFolder('/w');
@@ -549,7 +617,7 @@ describe('one file in two groups', () => {
       if (target !== id) return false;
       paneB.state = paneB.state.update(spec as Parameters<typeof paneB.state.update>[0]).state;
       return true;
-    }, paneB);
+    }, { owner: paneB });
 
     // Pane A types, exactly as `dispatchTransactions` does it.
     const typed = paneA.state.update({ changes: { from: 0, insert: 'X' } });
@@ -574,7 +642,7 @@ describe('one file in two groups', () => {
       if (target !== id) return false;
       paneA.received++;
       return true;
-    }, paneA);
+    }, { owner: paneA });
 
     const typed = workspace.stateOf(id)!.update({ changes: { from: 0, insert: 'X' } });
     workspace.applyTransaction(id, typed, paneA);

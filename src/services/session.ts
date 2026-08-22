@@ -162,7 +162,11 @@ export class SessionService {
           // is why the marker exists.
           const already = tab.mirror ? this.#workspace.findByPath(tab.path) : undefined;
           if (already) {
-            this.#workspace.mirrorInto(this.#workspace.activeGroupId.get(), already.id);
+            const into = this.#workspace.activeGroupId.get();
+            this.#workspace.mirrorInto(into, already.id);
+            // Not `setSelection`, which moves the *buffer* and so would drag
+            // the other pane here too. This waits for the pane itself.
+            if (tab.selection) this.#workspace.setPaneSelection(into, already.id, tab.selection);
             opened.push(already.id);
             continue;
           }
@@ -265,7 +269,9 @@ export class SessionService {
         const mirrored = written.has(buffer.id) ? ({ mirror: true } as const) : {};
         written.add(buffer.id);
         if (buffer.id === group.activeId) activeIndex = tabs.length;
-        const selection = this.#workspace.selectionOf(buffer.id) ?? undefined;
+        // Asked of *this pane*: one file in two panes has two cursors, and
+        // the buffer only remembers whichever moved last.
+        const selection = this.#workspace.selectionOf(buffer.id, group.id) ?? undefined;
 
         if (buffer.path) {
           // Only dirty buffers carry their text; a clean one is already on
