@@ -6,6 +6,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-08-21
+
+### Fixed
+
+- **Both panes showing the same file reopened on the same line.** Each pane
+  now comes back where you left its cursor, so a file you were reading at the
+  top and editing at the bottom is still that way after a restart.
+
 ## [0.8.1] — 2026-08-21
 
 ### Fixed
@@ -1198,7 +1206,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/francescoa27122/nox-editor/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/francescoa27122/nox-editor/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/francescoa27122/nox-editor/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/francescoa27122/nox-editor/compare/v0.6.0...v0.7.0
