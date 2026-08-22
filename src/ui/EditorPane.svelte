@@ -25,6 +25,7 @@
   import { EditorView } from '@codemirror/view';
   import { onMount } from 'svelte';
   import { formatChord, normalizeChord } from '@services/keymap';
+  import { mirroredAnnotation } from '@services/transactions';
   import { cursorInfo } from '@editor/commands';
   import {
     lspCompartment,
@@ -110,7 +111,12 @@
 
         let docChanged = false;
         for (const transaction of transactions) {
-          workspace.applyTransaction(id, transaction);
+          // A change forwarded from the other pane showing this file has
+          // already been recorded by the workspace — handing it back would
+          // overwrite `buffer.state` with this pane's copy of it and bounce
+          // between the two forever.
+          if (transaction.annotation(mirroredAnnotation)) continue;
+          workspace.applyTransaction(id, transaction, instance);
           docChanged ||= transaction.docChanged;
         }
 
@@ -126,11 +132,15 @@
     // into the live view instead of resetting state, so scroll position and
     // undo history survive. Every pane registers; each declines the buffers it
     // is not showing.
-    const offDispatcher = workspace.addViewDispatcher((id, spec) => {
-      if (!view || id !== currentId) return false;
-      view.dispatch(spec);
-      return true;
-    });
+    const offDispatcher = workspace.addViewDispatcher(
+      (id, spec) => {
+        if (!view || id !== currentId) return false;
+        view.dispatch(spec);
+        return true;
+      },
+      // Identifies this pane, so an edit it originated is not sent back to it.
+      view,
+    );
 
     // Diagnostics are painted from here rather than from the app, because
     // `currentId` is the only authoritative answer to "which buffer is this

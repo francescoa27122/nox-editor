@@ -524,6 +524,28 @@ than a formality.
 
 ### Split panes: one document, however many tabs show it
 
+Two views over one document stay in step by **forwarding changes**, not by
+sharing an `EditorState`. When a pane's transaction reaches
+`applyTransaction`, its `changes` are dispatched to every other pane showing
+that file, carrying `mirroredAnnotation` so the receiver knows not to send it
+back. Only the changes travel, never the `Transaction` — `@codemirror/view`
+rejects one that does not start from the state it is applied to.
+
+Two rules keep that from looping or double-applying. A transaction that is
+itself a mirror is never forwarded again, guarded in the workspace rather than
+in the panes, because a consumer that re-enters without checking would
+otherwise bounce one keystroke between two views forever. And forwarding only
+happens when the caller says which pane it is: without that there is no way to
+skip the sender, and it would apply its own change twice — which is exactly
+how the watcher's fake pane found this, as `RangeError: Applying change set to
+a document with the wrong length`. A caller that does not identify itself gets
+the behaviour it had before panes could be mirrored.
+
+`view.openCopyToSide` builds the second pane itself rather than calling
+`splitEditor`, which *moves* the active tab when its group has more than one.
+A copy has to leave the original where it is, or it is the split command under
+a different name.
+
 A buffer used to belong to exactly one group, and four things quietly relied
 on it: `#groupOf` was a `find` and so addressed whichever pane came first;
 `close` deleted the document rather than the tab; `buffers` was every group's
@@ -1766,7 +1788,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | The transaction log does not survive a restart | Deliberate — see §4. Undo history does not either, so a persisted log would list changes it could not undo. |
 | Agent processes are not sandboxed | A configured agent runs with Nox's own privileges. The permission model governs what it may ask *Nox* to do, not what its own process can reach — a stdio agent is trusted code you chose to run, like a shell plugin. |
 | No model provider ships | Deliberate: a default provider would be a vendor in the core. The Agents panel says so rather than offering an input that cannot work. |
-| One file cannot be open in two panes | A buffer belongs to exactly one group — see §4. Viewing one file in two panes needs a second CodeMirror view over the same document with transactions forwarded between them. |
+| A mirrored pane does not survive a restart | `view.openCopyToSide` shows one file in two panes (§4), but `TabRecord` has no way to say a tab is a second view of a buffer the session already restored, so a restart brings back one. Needs a `mirror` flag and VERSION 4 → 5. Per-pane cursor and scroll are unsaved for the same reason. |
 | Splits do not nest | The layout is a flat row or column, not a tree, so you cannot have a column split inside a row. |
 | macOS trash has no "Put Back" | Nox trashes via `NSFileManager` rather than Finder/AppleScript, because the AppleScript path blocks for two minutes and then fails when Finder is unavailable. A trashed file restores to the Trash folder, not its original location. Covered by `tests/fileops_integration.rs`. |
 | Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**; unsaved work does, because it is in the session. The reload also kills any running agent, which is the point — a renderer that no longer exists cannot talk to them. |
