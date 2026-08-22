@@ -18,11 +18,16 @@ import { describe, expect, it } from 'vitest';
  * ground `.nox-input` ever has. Storybook's axe pass found it; this suite is
  * what would have.
  *
- * Deliberately out of scope: the `--nox-syn-*` syntax colours. Those paint the
- * user's own document rather than Nox's chrome, and a dim comment colour is an
- * editor convention rather than an accessibility failure — `--nox-syn-comment`
- * keeps the original `#4c5768` on purpose. Judging them by 1.4.3 would assert
- * a rule this project has not agreed to.
+ * The `--nox-syn-*` colours were out of scope when this file was written, on
+ * the argument that they paint the user's document rather than Nox's chrome
+ * and that a dim comment is an editor convention. That exemption was withdrawn
+ * on 2026-08-22: syntax is the text a person actually spends the day reading,
+ * and "it is conventional" is not a reason it has to be unreadable. Two of the
+ * sixteen were under the floor — `--nox-syn-comment` at 2.64:1 and
+ * `--nox-syn-punctuation` at 3.95:1 — and both moved.
+ *
+ * The bar is the same 4.5:1, measured on `--nox-bg-editor`, which is the worst
+ * case: Umbra's editor is pure black and reads higher on every token.
  */
 
 /**
@@ -209,6 +214,36 @@ describe.each(themes)('%s', (_theme, tokens) => {
       const ratio = contrast(resolve(tokens, name), resolve(tokens, surface));
       expect(`${surface}: ${ratio.toFixed(2)}`).toBe(`${surface}: ${Math.max(ratio, 4.5).toFixed(2)}`);
     }
+  });
+
+  /**
+   * Every syntax colour, discovered rather than listed, so a token added for a
+   * new grammar is covered the day it appears instead of the day someone
+   * remembers this file.
+   */
+  it('every syntax colour is legible on the writing surface', () => {
+    const editor = resolve(tokens, '--nox-bg-editor');
+    const syntax = [...tokens.keys()].filter((name) => name.startsWith('--nox-syn-'));
+    expect(syntax.length).toBeGreaterThan(10);
+
+    for (const name of syntax) {
+      const ratio = contrast(resolve(tokens, name), editor);
+      expect(`${name}: ${ratio.toFixed(2)}`).toBe(`${name}: ${Math.max(ratio, 4.5).toFixed(2)}`);
+    }
+  });
+
+  /**
+   * The inert group keeps its order. DESIGN.md §3 wants comments quietest and
+   * operators/punctuation a step above, and raising both to clear the floor
+   * compressed that band rather than removing it — so the ordering is worth
+   * asserting now that there is far less room between the levels.
+   */
+  it('comments stay the quietest thing in the buffer', () => {
+    const editor = resolve(tokens, '--nox-bg-editor');
+    const at = (name: string) => contrast(resolve(tokens, name), editor);
+
+    expect(at('--nox-syn-comment')).toBeLessThan(at('--nox-syn-operator'));
+    expect(at('--nox-syn-operator')).toBeLessThan(at('--nox-syn-variable'));
   });
 
   /**

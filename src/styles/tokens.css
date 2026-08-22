@@ -100,13 +100,25 @@
   --nox-syn-keyword: #8b7df5;
   --nox-syn-string: #7bd88f;
   --nox-syn-number: #e8925c;
-  --nox-syn-comment: #4c5768;
+  /* Lifted from #4c5768 (2.64:1 over bg-editor) on 2026-08-22. The 1.4.3
+     floor applies here like anywhere else: a comment is prose a person wrote
+     for another person to read, and "inert" was being spent on making it
+     unreadable rather than quiet. #6d7d94 keeps the hue (216°) and the low
+     saturation, measures 4.60:1, and is still the quietest thing in the
+     buffer — italic does the rest of the work DESIGN.md §3 wanted. */
+  --nox-syn-comment: #6d7d94;
   --nox-syn-function: #7dd3e0;
   --nox-syn-type: #e3b341;
   --nox-syn-variable: #c8d2e4;
   --nox-syn-property: #93b4d8;
   --nox-syn-operator: #7a8699;
-  --nox-syn-punctuation: #66718a;
+  /* DESIGN.md §3 lists operators and punctuation as one "Muted" level; the
+     separate #66718a was undocumented drift, and at 3.95:1 it was also below
+     the text floor. Folded into the operator token rather than given a value
+     of its own: two shades 0.3 apart in contrast are not a distinction anyone
+     can see, and naming the relationship is more honest than duplicating a
+     hex that happens to match. */
+  --nox-syn-punctuation: var(--nox-syn-operator);
   --nox-syn-constant: #e8925c;
   --nox-syn-tag: #f0616d;
   --nox-syn-attribute: #e3b341;
