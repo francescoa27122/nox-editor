@@ -260,6 +260,73 @@ describe('session persistence', () => {
     await session.save();
   }
 
+  /**
+   * The failure this prevents: a file shown in two panes coming back in one.
+   * `restore` opens each tab by path, and `open` focuses a buffer that is
+   * already open rather than adding a second tab — so without a marker the
+   * second pane silently lost its copy on every restart.
+   */
+  it('round-trips one file shown in two panes', async () => {
+    const { platform, workspace } = setup();
+    await workspace.openFolder('/w');
+    await workspace.open('/w/a.ts');
+    workspace.openCopyToSide();
+    await persist(workspace, platform);
+
+    const restored = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, restored);
+    session.markReady();
+    await session.restore();
+
+    expect(layout(restored)).toEqual([['a.ts'], ['a.ts']]);
+  });
+
+  /** And it is still one document, not two copies that drift apart. */
+  it('brings the mirror back as the same buffer', async () => {
+    const { platform, workspace } = setup();
+    await workspace.openFolder('/w');
+    await workspace.open('/w/a.ts');
+    workspace.openCopyToSide();
+    await persist(workspace, platform);
+
+    const restored = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, restored);
+    session.markReady();
+    await session.restore();
+
+    const ids = restored.groups.get().flatMap((g) => g.tabs.map((t) => t.id));
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size, 'both tabs are the same buffer').toBe(1);
+    expect(restored.buffers.get()).toHaveLength(1);
+  });
+
+  /**
+   * A session written before mirroring existed carries no marker, and must
+   * restore exactly as it always did. VERSION is deliberately not bumped —
+   * `#read` discards a session whose version it does not know, so a bump
+   * would cost every tab rather than one pane.
+   */
+  it('still restores a session that predates mirroring', async () => {
+    const { platform, workspace } = setup();
+    await workspace.openFolder('/w');
+    await workspace.open('/w/a.ts');
+    await workspace.open('/w/b.ts');
+    workspace.splitEditor();
+    await persist(workspace, platform);
+
+    // Strip the field a newer Nox would have written.
+    const raw = JSON.parse((await platform.readConfigFile('session.json'))!);
+    for (const group of raw.groups) for (const tab of group.tabs) delete tab.mirror;
+    await platform.writeConfigFile('session.json', JSON.stringify(raw));
+
+    const restored = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, restored);
+    session.markReady();
+    await session.restore();
+
+    expect(layout(restored)).toEqual([['a.ts'], ['b.ts']]);
+  });
+
   it('round-trips a split layout', async () => {
     const { platform, workspace } = setup();
     await workspace.openFolder('/w');

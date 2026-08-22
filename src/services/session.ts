@@ -43,7 +43,26 @@ interface UnsavedRecord {
 }
 
 type TabRecord =
-  | { kind: 'file'; path: string; selection?: SelectionRecord; unsaved?: UnsavedRecord }
+  | {
+      kind: 'file';
+      path: string;
+      selection?: SelectionRecord;
+      unsaved?: UnsavedRecord;
+      /**
+       * A second view of a file an earlier group already restored.
+       *
+       * `restore` opens tabs by path, and `open` focuses a buffer that is
+       * already open rather than adding a tab — so without this the second
+       * pane silently lost its copy on every restart.
+       *
+       * Optional, and VERSION is deliberately **not** bumped for it: `#read`
+       * discards a session whose version it does not recognise, so a bump
+       * would cost every tab rather than one pane. An older Nox reading this
+       * ignores the field and opens the file once, which is exactly what it
+       * did before.
+       */
+      mirror?: true;
+    }
   | {
       kind: 'untitled';
       name: string;
@@ -137,6 +156,17 @@ export class SessionService {
         if (tab.kind === 'file') {
           // A file may have been deleted since last launch; skip it quietly.
           if (!(await this.#platform.exists(tab.path))) continue;
+
+          // A second view of a buffer an earlier group already restored.
+          // `open` would focus that one rather than adding a tab here, which
+          // is why the marker exists.
+          const already = tab.mirror ? this.#workspace.findByPath(tab.path) : undefined;
+          if (already) {
+            this.#workspace.mirrorInto(this.#workspace.activeGroupId.get(), already.id);
+            opened.push(already.id);
+            continue;
+          }
+
           id = await this.#workspace.open(tab.path);
           // Unsaved work goes back on top of the file as it is now, as a real
           // edit — so the tab is dirty and ⌘Z reaches the on-disk content.
@@ -223,11 +253,17 @@ export class SessionService {
     /** Each resolves to the reason its write failed, or null. */
     const writes: Promise<string | null>[] = [];
 
+    // Buffers already written into an earlier group. The first appearance is
+    // the real tab; the rest are second views of it.
+    const written = new Set<string>();
+
     const groups: GroupRecord[] = layout.map((group) => {
       const tabs: TabRecord[] = [];
       let activeIndex = 0;
 
       for (const buffer of group.tabs) {
+        const mirrored = written.has(buffer.id) ? ({ mirror: true } as const) : {};
+        written.add(buffer.id);
         if (buffer.id === group.activeId) activeIndex = tabs.length;
         const selection = this.#workspace.selectionOf(buffer.id) ?? undefined;
 
@@ -235,7 +271,7 @@ export class SessionService {
           // Only dirty buffers carry their text; a clean one is already on
           // disk and copying it into the session would just go stale.
           if (!buffer.isDirty) {
-            tabs.push({ kind: 'file', path: buffer.path, selection });
+            tabs.push({ kind: 'file', path: buffer.path, selection, ...mirrored });
             continue;
           }
           const backup = this.#backUp(buffer.id, live, writes);
@@ -244,6 +280,7 @@ export class SessionService {
             path: buffer.path,
             selection,
             unsaved: { backup, baseMtime: this.#workspace.knownMtime(buffer.id) },
+            ...mirrored,
           });
         } else {
           // An empty scratch tab is not worth restoring.
