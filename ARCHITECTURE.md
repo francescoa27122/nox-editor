@@ -541,6 +541,19 @@ how the watcher's fake pane found this, as `RangeError: Applying change set to
 a document with the wrong length`. A caller that does not identify itself gets
 the behaviour it had before panes could be mirrored.
 
+A mirrored pane survives a restart. `TabRecord` carries `mirror: true` on the
+second and later appearances of a buffer, and `restore` calls `mirrorInto`
+for those rather than `open`, which would focus the tab an earlier group had
+already restored instead of adding one.
+
+**VERSION stays 4 on purpose.** `#read` discards a session whose version it
+does not recognise — the same all-or-nothing check `notes.json` has — so
+bumping it would cost every tab and every unsaved-backup pointer to gain one
+pane. The field is optional in both directions instead: an older session has
+no marker and restores exactly as it did, and an older Nox reading a newer
+session ignores the marker and opens the file once, which is what it did
+before mirroring existed.
+
 `view.openCopyToSide` builds the second pane itself rather than calling
 `splitEditor`, which *moves* the active tab when its group has more than one.
 A copy has to leave the original where it is, or it is the split command under
@@ -1788,7 +1801,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | The transaction log does not survive a restart | Deliberate — see §4. Undo history does not either, so a persisted log would list changes it could not undo. |
 | Agent processes are not sandboxed | A configured agent runs with Nox's own privileges. The permission model governs what it may ask *Nox* to do, not what its own process can reach — a stdio agent is trusted code you chose to run, like a shell plugin. |
 | No model provider ships | Deliberate: a default provider would be a vendor in the core. The Agents panel says so rather than offering an input that cannot work. |
-| A mirrored pane does not survive a restart | `view.openCopyToSide` shows one file in two panes (§4), but `TabRecord` has no way to say a tab is a second view of a buffer the session already restored, so a restart brings back one. Needs a `mirror` flag and VERSION 4 → 5. Per-pane cursor and scroll are unsaved for the same reason. |
+| A mirrored pane restores without its own cursor | The pane comes back (§4), but `SelectionRecord` is stored per *buffer*, so both views reopen on the same line. Per-pane cursor and scroll need the selection read from each view at save time rather than from the buffer. |
 | Splits do not nest | The layout is a flat row or column, not a tree, so you cannot have a column split inside a row. |
 | macOS trash has no "Put Back" | Nox trashes via `NSFileManager` rather than Finder/AppleScript, because the AppleScript path blocks for two minutes and then fails when Finder is unavailable. A trashed file restores to the Trash folder, not its original location. Covered by `tests/fileops_integration.rs`. |
 | Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**; unsaved work does, because it is in the session. The reload also kills any running agent, which is the point — a renderer that no longer exists cannot talk to them. |
