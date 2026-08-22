@@ -100,6 +100,21 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
+      # macOS code signing and notarization. A *different* key from the two
+      # above and a different job: those sign update payloads so a running Nox
+      # can verify one came from us, and these decide whether a fresh download
+      # opens without a terminal command. Neither substitutes for the other.
+      #
+      # Absent, the macOS build is ad-hoc signed exactly as it is today.
+      # Present, the bundler imports the certificate itself — no keychain step
+      # here — and notarizes. Half-present is what the step below refuses.
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
     steps:
       - uses: actions/checkout@v7
 
@@ -168,6 +183,49 @@ jobs:
             echo "args=" >> "$GITHUB_OUTPUT"
             echo "No signing key: installers only, no updater artifacts."
           fi
+
+      # The same shape as the updater guard above, for the same reason: a
+      # half-present configuration is worse than an absent one, because it
+      # looks like it worked.
+      #
+      # Signing without notarizing is the trap. Gatekeeper still stops the app
+      # — a milder dialog than "damaged", but still a click-through — so the
+      # release notes' promise would be wrong and nothing would say so. Apple
+      # requires notarization for a Developer ID Application certificate, and
+      # this refuses to ship the half that does not.
+      #
+      # Only names are echoed, never values; the runner masks secrets anyway.
+      - name: Check the Apple signing configuration is whole
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eu
+          if [ -z "${APPLE_CERTIFICATE:-}" ]; then
+            echo "No Apple certificate: this build is ad-hoc signed, as every build is today."
+            echo "A fresh download will need 'xattr -dr com.apple.quarantine' to open."
+            exit 0
+          fi
+
+          missing=''
+          for name in APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name:-}" ]; then
+              missing="$missing $name"
+            fi
+          done
+
+          if [ -n "$missing" ]; then
+            echo "APPLE_CERTIFICATE is set, but these repository secrets are missing:"
+            echo "  $missing"
+            echo
+            echo "Signing without notarizing still stops at Gatekeeper, so this would ship"
+            echo "an installer whose release notes promise otherwise. Add the missing"
+            echo "secrets and retag, or clear APPLE_CERTIFICATE to build ad-hoc as before."
+            echo
+            echo "See docs/superpowers/specs/2026-08-22-apple-signing-design.md."
+            exit 1
+          fi
+
+          echo "Apple signing configured: this macOS build will be signed and notarized."
 
       - uses: tauri-apps/tauri-action@v1
         env:
