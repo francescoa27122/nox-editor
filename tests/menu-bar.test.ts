@@ -218,3 +218,49 @@ describe('keyboard', () => {
     );
   });
 });
+
+describe('what the bar shows after a rebinding', () => {
+  /**
+   * The failure this prevents: `menus` tracked `commands.version` and nothing
+   * else, while its own comment claimed it rebuilt "when the command table
+   * *or a keybinding* moves". Keybindings live on a *separate* signal —
+   * `MenuService.start` subscribes to `keymap.version` to reinstall the
+   * native menu (`menu.ts:345`), and this bar subscribed to nothing.
+   *
+   * So `describe()`'s "one tree, two consumers, and they cannot drift" held
+   * for the layout and not for the accelerators: rebind a key and macOS's
+   * menu updated while the in-window bar went on offering the old chord —
+   * until some unrelated command was registered and knocked the derived over
+   * by accident.
+   *
+   * Read from the rendered popup rather than from `menu.describe()`, because
+   * the service was never the broken half.
+   */
+  it('shows the new chord, not the one that was rebound', async () => {
+    mounted = mountComponent(MenuBar);
+    const { app, container } = mounted;
+    flush();
+
+    /** Open the File menu, read its items, close it again. */
+    const fileItems = async (): Promise<string[]> => {
+      const button = [...container.querySelectorAll<HTMLButtonElement>('.menu-title')].find(
+        (candidate) => candidate.textContent?.trim() === 'File',
+      )!;
+      button.click();
+      await flush();
+      const items = openItems();
+      button.click();
+      await flush();
+      return items;
+    };
+
+    expect(await fileItems()).toContain('Save Ctrl+S');
+
+    app.keymap.assign('file.save', 'Ctrl+Alt+Y', { from: 'Mod+S' });
+    await flush();
+
+    const after = await fileItems();
+    expect(after).toContain('Save Ctrl+Alt+Y');
+    expect(after).not.toContain('Save Ctrl+S');
+  });
+});

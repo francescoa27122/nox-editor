@@ -25,12 +25,25 @@
   const { commands, ui } = app;
 
   const commandVersion = commands.version;
+  /**
+   * Bindings are a *second* signal, and reading it here is not optional.
+   *
+   * `MenuService.describe()` calls `keymap.chordFor` for every accelerator,
+   * but `commands.version` only moves when a command is registered or
+   * unregistered — never when one is rebound. Without this the bar kept
+   * offering the old chord after a rebinding while the native menu, which
+   * reinstalls on exactly this signal (`menu.ts:345`), showed the new one:
+   * the two consumers of the one tree drifting, which is the thing
+   * `describe()` says cannot happen.
+   */
+  const keymapVersion = app.keymap.version;
   const focusRequest = ui.focusMenuBarRequest;
   const menuBarOpen = ui.menuBarOpen;
 
   /** Top-level menus. Rebuilt when the command table or a keybinding moves. */
   const menus = $derived.by<{ label: string; items: readonly MenuNode[] }[]>(() => {
     void $commandVersion;
+    void $keymapVersion;
     return app.menu
       .describe()
       .filter((node): node is Extract<MenuNode, { kind: 'submenu' }> => node.kind === 'submenu')
