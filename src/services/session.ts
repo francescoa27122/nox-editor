@@ -1,5 +1,7 @@
+import { highestNumbered, type DamagedFile } from '@core/damaged-config';
 import { Signal } from '@core/signal';
 import type { Platform } from '@platform/types';
+import { preserveDamaged } from './damaged-config';
 import type { SelectionRecord, WorkspaceService } from './workspace';
 
 /**
@@ -102,6 +104,14 @@ export class SessionService {
    * user finds out by relaunching into an empty window.
    */
   readonly error = new Signal<string | null>(null);
+  /**
+   * The session file Nox could not read at boot, and where it kept a copy.
+   *
+   * Separate from `error` for the reason `ConfigService.damaged` is, and more
+   * load-bearing here than anywhere else: this file is the whole of
+   * README.md's "It does not lose your work. Ever."
+   */
+  readonly damaged = new Signal<DamagedFile | null>(null);
 
   #platform: Platform;
   #workspace: WorkspaceService;
@@ -388,11 +398,22 @@ export class SessionService {
     }
   }
 
+  /**
+   * Read the index, or preserve it and start clean.
+   *
+   * A file that will not parse — or carries a version this build does not
+   * know, which is usually a newer Nox having written it — used to be treated
+   * as no file at all. That is what made a downgrade cost you your tabs, and
+   * it is what made `#nextBackup` restart at 1 and write over `unsaved-1.txt`,
+   * a file holding text the user never saved.
+   */
   async #read(): Promise<SessionData | null> {
     let raw: string | null;
     try {
       raw = await this.#platform.readConfigFile(SESSION_FILE);
     } catch {
+      // Unreadable is not damaged: there is nothing to copy, and nothing the
+      // user could act on. An empty file is how `clear()` releases a session.
       return null;
     }
     if (!raw) return null;
@@ -417,10 +438,30 @@ export class SessionService {
         return { ...parsed, version: VERSION };
       }
 
-      if (parsed.version !== VERSION) return null;
+      if (parsed.version !== VERSION) return await this.#damaged(raw);
       return parsed;
     } catch {
-      return null;
+      return await this.#damaged(raw);
     }
+  }
+
+  /**
+   * Preserve an index that could not be read, and salvage one number from it.
+   *
+   * The number is the whole point. `#backUp` hands out `unsaved-N.txt` from a
+   * counter that is recomputed on load, so a load that fails silently reissues
+   * `unsaved-1.txt` and the first dirty buffer overwrites work the user never
+   * saved. `JSON.parse` failing does not make the text unreadable — it makes
+   * it unstructured — and the names are still in it, in a truncated file just
+   * as much as in a valid one.
+   *
+   * Deliberately not an attempt to recover the *contents* of a damaged index.
+   * One number is all it takes to stop the next write landing on a file that
+   * still holds the user's text.
+   */
+  async #damaged(raw: string): Promise<null> {
+    this.#nextBackup = highestNumbered(raw, /unsaved-(\d+)\.txt/g) + 1;
+    this.damaged.set(await preserveDamaged(this.#platform, SESSION_FILE, raw));
+    return null;
   }
 }

@@ -511,6 +511,65 @@ export class NoxApp {
       }
     });
 
+    // A file Nox could not *read* is a different event from one it could not
+    // write, and it needs saying for the same reason: only the user can fix
+    // the cause, and without a word they find out by noticing that something
+    // they configured is gone. One subscription each rather than one shared
+    // signal, because the sentence that matters is different every time.
+    // See `docs/superpowers/specs/2026-08-22-damaged-config-recovery-design.md`.
+    const damagedDetail = (copy: string | null, lost: string): string =>
+      copy === null
+        ? `${lost}\n\nNox could not keep a copy of the old file.`
+        : `${lost}\n\nThe old file was kept as ${copy} in your Nox config folder.`;
+
+    this.config.damaged.subscribe((damage) => {
+      if (damage) {
+        this.notifications.error(
+          'Could not read your settings',
+          damagedDetail(
+            damage.copy,
+            'Nox is running on its defaults, and will overwrite settings.json the next time you change a preference.',
+          ),
+        );
+      }
+    });
+
+    this.keymap.damaged.subscribe((damage) => {
+      if (damage) {
+        this.notifications.error(
+          'Could not read your keyboard shortcuts',
+          damagedDetail(
+            damage.copy,
+            'The default keys are in force, and the next rebinding will overwrite keybindings.json.',
+          ),
+        );
+      }
+    });
+
+    this.session.damaged.subscribe((damage) => {
+      if (damage) {
+        this.notifications.error(
+          'Could not read your last session',
+          damagedDetail(
+            damage.copy,
+            'Your tabs could not be restored. Any unsaved work from that session is still in the unsaved-*.txt files beside it.',
+          ),
+        );
+      }
+    });
+
+    this.notes.damaged.subscribe((damage) => {
+      if (damage) {
+        this.notifications.error(
+          'Could not read your notes',
+          damagedDetail(
+            damage.copy,
+            'The list is empty, but the note bodies are still in the note-*.txt files beside it.',
+          ),
+        );
+      }
+    });
+
     // Each configured local model becomes a provider the agent panel can start
     // a session with. Re-registered wholesale when agents.json changes, which
     // is rare and much simpler than diffing the list.

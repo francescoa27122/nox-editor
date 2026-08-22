@@ -1758,6 +1758,49 @@ the same token, not that all panels share a token.
 
 ---
 
+### A config file that will not parse is damaged, not absent
+
+Four load paths — `settings.json`, `keybindings.json`, `session.json`,
+`notes.json` — treated a file they could not parse as a file that was not
+there. Absent is a state Nox already handles: start from the defaults and
+write your own file over the top. That is correct for a file that genuinely
+is not there and destructive for one that is, and every one of these four is
+written back by Nox. The next `set()`, the next rebind, the next save
+replaced the user's file with a fresh one, silently.
+
+`servers.json` and `agents.json` had always done the right thing — publish the
+parse error and say so. Neither is ever written back by Nox, which is why the
+asymmetry survived: the two paths where reporting was merely *polite* had it,
+and the four where it was the only thing standing between a typo and a loss
+did not.
+
+A damaged file is now **preserved, reported, and read for what survives**:
+
+- **Preserved** as `<name>.damaged.<ext>` beside the original, through
+  `core/damaged-config.ts`. The original is *not* deleted — Nox does not
+  delete a user's file to fix its own problem — and it being overwritten by
+  the next legitimate write is acceptable precisely because the copy exists.
+- **Reported** on a `damaged` signal that is deliberately **not** `error`.
+  `error` means "the last *write* failed" and `ConfigService.#save` clears it
+  on the next write that lands, which would erase a damage notice about
+  250 ms after it appeared.
+- **Read for what survives.** `session.json` and `notes.json` both hand out
+  content-file names (`unsaved-3.txt`, `note-7.txt`) from a counter that is
+  "recomputed on load" — so a load that fails reissues `unsaved-1.txt` and the
+  first dirty buffer overwrites text the user never saved. `JSON.parse`
+  failing does not make the text unreadable, it makes it *unstructured*, and
+  the names are still in it. `highestNumbered` recovers the high-water mark
+  from a truncated file exactly as it would from a valid one. That is the
+  whole of the salvage, deliberately: one number is all it takes to stop the
+  next write landing on a file that still holds the user's text.
+
+An unrecognised **version** counts as damage on the same reasoning. It is
+usually a newer Nox having written the file rather than corruption, but the
+old consequence was identical — discarded, then overwritten — and a downgrade
+should not cost you your tabs. Versions Nox does recognise still migrate.
+
+---
+
 ### A fake that emits one shape of a record proves less than its test count
 
 Real `git status --porcelain=v2` collapses an untracked directory into a
@@ -1846,8 +1889,9 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | The browser search walks `node_modules` and `.git` | `MemoryPlatform.searchProject` applies no always-exclude list, so the dev target searches machine directories the desktop build prunes. Divergence in the harmless direction, but it is the fake being wrong. |
 | Dirty flag on huge files | See §4. Above 2 MB, undo-to-saved leaves the tab dirty. |
 | Watch mtime resolution | See §4. A coarse-mtime filesystem can let an external write in the same second as a save be misread as our own. |
-| Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. |
+| Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. **A file in that state also never leaves `externalState: 'none'`, so the save-overwrite dialog never fires for it** — a concurrent edit is clobbered rather than reported. |
 | Folds are not persisted across sessions | Fold state lives in the buffer's `EditorState`, so it survives tab switches but not a restart. Cursor positions *are* persisted — see §4. |
+| A damaged config file is preserved, but never repaired | `<name>.damaged.<ext>` is a copy, not a merge: Nox does not attempt to recover the *contents* of an index it could not parse, only the one counter that stops the next write destroying a body file. Recovering a truncated `notes.json`'s rows is possible and unbuilt. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
 | No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |

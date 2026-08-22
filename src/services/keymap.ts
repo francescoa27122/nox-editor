@@ -1,6 +1,8 @@
+import type { DamagedFile } from '@core/damaged-config';
 import { Signal } from '@core/signal';
 import type { Platform } from '@platform/types';
 import type { CommandRegistry } from './commands';
+import { preserveDamaged } from './damaged-config';
 
 /**
  * Keybindings.
@@ -272,6 +274,11 @@ export class KeymapService {
    * they can fix the reason.
    */
   readonly error = new Signal<string | null>(null);
+  /**
+   * The bindings file Nox could not read at boot, and where it kept a copy.
+   * Separate from `error` for the reason `ConfigService.damaged` is.
+   */
+  readonly damaged = new Signal<DamagedFile | null>(null);
 
   constructor(commands: CommandRegistry, platform?: Platform) {
     this.#commands = commands;
@@ -412,9 +419,18 @@ export class KeymapService {
     try {
       parsed = JSON.parse(raw);
     } catch {
-      return; // Corrupt: the defaults stand. Losing rebinds beats not booting.
+      // The defaults stand either way — losing rebinds beats not booting. But
+      // the next rebind writes this file with one rule in it, so every other
+      // rule in it needs to exist somewhere first.
+      this.damaged.set(await preserveDamaged(this.#platform, USER_BINDINGS_FILE, raw));
+      return;
     }
-    if (!Array.isArray(parsed)) return;
+    // Valid JSON of the wrong shape is damage too: it is a file the user
+    // wrote and Nox is about to replace.
+    if (!Array.isArray(parsed)) {
+      this.damaged.set(await preserveDamaged(this.#platform, USER_BINDINGS_FILE, raw));
+      return;
+    }
 
     this.#userRules = parsed.filter(isRule).map(normalizeRule);
     this.#rebuild();
