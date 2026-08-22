@@ -248,8 +248,16 @@ button {
   transition: border-color var(--nox-dur-fast) var(--nox-ease);
 }
 
+/* `--nox-text-faint` was the obvious choice and is wrong here. That token is
+   tuned for *non-text* UI — the rail icons, tab glyphs and kbd hints it was
+   lifted to 3:1 for on 2026-08-20 (see tokens.css) — and WCAG 1.4.11's 3:1 is
+   the wrong bar for a placeholder, which is text and wants 1.4.3's 4.5:1. It
+   measured 3.79:1 on `--nox-bg-inset`, the only ground `.nox-input` ever has.
+   `--nox-text-muted` clears 4.5:1 on every surface and still sits a clear step
+   below `--nox-text`, so a filled field still reads brighter than an empty
+   one. Guarded by `tests/token-contrast.test.ts`. */
 .nox-input::placeholder {
-  color: var(--nox-text-faint);
+  color: var(--nox-text-muted);
 }
 
 .nox-input:focus {
