@@ -362,6 +362,13 @@ describe('the prompt Nox builds', () => {
     const app = new NoxApp(platform);
     await app.workspace.openFolder('/w');
     await app.workspace.open('/w/a.ts');
+    // A focused search result, so the commands scoped to *that* rather than to
+    // the active buffer have a subject to name. `search.replaceResult` acts on
+    // the row you are on, which is the point of a results list — the file it
+    // grants against is usually one you are not looking at.
+    app.search.query.set('const');
+    await app.search.run();
+    app.search.focused.set(0);
     return app;
   }
 

@@ -1856,6 +1856,49 @@ tests were *not* shaped to see:
   the first pane instead. `TabBar` knew its `groupId` all along. `Close All
   Files` had the same root: it iterated the deduplicated `buffers` list, so a
   mirrored file was closed once and survived in the other pane.
+### An excluded match is an identity, never an index
+
+Project replace could exclude a whole *file* and nothing smaller, which is the
+wrong granularity for the case people hit: forty matches, thirty-eight wanted,
+two in a fixture or a comment that means something else.
+
+`computeReplacements` has taken a `skip` set of match indices since it was
+written, documented as walking "in exactly the order `findMatches` does", and
+**no caller ever passed one**. The primitive was right; what was missing was
+the state in between, and one decision.
+
+The decision is that an exclusion cannot be stored as an index.
+`#replacePaths` deliberately does not trust the stored result rows — it
+re-reads the file and recomputes, because a file edited since the search would
+otherwise be rewritten from stale coordinates, and because the replace source
+prefers an open buffer while the *results* came from disk. So index 3 of the
+results and index 3 of the text being replaced are the same match only while
+nothing has moved.
+
+An exclusion is therefore `path`, 1-based `line`, and the **absolute** column —
+`previewOffset + column`, because a long line's preview is a window into it and
+two matches on one long line would otherwise key the same. At replace time the
+current text is walked with `findMatches`, the same loop `computeReplacements`
+runs, and the skip indices are positions in *that* walk. Nothing carries over
+from the search but the identity.
+
+**When an identity cannot be found, the file is refused rather than replaced.**
+If the excluded match is no longer at the line and column it was excluded at,
+Nox does not know which text the user meant to protect, and replacing the rest
+would be replacing something they said not to. It joins `failed`, which the
+toast already reports, and the file stays in the results. Same rule rename uses
+for a file edited during review, and the same rule `undoLastReplace` uses for a
+file that no longer says what the replace left there: when the world has moved,
+refuse rather than guess.
+
+Replacing exactly one match is that machinery with the set inverted — every
+index except this one — which is why it costs a method rather than a mechanism
+and why it inherits the refusal for free.
+
+The panel's counts needed no arithmetic of their own: `dismissMatch` removes
+the row from `results`, and `pendingReplaceCount` and the file-row badge read
+`results` and nothing else. The dismissed set exists only to become skip
+indices; it is never a second source of truth about what is on screen.
 
 ---
 
@@ -1950,6 +1993,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. **A file in that state also never leaves `externalState: 'none'`, so the save-overwrite dialog never fires for it** — a concurrent edit is clobbered rather than reported. |
 | Folds are not persisted across sessions | Fold state lives in the buffer's `EditorState`, so it survives tab switches but not a restart. Cursor positions *are* persisted — see §4. |
 | A damaged config file is preserved, but never repaired | `<name>.damaged.<ext>` is a copy, not a merge: Nox does not attempt to recover the *contents* of an index it could not parse, only the one counter that stops the next write destroying a body file. Recovering a truncated `notes.json`'s rows is possible and unbuilt. |
+| An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
 | No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |

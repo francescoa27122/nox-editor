@@ -73,8 +73,8 @@ The MVP: a real editor you can work in.
 
 | | Why |
 |---|---|
-| **Replace individual matches** | Today replace applies per file or per project; dismissing a file excludes it, but single matches cannot be excluded. |
-| **The same file in two panes** | Needs a second CodeMirror view over one document, forwarding transactions between them. The one real limit of the current split model. |
+| **Replace individual matches** ✅ | Each match row carries its own dismiss and its own replace, and both are commands so the results list is operable from the keyboard rather than only the mouse. An exclusion is stored as an *identity* — path, line, absolute column — never an index, because the replace path recomputes from the file's current text rather than trusting the result rows; a match that is no longer where it was gets its file refused rather than guessed at. `computeReplacements` had accepted a `skip` set since it was written and nothing had ever passed one. |
+| **The same file in two panes** ✅ *(released in 0.8.0)* | **Open Copy to the Side**: a second view over one document, with transactions forwarded between the panes. 0.8.1 brought a mirrored pane back across a restart and 0.8.2 gave each pane its own cursor. That forwarding is also what turned the workspace's own broadcast into a *second* delivery — see ARCHITECTURE §6. |
 | **Nested splits** | A column inside a row. The layout is a flat list today. |
 | **Terminal** *(shipped early, in 0.3.0)* | A real pty, not piped stdio, so `vim`, colour and job control work. Previously ruled out as its own project; it turned out to share process supervision with the agent transport, which is what made it affordable. |
 
@@ -192,9 +192,10 @@ That is a claim about trust and finish, so the bar is written in those terms:
 
 Everything in the v0.2–v0.7 tables that is not named above is 1.x. In
 particular, out of 1.0 on purpose: the plugin API, Vim and Emacs modes,
-Tree-sitter, dragging files out, renaming several files at once, the same file
-in two panes, nested splits. Each is a good idea; none is what keeps someone
-from recommending the editor.
+Tree-sitter, dragging files out, renaming several files at once, nested
+splits. Each is a good idea; none is what keeps someone from recommending the
+editor. (*The same file in two panes* was on this list and then shipped
+anyway, in 0.8.0 — "out of 1.0" has never meant "not before it".)
 
 Order of work, by what each thing unblocks rather than by size: find
 references → rename → format on save → Git gutter and diff → stage/commit →
