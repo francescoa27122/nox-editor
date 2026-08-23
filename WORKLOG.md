@@ -8,6 +8,65 @@ are knowledge.**
 
 ---
 
+## 2026-08-22 (PC, later) — Code actions, and four fixes that led to them
+
+Second half of the same day. The operator asked what should be built next,
+then said build it — so this entry is one feature and the four bugs that came
+before it, all merged.
+
+Shipped:
+
+- **#103 code actions**, the feature. `⌘.` asks the server what it can do at
+  the caret and lists the answers. The decision worth remembering is **where
+  an action lands, and that it is not the server's `kind`** — servers disagree
+  about `quickfix` versus `refactor`, so branching on it inherits their
+  disagreement. It is how far the change reaches: one file applied directly
+  (a fix at your own caret is not a proposal), more than one staged in review
+  (which is what review is for, and the shape rename already produces).
+  Actions that are a server *command* are listed and disabled with the reason
+  rather than hidden, because a picker that hid them would blame the server
+  for something Nox has not built.
+- **#97** the menu bar rebuilding on a rebinding, **#98** the fake pruning
+  machine directories like the real walker, **#99** auto-imports arriving with
+  their completion, **#101** the server's own `textEdit` range being applied,
+  **#96** UTF-16 actually being written as UTF-16.
+
+Verified:
+
+- `npm test` 1885 (128 files), `npm run check` 964 files 0 errors, build
+  green, 7/7 CI on every PR including the three Rust jobs.
+- Every fix mutation-checked. Two mutation checks earned their keep by
+  catching tests that passed for the wrong reason — #97's first draft
+  asserted on `menu.describe()` rather than the rendered popup, and #99's
+  "one transaction" test counted transactions instead of the changes inside
+  one, which a version that dropped the import entirely also satisfies.
+- Code actions were driven in the running app for the part the browser can
+  show: no language server there, so the command is correctly disabled while
+  the palette still lists it with its chord. The new lightbulb path was
+  *rendered* and measured rather than eyeballed, because a malformed `d` draws
+  nothing and raises no error.
+
+Next: **`JsonRpcTransport.onRequest` has a definition and zero callers**, so
+every server→client request is refused. That one seam is what four separate
+things wait on — running a code action that is a command
+(`workspace/executeCommand` → `workspace/applyEdit` back),
+`workspace/configuration` (pyright, gopls and rust-analyzer fall back to
+defaults without it), `client/registerCapability` (dynamic registration, which
+is how rust-analyzer and gopls ask to watch files), and work-done progress. It
+is the highest-leverage piece of LSP work left, and code actions made the case
+for it concrete rather than theoretical.
+
+Blocked: unchanged — the desktop keyboard pass needs a real Mac keyboard, and
+the two certificates are a purchase. Both are still the whole of 1.0.
+
+Confidence:
+
+- High on all six. Every claim has a command behind it.
+- Medium on one thing in code actions, and it is the same limit every LSP
+  feature here has: the tests replace `requestFor`, so they prove Nox's half
+  of the conversation. Whether tsserver's quick fixes arrive in the shape this
+  reads is a desktop-walk item, and no test on this machine can settle it.
+
 ## 2026-08-22 (PC) — Three PRs: damaged config, split panes, single-match replace
 
 The work log stops at v0.5.1 and the repo is at 0.8.3. **This entry does not
