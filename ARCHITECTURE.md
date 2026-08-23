@@ -1856,6 +1856,46 @@ tests were *not* shaped to see:
   the first pane instead. `TabBar` knew its `groupId` all along. `Close All
   Files` had the same root: it iterated the deduplicated `buffers` list, so a
   mirrored file was closed once and survived in the other pane.
+### UTF-16 is the one charset `encoding_rs` will not write
+
+`encode` delegated every non-UTF-8 charset to `encoding_rs`, which is right
+for windows-1252 and Shift_JIS and silently wrong for UTF-16. The crate
+implements the WHATWG Encoding Standard, and in that standard **UTF-16 is
+decode-only**: `UTF_16LE.encode` uses `output_encoding()`, which is UTF-8, and
+reports no unmappable characters while doing it.
+
+So the call returned `Ok`, the atomic write succeeded, the status bar went on
+saying "UTF-16 LE", and the file on disk was UTF-8. A PowerShell script or a
+`.reg` file opened in Nox stopped being UTF-16 the first time it was saved.
+The only signal was the tuple's second item — the encoding actually used —
+and the code discarded it with `let (bytes, _, had_unmappable)`.
+
+Nothing in the type system or the return value distinguishes this from a
+successful save, which is why it survived a feature that shipped with tests:
+`round_trips_windows_1252` covers the charset where delegation works, and
+there was no encode test for the charset where it does not.
+
+UTF-16 is now encoded here rather than delegated — `str::encode_utf16`, then
+each unit in the requested byte order. That is total, unlike the legacy
+charsets: every `str` is valid Unicode and every scalar value has a UTF-16
+form, so there is no `unmappable` case for this branch to refuse, and an
+astral character becomes a surrogate pair rather than one lost unit.
+
+**The byte-order mark is always written**, and that is the load-bearing half.
+`detect` recognises UTF-16 only by its mark, and mark-less bytes are worse
+than undetectable: little-endian ASCII is `h\0i\0`, which `std::str::from_utf8`
+accepts — NUL is valid UTF-8 — so the file would be detected as UTF-8 and then
+refused by `looksBinary` for containing NULs. Writing the mark is what makes a
+file Nox wrote a file Nox can open, and the round-trip test asserts exactly
+that property rather than only the bytes.
+
+The test vectors are not hand-written. They come from Python's `codecs`, and
+the encoder was checked against it over 4020 strings including astral
+characters before any of them was committed — an independent implementation
+rather than the module agreeing with itself.
+
+---
+
 ### An excluded match is an identity, never an index
 
 Project replace could exclude a whole *file* and nothing smaller, which is the
@@ -1994,6 +2034,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Folds are not persisted across sessions | Fold state lives in the buffer's `EditorState`, so it survives tab switches but not a restart. Cursor positions *are* persisted — see §4. |
 | A damaged config file is preserved, but never repaired | `<name>.damaged.<ext>` is a copy, not a merge: Nox does not attempt to recover the *contents* of an index it could not parse, only the one counter that stops the next write destroying a body file. Recovering a truncated `notes.json`'s rows is possible and unbuilt. |
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
+| A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
 | No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |

@@ -52,6 +52,9 @@ Shipped, as three PRs, all merged to `main` with CI green on all seven jobs:
   to `close`, so ⌘W in the second pane closed the first; `Close All Files`
   iterated deduplicated `buffers`; the session recorded no charset so non-UTF-8
   tabs vanished; Reopen with Encoding discarded unsaved edits without asking.
+- **#96 `fix/utf16-encode`** — the bug the first pass left, taken up on
+  request. See the Blocked section below for what it was and how it was
+  verified without a local toolchain.
 - **#94 `feat/replace-single-matches`** — the v0.3 roadmap row.
   `computeReplacements` had accepted a `skip` set since it was written and no
   caller ever passed one. An exclusion is an *identity* (path, line, absolute
@@ -89,13 +92,16 @@ that *is* code on the 1.0 bar is done.
 
 Blocked:
 
-- **`src-tauri/src/encoding.rs` writes UTF-8 when asked for UTF-16.** Two
-  independent defects: no BOM is emitted, and `detect` recognises UTF-16 only
-  by its BOM — so the file can never be reopened; and `encoding_rs`'s
-  `Encoding::encode` maps UTF-16LE/BE to UTF-8 via `output_encoding()`, with
-  the returned encoding discarded. Left unfixed **because there is no Rust
-  toolchain on this PC** and this wants `cargo test` behind it, not a green
-  summary. Highest-value remaining bug.
+- ~~`src-tauri/src/encoding.rs` writes UTF-8 when asked for UTF-16.~~ **Fixed
+  the same day, in #96**, after the operator asked for it. `encoding_rs`
+  implements the WHATWG standard, in which UTF-16 is decode-only, so
+  `UTF_16LE.encode` used `output_encoding()` — UTF-8 — and reported no
+  unmappable characters while doing it. UTF-16 is encoded in this module now,
+  with its byte-order mark, which is also what makes the file detectable
+  again. Still no Rust toolchain here, so the algorithm and every test vector
+  were checked against Python's `codecs` over 4020 strings first, and the
+  compile-and-run half is CI's on all three platforms rather than a local
+  claim.
 - Smaller, unfixed, all found and not chased: `MenuBar.svelte:32` tracks
   `commandVersion` but not `keymap.version`, so the in-window menu shows stale
   accelerators after a rebind; `MemoryPlatform.searchProject` has no
@@ -113,8 +119,10 @@ Confidence:
 - Medium on the Windows separator bug *manifesting*: the string mismatch is
   certain and now tested, but I could not run a Windows Tauri build to confirm
   the folder dialog returns backslash paths.
-- Low on nothing here. The one thing I did not verify at all is the UTF-16
-  claim's second half, and it is written down as unverified rather than fixed.
+- High on the UTF-16 fix's *behaviour* — the encoder agrees with an
+  independent implementation across 4020 strings including astral characters,
+  and CI compiled and ran the Rust. Nothing about it was verified by reading
+  alone.
 
 ## 2026-08-20 (PC, release) — The key ceremony, and v0.5.1
 
