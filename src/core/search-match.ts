@@ -144,13 +144,55 @@ export function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${out}$`);
 }
 
-/** True when `relativePath` should be searched under these glob lists. */
+/**
+ * Directories never worth searching, applied even when gitignore is off.
+ *
+ * Mirrors `ALWAYS_EXCLUDE` in `src-tauri/src/search.rs`. The list is
+ * duplicated rather than shared because the two walkers are in two languages;
+ * `machine_directories_stay_out_when_nothing_is_asked_for` pins it on both
+ * sides, under the same name, so changing one without the other is visibly
+ * half a change.
+ */
+export const ALWAYS_EXCLUDE: readonly string[] = [
+  '**/.git/**',
+  '**/node_modules/**',
+  '**/target/**',
+  '**/dist/**',
+  '**/.svelte-kit/**',
+  '**/.next/**',
+  '**/__pycache__/**',
+  '**/.venv/**',
+];
+
+const ALWAYS_EXCLUDE_PATTERNS = ALWAYS_EXCLUDE.map(globToRegExp);
+
+/**
+ * True when `relativePath` should be searched under these glob lists.
+ *
+ * Three groups, weakest first, matching the precedence `search.rs` documents
+ * for `ignore`'s last-match-wins overrides:
+ *
+ *   1. **`ALWAYS_EXCLUDE`**, weakest. A convenience list, not a rule — an
+ *      explicit include naming one of those directories reaches into it,
+ *      which is what keeps "No results" honest: every skip the walk makes is
+ *      one the user can undo from the panel.
+ *   2. The user's **includes**.
+ *   3. The user's **excludes**, strongest: "files to exclude" reads as a
+ *      narrowing of whatever "files to include" selected.
+ *
+ * The always-excludes used to be missing here entirely, so the browser target
+ * and every service test walked `node_modules` and `.git` while the desktop
+ * build pruned them — the fake being wrong in the direction that looks
+ * harmless, which is the direction that goes unnoticed.
+ */
 export function matchesGlobs(
   relativePath: string,
   includes: readonly RegExp[],
   excludes: readonly RegExp[],
 ): boolean {
   if (excludes.some((pattern) => pattern.test(relativePath))) return false;
-  if (includes.length === 0) return true;
-  return includes.some((pattern) => pattern.test(relativePath));
+  // An include list is the user naming what they want, so it decides on its
+  // own — including for a path `ALWAYS_EXCLUDE` would otherwise have pruned.
+  if (includes.length > 0) return includes.some((pattern) => pattern.test(relativePath));
+  return !ALWAYS_EXCLUDE_PATTERNS.some((pattern) => pattern.test(relativePath));
 }

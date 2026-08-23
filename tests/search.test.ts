@@ -148,6 +148,58 @@ describe('globs', () => {
   it('an empty include list means everything', () => {
     expect(matchesGlobs('anything.md', [], [])).toBe(true);
   });
+
+  /**
+   * The failure this prevents: `matchesGlobs` had no always-exclude list at
+   * all, so the browser target and every service test written against
+   * `MemoryPlatform` walked `node_modules` and `.git` while the desktop build
+   * pruned them. The fake being wrong in the direction that looks harmless,
+   * which is the direction nobody checks.
+   *
+   * Named for `machine_directories_stay_out_when_nothing_is_asked_for` in
+   * `src-tauri/src/search.rs`, so that changing one side without the other is
+   * visibly half a change.
+   */
+  it('machine directories stay out when nothing is asked for', () => {
+    for (const path of [
+      '.git/config',
+      'node_modules/pkg/index.js',
+      'target/debug/build.rs',
+      'dist/assets/index.js',
+      '.svelte-kit/generated/root.js',
+      '.next/server/page.js',
+      'src/__pycache__/mod.cpython-312.pyc',
+      '.venv/lib/site.py',
+    ]) {
+      expect(matchesGlobs(path, [], [])).toBe(false);
+    }
+    // A directory that merely *contains* one of those names is not one.
+    expect(matchesGlobs('src/node_modules_helper.ts', [], [])).toBe(true);
+    expect(matchesGlobs('src/distance.ts', [], [])).toBe(true);
+  });
+
+  /**
+   * `ALWAYS_EXCLUDE` is the weakest of the three groups, deliberately: it is a
+   * convenience list, not a rule, so naming one of those directories in
+   * "files to include" reaches into it. That is what keeps "No results"
+   * honest — every skip the walk makes is one the panel can undo.
+   *
+   * Named for `an_explicit_include_reaches_into_an_always_excluded_directory`.
+   */
+  it('an explicit include reaches into an always excluded directory', () => {
+    const includes = [globToRegExp('node_modules/**')];
+    expect(matchesGlobs('node_modules/pkg/index.js', includes, [])).toBe(true);
+    // …and still does not drag in the rest of the tree.
+    expect(matchesGlobs('src/main.ts', includes, [])).toBe(false);
+  });
+
+  /** Excludes stay strongest, above an include that reached in. */
+  it('an exclude still beats an include that reached into one', () => {
+    const includes = [globToRegExp('node_modules/**')];
+    const excludes = [globToRegExp('**/*.min.js')];
+    expect(matchesGlobs('node_modules/pkg/a.min.js', includes, excludes)).toBe(false);
+    expect(matchesGlobs('node_modules/pkg/a.js', includes, excludes)).toBe(true);
+  });
 });
 
 describe('splitPatterns', () => {
