@@ -201,4 +201,30 @@ describe('the status bar', () => {
     flush();
     expect(app.ui.terminalOpen.get()).toBe(false);
   });
+
+  /**
+   * The failure this prevents, found in a UI walk on 2026-08-23: with a split
+   * pane focused and nothing open in it, the whole bar rendered as the single
+   * word "Wrap" in the far corner. Every other item is inside `{#if active}`;
+   * this one sat outside it, so it survived alone and the bar read as broken
+   * rather than as empty.
+   *
+   * Word wrap is a property of the buffer on screen, so with no buffer there
+   * is nothing for it to be about.
+   */
+  it('shows nothing buffer-shaped, Wrap included, when no file is open', async () => {
+    const { app, container } = await mountBar();
+    // With a file open, the buffer items are all there.
+    expect(item(container, 'Wrap')).toBeDefined();
+    expect(item(container, 'Ln')).toBeDefined();
+
+    app.workspace.closeAll({ force: true });
+    flush();
+
+    const labels = [...container.querySelectorAll('button')].map((b) =>
+      (b.textContent ?? '').trim(),
+    );
+    expect(labels).not.toContain('Wrap');
+    expect(labels.some((l) => l.startsWith('Ln '))).toBe(false);
+  });
 });

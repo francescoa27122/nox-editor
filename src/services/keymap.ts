@@ -3,6 +3,7 @@ import { Signal } from '@core/signal';
 import type { Platform } from '@platform/types';
 import type { CommandRegistry } from './commands';
 import { preserveDamaged } from './damaged-config';
+import { isMacHost } from '@platform/host';
 
 /**
  * Keybindings.
@@ -79,8 +80,10 @@ const MODIFIER_KEYS = new Set([
   `tests/menu.test.ts`'s accelerator assertions. Assert against `platformIsMac`,
   or use an explicit modifier and avoid `Mod` altogether, as the keymap tests do.
 */
-const isMac =
-  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform ?? navigator.userAgent);
+// One definition, in `platform/host.ts`: the demo workspace needs the same
+// answer to write its README, and two copies of this sniff drifted once
+// already — the keymap said Ctrl on Windows while the README said ⌘.
+const isMac = isMacHost;
 
 /** Normalise names users type in config into our canonical key tokens. */
 const KEY_ALIASES: Record<string, string> = {
