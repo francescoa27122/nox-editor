@@ -31,6 +31,31 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   histories and two dirty flags. The path was built with a forward slash on a
   platform that uses backslashes, so two strings that named one file never
   matched.
+- **A file open in two panes could be corrupted, marked saved, and written to
+  disk.** When anything outside the editor changed such a file — a `git
+  checkout`, a formatter, another program — the reload was applied to the
+  second pane twice, and a file that had grown came back with a chunk of
+  itself repeated. Nox then considered that text saved, so the next ⌘S wrote
+  it out. A file that had shrunk failed to reload at all.
+- **Every background tab came back on the wrong line.** A pane reported the
+  cursor of whatever tab it was *showing* for every tab it held, so the file
+  you were reading at line 400 reopened wherever you happened to be typing in
+  the tab beside it.
+- **Split layouts scrambled a little more on every launch.** If the first pane
+  held more than one tab, restoring the session moved its second tab into the
+  next pane.
+- **Closing a tab in the second pane closed the first one.** ⌘W, the ✕ and
+  middle-click all acted on whichever pane came first rather than the one you
+  were in, so "close the copy" closed the original — and took the pane with
+  it. *Close All Files* left a mirrored file open in the other pane while
+  reporting that it was done.
+- **A file that is not UTF-8 no longer disappears on restart.** The session
+  did not record which charset the file had been read as, so it was reopened
+  as UTF-8, refused, and dropped — along with any unsaved work in it.
+- **Reopening with a different encoding no longer discards unsaved edits
+  without asking.** The command is reachable by clicking the encoding label in
+  the status bar, which reads as inspecting a setting rather than throwing
+  work away; it now asks first, the way *Reload File from Disk* always has.
 
 ## [0.8.3] — 2026-08-22
 

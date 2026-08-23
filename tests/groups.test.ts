@@ -1,6 +1,8 @@
+import type { TransactionSpec } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import { SessionService } from '../src/services/session';
+import { mirroredAnnotation } from '../src/services/transactions';
 import { WorkspaceService } from '../src/services/workspace';
 
 /**
@@ -259,6 +261,41 @@ describe('session persistence', () => {
     session.markReady();
     await session.save();
   }
+
+
+  /**
+   * The failure this prevents: restore called `splitEditor()` once per group
+   * after the first, and `splitEditor` *moves* the active tab when its group
+   * holds more than one. So the moment the first pane had two tabs, the
+   * second of them was relocated into the new pane on every launch — and the
+   * layout drifted a little further each time.
+   *
+   * Two tabs in the first pane is the whole point of the fixture: every
+   * existing multi-group session test gives group 0 exactly one tab, which is
+   * precisely the case `splitEditor`'s own guard skips.
+   */
+  it('round-trips a first pane that holds more than one tab', async () => {
+    const { platform, workspace } = setup();
+    await workspace.openFolder('/w');
+    // Split while the first pane holds one tab, so nothing moves, then fill
+    // both panes from there — the second tab of the first pane has to arrive
+    // *after* the split or `splitEditor` would carry it across.
+    await workspace.open('/w/a.ts');
+    workspace.splitEditor();
+    await workspace.open('/w/c.ts');
+    workspace.focusGroup(workspace.groups.get()[0]!.id);
+    await workspace.open('/w/b.ts');
+    expect(layout(workspace)).toEqual([['a.ts', 'b.ts'], ['c.ts']]);
+
+    await persist(workspace, platform);
+
+    const restored = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, restored);
+    session.markReady();
+    await session.restore();
+
+    expect(layout(restored)).toEqual([['a.ts', 'b.ts'], ['c.ts']]);
+  });
 
   /**
    * The failure this prevents: a file shown in two panes coming back in one.
@@ -560,37 +597,55 @@ describe('one file in two groups', () => {
   });
 
   /**
-   * The failure this prevents: `#dispatchToView` stopped at the first view
-   * that accepted a change. With one file in two panes that updates one and
-   * leaves the other showing text that no longer exists — and every reload,
-   * grouped undo and agent change set goes through that path, so the stale
-   * pane would then compute its next edit against the wrong document.
+   * The failure this prevents: a change the workspace originates must reach
+   * every pane showing the file. A pane left behind shows text that no longer
+   * exists, and its next edit is then computed against the wrong document.
    *
-   * Driven through `reloadFromDisk`, which is the cheapest public route to
-   * it. Two fake views stand in for two `EditorPane`s; no DOM is involved.
+   * **How it reaches them is the part worth stating.** The workspace hands the
+   * change to the first pane that accepts it; that pane routes it back through
+   * `applyTransaction`, which mirrors it to the others. Delivering to all of
+   * them directly *as well* is a second delivery, and the earlier version of
+   * this test could not tell the difference because its two stubs recorded
+   * what they were handed and never routed anything back. Two panes that do
+   * route back is what it takes — see `tests/pane-fidelity.test.ts` for what
+   * the duplicate delivery then did to the document.
+   *
+   * Driven through `reloadFromDisk`, the cheapest public route to that path.
+   * No DOM is involved: `EditorState` is enough to model a pane.
    */
-  it('hands a change to every pane showing the file, not just the first', async () => {
+  it('hands a change to every pane showing the file, exactly once each', async () => {
     const { platform, workspace } = setup();
     const id = (await workspace.open('/w/a.ts'))!;
     workspace.splitEditor();
     workspace.mirrorInto(workspace.groups.get()[0]!.id, id);
 
     const reached: string[] = [];
-    workspace.addViewDispatcher((target) => {
-      if (target !== id) return false;
-      reached.push('pane-one');
-      return true;
-    });
-    workspace.addViewDispatcher((target) => {
-      if (target !== id) return false;
-      reached.push('pane-two');
-      return true;
-    });
+    const pane = (name: string) => {
+      let state = workspace.stateOf(id)!;
+      const self = {};
+      workspace.addViewDispatcher(
+        (target, spec) => {
+          if (target !== id) return false;
+          reached.push(name);
+          const transaction = state.update(spec as TransactionSpec);
+          state = transaction.state;
+          if (transaction.annotation(mirroredAnnotation)) return true;
+          workspace.applyTransaction(target, transaction, self);
+          return true;
+        },
+        { owner: self },
+      );
+      return () => state.doc.toString();
+    };
+    const one = pane('pane-one');
+    const two = pane('pane-two');
 
     platform.seedFile('/w/a.ts', 'changed on disk\n');
     await workspace.reloadFromDisk(id);
 
     expect(reached).toEqual(['pane-one', 'pane-two']);
+    expect(one()).toBe('changed on disk\n');
+    expect(two()).toBe('changed on disk\n');
   });
 
   /**

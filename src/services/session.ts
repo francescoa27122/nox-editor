@@ -1,4 +1,5 @@
 import { highestNumbered, type DamagedFile } from '@core/damaged-config';
+import type { Encoding } from '@core/encoding';
 import { Signal } from '@core/signal';
 import type { Platform } from '@platform/types';
 import { preserveDamaged } from './damaged-config';
@@ -64,6 +65,21 @@ type TabRecord =
        * did before.
        */
       mirror?: true;
+      /**
+       * The charset this file was read as, when it was not the default.
+       *
+       * Without it `restore` reopened every tab as UTF-8, and
+       * `readEncodedFile` refuses anything it cannot prove is UTF-8 or
+       * BOM-marked — so a windows-1252 or Shift JIS file, opened deliberately
+       * through the encoding picker, came back as a "Could not open" toast and
+       * a missing tab. Its unsaved backup was then orphaned, and released on
+       * the next save.
+       *
+       * Optional, and VERSION is deliberately not bumped for it, for the same
+       * reason `mirror` does not bump it: an older Nox ignores the field and
+       * opens the file the way it did before.
+       */
+      encoding?: Encoding;
     }
   | {
       kind: 'untitled';
@@ -157,7 +173,10 @@ export class SessionService {
     const groupActives: (string | null)[] = [];
 
     for (const [index, group] of (data.groups ?? []).entries()) {
-      if (index > 0) this.#workspace.splitEditor();
+      // `move: false`: `splitEditor` moves the active tab when its group has
+      // more than one, so restoring a layout whose first pane held two tabs
+      // used to relocate the second of them into the new pane — every launch.
+      if (index > 0) this.#workspace.splitEditor({ move: false });
 
       const opened: string[] = [];
       for (const tab of group.tabs ?? []) {
@@ -181,7 +200,10 @@ export class SessionService {
             continue;
           }
 
-          id = await this.#workspace.open(tab.path);
+          id = await this.#workspace.open(
+            tab.path,
+            tab.encoding ? { encoding: tab.encoding } : {},
+          );
           // Unsaved work goes back on top of the file as it is now, as a real
           // edit — so the tab is dirty and ⌘Z reaches the on-disk content.
           if (id && tab.unsaved) {
@@ -284,10 +306,16 @@ export class SessionService {
         const selection = this.#workspace.selectionOf(buffer.id, group.id) ?? undefined;
 
         if (buffer.path) {
+          // Written only when it is not the default, so an ordinary session
+          // stays exactly the shape it was and an older Nox reading this sees
+          // nothing new. Restore hands it straight back to `open`.
+          const charset =
+            buffer.encoding !== 'utf-8' ? ({ encoding: buffer.encoding } as const) : {};
+
           // Only dirty buffers carry their text; a clean one is already on
           // disk and copying it into the session would just go stale.
           if (!buffer.isDirty) {
-            tabs.push({ kind: 'file', path: buffer.path, selection, ...mirrored });
+            tabs.push({ kind: 'file', path: buffer.path, selection, ...charset, ...mirrored });
             continue;
           }
           const backup = this.#backUp(buffer.id, live, writes);
@@ -296,6 +324,7 @@ export class SessionService {
             path: buffer.path,
             selection,
             unsaved: { backup, baseMtime: this.#workspace.knownMtime(buffer.id) },
+            ...charset,
             ...mirrored,
           });
         } else {

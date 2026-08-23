@@ -247,13 +247,20 @@ interface PaneChannel {
   /** Which pane this is, when the caller said. */
   groupId: GroupId | undefined;
   /**
-   * This pane's own cursor, asked for rather than pushed.
+   * This pane's cursor **in one named buffer**, asked for rather than pushed.
    *
    * A selection changes on every cursor move, so publishing one would put
    * work on the typing path for something only the session ever reads. It is
    * pulled at save time instead.
+   *
+   * The buffer id is not decoration. A pane's *live* selection is its active
+   * tab's, so a channel that answers whatever it is asked hands back the
+   * foreground tab's cursor for every background tab in that pane — which is
+   * what the session then persisted. A pane returns null for a buffer it is
+   * not currently showing, and the caller falls back to that buffer's own
+   * state, which is where a background tab's cursor actually lives.
    */
-  readSelection: (() => SelectionRecord | null) | undefined;
+  readSelection: ((id: BufferId) => SelectionRecord | null) | undefined;
 }
 
 export class WorkspaceService {
@@ -318,7 +325,11 @@ export class WorkspaceService {
    */
   addViewDispatcher(
     dispatch: ViewDispatcher,
-    options: { owner?: object; groupId?: GroupId; readSelection?: () => SelectionRecord | null } = {},
+    options: {
+      owner?: object;
+      groupId?: GroupId;
+      readSelection?: (id: BufferId) => SelectionRecord | null;
+    } = {},
   ): () => void {
     const channel: PaneChannel = {
       dispatch,
@@ -330,28 +341,58 @@ export class WorkspaceService {
     return () => this.#viewDispatchers.delete(channel);
   }
 
-  /** True when some view was showing the buffer and took the change. */
   /**
-   * Hand a change to every view showing `id`, and say whether any took it.
+   * Hand a change to the first view showing `id`, and say whether one took it.
    *
-   * Broadcast rather than first-wins: with a file in two panes, stopping at
-   * the first acceptor would update one and leave the other showing text
-   * that no longer exists — reloads, grouped undo and agent change sets all
-   * come through here.
+   * **First acceptor, not broadcast** — and the difference is a data-loss bug,
+   * not a preference. A pane routes everything it is handed back through
+   * `applyTransaction`, which forwards the change to every *other* pane
+   * showing the file. So one delivery already reaches all of them; a second
+   * delivery arrives at a document that has already moved. With a reload,
+   * whose spec is `{from: 0, to: oldLength, insert: newDoc}`, a file that grew
+   * came back as the new text with a slice of itself appended — and
+   * `reloadFromDisk` then marked that document *clean*, so the next save wrote
+   * it to disk. A file that shrank threw `RangeError` mid-reload instead.
+   *
+   * This was written as a broadcast to fix the opposite failure — one pane
+   * updated, the other left showing text that no longer exists. The forwarding
+   * in `applyTransaction` arrived later and covers that case properly, at
+   * which point the broadcast became a second delivery rather than the only
+   * one reaching the second pane.
+   *
+   * The forward is `#mirrorToOtherViews`, which does still broadcast — see
+   * there for why the two cannot be the same method.
    */
-  #dispatchToView(
-    id: BufferId,
-    spec: TransactionSpec | Transaction,
-    exclude?: object,
-  ): boolean {
-    let accepted = false;
+  #dispatchToView(id: BufferId, spec: TransactionSpec | Transaction): boolean {
     for (const channel of this.#viewDispatchers) {
-      // The pane an edit came from has already applied it locally; sending it
-      // back would apply it twice.
-      if (exclude !== undefined && channel.owner === exclude) continue;
-      if (channel.dispatch(id, spec)) accepted = true;
+      // A pane showing a different buffer declines, so this is the first
+      // *acceptor* rather than simply the first channel.
+      if (channel.dispatch(id, spec)) return true;
     }
-    return accepted;
+    return false;
+  }
+
+  /**
+   * Push one pane's change out to every *other* pane showing the same buffer.
+   *
+   * A broadcast, unlike `#dispatchToView`, and safe as one for the reason that
+   * method is not: the spec carries `mirroredAnnotation`, so a pane applies it
+   * and stops rather than routing it back. Nothing re-enters, so nothing can
+   * arrive twice — and with three panes on one file, stopping at the first
+   * would leave the third holding text that no longer exists.
+   *
+   * `origin` is the pane the change came from. It has already applied the
+   * change locally; handing it back would apply it a second time.
+   */
+  #mirrorToOtherViews(id: BufferId, changes: ChangeSet, origin: object): void {
+    const spec: TransactionSpec = {
+      changes,
+      annotations: [mirroredAnnotation.of(true)],
+    };
+    for (const channel of this.#viewDispatchers) {
+      if (channel.owner === origin) continue;
+      channel.dispatch(id, spec);
+    }
   }
 
   // --- Accessors ---------------------------------------------------------
@@ -668,12 +709,23 @@ export class WorkspaceService {
     return group.id;
   }
 
-  splitEditor(): GroupId {
+  /**
+   * Add a pane beside the active one.
+   *
+   * The command moves the active tab across when its group has more than one,
+   * which is what "split" means to someone pressing the key. **Session
+   * restore must not**, and used to: it called this once per group after the
+   * first, so a layout whose first pane held two tabs came back with the
+   * second of them relocated into the new pane, every launch. `move: false`
+   * is that caller — it wants an empty pane to open tabs into, nothing more.
+   */
+  splitEditor(options: { move?: boolean } = {}): GroupId {
     const source = this.#activeGroup();
     const group: EditorGroup = { id: `group-${this.#nextGroupId++}`, order: [], activeId: null };
     this.#groups.splice(this.#groups.indexOf(source) + 1, 0, group);
 
-    const moving = source.order.length > 1 ? source.activeId : null;
+    const moving =
+      options.move !== false && source.order.length > 1 ? source.activeId : null;
     if (moving) {
       source.order.splice(source.order.indexOf(moving), 1);
       source.activeId = source.order[0] ?? null;
@@ -822,11 +874,7 @@ export class WorkspaceService {
       // `@codemirror/view` rejects a transaction that does not start from the
       // state it is being applied to.
       if (!isMirror && origin !== undefined) {
-        this.#dispatchToView(
-          id,
-          { changes: transaction.changes, annotations: [mirroredAnnotation.of(true)] },
-          origin,
-        );
+        this.#mirrorToOtherViews(id, transaction.changes, origin);
       }
       buffer.changeCount++;
       buffer.revision++;
@@ -1085,7 +1133,8 @@ export class WorkspaceService {
       // has to be asked directly or both are recorded in the same place.
       for (const channel of this.#viewDispatchers) {
         if (channel.groupId !== groupId || !channel.readSelection) continue;
-        const live = channel.readSelection();
+        // Asked about `id` rather than for "your cursor": see `PaneChannel`.
+        const live = channel.readSelection(id);
         if (live) return live;
       }
     }

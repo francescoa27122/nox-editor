@@ -1798,6 +1798,64 @@ An unrecognised **version** counts as damage on the same reasoning. It is
 usually a newer Nox having written the file rather than corruption, but the
 old consequence was identical — discarded, then overwritten — and a downgrade
 should not cost you your tabs. Versions Nox does recognise still migrate.
+### A pane routes changes back, so the workspace must deliver them once
+
+`#dispatchToView` handed a workspace-originated change to **every** pane
+showing the file. That was written to fix a real failure — one pane updated,
+the other left showing text that no longer exists — and it was correct at the
+time. Mirrored panes then arrived, and with them the forward in
+`applyTransaction`: a pane routes everything it is handed back to the
+workspace, which pushes the change out to every *other* pane. From that moment
+the broadcast was a **second** delivery, and the second one arrives at a
+document that has already moved.
+
+The cost was not cosmetic. A reload's spec is
+`{from: 0, to: oldLength, insert: newDoc}`, so a file that had grown came back
+as the new text with a slice of itself appended — and `reloadFromDisk` sets
+`savedDoc` from the resulting state, which marked the corrupted document
+**clean**. The next save wrote it to disk. A file that had shrunk threw
+`RangeError` out of the reload instead. Every path that pushes a change into a
+view — reload, `applyEdits` for project replace, `apply` for agent and LSP
+change sets, grouped undo — went through it.
+
+The two directions are now two methods, because they want opposite rules:
+
+- **`#dispatchToView`** stops at the first pane that accepts. That pane's route
+  back mirrors the change to the others, so one delivery still reaches all of
+  them. A buffer no pane is showing falls through to the background path
+  exactly as before.
+- **`#mirrorToOtherViews`** broadcasts, and is safe as one because its spec
+  carries `mirroredAnnotation`: a pane applies it and stops rather than
+  routing it back, so nothing re-enters and nothing can arrive twice. It has
+  to broadcast — with three panes on one file, stopping at the first would
+  leave the third stale.
+
+**The test that missed this is the lesson.** `groups.test.ts` asserted the
+broadcast with two stubs that recorded what they were handed and never called
+`applyTransaction`. A dispatcher that does not route back is not a pane, and
+every defect in this feature lives in the loop between the two. The fakes are
+re-entrant now, and `tests/pane-fidelity.test.ts` models a pane with a real
+`EditorState`.
+
+Three more of the same family, all found by asking what the existing pane
+tests were *not* shaped to see:
+
+- **`selectionOf` asked a pane for "your cursor"**, and a view's live selection
+  is its active tab's — so every background tab in every pane was persisted
+  with the foreground tab's. The channel is now asked about a named buffer and
+  declines for one it is not showing, which lets the caller fall back to that
+  buffer's own state. The old tests gave each group one tab, where the two
+  answers coincide.
+- **Session restore called `splitEditor()`**, which *moves* the active tab when
+  its group holds more than one. A first pane with two tabs therefore came back
+  with the second of them relocated, every launch. Restore wants an empty pane,
+  and now says so: `splitEditor({ move: false })`.
+- **No production caller passed a group to `workspace.close`.** The parameter
+  existed and its tests drove it directly, so `#groupOf` fell back to "the first
+  group showing this buffer" and ⌘W in the second pane of a mirrored file closed
+  the first pane instead. `TabBar` knew its `groupId` all along. `Close All
+  Files` had the same root: it iterated the deduplicated `buffers` list, so a
+  mirrored file was closed once and survived in the other pane.
 
 ---
 
