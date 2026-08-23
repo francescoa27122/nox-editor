@@ -31,13 +31,37 @@
   const configured = agentConfig.agents;
   const providers = agents.providers;
 
-  const VIEWS: { id: SidebarView; icon: IconName; label: string; command: string }[] = [
+  interface View {
+    id: SidebarView;
+    icon: IconName;
+    label: string;
+    command: string;
+    /**
+     * A different command whose chord also lands here, shown when `command`
+     * has none of its own.
+     *
+     * References is the case: `app.ts:3882` records the decision that it keeps
+     * no chord because Shift+F12 already fills *and* shows the view. True, but
+     * the tooltip then read "References" with nothing after it while its four
+     * neighbours advertised a chord — so the panel looked like the one with no
+     * keyboard route rather than the one whose route is on another command.
+     */
+    chordFrom?: string;
+  }
+
+  const VIEWS: View[] = [
     { id: 'explorer', icon: 'sidebar', label: 'Explorer', command: 'nav.focusExplorer' },
     { id: 'search', icon: 'search', label: 'Search', command: 'search.focus' },
     { id: 'notes', icon: 'note', label: 'Notes', command: 'notes.focus' },
     { id: 'answers', icon: 'info', label: 'Answers', command: 'answers.focus' },
     { id: 'problems', icon: 'warning', label: 'Problems', command: 'problems.focus' },
-    { id: 'references', icon: 'references', label: 'References', command: 'references.focus' },
+    {
+      id: 'references',
+      icon: 'references',
+      label: 'References',
+      command: 'references.focus',
+      chordFrom: 'lsp.findReferences',
+    },
     { id: 'git', icon: 'branch', label: 'Git', command: 'git.focus' },
   ];
 
@@ -63,7 +87,7 @@
 <aside class="nox-sidebar" aria-label="Sidebar">
   <nav class="rail" aria-label="Sidebar views">
     {#each views as entry (entry.id)}
-      {@const hint = keymap.displayFor(entry.command)}
+      {@const hint = keymap.displayFor(entry.command) ?? (entry.chordFrom ? keymap.displayFor(entry.chordFrom) : undefined)}
       <button
         class="rail-button"
         class:active={$view === entry.id}
