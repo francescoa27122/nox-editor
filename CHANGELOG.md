@@ -8,6 +8,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **The release build is ready to sign for macOS.** Nothing changes for now —
+  builds are still ad-hoc signed and a fresh download still needs the `xattr`
+  command — but the workflow reads the six Apple secrets when they exist, and
+  refuses to build a half-configured one rather than shipping an installer
+  whose notes promise a clean first launch it cannot deliver.
+
 - **Quick fixes.** Nox could show you an error and not fix it. `Ctrl+.` (`⌘.`)
   now asks the language server what it can do where you are — add the missing
   import, remove the unused variable, whatever it offers — and lists the
