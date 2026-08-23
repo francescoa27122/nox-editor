@@ -160,6 +160,19 @@ export class LspSession {
             // Rename Symbol asks `prepareRename` first when the server offers
             // it; tsserver offers it only to a client that says it will ask.
             rename: { prepareSupport: true },
+            // Say that a `CodeAction` object is understood, or a server is
+            // entitled to answer with the pre-3.8 bare `Command` shape — which
+            // is the half Nox cannot run. The `valueSet` is deliberately empty:
+            // the specification has it mean "no kinds are known to the client",
+            // and Nox does not filter by kind, so claiming a list would be
+            // claiming a behaviour it does not have.
+            //
+            // `resolveSupport` and `dataSupport` are **not** here, so a server
+            // must send complete actions rather than stubs to resolve later.
+            codeAction: {
+              codeActionLiteralSupport: { codeActionKind: { valueSet: [] } },
+              disabledSupport: true,
+            },
           },
         },
         // Nox advertises what it implements and nothing else. Claiming a

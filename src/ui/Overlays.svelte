@@ -27,6 +27,7 @@
       $overlay === 'go-to-line' ||
       $overlay === 'go-to-symbol' ||
       $overlay === 'git-branch' ||
+      $overlay === 'code-action' ||
       $overlay === 'note-open',
   );
 

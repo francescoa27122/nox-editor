@@ -55,6 +55,10 @@
     'case-sensitive': 'M2 12 5 4l3 8M3 9.6h4M10 12a2 2 0 1 1 0-4h2.5v3.5 M12.5 7.5V12',
     'whole-word': 'M2.5 4.5v7M13.5 4.5v7M5 10.5 7 5.5l2 5M5.6 9h2.8',
     regex: 'M8 4v6M5.4 5.2l5.2 3.6M10.6 5.2 5.4 8.8 M4 12.4h.1',
+    // The bulb is drawn as an outline with two base rules rather than a filled
+    // teardrop: filled, at 12px in a palette row, it reads as a solid blob.
+    lightbulb:
+      'M8 1.6a4.1 4.1 0 0 0-2.5 7.35c.5.4.8 1 .8 1.6v.35h3.4v-.35c0-.6.3-1.2.8-1.6A4.1 4.1 0 0 0 8 1.6Z M6.3 13.1h3.4 M7 14.6h2',
     keyboard: 'M1.5 4.5h13v7h-13Z M4 7h.1M6.4 7h.1M8.8 7h.1M11.2 7h.1M4.5 9.4h7',
     // Two commits on a trunk and one on a branch, joined by the curve —
     // the universal "branch" glyph, drawn in this set's stroke style.
