@@ -207,7 +207,6 @@
   }
 
   .toggle {
-    cursor: pointer;
     display: flex;
     align-items: center;
     gap: var(--nox-sp-2);

@@ -272,7 +272,6 @@
     color: var(--nox-text-muted);
     text-decoration: underline;
     text-underline-offset: 2px;
-    cursor: pointer;
     text-align: left;
     overflow-wrap: anywhere;
   }
@@ -284,7 +283,6 @@
   .where:disabled {
     color: var(--nox-text-faint);
     text-decoration: none;
-    cursor: default;
   }
 
   .stale {

@@ -28,6 +28,11 @@ body {
   /* The chrome is a native app surface, not a document. */
   user-select: none;
   cursor: default;
+  /* That argument covers text and surfaces. It used to cover `button` too,
+     and that went too far: 38 of the 39 interactive controls in the chrome
+     showed the arrow, so nothing under the pointer ever announced that it
+     could be pressed. See the `button` rule below for where the line is
+     now. */
   accent-color: var(--nox-accent);
 }
 
@@ -46,12 +51,27 @@ textarea {
   margin: 0;
 }
 
+/* Anything that is a `<button>` can be pressed, and says so.
+
+   The line runs between *controls* and *rows*, not between chrome and
+   document. A button is a thing you press; a list row — the explorer tree,
+   the palette, search results, problems, references, a tab — is a thing you
+   select, and each of those sets `cursor: default` on itself to say so.
+   `tests/cursor-affordance.test.ts` holds the exceptions to a list, because
+   the value here is the rule being uniform and a comment cannot fail. */
 button {
   background: none;
   border: none;
   padding: 0;
-  cursor: default;
+  cursor: pointer;
   color: inherit;
+}
+
+/* A control that cannot be used must not offer to be. This is the one
+   exception no caller should have to remember, so it lives here rather than
+   beside each `:disabled` rule. */
+button:disabled {
+  cursor: default;
 }
 
 :focus {
@@ -168,7 +188,6 @@ button {
   border: 1px solid var(--nox-border);
   background: var(--nox-bg-raised);
   color: var(--nox-text);
-  cursor: pointer;
   transition:
     background var(--nox-dur-fast) var(--nox-ease),
     color var(--nox-dur-fast) var(--nox-ease);
@@ -181,7 +200,6 @@ button {
 
 .nox-button:disabled {
   opacity: 0.4;
-  cursor: default;
 }
 
 .nox-button.small {
