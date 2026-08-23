@@ -22,6 +22,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The menu bar kept offering a shortcut you had changed.** On Windows and
+  Linux, where Nox draws its own menu, rebinding a key left the menu showing
+  the old chord — while macOS's native menu, which reloads on exactly that
+  event, showed the new one. The bar reads the same table the native menu
+  does; it just was not listening for the half that moved.
+
 - **Saving a UTF-16 file wrote a UTF-8 one.** The bytes went out as UTF-8 while
   the status bar still said UTF-16 LE, so a file that had to stay UTF-16 — a
   PowerShell script, a `.reg` file, XML that declares it — quietly stopped
