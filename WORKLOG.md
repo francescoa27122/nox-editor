@@ -8,6 +8,85 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, last) — Where production actually stands, and the five gaps
+
+No code this session. The operator asked where Nox goes next to be a
+production product, and the honest answer needed measuring rather than
+re-reading the roadmap — which says every 1.0 code row is done and leaves "a
+ritual and a purchase". That is true about features and not about production.
+
+Written: `docs/superpowers/plans/2026-08-23-production-readiness.md`.
+
+The five, each a claim the product cannot currently back:
+
+1. **The packaged app cannot be verified.** `.desktop-pass-report.md` is the
+   only walk on record: 2 PASS, 3 PARTIAL, **12 UNSEEN**, aborted by machine
+   contention rather than by judgement. Its one CONFIRMED finding — BUG-1, the
+   Changes view undismissable — **contradicts the source**: `DiffView.svelte:178`
+   binds Close to `ui.diffOpen.set(false)` and `ui.ts:404` dismisses on Escape,
+   both landed in `7302527` on 2026-08-19, the day *before* the walk. That file
+   is tracked and public, so the repo currently asserts a defect against shipped
+   code that may not exist. Root cause is the shape of the ritual, not the
+   diligence: manual, expensive, unrepeatable, therefore skipped.
+2. **No diagnostics at all.** Zero logging deps in `Cargo.toml` — no `log`, no
+   `tracing`, no `tauri-plugin-log`; no log file anywhere. `app.ts:764` admits
+   the release webview has no console. The backstop at `app.ts:779` covers
+   `unhandledrejection` only — **there is no `window.onerror`**, so a
+   synchronous throw in an effect or a CodeMirror extension produces nothing:
+   no toast, no log, no console.
+3. **`JsonRpcTransport.onRequest` (`transport.ts:97`) has one caller and it is
+   a test** (`tests/lsp-transport.test.ts:124`). `#answer` correctly replies
+   MethodNotFound rather than stalling, which is why it is invisible — the
+   failure is silent degradation. Four features behind it, and the 1.0 bar
+   "Language intelligence is complete ✅" holds for tsserver while pyright,
+   gopls and rust-analyzer silently take defaults.
+4. **1926 tests, zero benchmarks.** No `bench` script; the two `bench(` hits in
+   the repo are fixture text in `demo-workspace.ts`. "Nothing on the typing
+   path" is enforced by review alone. `MAX_FILE_BYTES = 64 MB` and
+   `EXACT_DIRTY_LIMIT = 2 MB` are both thresholds with no number behind them.
+5. **Four installers ship; three have never been run.** Updater signing works
+   (v0.8.3 carries all four platforms plus `latest.json` and `.sig`s). OS code
+   signing does not, and both halves are purchases. Mine in that area: no
+   native menu off macOS (`menu.rs` returns `Ok(())`), and the in-window bar
+   replacing it is three days old with two defects already found.
+
+Also shipped, found by the pre-commit scrub rather than looked for: **this
+file leaked the operator's real first name in ten places** — all pre-existing,
+all in older entries, in a public repository whose governing rule 1 says to
+use "the operator". Fixed forward at HEAD; the name survives in published
+history, which no edit here can reach.
+
+Verified:
+
+- `npm test` — **1926 passed, 132 files**, green. `npm run check` not re-run;
+  no source changed this session.
+- Rust production `unwrap()`/`expect()`: **2** total (`http.rs`, `lib.rs`); the
+  other 157 are inside `#[cfg(test)]`. The Rust layer is not the risk, and the
+  first draft of this analysis was wrong about it.
+- `MAX_FILE_BYTES` guard at `workspace.ts:451` found only after a first grep
+  suggested the open path was unguarded. It is guarded, at 64 MB. Corrected
+  before it reached the plan.
+- tauri-driver platform support checked against the Tauri v2 docs rather than
+  assumed: driven directly it is **Windows and Linux only** ("macOS has no
+  WKWebView driver tool available"); the WebdriverIO service's embedded server
+  claims macOS, and CrabNebula's fork wants a paid key for it. Treated as a
+  spike in the plan, not a premise.
+
+Next: **phase 0 — adjudicate BUG-1 on Windows.** Hours, not a session, and it
+is the only item in the untrustworthy-claim category that can be closed
+without new infrastructure. Then diagnostics, because every later phase wants
+an artifact rather than prose.
+
+Blocked: the Apple and Windows certificates (stop-list 4 — spending money).
+Possibly the macOS leg of the WebDriver harness, if the free path does not
+reach it.
+
+Confidence: high on all five findings — each is a grep or a file:line, and the
+two I got wrong on the first pass were caught and corrected above. Medium on
+the phase sizing, which is estimated rather than measured.
+
+---
+
 ## 2026-08-23 (PC, later still) — Two lifecycle bugs the walk turned up
 
 Third pass, same brief. The first two found things you could see; this one
@@ -425,7 +504,7 @@ Confidence:
 
 ## 2026-08-20 (PC, release) — The key ceremony, and v0.5.1
 
-The ceremony (spec §8, "human hands only") ran on Francesco's keyboard; my
+The ceremony (spec §8, "human hands only") ran on the operator's keyboard; my
 half was everything around it. Key id `A40CD806C398B1A7`.
 
 What went wrong first, and is now in §8 so it does not happen twice:
@@ -550,7 +629,7 @@ Next:
 
 Blocked:
 
-- Nothing. The draft release is Francesco's to publish — that is a
+- Nothing. The draft release is the operator's to publish — that is a
   publication, not a build.
 
 Confidence:
@@ -1156,7 +1235,7 @@ agents', all red, all recorded. One agent self-reported wiping its own
 uncommitted work with a careless `git checkout --` mid-mutation and
 redoing it — worth knowing the failure mode exists.
 
-Next: the desktop pass (A+B+C all changed pixels), then Francesco picks:
+Next: the desktop pass (A+B+C all changed pixels), then the operator picks:
 Phase D oddments or v0.5 stage/commit.
 
 Confidence: high on behavior; look still wants eyes.
@@ -1213,7 +1292,7 @@ span-for-h2 and dropped action button, both red.
 
 Next: Phase C (status-bar problems/branch/pickers, tab context menu +
 overflow, rail badges + collapse-survival, palette MRU, toast actions) on
-Francesco's go — or v0.5 stage/commit. The desktop pass keeps growing in
+the operator's go — or v0.5 stage/commit. The desktop pass keeps growing in
 value: A+B changed real pixels.
 
 Confidence: high on structure (tests+checks), medium on look until seen.
@@ -1223,7 +1302,7 @@ Confidence: high on structure (tests+checks), medium on look until seen.
 ## 2026-08-19 (PC, UI) — Audit, then Phase A
 
 Two pieces. First, a **full UI audit** (three parallel source auditors +
-live computed-style measurement), published as an artifact for Francesco:
+live computed-style measurement), published as an artifact for the operator:
 verdict "strong foundation, drifting consistency", ~40 findings, a 4-phase
 plan. The audit's method paid off: it found four genuine rendering bugs,
 two of them in code this very session had shipped (DiffView referenced
@@ -1257,7 +1336,7 @@ binding removal, focus-effect removal — all red. One claim was withdrawn
 honestly: the evicted-timer cleanup is unobservable (dismiss self-heals),
 so it is documented as hygiene and no test pretends otherwise.
 
-Next: Phase B (the four primitives + token sweep) when Francesco says go —
+Next: Phase B (the four primitives + token sweep) when the operator says go —
 or back to v0.5 stage/commit; his call which thread runs first.
 
 Confidence: high on behavior (mutation-checked); the visual half of these
@@ -1271,7 +1350,7 @@ On branch `git-stage-spec`, off `main` at `fa2caaf`. Spec only, no code:
 `docs/superpowers/specs/2026-08-19-git-stage-commit-design.md`. It is the
 first write-path git work, so the spec leads with the envelope — the six
 things the feature will never do — and that section (§0) is the part
-worth Francesco's read before step 1 of the build order starts. Merged as
+worth the operator's read before step 1 of the build order starts. Merged as
 a spec so the MacBook session can read it in-repo; building has not
 begun, and the ROADMAP row stays unchecked.
 
@@ -1297,7 +1376,7 @@ The decisions someone might re-litigate, and why they went this way:
 
 Next:
 
-- Francesco reads §0. Then build order §7, step 1: the porcelain v2
+- The operator reads §0. Then build order §7, step 1: the porcelain v2
   parser, the status read, the read-only panel.
 
 Blocked:
@@ -1493,7 +1572,7 @@ Next:
   the toolchain; `git pull`, install the dmg from the draft (or
   `npm run app`), ten minutes. Then publish (human), and Git gutter starts.
 - The **v0.4.2 draft** is superseded; delete it rather than publish both
-  (Francesco's call).
+  (the operator's call).
 
 Blocked:
 
@@ -2210,7 +2289,7 @@ Smoke-tested on real hardware, from the `v0.4.1-lsp-test1` tag build:
   `CreateProcess` fails with a different error. Someone writing a full path
   into `servers.json` is at least as likely.
 
-Second build (`v0.4.1-lsp-test2`), after Francesco reported an empty console
+Second build (`v0.4.1-lsp-test2`), after the operator reported an empty console
 window appearing on reload:
 
 - **Windows gives a console-subsystem child its own window when the parent is
