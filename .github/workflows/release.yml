@@ -100,20 +100,29 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      # macOS code signing and notarization. A *different* key from the two
-      # above and a different job: those sign update payloads so a running Nox
-      # can verify one came from us, and these decide whether a fresh download
-      # opens without a terminal command. Neither substitutes for the other.
+      # macOS code signing and notarization is deliberately NOT declared here.
       #
-      # Absent, the macOS build is ad-hoc signed exactly as it is today.
-      # Present, the bundler imports the certificate itself — no keychain step
-      # here — and notarizes. Half-present is what the step below refuses.
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # A job-level `env:` key whose secret is unset is still *defined*, with
+      # an empty value — and `tauri-action` branches on `APPLE_CERTIFICATE`
+      # being defined, not on it being non-empty. Declaring these six
+      # unconditionally therefore put every macOS build into signing mode
+      # whether a certificate existed or not, and the bundler ran
+      # `security import` against an empty string:
+      #
+      #     security: SecKeychainItemImport: One or more parameters passed to
+      #     a function were not valid.
+      #     failed to bundle project: failed codesign application
+      #
+      # Both macOS jobs died that way on v0.8.3-uipass (2026-08-23) — the
+      # first release build after the signing work landed — while the guard
+      # step below had already printed "No Apple certificate" correctly. No
+      # APPLE_* secret exists in the repository at all. v0.8.3 was tagged the
+      # day before that commit, which is why nothing caught it.
+      #
+      # The guard exports them to `$GITHUB_ENV` instead, and only once a
+      # certificate is really there. A key that is never written stays
+      # undefined rather than empty, which is the distinction the bug turned
+      # on. See `docs/superpowers/specs/2026-08-22-apple-signing-design.md`.
 
     steps:
       - uses: actions/checkout@v7
@@ -198,6 +207,15 @@ jobs:
       - name: Check the Apple signing configuration is whole
         if: runner.os == 'macOS'
         shell: bash
+        # Scoped to this step, not the job, so the build step below sees only
+        # what this one decides to export. See the note on the job's `env:`.
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -eu
           if [ -z "${APPLE_CERTIFICATE:-}" ]; then
@@ -224,6 +242,18 @@ jobs:
             echo "See docs/superpowers/specs/2026-08-22-apple-signing-design.md."
             exit 1
           fi
+
+          # Only now, with all six present, do they reach the build step. A
+          # heredoc delimiter rather than `NAME=value` because a certificate is
+          # multi-line base64 and the plain form silently truncates at the
+          # first newline.
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            {
+              echo "$name<<__APPLE_EOF__"
+              echo "${!name}"
+              echo "__APPLE_EOF__"
+            } >> "$GITHUB_ENV"
+          done
 
           echo "Apple signing configured: this macOS build will be signed and notarized."
 
