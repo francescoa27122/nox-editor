@@ -28,6 +28,30 @@
     return dangerous && safe >= 0 ? safe : 0;
   });
 
+  /**
+   * Whatever had focus when this dialog opened, so closing it hands the
+   * keyboard back.
+   *
+   * Captured here rather than taken as a prop the way `ContextMenu` does it:
+   * every caller of `ui.confirm()` is a service or a command, and none of them has
+   * an element to pass. Read during init, before the focus effect below has
+   * moved anything.
+   *
+   * The `isConnected` check is a statement of intent, not a fix: a detached
+   * element cannot take focus anyway, so dropping it changes no behaviour.
+   * It is here because the case it names is real and non-obvious — the
+   * destructive answers close the thing behind the dialog ("Don't Save"
+   * removes the pane that had focus) and the pane replacing it focuses
+   * itself, so this teardown must stay out of the way rather than compete.
+   * Those paths already landed correctly; Escape and Cancel are what needed
+   * fixing, where nothing happened and focus went to `<body>` regardless.
+   */
+  const opener = document.activeElement;
+
+  $effect(() => () => {
+    if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+  });
+
   $effect(() => {
     const buttons = [...(container?.querySelectorAll('button') ?? [])];
     buttons[defaultIndex]?.focus();
