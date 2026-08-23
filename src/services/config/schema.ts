@@ -85,12 +85,12 @@ export const SETTINGS_SCHEMA = {
     optionLabels: { eclipse: 'Eclipse', umbra: 'Umbra (OLED)' },
   }),
   'workbench.showExplorer': bool(true, {
-    label: 'Show Explorer',
-    description: 'Display the file explorer sidebar.',
+    label: 'Show Sidebar',
+    description: 'Display the sidebar and its view rail.',
     category: 'Workbench',
   }),
   'workbench.explorerWidth': num(248, { min: 150, max: 520 }, {
-    label: 'Explorer Width',
+    label: 'Sidebar Width',
     description: 'Width of the sidebar in pixels.',
     category: 'Workbench',
     advanced: true,

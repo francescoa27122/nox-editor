@@ -25,6 +25,8 @@
    * would be the one place that claim quietly stops being true.
    */
 
+  import { placeMenu } from '@core/menu-placement';
+
   interface Props {
     items: MenuItem[];
     anchor: MenuAnchor;
@@ -43,6 +45,8 @@
   let active = $state(items.findIndex((item) => !item.disabled));
   // svelte-ignore state_referenced_locally
   let position = $state({ x: anchor.x, y: anchor.y });
+  /** Set only when the menu is taller than the viewport; null means unclamped. */
+  let maxHeight = $state<number | null>(null);
   let typeAhead = '';
   let typeAheadTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -51,17 +55,25 @@
     return () => returnFocusTo?.focus();
   });
 
-  // Keep the menu inside the viewport: flip rather than clip when it would
-  // overflow, which is what every native menu does near a screen edge.
+  // Keep the menu inside the viewport. The arithmetic is `placeMenu` in
+  // `core/`; this effect only measures and applies, so the rules are testable
+  // without inventing rectangles under jsdom.
   $effect(() => {
     if (!menu) return;
     const rect = menu.getBoundingClientRect();
-    const margin = 8;
-    let { x, y } = anchor;
-
-    if (x + rect.width + margin > window.innerWidth) x = Math.max(margin, x - rect.width);
-    if (y + rect.height + margin > window.innerHeight) y = Math.max(margin, y - rect.height);
-    position = { x, y };
+    // `scrollHeight`, not `rect.height`: once a max-height is applied the
+    // measured box is the clamped one, and deciding on that would let the menu
+    // flip back to unclamped on the next measurement.
+    const placed = placeMenu({
+      anchorX: anchor.x,
+      anchorY: anchor.y,
+      width: rect.width,
+      naturalHeight: menu.scrollHeight,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    });
+    position = { x: placed.x, y: placed.y };
+    maxHeight = placed.maxHeight;
   });
 
   function step(delta: number) {
@@ -149,7 +161,9 @@
   aria-orientation="vertical"
   bind:this={menu}
   onkeydown={onKeydown}
-  style="left: {position.x}px; top: {position.y}px"
+  style="left: {position.x}px; top: {position.y}px{maxHeight === null
+    ? ''
+    : `; max-height: ${maxHeight}px; overflow-y: auto`}"
 >
   {#each items as item, index (item.id)}
     {#if item.separatorBefore}

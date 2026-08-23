@@ -2639,7 +2639,7 @@ export class NoxApp {
       {
         id: 'explorer.selectAll',
         title: 'Select All in Explorer',
-        category: 'Explorer',
+        category: 'View',
         enabled: this.#hasFolder,
         run: () => {
           this.ui.explorer.selectAll(this.files.nodes.get().map((node) => node.path));
@@ -2671,14 +2671,14 @@ export class NoxApp {
       {
         id: 'explorer.refresh',
         title: 'Refresh Explorer',
-        category: 'Explorer',
+        category: 'View',
         enabled: this.#hasFolder,
         run: () => this.files.refresh(),
       },
       {
         id: 'explorer.collapseAll',
         title: 'Collapse All Folders',
-        category: 'Explorer',
+        category: 'View',
         enabled: this.#hasFolder,
         run: () => this.files.collapseAll(),
       },
@@ -3383,9 +3383,13 @@ export class NoxApp {
       // --- View -----------------------------------------------------------
       {
         id: 'view.toggleExplorer',
-        title: 'Toggle Explorer',
+        // "Sidebar", not "Explorer": this hides the whole aside, view rail
+        // included, so calling it Explorer described one of the seven panels
+        // it takes away. The id keeps the old name because a user's
+        // keybindings.json may reference it.
+        title: 'Toggle Sidebar',
         category: 'View',
-        keywords: ['sidebar', 'files'],
+        keywords: ['sidebar', 'explorer', 'files', 'panel'],
         run: () => this.config.set('workbench.showExplorer', !this.config.get('workbench.showExplorer')),
       },
       {

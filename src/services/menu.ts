@@ -92,7 +92,13 @@ export const LAYOUT: readonly MenuGroup[] = [
       predefined('quit', 'Quit Nox'),
     ],
   },
-  { label: 'File', categories: ['File'] },
+  // Explorer sits under File, not View. Rename…, Delete…, Duplicate and Copy
+  // Path are file operations, and View is not where anyone looks for them —
+  // they arrived here because the explorer is a view, which is a fact about
+  // the widget rather than about what the commands do. The three that really
+  // are view operations (refresh, collapse all, select all in the tree) carry
+  // `category: 'View'` instead and stay in the View menu.
+  { label: 'File', categories: ['File', 'Explorer'] },
   {
     label: 'Edit',
     categories: ['Edit'],
@@ -111,7 +117,7 @@ export const LAYOUT: readonly MenuGroup[] = [
   { label: 'Go', categories: ['Go'] },
   {
     label: 'View',
-    categories: ['View', 'Explorer'],
+    categories: ['View'],
     trailing: [separator, predefined('fullscreen')],
   },
   { label: 'Code', categories: ['Language', 'Change Marks', 'Review'] },

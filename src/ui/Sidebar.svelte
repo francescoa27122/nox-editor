@@ -71,14 +71,20 @@
         aria-label={entry.label}
         title={hint ? `${entry.label} (${hint})` : entry.label}
         onclick={() => {
-          // Re-clicking the current view collapses the sidebar — the
-          // universal rail convention. ⌘B or the title-bar toggle reopens.
+          // Re-clicking the current view focuses its panel; it used to collapse
+          // the sidebar.
           //
-          // Through the command rather than `config.set`, because the collapse
-          // is a user action like any other and `view.toggleExplorer` already
-          // is that action: dispatching it while the sidebar is showing turns
-          // the same setting off, and the palette gets to learn the click.
-          if ($view === entry.id) void commands.execute('view.toggleExplorer');
+          // Collapse-on-reclick is the rail convention, but the convention
+          // assumes a *persistent* activity bar — in VS Code the column stays
+          // and only the panel body goes. This rail lives inside the aside it
+          // was collapsing, so the gesture deleted its own affordance along
+          // with the other six entry points, and nothing under the cursor said
+          // how to get them back. ⌘B and the title-bar button are the labelled
+          // ways to collapse, and they remain.
+          //
+          // Focusing is what a re-click most likely meant anyway, and each view
+          // already names the command that does it.
+          if ($view === entry.id) void commands.execute(entry.command);
           else ui.showView(entry.id);
         }}
       >
