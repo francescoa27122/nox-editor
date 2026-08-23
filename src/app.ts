@@ -396,6 +396,35 @@ export class NoxApp {
     // A new proposal shows itself; discarding or applying puts it away.
     this.review.staged.subscribe((staged) => this.ui.reviewOpen.set(staged !== null));
 
+    /*
+     * The find highlight belongs to the find panel, so it leaves when the
+     * panel leaves — whichever of the exits was used.
+     *
+     * `FindPanel` called `find.clear()` itself from three places and only one
+     * of them could ever run. `keymap.ts` installs the global handler with
+     * `capture: true`, so Escape reached `view.dismiss` before the panel's own
+     * keydown: `dismissTop` unmounted the component and the two handlers that
+     * would have cleared went with it. Pressing Escape left every match still
+     * boxed in a document with no find bar on screen — and the button beside
+     * it, running the same code the panel advertises as "Close (Esc)", came
+     * back clean.
+     *
+     * `ui.findOpen` is the one thing every exit already goes through, which is
+     * why the highlight hangs off it rather than off three call sites. Same
+     * argument as `MenuBar` reading `menuBarOpen` instead of trusting its own
+     * state. `Signal.subscribe` runs once on subscribe, with `findOpen` false
+     * and no view attached yet; `clear()` returns early on that.
+     *
+     * Opening is the same claim in reverse, and it has to be here or clearing
+     * on close would break reopening: `query` outlives a close on purpose, so
+     * something has to carry it back to the view. Nothing did — `edit.find`
+     * seeds from the selection and gives up when there is none.
+     */
+    this.ui.findOpen.subscribe((open) => {
+      if (open) this.find.reapply();
+      else this.find.clear();
+    });
+
     // Opening a file from quick-open should show it in the tree, so the
     // explorer never disagrees with what you are looking at.
     this.workspace.events.on('buffer-opened', ({ id }) => {

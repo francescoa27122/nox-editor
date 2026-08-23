@@ -35,7 +35,6 @@
       else find.next();
     } else if (event.key === 'Escape') {
       event.preventDefault();
-      find.clear();
       ui.closeFind();
     }
   }
@@ -47,7 +46,6 @@
       else find.replaceCurrent();
     } else if (event.key === 'Escape') {
       event.preventDefault();
-      find.clear();
       ui.closeFind();
     }
   }
@@ -156,10 +154,7 @@
           class="control"
           title="Close (Esc)"
           aria-label="Close find"
-          onclick={() => {
-            find.clear();
-            ui.closeFind();
-          }}
+          onclick={() => ui.closeFind()}
         >
           <Icon name="close" size={13} />
         </button>

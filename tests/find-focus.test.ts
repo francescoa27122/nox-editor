@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { search } from '@codemirror/search';
+import { getSearchQuery, search } from '@codemirror/search';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -149,5 +149,86 @@ describe('what the keystroke did, not just where focus went', () => {
     pressEnter(find);
     pressEnter(find, { shiftKey: true });
     expect([view!.state.selection.main.from, view!.state.selection.main.to]).toEqual([0, 5]);
+  });
+});
+
+describe('what closing the panel leaves behind', () => {
+  /**
+   * Asserted on the `SearchQuery` in state rather than on `.cm-searchMatch`
+   * in the DOM, because `editor/search-highlight.ts` only decorates
+   * `view.visibleRanges` and jsdom has no viewport to report. The query is
+   * the input that plugin reads; an empty one paints nothing.
+   */
+  const highlighting = () => getSearchQuery(view!.state).search;
+
+  /**
+   * The failure this prevents, measured in the browser build: the panel had
+   * two exits and they did different things. The close button ran
+   * `find.clear()` and the document came back clean; Escape left every match
+   * still boxed, in a file with no find bar on screen and nothing to press to
+   * get rid of them.
+   *
+   * The panel's own Escape handlers *did* call `find.clear()` and could never
+   * run: `keymap.ts:627` installs the global handler with `capture: true`, so
+   * Escape reached `view.dismiss` first, `dismissTop` unmounted the panel,
+   * and the component's keydown never fired. Three call sites that looked
+   * like the fix, and only the button's was reachable.
+   *
+   * So the highlight now follows `ui.findOpen`, which is the one thing every
+   * exit already goes through — the same argument `MenuBar` uses for reading
+   * `menuBarOpen` instead of trusting its own state.
+   */
+  it('takes the highlight with it, whichever way the panel is closed', () => {
+    for (const close of [
+      (m: Mounted) => m.app.ui.closeFind(),
+      (m: Mounted) => m.app.ui.dismissTop(),
+    ]) {
+      openFindOn('alpha one\nalpha two\n', 'alpha');
+      mounted!.app.ui.openFind(false);
+      expect(highlighting()).toBe('alpha');
+
+      close(mounted!);
+      flush();
+      expect(highlighting()).toBe('');
+
+      mounted!.unmount();
+      mounted = null;
+      view!.destroy();
+      view = null;
+    }
+  });
+
+  /**
+   * The other half of the same drift, and the reason clearing on close cannot
+   * ship alone.
+   *
+   * `find.query` survives a close on purpose — reopening with your last search
+   * still in the field is what every editor does. But nothing put that query
+   * back into the view: `edit.find` runs `seedFromSelection`, which returns
+   * early on an empty selection, and `openFind` only flips a flag. So a
+   * reopened panel showed the remembered text above "No results" and an
+   * unmarked document, and Enter did nothing until you retyped the query it
+   * was already showing you.
+   *
+   * It was reachable before the fix above — via the close button, the one
+   * exit that did clear — and the stale highlight hid it everywhere else.
+   */
+  it('puts the remembered query back to work on reopen', () => {
+    openFindOn('alpha one\nalpha two\n', 'alpha');
+    const { find, ui } = mounted!.app;
+
+    ui.openFind(false);
+    ui.closeFind();
+    flush();
+    expect(highlighting()).toBe('');
+
+    ui.openFind(false);
+    flush();
+
+    // The field never lost it...
+    expect(find.query.get()).toBe('alpha');
+    // ...and now neither has the view.
+    expect(highlighting()).toBe('alpha');
+    expect(find.status.get().total).toBe(2);
   });
 });

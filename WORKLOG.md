@@ -8,6 +8,47 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, later still) — Two lifecycle bugs the walk turned up
+
+Third pass, same brief. The first two found things you could see; this one
+found things that only show up if you drive the app rather than look at it.
+Both are the same shape — a panel closing without taking its state with it —
+and both were reproduced in the browser build before a line was written.
+
+- **`c2e4e16`** — the find panel had two exits that did different things. The
+  close button ran `find.clear()`; Escape left all 8 matches still boxed in a
+  document with no find bar on screen. `FindPanel` called `clear()` from three
+  places and only the button's could ever run: `keymap.ts:627` installs the
+  global handler with `capture: true`, so Escape reached `view.dismiss` first
+  and `dismissTop` unmounted the component before its own keydown fired. The
+  highlight now hangs off `ui.findOpen`. That exposed the mirror-image bug —
+  `find.query` outlives a close on purpose, and nothing carried it back to the
+  view, so a reopened panel showed the remembered text over "No results" and
+  an unmarked document. `reapply()` is the counterpart to `clear()`; it is
+  deliberately not `refresh()`, which is taken by the typing-path recount.
+- **`75c2061`** — every confirm and prompt dialog dropped focus to `<body>` on
+  the way out. ⌘W on a dirty file, Escape, and the next keystroke goes
+  nowhere. The destructive answers were fine by accident (closing the buffer
+  makes the replacement pane focus itself), so the one path that left you
+  unable to type was the path where *nothing happened*. `ContextMenu` has had
+  the take-it-and-give-it-back shape since it was written; these two never got
+  it.
+
+**Checked and found healthy**, so nobody re-walks them: every panel's empty
+state has a one-click way out and reads well with no folder open; no
+unlabelled buttons anywhere in the chrome; the reveal-on-hover actions in five
+panels all handle `:focus-within`; the sidebar splitter already has a 9px hit
+area, arrow-key resize and its own focus indicator; the confirm dialog is a
+proper `alertdialog` that focuses the safe choice; Escape returns focus
+correctly from the palette, Settings, Search and the context menu.
+
+**Not a bug, for the record.** "Could not copy to the clipboard" in the browser
+target is the preview environment lacking clipboard permission, not Nox. It
+also does not reproduce in the desktop build, which is where Copy Path is
+meant to run.
+
+---
+
 ## 2026-08-23 (PC, later) — Hover, and what the pointer could not reach
 
 Follow-up pass with the same brief as the entry below — day-to-day workflows,

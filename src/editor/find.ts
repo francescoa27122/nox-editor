@@ -184,6 +184,25 @@ export class FindController {
     return true;
   }
 
+  /**
+   * Put the current query back to work on the view — the counterpart to
+   * `clear()`.
+   *
+   * Needed because `query` deliberately outlives a close: reopening with your
+   * last search still in the field is what every editor does. Nothing carried
+   * it back to the view, though — `edit.find` runs `seedFromSelection`, which
+   * gives up when the selection is empty, and `ui.openFind` only flips a flag
+   * — so a reopened panel showed the remembered text over "No results" and an
+   * unmarked document.
+   *
+   * Not `refresh()`, which is taken and does something quite different: that
+   * one runs on every doc and selection change and only re-counts, because it
+   * is on the typing path and must never dispatch.
+   */
+  reapply(): void {
+    this.#sync();
+  }
+
   /** Clear the highlight so closing the panel leaves a clean editor. */
   clear(): void {
     const view = this.#view;
