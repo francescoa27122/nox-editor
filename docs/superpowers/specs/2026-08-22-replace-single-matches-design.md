@@ -114,3 +114,22 @@ A file whose last match is dismissed leaves the results entirely, exactly as
 | `replaceMatch` on a match that has moved | Nothing written, file in `failed` |
 | Search re-run | Dismissed set cleared with the results |
 | Dismissed match in a file that is also dismissed | No interaction; the file is not in `results`, so no path names it |
+
+## 8. What identity matching cannot do
+
+An identity is a line and a column, so an edit that moves a *different* match
+onto exactly the line and column the excluded one occupied will exclude that
+one instead. Deleting a line above a match, when the match below happens to
+share its column, is the realistic case.
+
+This is not fixable by making the key richer — the surrounding text, a hash of
+the line — without deciding what "the same match" means across an edit, which
+is the identity problem CodeMirror solves with position mapping and which
+nothing here has, because the results came from disk and the replace may read
+a buffer.
+
+It is bounded, and bounded in the safe direction: the run still replaces
+exactly the matches the pattern finds, and the exclusion still lands on *a*
+match the user could see. What it can get wrong is *which* one. Anything less
+locatable than that — the match simply gone, or moved — is refused outright
+(§4). Recorded in the debt table.

@@ -1,6 +1,6 @@
 import { basename, dirname, relative } from '@core/path';
 import { computeReplacements, expandReplacement, preserveCase } from '@core/replace';
-import { buildSearchRegex } from '@core/search-match';
+import { buildSearchRegex, findMatches, type LineMatch } from '@core/search-match';
 import { Signal } from '@core/signal';
 import type { Platform, SearchFileResult, SearchSummary } from '@platform/types';
 import type { JobRunner } from './jobs';
@@ -65,6 +65,21 @@ export class SearchService {
   readonly status = new Signal<SearchStatus>('idle');
   readonly summary = new Signal<SearchSummary | null>(null);
   readonly collapsed = new Signal<ReadonlySet<string>>(new Set());
+  /**
+   * Matches the user has taken out of the replace, by identity.
+   *
+   * **Never by index.** `#replacePaths` recomputes from the file's current
+   * text rather than trusting the stored result rows — that is what stops a
+   * replace using stale coordinates for a file edited since the search — so
+   * index 3 of the results and index 3 of the text being replaced are the same
+   * match only while nothing has moved. The key is the path, the line, and the
+   * *absolute* column, which is what `findMatches` will report again from the
+   * same walk `computeReplacements` performs.
+   *
+   * Public so the panel can tell a dismissed run from an empty one; nothing
+   * outside this service constructs a key.
+   */
+  readonly dismissed = new Signal<ReadonlySet<string>>(new Set());
   /** Index into `rows()`, or -1. Drives keyboard navigation. */
   readonly focused = new Signal(-1);
 
@@ -141,6 +156,9 @@ export class SearchService {
     this.summary.set(null);
     this.collapsed.set(new Set());
     this.focused.set(-1);
+    // A new search is a new question: the matches these exclusions named do
+    // not exist any more, whatever the new results turn out to be.
+    this.dismissed.set(new Set());
     this.status.set('searching');
     // A fresh search invalidates the undo: its journal describes files that
     // the new results no longer correspond to.
@@ -227,6 +245,7 @@ export class SearchService {
     this.summary.set(null);
     this.collapsed.set(new Set());
     this.focused.set(-1);
+    this.dismissed.set(new Set());
     this.status.set('idle');
   }
 
@@ -253,6 +272,31 @@ export class SearchService {
     this.focused.set(-1);
   }
 
+  /**
+   * Remove one match, and keep any later replace off it.
+   *
+   * Two effects, deliberately in one call. Taking the row out of `results` is
+   * what makes the panel's counts follow — they read `results` and nothing
+   * else, so there is no second tally to keep in step — and recording the
+   * identity is what makes a replace of the *rest of the file* skip it. A file
+   * whose last match is dismissed leaves the results entirely, exactly as
+   * `dismissFile` would have left it.
+   */
+  dismissMatch(path: string, match: MatchPosition): void {
+    const key = matchKey(path, match);
+    this.dismissed.update((current) => new Set(current).add(key));
+    this.results.update((current) =>
+      current
+        .map((file) =>
+          file.path === path
+            ? { ...file, matches: file.matches.filter((row) => matchKey(path, row) !== key) }
+            : file,
+        )
+        .filter((file) => file.matches.length > 0),
+    );
+    this.focused.set(-1);
+  }
+
   /** Flattened, collapse-aware row list. The axis for keyboard navigation. */
   rows(): SearchRow[] {
     const collapsed = this.collapsed.get();
@@ -267,6 +311,25 @@ export class SearchService {
     });
 
     return rows;
+  }
+
+  /**
+   * The focused row resolved to what it points at, or null.
+   *
+   * `rows()` returns indices into two arrays, which is right for rendering and
+   * wrong for every command: a caller that has to re-derive the file and the
+   * match from a `SearchRow` has to know the shape of `results` to do it, and
+   * would get it subtly wrong the first time a row was focused after a
+   * dismissal.
+   */
+  focusedRow(): FocusedResult | null {
+    const row = this.rows()[this.focused.get()];
+    if (!row) return null;
+    const file = this.results.get()[row.fileIndex];
+    if (!file) return null;
+    if (row.kind === 'file') return { kind: 'file', path: file.path };
+    const match = file.matches[row.matchIndex];
+    return match ? { kind: 'match', path: file.path, match } : null;
   }
 
   moveFocus(delta: number): void {
@@ -389,6 +452,59 @@ export class SearchService {
     }
   }
 
+  /**
+   * Which match indices this file's replace must leave alone, or null.
+   *
+   * Null means "an exclusion names a match this text does not have" — the
+   * file has moved under it, and the caller refuses rather than guessing.
+   *
+   * Indices come from walking the *current* text with `findMatches`, which is
+   * the same loop `computeReplacements` runs — same split, same `exec` order,
+   * same zero-width rule — so the nth match here and the nth skip index there
+   * are the same match by construction. Nothing here trusts the result rows.
+   */
+  #skipFor(
+    path: string,
+    text: string,
+    matcher: RegExp,
+    only: string | undefined,
+  ): Set<number> | null {
+    const dismissed = this.dismissed.get();
+    const wanted = only !== undefined;
+    // The common path: nothing dismissed and no single target, so no second
+    // walk of the file and no way to refuse it.
+    if (!wanted && ![...dismissed].some((key) => key.startsWith(`${path}\u0000`))) {
+      return new Set();
+    }
+
+    const found = findMatches(text, matcher);
+    const skip = new Set<number>();
+    const located = new Set<string>();
+    let kept = 0;
+
+    found.forEach((match, index) => {
+      const key = matchKey(path, match);
+      if (wanted) {
+        if (key === only) {
+          located.add(key);
+          kept++;
+        } else {
+          skip.add(index);
+        }
+        return;
+      }
+      if (dismissed.has(key)) {
+        located.add(key);
+        skip.add(index);
+      }
+    });
+
+    if (wanted) return kept === 1 ? skip : null;
+
+    const expected = [...dismissed].filter((key) => key.startsWith(`${path}\u0000`));
+    return located.size === expected.length ? skip : null;
+  }
+
   /** Write new contents, through the editor when the file is open. */
   async #writeText(path: string, text: string, bufferId: string | null): Promise<boolean> {
     if (bufferId) {
@@ -414,6 +530,20 @@ export class SearchService {
     return outcome.matches;
   }
 
+  /**
+   * Replace exactly one match. Returns 1, or 0 when it could not be found.
+   *
+   * `skip` inverted — every index in the file except this one — over the same
+   * recomputed walk everything else uses, which is why it costs a method
+   * rather than a mechanism and why it inherits the staleness refusal for
+   * free: a match that is no longer where it was does nothing at all rather
+   * than replacing whatever moved into its place.
+   */
+  async replaceMatch(path: string, match: MatchPosition): Promise<number> {
+    const outcome = await this.#replacePaths([path], { only: matchKey(path, match) });
+    return outcome.matches;
+  }
+
   /** Replace every match in every result. */
   async replaceAll(): Promise<ReplaceOutcome> {
     return this.#replacePaths(this.results.get().map((file) => file.path));
@@ -428,7 +558,10 @@ export class SearchService {
     };
   }
 
-  async #replacePaths(paths: readonly string[]): Promise<ReplaceOutcome> {
+  async #replacePaths(
+    paths: readonly string[],
+    scope: { only?: string } = {},
+  ): Promise<ReplaceOutcome> {
     const query = this.query.get();
     const options = this.options.get();
     if (query.length === 0 || paths.length === 0) {
@@ -443,6 +576,7 @@ export class SearchService {
     }
 
     const replacement = this.replacement.get();
+    const only = scope.only;
 
     /**
      * The walk runs as a job and **writes nothing**. It reads every file,
@@ -474,11 +608,21 @@ export class SearchService {
             continue;
           }
 
+          const skip = this.#skipFor(path, source.text, matcher, only);
+          // The exclusions named matches this text no longer has. Refusing is
+          // the point: replacing the rest would be replacing something the
+          // user said not to touch, and nothing here can tell which.
+          if (skip === null) {
+            failed.push(path);
+            continue;
+          }
+
           // Recomputed from the current text rather than trusting the stored
           // result rows, which may be stale for a file edited since the search.
           const result = computeReplacements(source.text, matcher, replacement, {
             expand: options.regexp,
             preserveCase: options.preserveCase,
+            ...(skip.size > 0 ? { skip } : {}),
           });
           if (result.count === 0) continue;
 
@@ -653,6 +797,30 @@ export interface ReplaceOutcome {
   matches: number;
   /** Files that could not be read or written. */
   failed: string[];
+}
+
+/** What the focused row points at — a whole file, or one match in one. */
+export type FocusedResult =
+  | { kind: 'file'; path: string }
+  | { kind: 'match'; path: string; match: LineMatch };
+
+/** Enough of a match row to say which match it is. */
+export interface MatchPosition {
+  line: number;
+  column: number;
+  previewOffset: number;
+}
+
+/**
+ * The identity of one match: path, 1-based line, absolute column.
+ *
+ * `column` is relative to the preview, which is a *window* into a long line
+ * rather than the line itself — so `previewOffset` has to be added back or two
+ * matches on one long line would key the same. NUL as the separator because no
+ * path, and no number, can contain one.
+ */
+function matchKey(path: string, match: MatchPosition): string {
+  return `${path}\u0000${match.line}\u0000${match.previewOffset + match.column}`;
 }
 
 /** Split a comma- or newline-separated glob list. */

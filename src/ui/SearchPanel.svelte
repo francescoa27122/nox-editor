@@ -522,6 +522,30 @@
                     >{match.preview.slice(match.column + match.length)}</span
                   >
                 </span>
+                {#if $replaceMode}
+                  <button
+                    class="row-action"
+                    aria-label="Replace this match on line {match.line}"
+                    title="Replace this match"
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      void app.replaceOneMatch(file.path, match);
+                    }}
+                  >
+                    <Icon name="replace" size={11} />
+                  </button>
+                {/if}
+                <button
+                  class="row-action"
+                  aria-label="Dismiss the match on line {match.line}"
+                  title="Dismiss this match"
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    search.dismissMatch(file.path, match);
+                  }}
+                >
+                  <Icon name="close" size={10} />
+                </button>
               </div>
             {/if}
           {/if}
@@ -907,8 +931,13 @@
     transition: opacity var(--nox-dur-fast) var(--nox-ease);
   }
 
+  /* Both row kinds reveal their actions the same way. Kept as one rule per
+     kind rather than a bare `.row:hover` so the spacer divs, which carry no
+     `.row` class but sit in the same list, stay out of it. */
   .row.file:hover .row-action,
   .row.file.focused .row-action,
+  .row.match:hover .row-action,
+  .row.match.focused .row-action,
   .row-action:focus-visible {
     opacity: 1;
   }

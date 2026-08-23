@@ -6,6 +6,19 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Take one match out of a replace.** Search results have always been
+  dismissable a whole file at a time, which is no help when thirty-eight of
+  forty matches are the ones you want. Each match row now has its own `×`, and
+  the replace that follows leaves it alone. If the file has changed underneath
+  such that the match you protected is no longer where you protected it, Nox
+  refuses that file rather than guessing which text you meant.
+- **Replace a single match** from its row, without touching the rest of the
+  file. Undoes with the same one-step undo a project replace has.
+- **Both from the keyboard**, as *Dismiss Search Result* and *Replace Search
+  Result*, acting on the focused row. The results list is arrow-key navigable
+  and its `×` was mouse-only.
 ### Fixed
 
 - **A settings, shortcuts, notes or session file Nox could not read was

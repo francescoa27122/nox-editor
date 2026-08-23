@@ -80,7 +80,7 @@ import {
   type Principal,
   type PromptAnswer,
 } from '@services/permissions';
-import { SearchService } from '@services/search';
+import { SearchService, type MatchPosition } from '@services/search';
 import { MenuService } from '@services/menu';
 import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
@@ -1738,6 +1738,47 @@ export class NoxApp {
     }
   }
 
+  /**
+   * Replace exactly one match, from the row it is shown on.
+   *
+   * A refusal here is silent-but-said: `replaceMatch` returns 0 when the match
+   * is no longer where the results say it is, and the row is still on screen
+   * claiming otherwise, so the toast has to explain rather than leaving a
+   * click that visibly did nothing.
+   */
+  async replaceOneMatch(path: string, match: MatchPosition): Promise<void> {
+    const count = await this.search.replaceMatch(path, match);
+    if (count > 0) {
+      this.notifications.success(`Replaced 1 in ${basename(path)}`);
+      return;
+    }
+    this.notifications.warn(
+      `${basename(path)} has changed`,
+      'That match is no longer where the results say it is. Run the search again.',
+    );
+  }
+
+  /**
+   * Act on the focused result row.
+   *
+   * The panel's `×` and replace buttons are mouse-only today, and the results
+   * list is otherwise fully keyboard-driven — so these exist to close that gap
+   * rather than to add a second way to click.
+   */
+  dismissFocusedResult(): void {
+    const row = this.search.focusedRow();
+    if (!row) return;
+    if (row.kind === 'file') this.search.dismissFile(row.path);
+    else this.search.dismissMatch(row.path, row.match);
+  }
+
+  async replaceFocusedResult(): Promise<void> {
+    const row = this.search.focusedRow();
+    if (!row) return;
+    if (row.kind === 'file') await this.replaceInOneFile(row.path);
+    else await this.replaceOneMatch(row.path, row.match);
+  }
+
   async undoProjectReplace(): Promise<void> {
     const { restored, skipped } = await this.search.undoLastReplace();
     if (restored === 0 && skipped === 0) return;
@@ -2422,6 +2463,31 @@ export class NoxApp {
         title: 'Toggle Respect .gitignore',
         category: 'Search',
         run: () => this.search.toggle('respectGitIgnore'),
+      },
+      {
+        id: 'search.dismissResult',
+        title: 'Dismiss Search Result',
+        category: 'Search',
+        keywords: ['exclude', 'remove', 'skip', 'ignore', 'match', 'result'],
+        enabled: () => this.search.focusedRow() !== null,
+        run: () => this.dismissFocusedResult(),
+      },
+      {
+        id: 'search.replaceResult',
+        // The row decides which: a match row replaces that match, a file row
+        // replaces the file. One command rather than two, because the panel
+        // already treats the focused row as the thing being acted on.
+        title: 'Replace Search Result',
+        category: 'Search',
+        keywords: ['replace', 'one', 'single', 'match', 'result'],
+        capabilities: ['fs.write', 'buffer.edit'],
+        // The focused row's file, which is not necessarily the active buffer —
+        // the whole point of the results list is acting on files you are not
+        // looking at. `search.replaceAll` is unscoped for the opposite reason:
+        // it writes across a set, so naming one file would understate it.
+        resourceFrom: () => this.search.focusedRow()?.path,
+        enabled: () => this.search.focusedRow() !== null,
+        run: () => void this.replaceFocusedResult(),
       },
       {
         id: 'search.replaceAll',
