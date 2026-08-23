@@ -49,31 +49,50 @@ Worse than the coverage is the one confirmed finding:
 > button renders a hover state but clicking does nothing (5+ attempts) …
 > Escape does nothing … Only escape found: restart the app.
 
-**The source says otherwise.** `src/ui/DiffView.svelte:178` binds Close to
-`ui.diffOpen.set(false)`, and `src/services/ui.ts:404-408` dismisses the diff
-on Escape and returns focus to the editor. `git log -S` puts both in `7302527`
-(2026-08-19) — *the day before the walk*. So either the walk's clicks were
-never landing (which the abort log makes plausible), or there is a real defect
-the code reading cannot see. **Nobody can tell which**, and that file is
-**tracked and public**: the repository currently asserts a confirmed defect
-against the shipped product that may not exist.
+**Neither bug was real, and how that was established is the actual finding.**
+*(Corrected 2026-08-23: the first draft of this plan claimed the repository
+still asserted BUG-1 as confirmed. It does not — the resolution is in the same
+file, and this section had been written from a partial read of it.)*
+
+An instrumented re-walk that same afternoon rebuilt Nox.app from the same main
+with a window-level event probe and found the cause was the walk harness:
+
+- An **invisible computer-use harness window covering screen x≥970, y 53–773**
+  swallowed every click aimed into it. The probe recorded *zero* pointer
+  events on the Close button at its walk-time position, while clicks lower and
+  left arrived normally. Moved out of that region, one click dismissed the
+  view instantly.
+- **Escape never reaches the app at all** — it is the harness's own user-abort
+  key, consumed at the OS level. The probe confirmed ⌘⇧P, typed characters and
+  Enter all delivered; Escape delivered through no injection path tried.
+
+So the tooling used to verify Nox **manufactures false defects and cannot test
+one of the two dismissal paths at all.** That is a much worse problem than a
+stale report would have been: every manual walk is running on an instrument
+that silently drops inputs in a screen region it also hides from its own
+screenshots.
 
 The pattern is not one bad session. Three of the last four `WORKLOG.md`
 entries end on the same line — *the desktop build is unverified for all of
 this*. And four installers ship while **only macOS has ever been walked**.
 
 The root cause is not diligence. It is that verification is a manual human
-ritual: not repeatable, not cheap, not runnable unattended. Anything with that
-shape gets skipped, and the record is what skipping looks like.
+ritual driven through an unreliable instrument: not repeatable, not cheap, not
+runnable unattended, and — as BUG-1 and BUG-2 both show — capable of returning
+confident answers that are wrong in either direction. Anything with that shape
+gets skipped, and the record is what skipping looks like.
 
 ### The fix
 
 Make the packaged app drivable by a test.
 
-- **Phase 0 — settle BUG-1 (hours, do first).** Build the Windows app, open
-  Changes, click Close, press Escape. Confirm or refute. Then correct
-  `.desktop-pass-report.md` or delete it. A public file asserting a possibly
-  false defect is itself the bug.
+- **Phase 0 — ✅ done 2026-08-23.** BUG-1 was already resolved by the
+  instrumented re-walk and pinned by two end-to-end tests in `8453ab5`. BUG-2
+  was still open, three sessions after the re-check it asked for; it is now
+  closed on the harness evidence plus a stylesheet contract in
+  `tests/tab-dirty-affordance.test.ts`, three assertions, each
+  mutation-checked. The report's summary line, which still read "1 confirmed"
+  above its own refutation, now leads with **0 app defects**.
 - **Phase 2 — a WebDriver harness.** `tauri-driver` + WebdriverIO. Verified
   this session against the Tauri v2 docs: driven directly, **Windows and Linux
   only** — "macOS has no WKWebView driver tool available". The WebdriverIO
@@ -282,7 +301,7 @@ Ties broken toward the smaller change; sequenced by what each unblocks.
 
 | # | Work | Why here | Size |
 |---|---|---|---|
-| 0 | Adjudicate BUG-1; fix or delete the public report | An untrustworthy public claim, and it is hours | hours |
+| 0 | ✅ **Done 2026-08-23.** Adjudicate both walk bugs; correct the report | Neither was an app defect; the walk harness was | hours |
 | 1 | Diagnostics: `window.onerror`, log sink via `Platform`, Copy Diagnostics | Every later phase produces evidence instead of prose | 1 session |
 | 2 | WebDriver harness — Windows, then Linux in CI | Closes the last 1.0 gate and unblocks §4's other half | 2–3 sessions |
 | 3 | The `onRequest` seam — four handlers | One seam, four features, and a ✅ that is currently overstated | 1–2 sessions |
@@ -293,7 +312,13 @@ Ties broken toward the smaller change; sequenced by what each unblocks.
 spending money), and the macOS leg of the WebDriver harness if it turns out to
 need CrabNebula's paid key.
 
-**What would change this order:** if BUG-1 reproduces in phase 0, it is a real
-defect in shipped code and jumps the queue ahead of everything else. If the
-WebdriverIO embedded server turns out to drive macOS for free, phase 2 grows a
-third platform and phase 5 shrinks.
+**What would change this order:** if the WebdriverIO embedded server turns out
+to drive macOS for free, phase 2 grows a third platform and phase 5 shrinks.
+If it does not, macOS keeps a manual script — and phase 0's finding says that
+script must never use Escape as a verification input, and must keep the
+window's interactive targets out of the harness's dead region.
+
+*Phase 0 closed 2026-08-23 and is kept in the table rather than deleted: what
+it found — that the verification instrument itself drops inputs — is the
+strongest single argument for phase 2, and deleting the row would delete the
+argument.*
