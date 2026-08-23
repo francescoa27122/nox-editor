@@ -2407,7 +2407,7 @@ export class NoxApp {
         id: 'search.focus',
         title: 'Search in Project',
         category: 'Search',
-        keywords: ['find in files', 'grep', 'project search', 'find across'],
+        keywords: ['find in files', 'grep', 'project search', 'find across', 'panel', 'sidebar', 'view'],
         enabled: () => this.search.available,
         run: () => {
           // Seed from the editor selection, matching ⌘F's behaviour.
@@ -2637,15 +2637,6 @@ export class NoxApp {
         },
       },
       {
-        id: 'explorer.selectAll',
-        title: 'Select All in Explorer',
-        category: 'Explorer',
-        enabled: this.#hasFolder,
-        run: () => {
-          this.ui.explorer.selectAll(this.files.nodes.get().map((node) => node.path));
-        },
-      },
-      {
         id: 'explorer.revealInFileManager',
         resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
         capabilities: ['shell.exec'],
@@ -2667,20 +2658,6 @@ export class NoxApp {
             );
           }
         },
-      },
-      {
-        id: 'explorer.refresh',
-        title: 'Refresh Explorer',
-        category: 'Explorer',
-        enabled: this.#hasFolder,
-        run: () => this.files.refresh(),
-      },
-      {
-        id: 'explorer.collapseAll',
-        title: 'Collapse All Folders',
-        category: 'Explorer',
-        enabled: this.#hasFolder,
-        run: () => this.files.collapseAll(),
       },
 
       {
@@ -2902,7 +2879,7 @@ export class NoxApp {
         id: 'references.focus',
         title: 'Show References',
         category: 'Language',
-        keywords: ['references', 'usages', 'definitions', 'lsp'],
+        keywords: ['references', 'usages', 'definitions', 'lsp', 'panel', 'sidebar', 'view'],
         run: () => {
           this.config.set('workbench.showExplorer', true);
           this.ui.showView('references');
@@ -2910,9 +2887,9 @@ export class NoxApp {
       },
       {
         id: 'git.focus',
-        title: 'Show Git',
+        title: 'Open Git Panel',
         category: 'Git',
-        keywords: ['git', 'stage', 'commit', 'branch', 'changes', 'status'],
+        keywords: ['git', 'stage', 'commit', 'branch', 'changes', 'status', 'panel', 'sidebar', 'view'],
         run: () => {
           this.config.set('workbench.showExplorer', true);
           this.ui.showView('git');
@@ -3106,6 +3083,9 @@ export class NoxApp {
         title: 'Go to Tab by Number',
         category: 'Go',
         hidden: true,
+        // The arg is a 0-based index and the chord is 1-based, so the panel
+        // cannot derive this and the command has to say it.
+        titleForArg: (arg) => `Go to Tab ${Number(arg) + 1}`,
         run: (arg) => this.workspace.activateIndex(Number(arg) || 0),
       },
       {
@@ -3119,6 +3099,7 @@ export class NoxApp {
         id: 'nav.focusExplorer',
         title: 'Focus Explorer',
         category: 'Go',
+        keywords: ['explorer', 'files', 'tree', 'panel', 'sidebar', 'view'],
         enabled: this.#hasFolder,
         run: () => {
           this.config.set('workbench.showExplorer', true);
@@ -3381,11 +3362,43 @@ export class NoxApp {
       },
 
       // --- View -----------------------------------------------------------
+      // These three act on the explorer *tree* rather than on a file, which is
+      // why they carry `category: 'View'` while the rest of `explorer.*` sits
+      // under File. Defined here rather than beside their siblings because a
+      // menu block is registration-ordered, and left up there they opened the
+      // View menu with "Select All in Explorer".
+      {
+        id: 'explorer.selectAll',
+        title: 'Select All in Explorer',
+        category: 'View',
+        enabled: this.#hasFolder,
+        run: () => {
+          this.ui.explorer.selectAll(this.files.nodes.get().map((node) => node.path));
+        },
+      },
+      {
+        id: 'explorer.refresh',
+        title: 'Refresh Explorer',
+        category: 'View',
+        enabled: this.#hasFolder,
+        run: () => this.files.refresh(),
+      },
+      {
+        id: 'explorer.collapseAll',
+        title: 'Collapse All Folders',
+        category: 'View',
+        enabled: this.#hasFolder,
+        run: () => this.files.collapseAll(),
+      },
       {
         id: 'view.toggleExplorer',
-        title: 'Toggle Explorer',
+        // "Sidebar", not "Explorer": this hides the whole aside, view rail
+        // included, so calling it Explorer described one of the seven panels
+        // it takes away. The id keeps the old name because a user's
+        // keybindings.json may reference it.
+        title: 'Toggle Sidebar',
         category: 'View',
-        keywords: ['sidebar', 'files'],
+        keywords: ['sidebar', 'explorer', 'files', 'panel'],
         run: () => this.config.set('workbench.showExplorer', !this.config.get('workbench.showExplorer')),
       },
       {
@@ -3593,10 +3606,10 @@ export class NoxApp {
       // --- Answers ------------------------------------------------------------
       {
         id: 'answers.focus',
-        title: 'Show Answers',
+        title: 'Open Answers Panel',
         category: 'Answers',
         keyHint: 'Mod+Shift+A',
-        keywords: ['explain', 'ask', 'ai', 'answer'],
+        keywords: ['explain', 'ask', 'ai', 'answer', 'answers', 'panel', 'sidebar', 'view'],
         // The agent half of the selection predicate only: this command and
         // the sidebar rail must never disagree about whether the section
         // exists.
@@ -3613,7 +3626,7 @@ export class NoxApp {
         id: 'problems.focus',
         title: 'Show Problems',
         category: 'Language',
-        keywords: ['diagnostics', 'errors', 'warnings', 'lsp'],
+        keywords: ['diagnostics', 'errors', 'warnings', 'lsp', 'problems', 'panel', 'sidebar', 'view'],
         run: () => {
           // Otherwise the command is inert whenever the sidebar is hidden,
           // which is the same trap `answers.focus` documents.
@@ -3635,10 +3648,15 @@ export class NoxApp {
       },
       {
         id: 'notes.focus',
-        title: 'Show Notes',
+        // "Open Notes Panel", not "Show Notes". The palette renders every row
+        // as "<category>: <title>" and printed the object twice — but the
+        // *menu* renders the title alone, so trimming it to "Show Panel" would
+        // have put three identical entries in Tools. Naming the panel works in
+        // both places.
+        title: 'Open Notes Panel',
         category: 'Notes',
         keyHint: 'Mod+Shift+N',
-        keywords: ['note', 'scratch', 'memo'],
+        keywords: ['note', 'notes', 'scratch', 'memo', 'panel', 'sidebar', 'view'],
         run: () => this.revealNotes(),
       },
       {

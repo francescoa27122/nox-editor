@@ -75,6 +75,50 @@ describe('what the menu contains', () => {
   });
 
   /**
+   * The failure this prevents, found in a UI walk on 2026-08-23: eleven
+   * explorer commands — Rename…, Delete…, Duplicate, Copy Path among them —
+   * sat at the bottom of the **View** menu, because the explorer is a view.
+   * That is a fact about the widget, not about what the commands do, and View
+   * is not where anyone looks to rename a file.
+   *
+   * Stated as menus rather than as categories so it keeps holding if the
+   * categories are reorganised again.
+   */
+  it('files explorer operations under File, and only tree operations under View', () => {
+    const app = new NoxApp(new SystemMenuPlatform());
+    const menuFor = (label: string) => {
+      const node = app.menu
+        .describe()
+        .find((n): n is Extract<MenuNode, { kind: 'submenu' }> =>
+          n.kind === 'submenu' && n.label === label,
+        );
+      if (!node) throw new Error(`no ${label} menu`);
+      return commandIds(node.items);
+    };
+
+    const file = menuFor('File');
+    for (const id of [
+      'explorer.rename',
+      'explorer.delete',
+      'explorer.duplicate',
+      'explorer.copyPath',
+      'explorer.copyRelativePath',
+      'explorer.newFile',
+      'explorer.newFolder',
+    ]) {
+      expect(file).toContain(id);
+    }
+
+    // The three that genuinely act on the tree rather than on a file.
+    const view = menuFor('View');
+    expect(view).toContain('explorer.refresh');
+    expect(view).toContain('explorer.collapseAll');
+    expect(view).toContain('explorer.selectAll');
+    expect(view).not.toContain('explorer.delete');
+    expect(view).not.toContain('explorer.rename');
+  });
+
+  /**
    * The failure this prevents: putting Undo, Redo and Select All in the menu
    * as Nox commands. Those dispatch against the editor, while the predefined
    * items go through the responder chain — so a Nox-command Undo bound to ⌘Z

@@ -1,7 +1,9 @@
 <script lang="ts">
   import PanelEmpty from './PanelEmpty.svelte';
+  import PanelHeader from './PanelHeader.svelte';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
+  import { basename } from '@core/path';
 
   /**
    * Project-wide search results.
@@ -22,6 +24,8 @@
   const collapsed = search.collapsed;
   const focused = search.focused;
   const rootPath = workspace.rootPath;
+  /** Just the folder's name; the full path is too long for a sentence. */
+  const rootName = $derived($rootPath ? basename($rootPath) : '');
   const focusRequest = ui.focusSearchRequest;
   const replacement = search.replacement;
   const replaceMode = search.replaceMode;
@@ -138,6 +142,17 @@
     return $summary?.truncated ? `${base} (stopped at the limit)` : base;
   });
 
+  /**
+   * The header's right-hand summary. The status line under the controls owns
+   * the detail; this is the glanceable half, and it stays blank while idle so
+   * the header does not assert a count nobody asked for.
+   */
+  const headerSummary = $derived(
+    $status === 'done' && totals.matches > 0
+      ? `${totals.matches} in ${totals.files}`
+      : undefined,
+  );
+
   $effect(() => {
     void $focusRequest;
     input?.focus();
@@ -241,6 +256,13 @@
 </script>
 
 <div class="search-panel">
+  <!--
+    Search was the one sidebar panel with no header, so it was also the one
+    with no landmark and no name on screen — every other panel announces
+    itself in 10px uppercase and this opened straight onto an input.
+  -->
+  <PanelHeader title="Search" summary={headerSummary} />
+
   <div class="controls">
     <button
       class="replace-toggle"
@@ -296,16 +318,24 @@
         >
           <Icon name="regex" size={13} />
         </button>
-        <button
-          class="toggle"
-          class:on={$options.preserveCase}
-          title="Preserve case"
-          aria-label="Preserve case"
-          aria-pressed={$options.preserveCase}
-          onclick={() => search.toggle('preserveCase')}
-        >
-          <span class="preserve-case-label">AB</span>
-        </button>
+        <!--
+          Only with replace showing: preserve-case is a property of the
+          *replacement*, and it sat in the search row whether or not there was
+          one — a fourth unexplained toggle crowding a 100px input, controlling
+          something not on screen.
+        -->
+        {#if $replaceMode}
+          <button
+            class="toggle"
+            class:on={$options.preserveCase}
+            title="Preserve case in replacements"
+            aria-label="Preserve case in replacements"
+            aria-pressed={$options.preserveCase}
+            onclick={() => search.toggle('preserveCase')}
+          >
+            <span class="preserve-case-label">AB</span>
+          </button>
+        {/if}
       </div>
     </div>
 
@@ -414,6 +444,23 @@
   {#if !$rootPath}
     <PanelEmpty action={{ label: 'Open Folder', run: () => void app.commands.execute('file.openFolder') }}>
       Open a folder to search it.
+    </PanelEmpty>
+    <!--
+      The two states below were a blank rectangle: every other panel says what
+      it is waiting for, and this one showed an empty listbox whether you had
+      typed nothing or had typed something with no matches. The status line
+      does say "No results", but in 11px grey above an empty void — the panel
+      read as broken rather than as empty.
+    -->
+  {:else if $query.trim() === ''}
+    <PanelEmpty>
+      Search every file in <strong>{rootName}</strong>. Results group by file;
+      <strong>Enter</strong> opens the focused one.
+    </PanelEmpty>
+  {:else if $status === 'done' && !$summary?.error && totals.matches === 0}
+    <PanelEmpty>
+      No matches for <strong>{$query}</strong>. Case, whole word and regular
+      expressions are the toggles beside the box.
     </PanelEmpty>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->

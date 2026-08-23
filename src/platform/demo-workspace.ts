@@ -2,8 +2,19 @@
  * A small, realistic project used to seed the browser dev target so Nox has
  * something to show on first launch. Not shipped in the desktop build.
  */
+import { modKeyLabel } from './host';
 
 export const DEMO_ROOT = '/home/nox/projects/aurora';
+
+/**
+ * The modifier this host actually uses.
+ *
+ * The README below is the first thing anyone reads in a browser dev build,
+ * and it hardcoded ⌘ — so on Windows and Linux the demo opened by teaching
+ * three keys that do nothing. Shared with the keymap rather than sniffed
+ * again here, so the prose and the bindings cannot disagree.
+ */
+const MOD = modKeyLabel;
 
 const files: Record<string, string> = {
   'README.md': `# Aurora
@@ -16,9 +27,9 @@ Running \`npm run dev\` should give you a *usable* editor immediately — not an
 empty window with a "no folder open" placeholder. Everything here is in-memory:
 edit freely, nothing touches your disk.
 
-- Press \`⌘K\` for the command palette
-- Press \`⌘P\` to jump to a file
-- Press \`⌘F\` to search this buffer
+- Press \`${MOD}K\` for the command palette
+- Press \`${MOD}P\` to jump to a file
+- Press \`${MOD}F\` to search this buffer
 
 > Nox — Latin for *night*.
 `,

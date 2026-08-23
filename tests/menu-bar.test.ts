@@ -217,6 +217,40 @@ describe('keyboard', () => {
       'true',
     );
   });
+
+  /**
+   * The failure this prevents, found in a UI walk on 2026-08-23: the bar took
+   * the keyboard on mount.
+   *
+   * Its focus-request effect was written in the shape every panel uses —
+   * `void $request; focus()` — but a panel mounts *because* you opened it,
+   * while the menu bar mounts with the window. A Svelte effect runs once on
+   * mount, so Nox opened with `document.activeElement` on the "Nox" button:
+   * typing did nothing until you clicked the editor, and Enter dropped a menu.
+   *
+   * Nothing geometric here, so jsdom can hold it.
+   */
+  it('does not take focus on mount', async () => {
+    mounted = mountComponent(MenuBar);
+    await flush();
+    await Promise.resolve();
+
+    const buttons = [...mounted.container.querySelectorAll('.menu-title')];
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons).not.toContain(document.activeElement);
+  });
+
+  it('still takes focus when F10 asks it to', async () => {
+    mounted = mountComponent(MenuBar);
+    await flush();
+
+    mounted.app.ui.focusMenuBarRequest.set(mounted.app.ui.focusMenuBarRequest.get() + 1);
+    await flush();
+    // The focus lands in a microtask the effect queues.
+    await new Promise((resolve) => queueMicrotask(() => resolve(null)));
+
+    expect(mounted.container.querySelector('.menu-title')).toBe(document.activeElement);
+  });
 });
 
 describe('what the bar shows after a rebinding', () => {

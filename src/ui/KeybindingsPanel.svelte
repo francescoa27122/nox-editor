@@ -59,10 +59,14 @@
     customized: boolean;
   }
 
-  function titleOf(commandId: string): string {
+  function titleOf(commandId: string, arg?: unknown): string {
     const command = commands.get(commandId);
     if (!command) return commandId;
-    return command.category ? `${command.category}: ${command.title}` : command.title;
+    // A parameterised command names its own bound instances; without it every
+    // binding of `nav.goToTab` rendered the same "Go to Tab by Number".
+    const title =
+      arg !== undefined && command.titleForArg ? command.titleForArg(arg) : command.title;
+    return command.category ? `${command.category}: ${title}` : title;
   }
 
   const allRows = $derived.by<Row[]>(() => {
@@ -71,7 +75,7 @@
     const rows: Row[] = keymap.bindings().map((binding) => ({
       key: `${binding.commandId}::${binding.chord}`,
       commandId: binding.commandId,
-      title: titleOf(binding.commandId),
+      title: titleOf(binding.commandId, binding.arg),
       chord: binding.chord,
       arg: binding.arg,
       customized: keymap.isCustomized(binding.commandId),

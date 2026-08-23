@@ -124,24 +124,33 @@ describe('the rail', () => {
     expect(mounted!.container.querySelector('.badge')?.textContent?.trim()).toBe('1');
   });
 
-  it('collapses the sidebar when the active view is clicked again', async () => {
+  /**
+   * This asserted the opposite until 2026-08-23: re-clicking the active view
+   * collapsed the sidebar, following the rail convention. The convention
+   * assumes a persistent activity bar, and Nox's rail lives *inside* the aside
+   * being collapsed — so a walk found the click removing its own affordance
+   * and the other six with it, leaving nothing under the cursor to undo it.
+   *
+   * Collapsing is still ⌘B and the title-bar button, both of which say so.
+   */
+  it('keeps the sidebar open when the active view is clicked again', async () => {
     const { app } = await withFile(Sidebar);
-    const explorer = [...mounted!.container.querySelectorAll<HTMLElement>('.rail-button')].find(
-      (b) => b.getAttribute('aria-label') === 'Explorer',
-    )!;
+    const rail = (label: string) =>
+      [...mounted!.container.querySelectorAll<HTMLElement>('.rail-button')].find(
+        (b) => b.getAttribute('aria-label') === label,
+      )!;
     expect(app.config.get('workbench.showExplorer')).toBe(true);
     expect(app.ui.sidebarView.get()).toBe('explorer');
 
-    explorer.click();
+    rail('Explorer').click();
     flush();
-    expect(app.config.get('workbench.showExplorer')).toBe(false);
+    expect(app.config.get('workbench.showExplorer')).toBe(true);
+    expect(app.ui.sidebarView.get()).toBe('explorer');
+    // The rail is still there to click, which is the whole point.
+    expect(mounted!.container.querySelectorAll('.rail-button').length).toBeGreaterThan(1);
 
-    // Clicking a non-active view still switches, never collapses.
-    app.config.set('workbench.showExplorer', true);
-    const search = [...mounted!.container.querySelectorAll<HTMLElement>('.rail-button')].find(
-      (b) => b.getAttribute('aria-label') === 'Search',
-    )!;
-    search.click();
+    // Clicking a non-active view still switches.
+    rail('Search').click();
     flush();
     expect(app.ui.sidebarView.get()).toBe('search');
     expect(app.config.get('workbench.showExplorer')).toBe(true);

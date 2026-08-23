@@ -227,8 +227,8 @@
       class="icon-button"
       class:active={explorerShown}
       onclick={() => void commands.execute('view.toggleExplorer')}
-      title={withChord(explorerShown ? 'Hide Explorer' : 'Show Explorer', 'view.toggleExplorer')}
-      aria-label="Toggle explorer"
+      title={withChord(explorerShown ? 'Hide Sidebar' : 'Show Sidebar', 'view.toggleExplorer')}
+      aria-label="Toggle sidebar"
       aria-pressed={explorerShown}
     >
       <Icon name="sidebar" size={15} />
