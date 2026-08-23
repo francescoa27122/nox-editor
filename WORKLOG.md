@@ -47,6 +47,13 @@ target is the preview environment lacking clipboard permission, not Nox. It
 also does not reproduce in the desktop build, which is where Copy Path is
 meant to run.
 
+A fifth, same family as the find one and found by splitting the editor: each
+pane holds its own `EditorState` and so its own copy of the search query, and
+`attach()` overwrote `#view` without saying anything to the pane it was
+leaving. Search in the left pane, click the right one, and the left kept its
+matches boxed while the panel — correctly, for the pane it had moved to —
+said "No results".
+
 A fourth landed after that: at a 560px window the title bar pushed Commands,
 the sidebar toggle and Settings clean out of the viewport with nothing to
 scroll them back. `.menu-bar` is `flex: 0 1 auto` and so nominally
