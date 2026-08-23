@@ -8,6 +8,50 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, later) — Hover, and what the pointer could not reach
+
+Follow-up pass with the same brief as the entry below — day-to-day workflows,
+"little things" — but starting from the operator's own observation that the
+top bar of menus did not react to the mouse. It does react. The reaction was
+1.06:1.
+
+Three findings, all measured in the browser build at 1280x720 rather than read
+off the source, and all shipped:
+
+- **`b93455c`** — the interaction tokens were all under the threshold at which
+  a flat fill registers. `--nox-hover` at 5.5% cyan composites to 1.06:1 over
+  bg-panel, and fourteen rules across five panels used it as their *only*
+  hover feedback, so the explorer tree, search results, problems, references,
+  notes and both dialogs' buttons were inert under the pointer. All four moved
+  together because the order between them is load-bearing; the ladder over
+  bg-panel is now hover 1.34 < selected 1.44 < active 1.62 < selected-strong
+  1.89. `token-contrast.test.ts` gained a `composite()` and a 1.25:1 floor
+  measured on Umbra's pure-black editor. Same shape of failure as
+  `--nox-text-faint` in August: argued in prose, never measured, quietly
+  load-bearing.
+- **`7389643`** — the menu bar could not be reached while one of its menus was
+  open. `MenuBar`'s `onmouseenter` has claimed since it was written to be "the
+  reason a bar feels like a bar" and had never once run: `ContextMenu`'s
+  click-away layer is `inset: 0` at `--nox-z-dropdown` and covers the titles.
+  Fixed by raising the bar to the popup's own z-index while open (a tie, so
+  DOM order still puts the menu on top) **and** by `placeMenu` refusing to
+  cover its anchor — the 2026-08-23 clamp gave a too-tall menu the whole
+  viewport, and the File menu at 30 items opened at y=8 over a bar ending at
+  y=29.
+- **`057ac62`** — the breadcrumb sits inside the header's drag region with no
+  `no-drag`, unlike `.actions` and `.menu-bar`. Unverified locally: no drag
+  regions in the browser and macOS uses `data-tauri-drag-region`. For the
+  Windows and Linux shells.
+
+**Left deliberately undone.** 38 of the 39 interactive controls in the chrome
+show the arrow cursor; only the breadcrumb shows a pointer, and `.nox-button`
+in `base.css` is the one primitive that overrides `button { cursor: default }`.
+That inconsistency is real but the default is argued — `base.css:29` calls the
+chrome "a native app surface, not a document" — so flipping it is the
+operator's call, not a bug fix.
+
+---
+
 ## 2026-08-23 (PC) - UI passthrough: thirteen findings from walking the app, twelve fixed
 
 The operator asked for a pass over the whole editor for intuitiveness and
