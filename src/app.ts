@@ -2637,15 +2637,6 @@ export class NoxApp {
         },
       },
       {
-        id: 'explorer.selectAll',
-        title: 'Select All in Explorer',
-        category: 'View',
-        enabled: this.#hasFolder,
-        run: () => {
-          this.ui.explorer.selectAll(this.files.nodes.get().map((node) => node.path));
-        },
-      },
-      {
         id: 'explorer.revealInFileManager',
         resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
         capabilities: ['shell.exec'],
@@ -2667,20 +2658,6 @@ export class NoxApp {
             );
           }
         },
-      },
-      {
-        id: 'explorer.refresh',
-        title: 'Refresh Explorer',
-        category: 'View',
-        enabled: this.#hasFolder,
-        run: () => this.files.refresh(),
-      },
-      {
-        id: 'explorer.collapseAll',
-        title: 'Collapse All Folders',
-        category: 'View',
-        enabled: this.#hasFolder,
-        run: () => this.files.collapseAll(),
       },
 
       {
@@ -3385,6 +3362,34 @@ export class NoxApp {
       },
 
       // --- View -----------------------------------------------------------
+      // These three act on the explorer *tree* rather than on a file, which is
+      // why they carry `category: 'View'` while the rest of `explorer.*` sits
+      // under File. Defined here rather than beside their siblings because a
+      // menu block is registration-ordered, and left up there they opened the
+      // View menu with "Select All in Explorer".
+      {
+        id: 'explorer.selectAll',
+        title: 'Select All in Explorer',
+        category: 'View',
+        enabled: this.#hasFolder,
+        run: () => {
+          this.ui.explorer.selectAll(this.files.nodes.get().map((node) => node.path));
+        },
+      },
+      {
+        id: 'explorer.refresh',
+        title: 'Refresh Explorer',
+        category: 'View',
+        enabled: this.#hasFolder,
+        run: () => this.files.refresh(),
+      },
+      {
+        id: 'explorer.collapseAll',
+        title: 'Collapse All Folders',
+        category: 'View',
+        enabled: this.#hasFolder,
+        run: () => this.files.collapseAll(),
+      },
       {
         id: 'view.toggleExplorer',
         // "Sidebar", not "Explorer": this hides the whole aside, view rail
