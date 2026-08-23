@@ -98,6 +98,37 @@ function contrast(foreground: string, background: string): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+
+/**
+ * A wash flattened onto the surface under it, because that is the only form
+ * anyone ever sees it in. `--nox-hover` is `rgba(...)` by design — one token
+ * has to work over six surfaces — so its real colour does not exist until a
+ * background is chosen for it.
+ */
+function composite(fill: string, surface: string): string {
+  const parts = /^rgba?\(([^)]+)\)$/.exec(fill.trim());
+  if (!parts) throw new Error(`not an rgba fill: ${fill}`);
+  const [r, g, b, a] = parts[1]!.split(',').map((n) => Number(n.trim()));
+  if ([r, g, b, a].some((n) => n === undefined || Number.isNaN(n))) {
+    throw new Error(`not four rgba channels: ${fill}`);
+  }
+  const hex = /^#([0-9a-f]{6})$/i.exec(surface.trim());
+  if (!hex) throw new Error(`not an opaque hex colour: ${surface}`);
+  const under = [0, 2, 4].map((i) => parseInt(hex[1]!.slice(i, i + 2), 16));
+  return `#${[r!, g!, b!]
+    .map((over, i) => Math.round(a! * over + (1 - a!) * under[i]!))
+    .map((value) => value.toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+/** The four washes that say what the pointer and the keyboard are touching. */
+const INTERACTION_FILLS = [
+  '--nox-hover',
+  '--nox-active',
+  '--nox-selected',
+  '--nox-selected-strong',
+];
+
 const eclipse = declarations(ruleBody(tokensCss, ':root,'));
 const umbra = new Map([...eclipse, ...declarations(ruleBody(tokensCss, "[data-nox-theme='umbra']"))]);
 const themes: [string, Map<string, string>][] = [
@@ -279,5 +310,58 @@ describe.each(themes)('%s', (_theme, tokens) => {
     expect(`${colour} on ${background}: ${ratio.toFixed(2)}`).toBe(
       `${colour} on ${background}: ${Math.max(ratio, 4.5).toFixed(2)}`,
     );
+  });
+  /**
+   * A state fill has to be seen to be a state.
+   *
+   * `--nox-hover` shipped at 5.5% cyan, which composites to 1.06:1 over
+   * `--nox-bg-panel` — the sidebar, where for a file row it is the *entire*
+   * feedback. Fourteen rules across five panels paired it with no colour
+   * change at all, so hovering the explorer tree, the search results, the
+   * problems list, the notes list and both dialogs' buttons did nothing a
+   * person could see. DESIGN.md §7 argued the token as "a 5.5% cyan wash" and
+   * nothing ever measured it, which is the same failure `--nox-text-faint`
+   * had and the reason this file exists.
+   *
+   * WCAG has no clause to borrow: 1.4.11 is about *identifying* a control,
+   * not about a transient state on one already on screen. ~1.2:1 is the usual
+   * floor for a large flat fill to register at all, so the bar is 1.25:1 —
+   * one step clear of it, and measured on every surface because the lightest
+   * one flatters a light wash least.
+   */
+  it.each(INTERACTION_FILLS)('%s is a fill you can actually see', (name) => {
+    for (const surface of SURFACES) {
+      const ground = resolve(tokens, surface);
+      const ratio = contrast(composite(resolve(tokens, name), ground), ground);
+      expect(`${surface}: ${ratio.toFixed(2)}`).toBe(
+        `${surface}: ${Math.max(ratio, 1.25).toFixed(2)}`,
+      );
+    }
+  });
+
+  /**
+   * Raising the floor is what makes this worth asserting. Hover is the one
+   * state nobody asked for — it follows the pointer across everything it
+   * crosses — so it must stay quieter than the two that record a choice, or
+   * a mouse drifting over the explorer out-shouts the row you selected.
+   */
+  it('hover stays the quietest of the four', () => {
+    const ground = resolve(tokens, '--nox-bg-panel');
+    const at = (name: string) => contrast(composite(resolve(tokens, name), ground), ground);
+
+    expect(at('--nox-hover')).toBeLessThan(at('--nox-active'));
+    expect(at('--nox-hover')).toBeLessThan(at('--nox-selected'));
+  });
+
+  /**
+   * `ExplorerPanel.svelte` draws `.row.selected.lead` with the strong variant
+   * for one reason — the keyboard's position has to stay findable inside a
+   * large selection — and that only works while it outranks `.row.selected`.
+   */
+  it('the lead row stays findable inside a selection', () => {
+    const ground = resolve(tokens, '--nox-bg-panel');
+    const at = (name: string) => contrast(composite(resolve(tokens, name), ground), ground);
+
+    expect(at('--nox-selected')).toBeLessThan(at('--nox-selected-strong'));
   });
 });

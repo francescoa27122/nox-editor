@@ -975,7 +975,12 @@
     border-radius: var(--nox-r-sm);
     color: var(--nox-text-faint);
     opacity: 0;
-    transition: opacity var(--nox-dur-fast) var(--nox-ease);
+    /* Three properties move on this button — it fades in with the row, then
+       fills and brightens under the pointer — and only the fade was eased. */
+    transition:
+      opacity var(--nox-dur-fast) var(--nox-ease),
+      background var(--nox-dur-fast) var(--nox-ease),
+      color var(--nox-dur-fast) var(--nox-ease);
   }
 
   /* Both row kinds reveal their actions the same way. Kept as one rule per

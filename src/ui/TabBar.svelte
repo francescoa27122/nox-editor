@@ -489,7 +489,11 @@
     border-right: 1px solid var(--nox-border);
     cursor: default;
     position: relative;
-    transition: color var(--nox-dur-fast) var(--nox-ease);
+    /* Background as well as colour: `.tab:hover` moves both, and easing one
+       of them made the fill arrive before the label. */
+    transition:
+      background var(--nox-dur-fast) var(--nox-ease),
+      color var(--nox-dur-fast) var(--nox-ease);
   }
 
   .tab:hover {
