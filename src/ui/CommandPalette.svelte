@@ -266,10 +266,22 @@
     return matchAgainstKeywords(query, command);
   }
 
+  /**
+   * Commands that open the very list they would be listed in.
+   *
+   * `nav.commandPalette` sorted first on an empty query, so the highlighted
+   * row on opening the palette was "Go: Command Palette" and Enter re-opened
+   * what was already on screen — the one keystroke a new user is most likely
+   * to try, answered with nothing happening. They stay in the Go menu and the
+   * keybinding editor, which is where discovering them is useful.
+   */
+  const SELF_OPENING = new Set(['nav.commandPalette']);
+
   function commandRows(query: string): RowsResult {
     const scored: { row: Row; score: number; title: string }[] = [];
 
     for (const command of commands.palette()) {
+      if (SELF_OPENING.has(command.id)) continue;
       const label = command.category ? `${command.category}: ${command.title}` : command.title;
       const won = scoreCommand(query, command, label);
       if (!won) continue;

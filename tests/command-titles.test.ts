@@ -60,4 +60,35 @@ describe('the command table', () => {
       'view.resetFontSize',
     ]);
   });
+
+  /**
+   * Every sidebar panel must be reachable by typing what it is.
+   *
+   * The walk that produced this found six panels behind five categories and
+   * three verbs — `Search: Search in Project`, `Go: Focus Explorer`, `Language:
+   * Show Problems`, `Git: Show Git` — so there was no name to guess. The
+   * categories are right where they are (Find holds the search commands, Code
+   * holds the language ones); what was missing is the vocabulary, so the
+   * commands carry it as keywords instead of being herded into one menu.
+   */
+  it('reaches every sidebar panel by the words "panel" and "sidebar"', () => {
+    const PANEL_COMMANDS = [
+      'nav.focusExplorer',
+      'search.focus',
+      'notes.focus',
+      'answers.focus',
+      'problems.focus',
+      'references.focus',
+      'git.focus',
+    ];
+
+    for (const word of ['panel', 'sidebar']) {
+      const reachable = commands
+        .filter((command) => command.keywords?.some((keyword) => keyword.includes(word)))
+        .map((command) => command.id);
+      for (const id of PANEL_COMMANDS) {
+        expect(reachable, `"${word}" should reach ${id}`).toContain(id);
+      }
+    }
+  });
 });
