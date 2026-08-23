@@ -148,10 +148,26 @@
     }
   }
 
+  /**
+   * Not `$state`: read and written only inside the effect below, and making it
+   * reactive would re-run that effect on its own write.
+   */
+  let focusRequestSeen = false;
+
   $effect(() => {
     // `menubar.focus` (F10) bumps a counter rather than reaching for the
     // element, the same shape every panel's focus request uses.
     void $focusRequest;
+
+    // A panel mounts *because* you opened it, so acting on the effect's first
+    // run is right for them. The menu bar mounts with the window, and the same
+    // shape meant Nox opened with the keyboard parked on the "Nox" button:
+    // typing did nothing until you clicked the editor, and Enter or ArrowDown
+    // opened a menu. The first run is the mount, so skip it.
+    if (!focusRequestSeen) {
+      focusRequestSeen = true;
+      return;
+    }
     queueMicrotask(() => buttons[focused]?.focus());
   });
 

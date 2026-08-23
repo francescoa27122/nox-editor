@@ -8,6 +8,89 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC) - UI passthrough: thirteen findings from walking the app, twelve fixed
+
+The operator asked for a pass over the whole editor for intuitiveness and
+cleanliness. Walked the browser target under Playwright at 1440x900 rather
+than reading the code, which is why these are measurements and not opinions.
+
+The design system itself is in good shape - tokens, empty-state copy, tooltips
+and aria labels are consistent and well argued. Everything below is navigation
+naming, or a place that outgrew its container.
+
+Shipped, in three commits:
+
+- **`9aff916`** - the three that cost you what you were doing. Menus taller
+  than the window were clipped with no scroll: the placement rule only ever
+  flipped, which cannot rescue a menu taller than the viewport, and View
+  measured **903px in a 900px window** with `overflow-y: visible`. Placement is
+  now `core/menu-placement.ts`, pure, because jsdom has no layout and
+  `tests/support/jsdom-layout.ts` forbids inventing rectangles there. Eleven
+  explorer commands (Rename, Delete, Duplicate, Copy Path) moved out of **View**
+  into File; the three real tree operations stay. And the menu bar stopped
+  taking the keyboard on mount - its focus effect used the shape every panel
+  uses, but a panel mounts because you opened it while the bar mounts with the
+  window.
+- **`babbe23`** - findability. `titleForArg` so a parameterised command names
+  its own bound rows (nine rows read "Go to Tab by Number"; the panel could not
+  derive the number because the arg is 0-based and the chord is 1-based). The
+  palette no longer lists the command that opens the palette. All seven sidebar
+  panels carry `panel`/`sidebar` keywords, with a table-wide test.
+- **`13fdf35`** - Search got the `PanelHeader` and the two `PanelEmpty` states
+  the consolidation had missed, preserve-case moved inside the replace
+  disclosure, `Wrap` moved inside `{#if active}` so an empty pane no longer
+  leaves the status bar reading as one word, and the demo README stopped
+  teaching Mac chords on Windows (host check now shared in `platform/host.ts`).
+
+Verified:
+
+- `npm test` 1905 (130 files), `npm run check` 968 files 0 errors, `npm run
+  build` green.
+- Every behavioural fix mutation-checked: reverting the boot-focus guard, the
+  `Wrap` move and the Search `PanelHeader` each turned the named test red.
+- Re-measured in the running app after each change - View menu now 884px tall
+  inside a 900px viewport with `overflow-y: auto`; boot focus lands on
+  `.cm-content` and a typed character reaches the buffer; F10 still reaches the
+  bar; Tools menu reads "Open Git Panel"/"Open Notes Panel" rather than three
+  identical "Show Panel" entries.
+
+Decisions worth not re-litigating:
+
+- **Re-clicking the active rail icon no longer collapses the sidebar.** The
+  convention it followed assumes a persistent activity bar; this rail lives
+  *inside* the aside it was collapsing, so the click deleted its own affordance
+  and the other six with it. Ctrl+B and the title-bar button still collapse,
+  and both now say "Sidebar", which is what they hide.
+- **The stutter (`Git: Show Git`) is fixed by renaming to `Open Git Panel`, not
+  by trimming to `Show Panel`.** Menus render the title *without* its category,
+  so the shorter name would have put three identical entries in Tools. A
+  table-wide invariant test for the stutter was written and then deleted: it
+  also flagged `Terminal: Toggle Terminal` and `File: Close File`, which are
+  correct in the menu and only mildly redundant in the palette.
+- **No new keybindings.** References keeps no chord of its own by an argued
+  decision at `app.ts:3882` - Shift+F12 already fills and shows it - so the
+  fix was the rail tooltip, which now names that chord. Git genuinely has none
+  and the mnemonic letters are taken; freeing Ctrl+Shift+G from Find Previous
+  is a trade worth the operator's call, not mine.
+
+Not fixed, deliberately: the remaining duplicate rows in the keybinding editor
+(`Edit: Find Next` twice, for Ctrl+G and F3). Each binding must stay separately
+removable, which is what a row per binding buys, and sorting already places the
+alternatives adjacent.
+
+Next: **the desktop build is unverified for all of this.** Everything changed
+is chrome the browser target renders identically, but `--geometry`, the macOS
+overlay title bar and the native menu are exactly what a browser session cannot
+see - and the menu-placement change touches the popup the in-window menu bar
+uses on Windows and Linux. A desktop walk is the check.
+
+Blocked: nothing. Unpushed by design - the repo is public and a push is
+publication.
+
+Confidence: high on the twelve fixes, each measured before and after in the
+running app and held by a test. Medium on the desktop build, which no test and
+no browser session can reach.
+
 ## 2026-08-22 (PC, later) — Code actions, and four fixes that led to them
 
 Second half of the same day. The operator asked what should be built next,

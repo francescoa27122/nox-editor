@@ -32,6 +32,18 @@ export interface Command {
   /** Hide from the palette. Still executable and bindable. */
   hidden?: boolean;
   /**
+   * Title for one *bound* instance of a parameterised command.
+   *
+   * A command that takes an argument has as many bindings as arguments, and
+   * the keybinding editor lists a row per binding so each stays separately
+   * rebindable. Without this they all render the command's one generic title:
+   * `nav.goToTab` produced nine rows reading "Go: Go to Tab by Number", and
+   * only the chord column told them apart. The command knows how to name its
+   * own argument — the panel cannot, not least because `goToTab`'s arg is
+   * 0-based while its chord is 1-based.
+   */
+  titleForArg?: (arg: unknown) => string;
+  /**
    * What this command needs permission to do.
    *
    * Absent means "nothing with a side effect" — moving the cursor, opening a

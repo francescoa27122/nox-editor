@@ -332,17 +332,23 @@
           {active.languageName}
         </span>
       {/if}
+
+      <!--
+        Inside `{#if active}`: wrap is a property of the buffer on screen, and
+        outside it this button was the *only* item left when a pane was empty —
+        a lone "Wrap" adrift in the far corner of an otherwise blank bar.
+      -->
+      <button
+        class="item"
+        title={withChord('Toggle word wrap', 'view.toggleWordWrap')}
+        class:on={$settings['editor.wordWrap']}
+        aria-pressed={$settings['editor.wordWrap']}
+        onclick={() => void commands.execute('view.toggleWordWrap')}
+      >
+        Wrap
+      </button>
     {/if}
 
-    <button
-      class="item"
-      title={withChord('Toggle word wrap', 'view.toggleWordWrap')}
-      class:on={$settings['editor.wordWrap']}
-      aria-pressed={$settings['editor.wordWrap']}
-      onclick={() => void commands.execute('view.toggleWordWrap')}
-    >
-      Wrap
-    </button>
   </div>
 </footer>
 
