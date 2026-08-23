@@ -8,6 +8,114 @@ are knowledge.**
 
 ---
 
+## 2026-08-22 (PC) — Three PRs: damaged config, split panes, single-match replace
+
+The work log stops at v0.5.1 and the repo is at 0.8.3. **This entry does not
+try to fill that gap** — 0.6, 0.7 and 0.8.0–0.8.3 went unlogged and inventing
+entries for sessions nobody recorded would be worse than the hole. It records
+this session only.
+
+Started from "find the three most substantial things and do them". Research
+went out in parallel over the roadmap, the code, and a bug hunt in everything
+0.6–0.8.2 shipped. The roadmap answer was that **every 1.0 code row is
+already done** (`ROADMAP.md:202`) and what is left is a real-keyboard pass and
+two certificates — a ritual and a purchase, neither of them code. So the three
+came from the bug hunt and the debt table instead, which is what the priority
+function says anyway: things that make existing claims untrustworthy first.
+
+Shipped, as three PRs, all merged to `main` with CI green on all seven jobs:
+
+- **#92 `fix/damaged-config-files`** — four load paths treated a config file
+  they could not parse as a file that was not there, then wrote over it:
+  `settings.json` (`services/config/index.ts:229`), `keybindings.json`
+  (`services/keymap.ts:415`), `session.json` (`services/session.ts:396`),
+  `notes.json` (`services/notes.ts:153`). `servers.json` and `agents.json`
+  always reported theirs — neither is ever written back, which is why the
+  asymmetry survived. New `core/damaged-config.ts` + `services/damaged-config.ts`;
+  a `damaged` signal per service, deliberately not `error` (which `#save`
+  clears ~250 ms later); and a salvage that reads the `unsaved-N.txt` /
+  `note-N.txt` high-water mark out of the *unparseable* text, because a
+  restarted counter is what turned a damaged index into a destroyed body file.
+  Also `workspaceConfigPath`, which built `.nox/settings.json` with a hardcoded
+  `/` — on Windows a different *string* from what `join` and the watcher
+  produce, so the file never hot-reloaded and opening it twice made two buffers.
+- **#93 `fix/pane-and-session-fidelity`** — six defects in the panes feature
+  shipped 0.8.0–0.8.2. The bad one: `#dispatchToView` broadcast a
+  workspace-originated change to every pane while each pane's route back
+  through `applyTransaction` had already mirrored it, so the second pane
+  applied it twice. A grown file came back as itself plus a slice of itself,
+  and `reloadFromDisk` then marked that **clean** — next save writes the
+  corruption to disk. Now first-acceptor for delivery, `#mirrorToOtherViews`
+  (annotated, so nothing re-enters) for the forward. Plus: `selectionOf`
+  handed every background tab the foreground tab's cursor; restore's
+  `splitEditor()` moved a tab every launch; no production caller passed a group
+  to `close`, so ⌘W in the second pane closed the first; `Close All Files`
+  iterated deduplicated `buffers`; the session recorded no charset so non-UTF-8
+  tabs vanished; Reopen with Encoding discarded unsaved edits without asking.
+- **#94 `feat/replace-single-matches`** — the v0.3 roadmap row.
+  `computeReplacements` had accepted a `skip` set since it was written and no
+  caller ever passed one. An exclusion is an *identity* (path, line, absolute
+  column), never an index, because `#replacePaths` recomputes from current
+  text; an identity that cannot be relocated refuses the file rather than
+  guessing. Both actions are commands, so the results list stops being
+  mouse-only.
+
+Verified:
+
+- `npm test`: 1803 on #92, 1795 on #93, 1790 on #94, all green from a 1777
+  baseline. `npm run check` 951–953 files, 0 errors. `npm run build` green.
+- CI green on all three, seven jobs each: web on ubuntu and windows under
+  node 20 and 22, and rust on ubuntu, windows and macOS. #93 and #94 were
+  rebased onto main and re-run after the merges ahead of them, rather than
+  merged on a stale green.
+- The three branches conflicted only in `CHANGELOG.md`'s `[Unreleased]` block
+  and `ARCHITECTURE.md`'s decision log and debt table — every conflict was two
+  independent additions, resolved by keeping both, and `npm test` was re-run
+  after each resolution (1821, then 1834).
+- **Every fix mutation-checked** — reverting it fails the test that names it,
+  with the reported symptom (duplicated text; `RangeError: Invalid change
+  range 0 to 4 (in doc of length 2)`; `[['a.ts'],['b.ts','c.ts']]` instead of
+  `[['a.ts','b.ts'],['c.ts']]`; a background tab reporting `[[2,2]]` for
+  `[[14,14]]`).
+- #94 driven in the running app, not only under Vitest: dismiss took the row
+  out *and* dropped the file's count badge, a one-match replace landed with
+  its toast, and the row height was **measured** at 22px because
+  `SearchPanel.svelte:81` says the windowing arithmetic breaks otherwise.
+
+Next: **the desktop keyboard pass.** `.desktop-pass-report.md` has 12 of 17
+items UNSEEN, and it is one of only two things between here and 1.0. It needs
+a real keyboard on macOS and it is not doable from this machine. Everything
+that *is* code on the 1.0 bar is done.
+
+Blocked:
+
+- **`src-tauri/src/encoding.rs` writes UTF-8 when asked for UTF-16.** Two
+  independent defects: no BOM is emitted, and `detect` recognises UTF-16 only
+  by its BOM — so the file can never be reopened; and `encoding_rs`'s
+  `Encoding::encode` maps UTF-16LE/BE to UTF-8 via `output_encoding()`, with
+  the returned encoding discarded. Left unfixed **because there is no Rust
+  toolchain on this PC** and this wants `cargo test` behind it, not a green
+  summary. Highest-value remaining bug.
+- Smaller, unfixed, all found and not chased: `MenuBar.svelte:32` tracks
+  `commandVersion` but not `keymap.version`, so the in-window menu shows stale
+  accelerators after a rebind; `MemoryPlatform.searchProject` has no
+  always-exclude list, so the browser target searches `node_modules` while the
+  desktop build prunes it; `additionalTextEdits` is dropped from LSP
+  completions, so accepting an auto-import inserts the symbol and never the
+  import.
+
+Confidence:
+
+- High on all three PRs: every claim has a command behind it and every fix has
+  a mutation check, which is a stronger bar than "the tests pass".
+- High that the pane corruption was real — traced line by line through
+  `applyTransaction` and reproduced before it was fixed.
+- Medium on the Windows separator bug *manifesting*: the string mismatch is
+  certain and now tested, but I could not run a Windows Tauri build to confirm
+  the folder dialog returns backslash paths.
+- Low on nothing here. The one thing I did not verify at all is the UTF-16
+  claim's second half, and it is written down as unverified rather than fixed.
+
 ## 2026-08-20 (PC, release) — The key ceremony, and v0.5.1
 
 The ceremony (spec §8, "human hands only") ran on Francesco's keyboard; my
