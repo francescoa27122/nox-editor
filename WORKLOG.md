@@ -56,8 +56,28 @@ is how rust-analyzer and gopls ask to watch files), and work-done progress. It
 is the highest-leverage piece of LSP work left, and code actions made the case
 for it concrete rather than theoretical.
 
-Blocked: unchanged — the desktop keyboard pass needs a real Mac keyboard, and
-the two certificates are a purchase. Both are still the whole of 1.0.
+Blocked: the desktop keyboard pass needs a real Mac keyboard, and the
+certificate is a purchase. Both are still the whole of 1.0 — but the
+certificate half moved:
+
+- **Apple only, Windows deferred** (operator's decision, same day). The
+  workflow is wired and merged in #105: six secrets beside the updater's two,
+  and a guard that refuses a *half*-present configuration. Signing without
+  notarizing is the trap it exists for — Gatekeeper still stops the app, so
+  the release notes would promise a clean first launch that never happens.
+- Nothing here could be tested by CI: the release workflow fires only on a
+  tag. The guard was **extracted from the YAML and run** over its four states
+  instead, empty-string secrets included, since that is what an unset GitHub
+  secret becomes. The first tagged release with real secrets is still the
+  first real test — which is why the runbook makes it a `-rc` prerelease.
+- The human half is `docs/superpowers/specs/2026-08-22-apple-signing-design.md`:
+  enrolment, CSR, export, the six secrets, and what to verify with `codesign`,
+  `spctl` and `stapler` rather than trusting the absence of a dialog. It flags
+  once that an *individual* Developer ID puts a legal name in every shipped
+  binary, readable with `codesign -dv` — decided at enrolment, awkward after.
+- Install docs left alone deliberately: `README.md:38-53`, the workflow's
+  `releaseBody` and the roadmap row are accurate until a signed release
+  exists. The spec lists all three, the way 0.5.1 did for the updater.
 
 Confidence:
 
