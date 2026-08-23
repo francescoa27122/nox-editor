@@ -189,6 +189,17 @@ hover 1.34 < selected 1.44 < active 1.62 < selected-strong 1.89. Hover is the
 one state nobody asked for — it follows the pointer across everything it
 crosses — so it must never out-shout a state that records a choice.
 
+**The cursor draws the same line, one level up.** A `<button>` gets
+`cursor: pointer`; a list row — the explorer tree, the palette, search
+results, problems, references, a tab — gets `cursor: default`, because it is a
+thing you select rather than press, and the two drag sources among them would
+be lying if they pointed. `button:disabled` returns to the arrow. This lived
+at `button { cursor: default }` until 2026-08-23, on §2's "native app surface"
+argument, which is right about text and surfaces and was wrong about controls:
+38 of the 39 interactive elements in the chrome showed the arrow, and five
+components had already quietly opted themselves out. `tests/cursor-affordance.test.ts`
+holds the exceptions to a list.
+
 Two "you are here" markers carry most of the navigational weight:
 
 - **Tab spine** — a 2 px violet→cyan gradient across the top of the active tab.

@@ -43,12 +43,14 @@ off the source, and all shipped:
   regions in the browser and macOS uses `data-tauri-drag-region`. For the
   Windows and Linux shells.
 
-**Left deliberately undone.** 38 of the 39 interactive controls in the chrome
-show the arrow cursor; only the breadcrumb shows a pointer, and `.nox-button`
-in `base.css` is the one primitive that overrides `button { cursor: default }`.
-That inconsistency is real but the default is argued — `base.css:29` calls the
-chrome "a native app surface, not a document" — so flipping it is the
-operator's call, not a bug fix.
+**Raised as the operator's call, then made.** 38 of the 39 interactive
+controls in the chrome showed the arrow cursor; only a breadcrumb segment
+pointed, and five components had reached for `cursor: pointer` locally while
+`base.css` said otherwise — which is what a rule looks like when it is missing
+from the place that should own it. Flipped in a follow-up PR: `button` points,
+`button:disabled` does not, and list rows keep the arrow because they are
+things you select. The six local declarations came out; the exceptions live in
+`tests/cursor-affordance.test.ts` because a comment cannot fail.
 
 ---
 

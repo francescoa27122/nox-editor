@@ -379,7 +379,6 @@
   }
 
   .head {
-    cursor: pointer;
     display: flex;
     align-items: center;
     gap: var(--nox-sp-2);
@@ -422,7 +421,6 @@
   }
 
   .linkish {
-    cursor: pointer;
     color: var(--nox-text-muted);
     text-decoration: underline;
     text-underline-offset: 2px;

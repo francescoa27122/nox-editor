@@ -367,7 +367,6 @@
      the whitespace around them still drag the window — which is the half of
      the bar you actually want to grab. */
   button.crumb {
-    cursor: pointer;
     -webkit-app-region: no-drag;
   }
 
