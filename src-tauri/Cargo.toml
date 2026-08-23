@@ -54,6 +54,28 @@ futures-util = "0.3"
 # Used by name for the oneshot cancel channel and `select!`. Tauri depends on
 # tokio, but a transitive dependency is not in scope for `tokio::` paths.
 tokio = { version = "1", features = ["sync", "macros"] }
+# Optional, and only ever enabled by the `wdio` feature below. See there.
+tauri-plugin-wdio-webdriver = { version = "1", optional = true }
+
+# An embedded WebDriver server, so the end-to-end harness can drive the
+# packaged app. Off unless asked for, and asked for only by `e2e` in CI.
+#
+# **A feature rather than the plugin's own documented setup.** Its README says
+# to use `[target.'cfg(debug_assertions)'.dependencies]`, and Cargo does not
+# support that: the reference says `cfg(debug_assertions)`, `cfg(test)` and
+# `cfg(proc_macro)` "will not work as expected and will always have the
+# default value returned by `rustc --print=cfg`" — which *includes*
+# `debug_assertions`. Following that advice would link a WebDriver server into
+# every release build. It would never be registered, because the `#[cfg]` on
+# the call site in `lib.rs` does work — but a remote-control server compiled
+# into the shipped binary is not a thing to be relaxed about, and "it is
+# unreachable" is a weaker claim than "it is not there".
+#
+# So: optional dependency, off by default. A release build does not compile
+# it. `lib.rs` additionally requires `debug_assertions`, so even
+# `--release --features wdio` registers nothing.
+[features]
+wdio = ["dep:tauri-plugin-wdio-webdriver"]
 
 [profile.release]
 # The binary is the product; optimise it like one.

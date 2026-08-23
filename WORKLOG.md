@@ -8,6 +8,76 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, phase 2 cont.) — Windows and Linux are both driven now
+
+The embedded provider landed and **both platforms go green on the same
+change**: the packaged app is launched and driven on every pull request, on
+Windows and on Linux.
+
+```
+[msedge 151.0.0.0 windows]     4 passing (5m 52.9s)
+[WebKitGTK 605.1.15 linux]     4 passing (5m 52.5s)
+```
+
+`driverProvider: 'embedded'` replaces `tauri-driver`, WebKitWebDriver and
+msedgedriver with a WebDriver server compiled *into* the app. It is what
+unblocked Windows — where an exactly matching msedgedriver still could not
+open a session — and it is the only route to macOS, which has no external
+driver at all. macOS is now a matrix entry rather than a research problem.
+
+**The plugin's own documented setup would have shipped a WebDriver server.**
+Its README says to declare the dependency under
+`[target.'cfg(debug_assertions)'.dependencies]`. Cargo does not support that:
+the reference says `cfg(debug_assertions)`, `cfg(test)` and `cfg(proc_macro)`
+"will not work as expected and will always have the default value returned by
+`rustc --print=cfg`" — and that default *includes* `debug_assertions`. The
+crate would have been linked into every release build. It would never have
+been *registered*, because the `#[cfg]` on the call site does work — but for
+something that lets a local port drive the editor, "unreachable" is a weaker
+claim than "not there". Checked against the Cargo reference rather than
+trusted, which is the only reason it was caught.
+
+Two gates instead, and the split is deliberate:
+
+- the **`wdio` feature** decides whether the crate is compiled at all. Off by
+  default, named nowhere but the `e2e` job.
+- **`debug_assertions`** decides whether it is registered, so even
+  `--release --features wdio` starts no server.
+
+Verified:
+
+- `e2e (windows-latest)` and `e2e (ubuntu-22.04)` both green, **4 passing each**,
+  read off the spec reporter rather than the tick.
+- The three `rust` jobs are green *without* the feature, which is the half that
+  proves the default build is untouched by the optional dependency. That split
+  — same PR, feature on in one job and off in another — is what makes the
+  gating claim testable rather than asserted.
+- `npm test` 1953 / 134, `npm run check` 973 files 0 errors.
+
+**A prediction of mine was wrong.** The six minutes were written up as the
+service waiting for the missing plugin, and the embedded provider was expected
+to remove them by supplying it. It did not: 6m15s became 5m53s. The real shape
+is **one WebDriver command per ten seconds** — consecutive `findElement` calls
+land at `:43:52`, `:44:02`, `:44:12`, a flat round trip rather than a retry
+loop, since WebdriverIO polls at 500 ms. About thirty-five commands across four
+specs is the whole six minutes. That matters more than the old diagnosis did:
+it is per *command*, so **it grows linearly with every spec added**.
+
+Next: **the ten seconds**, before the suite grows or the job is promoted into
+required checks. Ten is a suspiciously round number — a default timeout being
+waited out rather than work being done. Then macOS, then dropping
+`webkit2gtk-driver`, which is now dead weight kept deliberately so this change
+had exactly one variable.
+
+Blocked: nothing new. The certificates remain the operator's.
+
+Confidence: high — both platforms green with the specs named in the log, and
+the release-build claim is backed by the `rust` jobs compiling without the
+feature. The ten-second diagnosis is one measurement of one run; the cause is
+identified, the fix is not yet.
+
+---
+
 ## 2026-08-23 (PC, phase 2 cont.) — Windows is wired and blocked, on someone else's bug
 
 Second slice of phase 2. The matrix is written and correct; **Windows does not

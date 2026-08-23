@@ -61,23 +61,24 @@ const application =
 /**
  * Which WebDriver actually drives the webview.
  *
- * `external` means `tauri-driver` in front of WebKitWebDriver, which the
- * service installs itself and which the `webkit2gtk-driver` package provides.
- * It needs **no change to the Rust crate**, which is the entire reason Linux
- * is the platform this harness starts on.
+ * `embedded` is a WebDriver server *inside* the app, from
+ * `tauri-plugin-wdio-webdriver`, which `src-tauri` compiles only under its
+ * `wdio` feature and registers only in a debug build. No `tauri-driver`, no
+ * WebKitWebDriver, no msedgedriver.
  *
- * The service now defaults to `embedded` instead, and that default is what
- * the second CI run died on: the embedded provider needs
- * `tauri-plugin-wdio-webdriver` registered in `lib.rs`, so with no plugin
- * present the app launched fine and then nothing ever answered on port 4445
- * until the 60s timeout. The app spawning is not the same as the app being
- * drivable.
+ * It replaced `external` because **`external` is a dead end on Windows.**
+ * Everything up to the session worked there — `nox.exe` built, WebView2
+ * `151.0.4129.86` detected, the exactly matching msedgedriver downloaded,
+ * `tauri-driver` ready on 4444 — and then `POST /session` waited sixty
+ * seconds for a Chromium DevTools port that a Tauri WebView2 window never
+ * opens. Version skew, the usual cause of that error, was ruled out by the
+ * exact match. `Haprog/tauri-wdio-win-test` exists to do precisely this and
+ * reports no way to make modern WebdriverIO work with `tauri-driver` there.
  *
- * Adopting the embedded provider is a real option later — it is how macOS is
- * supported at all — but it is a source change to `src-tauri`, and `cargo` is
- * not installed on the development machine, so it belongs in its own step.
+ * The same change is also the only route to macOS, which has no external
+ * driver available at all.
  */
-const DRIVER = { driverProvider: 'external' };
+const DRIVER = { driverProvider: 'embedded' };
 
 export const config = {
   runner: 'local',

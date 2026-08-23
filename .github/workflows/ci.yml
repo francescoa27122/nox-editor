@@ -106,20 +106,34 @@ jobs:
   # to the walk harness rather than the app. Linux and Windows ship installers
   # nobody has launched.
   #
-  # Linux first because it is the platform CI can build and drive end to end
-  # with no external account and no Rust plugin: the service drives WebKit
-  # through tauri-driver, which it installs itself. Windows is the next
-  # target and needs only a matrix entry; macOS needs the embedded provider's
-  # Rust crate registered in debug builds, which is a source change rather
-  # than a workflow one.
+  # Both platforms drive through a WebDriver server compiled *into* the app,
+  # behind `src-tauri`'s `wdio` feature. That replaced an external
+  # `tauri-driver`, which worked on Linux and is a dead end on Windows: with
+  # the exactly matching msedgedriver in place, `POST /session` still waited
+  # sixty seconds for a Chromium DevTools port that a Tauri WebView2 window
+  # never opens.
+  #
+  # The same server is the only route to macOS, which has no external driver
+  # available at all — so that platform is now a matrix entry rather than a
+  # research problem.
   #
   # Not in branch protection's required checks on purpose, for now. A harness
   # whose own flakiness is unmeasured should not be able to block a merge
   # until it has a track record; promoting it is a deliberate later step.
   e2e:
-    name: e2e (ubuntu-22.04)
-    runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    name: e2e (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # 60 rather than 45: a cold Rust cache on Windows is the slowest build in
+    # this workflow, and a timeout there would read as a harness failure.
+    timeout-minutes: 60
+    strategy:
+      # Windows is the operator's own platform and the one whose installer has
+      # never been launched by anyone; Linux is where this started because it
+      # needs no Rust change. Neither result may hide the other, so no
+      # fail-fast — a Windows-only defect is exactly what this matrix is for.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
@@ -132,16 +146,23 @@ jobs:
       # package set, and sharing a key would make the two jobs evict each
       # other's archives on every run.
       - name: Cache apt archives
+        if: runner.os == 'Linux'
         uses: actions/cache@v6
         with:
           path: ~/apt-archives
           key: apt-jammy-e2e-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
           restore-keys: apt-jammy-e2e-
 
-      # `webkit2gtk-driver` is WebKitWebDriver, which is what actually drives
-      # the webview; `xvfb` because a GTK window needs a display server and a
-      # runner has none.
+      # Linux only. `xvfb` is needed regardless — a GTK window still has to
+      # draw somewhere, and a runner has no display.
+      #
+      # `webkit2gtk-driver` should now be dead weight: the embedded provider
+      # replaces WebKitWebDriver, which is the only thing that package was
+      # for. It is kept for this change anyway, so that if the run goes red
+      # the cause is unambiguously the provider swap and not a dependency
+      # removed in the same breath. Drop it once this is green.
       - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
         uses: ./.github/actions/linux-build-deps
         with:
           extra-packages: webkit2gtk-driver xvfb
@@ -153,24 +174,10 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # The service advertises automatic driver management and does not do it
-      # here: the run before this one died on "tauri-driver not found",
-      # surfacing as WebdriverIO's misleading `No "browserName" defined in
-      # capabilities` because the service gives up before rewriting the
-      # capability. Cached by binary rather than rebuilt, since `cargo
-      # install` compiles it from source and `rust-cache` covers the workspace
-      # target directory, not `~/.cargo/bin`.
-      - name: Cache tauri-driver
-        id: tauri-driver-cache
-        uses: actions/cache@v6
-        with:
-          path: ~/.cargo/bin/tauri-driver
-          key: tauri-driver-jammy-v1
-
-      - name: Install tauri-driver
-        if: steps.tauri-driver-cache.outputs.cache-hit != 'true'
-        run: cargo install tauri-driver --locked
-
+      # No driver to install. The WebDriver server is compiled into the app by
+      # the `wdio` feature below, which is the whole point of the embedded
+      # provider: `tauri-driver`, WebKitWebDriver and msedgedriver all stop
+      # being part of this.
       - name: Install root dependencies
         run: npm ci
 
@@ -181,12 +188,32 @@ jobs:
       # `--debug` because a release build costs several minutes more for a
       # binary that behaves the same under WebDriver, and `--no-bundle`
       # because the installer is not what is being driven - the binary is.
+      # `bash` on both platforms: PowerShell is the Windows default and has
+      # its own reading of the `--` separator, which is the one token that
+      # has to survive intact for the flags to reach `tauri` rather than npm.
+      # `--features wdio` is what compiles the embedded WebDriver server in.
+      # It is off by default and named nowhere else, so a release build cannot
+      # pick it up by accident; `lib.rs` additionally requires
+      # `debug_assertions`, which `--debug` satisfies here and a release never
+      # would.
       - name: Build the app
-        run: npm run tauri build -- --debug --no-bundle
+        shell: bash
+        run: npm run tauri build -- --debug --no-bundle --features wdio
 
+      # One step with the branch visible rather than two `if`-guarded steps
+      # that would both be called "Drive it". `bash` is forced because Windows
+      # runners default to PowerShell and the difference here is one word.
       - name: Drive it
         working-directory: e2e
-        run: xvfb-run -a npm test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # A GTK window with no display server never draws, and never
+            # answers the driver either.
+            xvfb-run -a npm test
+          else
+            npm test
+          fi
 
       # The point of the whole exercise is an artefact to look at afterwards,
       # so keep whatever the run produced even when - especially when - it
@@ -195,7 +222,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-logs
+          # Per matrix entry: v4 refuses a name another job already uploaded,
+          # so a shared one would fail the second platform to finish.
+          name: e2e-logs-${{ matrix.os }}
           path: |
             e2e/logs/
             e2e/*.log

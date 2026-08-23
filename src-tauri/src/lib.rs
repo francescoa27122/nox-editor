@@ -22,7 +22,24 @@ mod window_state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // The end-to-end harness drives the packaged app through a WebDriver
+    // server living inside it. **Two gates, deliberately.** The `wdio` feature
+    // decides whether the crate is compiled at all — see `Cargo.toml` for why
+    // the plugin's own documented `cfg(debug_assertions)` dependency table
+    // would not have done that — and `debug_assertions` decides whether it is
+    // registered, so that even a release build with the feature turned on
+    // starts no server. A thing that lets a local port drive the editor should
+    // take more than one mistake to ship.
+    //
+    // A shadowing `let` rather than a branch in the chain below: `#[cfg]` does
+    // not apply to a method call mid-expression, and this keeps the change to
+    // the entry point three lines long.
+    #[cfg(all(feature = "wdio", debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .setup(|_app| {
             // `--geometry WxH+X+Y` — a launch-time window size for repeatable
             // desktop walks. See `geometry.rs` for why it is a test affordance
