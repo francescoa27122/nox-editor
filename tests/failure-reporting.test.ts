@@ -110,6 +110,62 @@ describe('the unhandled-rejection backstop', () => {
 });
 
 /**
+ * The other half of the backstop, and for a long time there was only one.
+ *
+ * `unhandledrejection` fires for a rejected promise. A *synchronous* throw —
+ * from a Svelte effect, a DOM event handler, a CodeMirror extension — fires
+ * `error` instead, and nothing listened for it: no toast, no log, and no
+ * console to read in the release webview. The only symptom was the UI
+ * quietly stopping.
+ */
+describe('the uncaught-error backstop', () => {
+  it('turns a synchronous throw nothing caught into an error notification', () => {
+    app = new NoxApp(new MemoryPlatform());
+
+    dispatchError({ error: new Error('an effect threw') });
+
+    const toast = app.notifications.items.get()[0];
+    expect(toast?.message).toBe('Something went wrong');
+    expect(toast?.kind).toBe('error');
+    expect(toast?.detail).toBe('an effect threw');
+  });
+
+  /**
+   * A cross-origin script error is sanitised by the spec to a bare message
+   * with no `error` object. Reporting the message is still better than
+   * reporting nothing.
+   */
+  it('falls back to the message when the error object was withheld', () => {
+    app = new NoxApp(new MemoryPlatform());
+
+    dispatchError({ message: 'Script error.' });
+
+    expect(app.notifications.items.get()[0]?.detail).toBe('Script error.');
+  });
+
+  /**
+   * A failed image or lazily imported chunk raises `error` too, carrying
+   * neither field. Turning those into "Something went wrong" would put a
+   * sticky error toast on screen for something that is not a script failure.
+   */
+  it('says nothing for a resource error, which carries neither field', () => {
+    app = new NoxApp(new MemoryPlatform());
+
+    dispatchError({});
+
+    expect(messages(app)).toEqual([]);
+  });
+
+  it('stops listening once the app is disposed', async () => {
+    const instance = new NoxApp(new MemoryPlatform());
+    await instance.dispose();
+
+    dispatchError({ error: new Error('after the window went away') });
+    expect(messages(instance)).toEqual([]);
+  });
+});
+
+/**
  * Fire what the browser fires. jsdom does not construct
  * `PromiseRejectionEvent`, and the handler reads only `reason` — which is why
  * it is typed structurally rather than against the DOM event.
@@ -118,4 +174,33 @@ function dispatchRejection(reason: unknown): void {
   const event = new Event('unhandledrejection');
   Object.assign(event, { reason });
   globalThis.dispatchEvent(event);
+}
+
+/**
+ * Same trick for `error`. Built from a plain `Event` rather than
+ * `ErrorEvent` so a resource error — which carries neither field — can be
+ * fired as well, which `new ErrorEvent()` would not let us express.
+ *
+ * Cancelled before it is fired, which is bookkeeping rather than behaviour:
+ * the default action of an uncancelled `error` event is "report the
+ * exception", and jsdom honours that by escalating it into a failure of
+ * whichever test happens to be running. Nox's own handler does not cancel the
+ * event in production, where the default action is a console line nobody can
+ * read anyway.
+ */
+function dispatchError(fields: { error?: unknown; message?: string }): void {
+  const event = new Event('error', { cancelable: true });
+  Object.assign(event, fields);
+
+  // Cancelled from *inside* the dispatch: the canceled flag does not survive
+  // being set beforehand, so this has to be a listener like any other. Order
+  // does not matter — Nox's handler and this one both run, and one
+  // `preventDefault` is enough.
+  const cancel = (fired: Event) => fired.preventDefault();
+  globalThis.addEventListener('error', cancel);
+  try {
+    globalThis.dispatchEvent(event);
+  } finally {
+    globalThis.removeEventListener('error', cancel);
+  }
 }

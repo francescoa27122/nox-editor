@@ -71,6 +71,7 @@ import { ContextService } from '@services/context';
 import { FileTreeService } from '@services/filetree';
 import { KeymapService, platformIsMac } from '@services/keymap';
 import { JobRunner } from '@services/jobs';
+import { DiagnosticsService } from '@services/diagnostics';
 import { NotesService, type NoteAnchor } from '@services/notes';
 import { NotificationService } from '@services/notifications';
 import { ReviewService, type ReviewScope } from '@services/review';
@@ -128,6 +129,7 @@ export class NoxApp {
   readonly watcher: FileWatcherService;
   readonly session: SessionService;
   readonly notifications = new NotificationService();
+  readonly diagnostics: DiagnosticsService;
   /** Long-running background work: progress, cancellation. See `jobs.ts`. */
   readonly jobs = new JobRunner();
   readonly ui = new UIService();
@@ -231,7 +233,23 @@ export class NoxApp {
     this.commands.setFailureSink((command, error) => {
       this.#reportFailure(`${command.title} failed`, error);
     });
-    this.#installRejectionBackstop();
+
+    // One tap, rather than a `record` call beside each of the hundred-odd
+    // places that raise a notification. Every failure the user is shown
+    // already passes through `notify`, so this captures command failures,
+    // service errors, git refusals and the two window backstops without any
+    // of them knowing diagnostics exist — and anything added later is
+    // covered by default rather than by remembering.
+    this.diagnostics = new DiagnosticsService(platform);
+    this.notifications.events.on('notified', (notification) => {
+      // Warnings and errors only. `info` and `success` are confirmations of
+      // things that worked, and a log of those is chatter that pushes the
+      // failures out of a bounded file.
+      if (notification.kind !== 'error' && notification.kind !== 'warning') return;
+      this.diagnostics.record(notification.kind, notification.message, notification.detail);
+    });
+
+    this.#installFailureBackstops();
 
     this.agentConfig = new AgentConfigService(platform);
     this.serverRegistry = new ServerRegistry(platform);
@@ -295,6 +313,10 @@ export class NoxApp {
   // --- Boot ---------------------------------------------------------------
 
   async #boot(): Promise<void> {
+    // First, and before anything that can fail: it arms path redaction and
+    // picks up what the previous session left, and every step below this one
+    // is a step whose failure is worth having recorded.
+    await this.diagnostics.start();
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
     // Before the session restores a root: the subscription above fires on
@@ -747,6 +769,31 @@ export class NoxApp {
    * indistinguishable from success — which is why "Save As…" was the worst
    * case of this: silence there reads as "saved".
    */
+  /**
+   * The facts a bug report needs that are not in the log itself.
+   *
+   * Assembled here rather than inside `DiagnosticsService` because the
+   * version is a build-time constant and the capabilities belong to the
+   * platform — a service that reached for either would stop being testable
+   * against a fake disk.
+   *
+   * Deliberately not here: the workspace path, the open files, or anything
+   * naming what the user is working on. `Target` answers "desktop or
+   * browser", which is the question that actually changes a diagnosis, and
+   * `Language servers` is a count rather than the commands, which are
+   * program names off the user's disk.
+   */
+  #environment(): Record<string, string> {
+    const capabilities = this.platform.capabilities;
+    return {
+      Nox: __APP_VERSION__,
+      Target: capabilities.persistentStorage ? 'desktop' : 'browser',
+      Agent: typeof navigator === 'undefined' ? 'unknown' : navigator.userAgent,
+      'Language servers': String(this.serverRegistry.servers.get().length),
+      Workspace: this.workspace.rootPath.get() ? 'folder open' : 'no folder',
+    };
+  }
+
   #reportFailure(headline: string, error: unknown): void {
     if (error instanceof PermissionError) return;
     if (typeof error === 'object' && error !== null) {
@@ -764,7 +811,7 @@ export class NoxApp {
    * callback, a listener. There is no devtools console in the release
    * webview, so without this those genuinely vanish.
    */
-  #installRejectionBackstop(): void {
+  #installFailureBackstops(): void {
     // Node has no `addEventListener` on `globalThis`, so the headless test
     // environment simply gets no backstop rather than a crash at construction.
     if (typeof globalThis.addEventListener !== 'function') return;
@@ -776,9 +823,35 @@ export class NoxApp {
       this.#reportFailure('Something went wrong', reason);
     };
 
+    /**
+     * The other half, and for a long time there was only one.
+     *
+     * `unhandledrejection` catches a rejected promise; it does not catch a
+     * *synchronous* throw — from a Svelte effect, a DOM event handler, a
+     * CodeMirror extension — which fires `error` instead. Those produced
+     * nothing at all: no toast, no log, and no console to read in the release
+     * webview. The one visible symptom was the UI quietly stopping.
+     */
+    const onError = (event: Event) => {
+      const { error, message } = event as Event & { error?: unknown; message?: string };
+      // A failed resource — an image, a lazily imported chunk — also raises
+      // `error`, carrying neither field. Those are not script failures and
+      // must not become "Something went wrong": the listener is registered
+      // in the bubble phase, where the spec does not deliver them, and this
+      // is the belt to that braces.
+      if (error === undefined && message === undefined) return;
+      // `error` is absent for a cross-origin script error, where the spec
+      // gives only the sanitised "Script error." string. Reporting that is
+      // still better than reporting nothing.
+      this.#reportFailure('Something went wrong', error ?? message);
+    };
+
     globalThis.addEventListener('unhandledrejection', onRejection);
-    this.#disposeRejectionListener = () =>
+    globalThis.addEventListener('error', onError);
+    this.#disposeRejectionListener = () => {
       globalThis.removeEventListener('unhandledrejection', onRejection);
+      globalThis.removeEventListener('error', onError);
+    };
   }
 
   /**
@@ -3865,6 +3938,24 @@ export class NoxApp {
         // caller (or test) that awaits the command should see the check done.
         run: () => this.updates.checkNow({ manual: true }),
       },
+      {
+        id: 'app.copyDiagnostics',
+        title: 'Copy Diagnostics',
+        // `Application`, not a new `Help` category. A category `LAYOUT` does
+        // not name is a command that reaches no menu at all — that table is
+        // the whole defence against a command nobody can find — and the Nox
+        // menu is already where this app's meta lives, beside About and
+        // Check for Updates. A top-level Help menu is a design decision, not
+        // something a diagnostics command should introduce as a side effect.
+        category: 'Application',
+        keywords: ['diagnostics', 'log', 'report', 'issue', 'bug', 'support', 'troubleshoot'],
+        // No `capabilities`: this reads Nox's own record of what it already
+        // told the user and puts it on the clipboard. It reaches no file the
+        // user has not already seen the failures from.
+        run: async () => {
+          await this.copyToClipboard(this.diagnostics.report(this.#environment()), 'diagnostics');
+        },
+      },
     ];
 
     this.commands.registerAll(commands);
@@ -4518,9 +4609,18 @@ export class NoxApp {
     // nothing left to talk to it.
     await this.lsp.stop();
     await this.platform.stopAllLanguageServers().catch(() => undefined);
-    await this.notes.flush();
-    await this.config.flush();
-    await this.session.save();
+    try {
+      await this.notes.flush();
+      await this.config.flush();
+      await this.session.save();
+    } finally {
+      // Last, and in a `finally`, because this is the flush that records why
+      // one of the three above failed. Running it first would write the log
+      // before the thing worth logging happened; running it outside the
+      // `finally` would skip it in exactly that case.
+      this.diagnostics.dispose();
+      await this.diagnostics.flush();
+    }
   }
 }
 
