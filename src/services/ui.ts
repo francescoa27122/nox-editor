@@ -149,6 +149,23 @@ export class UIService {
    */
   readonly diffOpen = new Signal(false);
   /**
+   * Whether the welcome screen was asked for.
+   *
+   * It renders in this slot anyway whenever no buffer is open, so this signal
+   * is only about the *other* case: someone with files open who wants it
+   * back. Before this existed there was no way back — the one screen that
+   * names the essential chords and lists recent folders appeared on first
+   * launch, vanished the moment a file opened, and could only be reached
+   * again by closing every tab. Off macOS that left an app with 148 commands
+   * offering nothing in its chrome that answers "where do I start".
+   *
+   * Not a layer under the file panels but a stand-in *for* the editor: asking
+   * for it clears review, agents and diff, and anything that shows you the
+   * editor again clears it. That rule lives in `focusEditor`, which is what
+   * every route back to a file goes through.
+   */
+  readonly welcomeOpen = new Signal(false);
+  /**
    * Whether the terminal panel is showing.
    *
    * Sits *below* the editor rather than taking it over, unlike review and
@@ -272,6 +289,20 @@ export class UIService {
     this.diffOpen.set(true);
   }
 
+  /**
+   * Show the welcome screen, which shares the same slot again.
+   *
+   * Clears the other three for the same reason they clear each other: one
+   * thing at a time in the editor area. Asking for the welcome screen is an
+   * explicit act, so it wins over a diff that was following the active file.
+   */
+  showWelcome(): void {
+    this.reviewOpen.set(false);
+    this.agentsOpen.set(false);
+    this.diffOpen.set(false);
+    this.welcomeOpen.set(true);
+  }
+
   showView(view: SidebarView): void {
     // Each branch focuses its own view. This used to fall through to
     // `focusExplorer` for anything that was not search, which set the view
@@ -356,6 +387,7 @@ export class UIService {
       this.reviewOpen.get() ||
       this.agentsOpen.get() ||
       this.diffOpen.get() ||
+      this.welcomeOpen.get() ||
       this.menuBarOpen.get() ||
       this.prompt.get() !== null ||
       this.confirm.get() !== null
@@ -403,6 +435,16 @@ export class UIService {
     }
     if (this.diffOpen.get()) {
       this.diffOpen.set(false);
+      this.focusEditor();
+      return true;
+    }
+    // Last, and mostly a formality: `focusEditor` below clears the signal
+    // anyway, so this branch exists to answer *whether* Escape did something.
+    // With no buffer open the screen stays on screen afterwards — it is the
+    // empty state as well as a layer, and Escape has no business closing an
+    // empty state.
+    if (this.welcomeOpen.get()) {
+      this.welcomeOpen.set(false);
       this.focusEditor();
       return true;
     }

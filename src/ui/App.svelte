@@ -38,6 +38,8 @@
   const agentsOpen = app.ui.agentsOpen;
   // svelte-ignore state_referenced_locally
   const diffOpen = app.ui.diffOpen;
+  // svelte-ignore state_referenced_locally
+  const welcomeOpen = app.ui.welcomeOpen;
 
   // svelte-ignore state_referenced_locally
   const terminalOpen = app.ui.terminalOpen;
@@ -147,9 +149,15 @@
           <AgentPanel />
         {:else if $diffOpen}
           <DiffView />
-        {:else if hasBuffers}
+        {:else if hasBuffers && !$welcomeOpen}
           <EditorArea />
         {:else}
+          <!--
+            Both the empty state and a screen you can ask for. One element
+            rather than two branches, because they render the same thing for
+            the same reason — there is nothing to edit, either because no file
+            is open or because you wanted the map instead.
+          -->
           <Welcome />
         {/if}
       </div>

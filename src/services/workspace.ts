@@ -216,6 +216,16 @@ export interface WorkspaceEvents {
   /** A buffer's EditorState was replaced wholesale — the view must re-sync. */
   'buffer-reset': { id: BufferId };
   'buffer-opened': { id: BufferId };
+  /**
+   * The user asked for this buffer — by clicking its tab, its row in the
+   * explorer, or anything else that calls `setActive`.
+   *
+   * Distinct from the `activeId` signal changing, and that distinction is the
+   * point: re-selecting the file you are already on changes nothing, so a
+   * subscriber to the signal never hears about the single most common way of
+   * saying "show me this file". This fires either way.
+   */
+  'buffer-activated': { id: BufferId };
   'buffer-closed': { id: BufferId };
   saved: { id: BufferId; path: string };
   /** The file changed or vanished behind Nox's back. */
@@ -603,6 +613,9 @@ export class WorkspaceService {
     this.#activeGroupId = group.id;
     this.#touch(id);
     this.#sync();
+    // After the sync, so a handler that reads the workspace sees the state
+    // this call produced. Unconditional: see the event's own comment.
+    this.events.emit('buffer-activated', { id });
   }
 
   /**
