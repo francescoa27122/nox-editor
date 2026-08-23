@@ -169,11 +169,25 @@ that flourishes while you work is an editor you fight.
 
 | State | Treatment |
 |---|---|
-| Hover | `--nox-hover` — a 5.5% cyan wash |
-| Active / current | `--nox-active` + accent-coloured icon |
-| Selected (list) | `--nox-selected` — violet wash |
+| Hover | `--nox-hover` — a 15% cyan wash |
+| Active / current | `--nox-active` — a 22% cyan wash, plus an accent-coloured icon |
+| Selected (list) | `--nox-selected` — a 26% violet wash |
 | Focus (keyboard) | `--nox-focus-ring`: 1 px background gap + 3 px accent glow, on `:focus-visible` only |
 | Disabled | 42% opacity, no colour change |
+
+These four are the only answer the app gives to *what is the pointer on* and
+*what did I choose*, so §2's licence for near-invisible borders does not reach
+them. Each is held to **1.25:1 against the darkest ground it lands on** —
+Umbra's pure-black editor — by `tests/token-contrast.test.ts`, which
+composites the wash before measuring it. Hover shipped at 5.5% until
+2026-08-23, which is 1.06:1: fourteen rules across five panels used it as
+their *only* hover feedback, and none of those surfaces visibly answered the
+mouse.
+
+The order matters as much as the floor. Over `--nox-bg-panel` the ladder is
+hover 1.34 < selected 1.44 < active 1.62 < selected-strong 1.89. Hover is the
+one state nobody asked for — it follows the pointer across everything it
+crosses — so it must never out-shout a state that records a choice.
 
 Two "you are here" markers carry most of the navigational weight:
 

@@ -23,11 +23,35 @@
      on purpose: bright enough to grab, too dull to read as content. */
   --nox-scrollbar-hover: #33405a;
 
-  /* --- Interaction states ---------------------------------------------- */
-  --nox-hover: rgba(125, 211, 224, 0.055);
-  --nox-active: rgba(125, 211, 224, 0.1);
-  --nox-selected: rgba(139, 125, 245, 0.14);
-  --nox-selected-strong: rgba(139, 125, 245, 0.22);
+  /* --- Interaction states -----------------------------------------------
+     All four were raised on 2026-08-23. They had been set by eye against
+     §2's "borders are near-invisible on purpose", and that licence does not
+     extend to them: a border separates two things that are both already on
+     screen, while these four are the *only* answer the app gives to "what is
+     the pointer on" and "what did I choose".
+
+     Hover was the one that broke. At 5.5% it composited to 1.06:1 over
+     bg-panel, and fourteen rules across five panels — every row in the
+     explorer, search, problems, references and notes lists, plus both
+     dialogs' buttons — paired it with no colour change at all, so those
+     surfaces did not visibly respond to the mouse. Measured, not guessed:
+     `tests/token-contrast.test.ts` holds all four to 1.25:1 against the
+     darkest ground any of them lands on, which is Umbra's pure-black editor.
+
+     The ladder over bg-panel is hover 1.34 < selected 1.44 < active 1.62 <
+     selected-strong 1.89, and the order is load-bearing. Hover is the state
+     nobody asked for — it follows the pointer across everything it crosses —
+     so it stays the quietest; selected-strong outranks selected because
+     `.row.selected.lead` is how the keyboard stays findable inside a large
+     selection.
+
+     `--nox-line-active` is deliberately *not* in this group. It is a passive
+     "you are here" band under the caret rather than a response to input, and
+     it has to lose to the text sitting on top of it. */
+  --nox-hover: rgba(125, 211, 224, 0.15);
+  --nox-active: rgba(125, 211, 224, 0.22);
+  --nox-selected: rgba(139, 125, 245, 0.26);
+  --nox-selected-strong: rgba(139, 125, 245, 0.4);
 
   /* --- Borders ---------------------------------------------------------- */
   /* Subtle: a rule inside a card or under a panel header — visible against

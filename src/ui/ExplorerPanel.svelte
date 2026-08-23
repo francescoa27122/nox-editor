@@ -985,7 +985,13 @@
     color: var(--nox-text-muted);
     cursor: default;
     position: relative;
-    transition: color var(--nox-dur-fast) var(--nox-ease);
+    /* Both halves of the hover, not one. The rule below changes background
+       and colour together; transitioning only the colour left the fill
+       snapping in under a fading label, which reads as a flicker now that
+       `--nox-hover` is a fill you can see. */
+    transition:
+      background var(--nox-dur-fast) var(--nox-ease),
+      color var(--nox-dur-fast) var(--nox-ease);
   }
 
   .row:hover {

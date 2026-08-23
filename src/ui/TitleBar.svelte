@@ -357,9 +357,18 @@
 
   /* Only the segments inside the workspace are buttons; one outside it has
      nothing to reveal and stays a span, so it must not offer a hover it
-     cannot honour. */
+     cannot honour.
+
+     `no-drag` for the same reason `.actions` and `.menu-bar` carry it: the
+     header is `-webkit-app-region: drag`, and on a platform whose webview
+     honours that property a drag region swallows the click. The breadcrumb
+     became clickable after those two were written and never got the opt-out.
+     It goes on the buttons rather than on `.center`, so the separators and
+     the whitespace around them still drag the window — which is the half of
+     the bar you actually want to grab. */
   button.crumb {
     cursor: pointer;
+    -webkit-app-region: no-drag;
   }
 
   button.crumb:hover {

@@ -198,6 +198,7 @@
 -->
 <div
   class="menu-bar"
+  class:showing={open !== null}
   role="menubar"
   aria-label="Main"
   aria-orientation="horizontal"
@@ -250,6 +251,29 @@
     -webkit-app-region: no-drag;
   }
 
+  /*
+    While a menu is showing the bar has to sit above `ContextMenu`'s
+    click-away layer, which is `position: fixed; inset: 0` at
+    `--nox-z-dropdown` and therefore covers these buttons along with
+    everything else.
+
+    That layer is why `onmouseenter` above never ran: sliding the pointer from
+    File to Edit — the gesture that makes a menu bar a bar — hit the shield,
+    not the button, so the comment claiming the bar "tracks" described
+    something the stacking context had made impossible. Clicking a second
+    title was dead the same way; it dismissed instead of switching.
+
+    The same z-index as the popup rather than one above it, deliberately: at a
+    tie the later element in the DOM paints on top, and `ContextMenu` renders
+    after this div. So the bar clears the layer and still loses to the menu,
+    which is the order that cannot go wrong. Only while open — the bar has no
+    business creating a stacking context the rest of the time.
+  */
+  .menu-bar.showing {
+    position: relative;
+    z-index: calc(var(--nox-z-dropdown) + 1);
+  }
+
   .menu-title {
     padding: 2px var(--nox-sp-3);
     border-radius: var(--nox-r-sm);
@@ -257,6 +281,9 @@
     font-size: var(--nox-fs-sm);
     line-height: 1.6;
     white-space: nowrap;
+    transition:
+      background var(--nox-dur-fast) var(--nox-ease),
+      color var(--nox-dur-fast) var(--nox-ease);
   }
 
   .menu-title:hover,

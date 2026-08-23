@@ -44,20 +44,43 @@ describe('placeMenu', () => {
    */
   it('clamps and scrolls a menu taller than the viewport instead of flipping it off-screen', () => {
     const p = placeMenu({ ...base, anchorY: 36, naturalHeight: 903, viewportHeight: 900 });
-    expect(p.y).toBe(8);
-    expect(p.maxHeight).toBe(884);
+    expect(p.maxHeight).not.toBeNull();
     // The whole menu is now inside the viewport, which the old code could not say.
     expect(p.y + p.maxHeight!).toBeLessThanOrEqual(900);
   });
 
+  /**
+   * The bug the *fix above* introduced, measured in the browser build at
+   * 1280x720: a menu too tall for the window took `y = margin` and the full
+   * viewport height, and a menu that fills the window covers what it dropped
+   * from. The File menu is 30 items, so it opened at y=8 while the menu bar
+   * ends at y=29 — the bar sat underneath its own dropdown.
+   *
+   * Stated as "never above the anchor when the anchor is the roomier side"
+   * rather than as a number, because the number is the menu bar's height and
+   * this rule is not about the menu bar.
+   */
+  it('never covers the anchor it dropped from', () => {
+    const tall = placeMenu({ ...base, anchorY: 36, naturalHeight: 903, viewportHeight: 900 });
+    expect(tall.y).toBe(36);
+    expect(tall.maxHeight).toBe(856);
+
+    // Same rule from the other end: anchored low, a too-tall menu grows
+    // upward and must stop short of the anchor rather than run through it.
+    const low = placeMenu({ ...base, anchorY: 864, naturalHeight: 903, viewportHeight: 900 });
+    expect(low.y).toBe(8);
+    expect(low.y + low.maxHeight!).toBeLessThanOrEqual(864);
+  });
+
   it('leaves the next-largest menus alone at laptop height, and clamps them below it', () => {
-    // Edit measured 712px. A 768px window still has 752px available, so it
-    // fits and must not gain a scrollbar it does not need.
+    // Edit measured 712px. A 768px window still has 724px below a 36px bar,
+    // so it fits and must not gain a scrollbar it does not need.
     expect(placeMenu({ ...base, anchorY: 36, naturalHeight: 712, viewportHeight: 768 }).maxHeight)
       .toBeNull();
     // Shrink the window past its height and the same menu clamps.
     const short = placeMenu({ ...base, anchorY: 36, naturalHeight: 712, viewportHeight: 700 });
-    expect(short.maxHeight).toBe(684);
+    expect(short.y).toBe(36);
+    expect(short.maxHeight).toBe(656);
     expect(short.y + short.maxHeight!).toBeLessThanOrEqual(700);
   });
 
@@ -88,7 +111,8 @@ describe('placeMenu', () => {
 
   it('honours a caller-supplied margin', () => {
     const p = placeMenu({ ...base, anchorY: 36, naturalHeight: 903, viewportHeight: 900, margin: 20 });
-    expect(p.y).toBe(20);
-    expect(p.maxHeight).toBe(860);
+    expect(p.y).toBe(36);
+    expect(p.maxHeight).toBe(844);
+    expect(p.y + p.maxHeight!).toBe(880);
   });
 });

@@ -40,18 +40,30 @@ export function placeMenu(box: MenuBox): MenuPlacement {
   // showing.
   if (x + box.width + margin > box.viewportWidth) x = Math.max(margin, x - box.width);
 
-  const available = box.viewportHeight - margin * 2;
+  // Vertical placement is a choice between the two gaps the anchor divides the
+  // viewport into. Below is preferred, above is the flip, and a menu too tall
+  // for either scrolls inside the roomier one.
+  const below = box.viewportHeight - y - margin;
+  const above = y - margin;
 
-  // Flipping only rescues a menu that fits *somewhere*. One taller than the
-  // viewport flips to `margin` and still runs off the bottom — Nox's View menu
-  // is 34 items and measured 903px in a 900px window, so its last entries were
-  // unreachable and no scrollbar said so. Those get the full height and scroll.
-  if (box.naturalHeight > available) {
-    return { x, y: margin, maxHeight: available };
-  }
+  if (box.naturalHeight <= below) return { x, y, maxHeight: null };
+  if (box.naturalHeight <= above) return { x, y: y - box.naturalHeight, maxHeight: null };
 
-  if (y + box.naturalHeight + margin > box.viewportHeight) {
-    y = Math.max(margin, y - box.naturalHeight);
-  }
-  return { x, y, maxHeight: null };
+  // Taller than both gaps. The rule used to be `y = margin, maxHeight =
+  // viewportHeight - margin * 2` — the whole window — which fixed the View
+  // menu running off the bottom and quietly broke something else: a menu that
+  // fills the window necessarily covers the thing it dropped from.
+  //
+  // Measured in the browser build at 1280x720: the File menu is 30 items, so
+  // it opened at y=8 while the menu bar it belongs to ends at y=29. The bar
+  // was underneath it, which is why sliding the pointer from File to Edit —
+  // the one gesture that makes a menu bar a bar — did nothing, and why the
+  // explorer's `.row.menu-target` styling, which exists to keep the row a
+  // context menu belongs to visible, could be covered by that menu.
+  //
+  // Growing into one gap instead of over the anchor costs some height on a
+  // short window and keeps the anchor on screen, which is the half that
+  // matters: the menu scrolls either way.
+  if (below >= above) return { x, y, maxHeight: below };
+  return { x, y: margin, maxHeight: above };
 }
