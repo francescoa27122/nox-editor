@@ -249,6 +249,33 @@
     /* The title bar is a drag region; its children must opt out or the drag
        swallows the click. Same reason `.actions` does. */
     -webkit-app-region: no-drag;
+
+    /*
+      Yield space rather than push the rest of the bar out of the window.
+
+      This is `flex: 0 1 auto` and so nominally shrinkable, but it is itself a
+      flex container, and `min-width: auto` on one resolves to min-content —
+      the eight titles side by side, 294px, which it will not go below. So the
+      bar overflowed to the right and everything after it left the viewport
+      with nothing to scroll it back: measured at a 560px window, Commands
+      ended at 581, the sidebar toggle at 609 and Settings at 637. Reachable
+      in the browser build at any width, and on Windows, where three window
+      controls sit further right still, at the 640px `minWidth` the desktop
+      app already allows.
+
+      `min-width: 0` lets it give way; `overflow-x` then keeps the titles
+      inside the box it gave way to. The scrollbar is hidden because a 23px
+      strip cannot host one — the menus stay reachable by trackpad, by F10 and
+      arrows (focus scrolls its target into view), and by the palette, which
+      lists every command in them.
+    */
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .menu-bar::-webkit-scrollbar {
+    display: none;
   }
 
   /*

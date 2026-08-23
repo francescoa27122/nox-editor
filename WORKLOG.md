@@ -47,6 +47,17 @@ target is the preview environment lacking clipboard permission, not Nox. It
 also does not reproduce in the desktop build, which is where Copy Path is
 meant to run.
 
+A fourth landed after that: at a 560px window the title bar pushed Commands,
+the sidebar toggle and Settings clean out of the viewport with nothing to
+scroll them back. `.menu-bar` is `flex: 0 1 auto` and so nominally
+shrinkable, but it is a flex container and `min-width: auto` on one resolves
+to min-content — its eight titles side by side, 294px — which it will not go
+below. `min-width: 0` plus `overflow-x` makes it yield instead. Reachable in
+the browser build at any width, and on Windows at the 640px `minWidth` the
+desktop app already allows, where three window controls sit further right
+still. No test: jsdom has no layout, and `tests/menu-bar.test.ts` says in its
+header that nothing geometric may be claimed there.
+
 ---
 
 ## 2026-08-23 (PC, later) — Hover, and what the pointer could not reach
