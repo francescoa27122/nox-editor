@@ -32,6 +32,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   friends — and the in-memory workspace the dev target and every test run
   against did not, so the two disagreed about what a project contains. They
   now share one list and one precedence rule.
+- **Auto-import completions inserted the symbol and not the import.** Accepting
+  `readFileSync` from the list gave you `readFileSync` and no `import` line —
+  code that does not compile, from the feature whose job is to write code that
+  does. The import the language server had already worked out was being thrown
+  away. It now lands with the completion, in one step that one ⌘Z takes back;
+  where the server only computes it on request, the completion appears
+  immediately and the import follows, so accepting one never waits on a server.
 
 - **Saving a UTF-16 file wrote a UTF-8 one.** The bytes went out as UTF-8 while
   the status bar still said UTF-16 LE, so a file that had to stay UTF-16 — a
