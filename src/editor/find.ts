@@ -114,6 +114,27 @@ export class FindController {
   #view: EditorView | null = null;
 
   attach(view: EditorView | null): void {
+    const previous = this.#view;
+
+    /*
+     * A pane that is no longer the find target must not keep its highlight.
+     * The panel counts against exactly one view, so boxes painted in a pane
+     * the counter is not looking at contradict it — measured with a split:
+     * search "Nox" in the left pane, click into the right one, and the left
+     * kept both matches boxed while the panel correctly said "No results".
+     * Nothing but searching that pane again could clear them.
+     *
+     * No guard against a destroyed view, deliberately. `attach(null)` can
+     * arrive after a closing pane has already called `view.destroy()`, and
+     * the obvious `dom.isConnected` check for it earns nothing: CodeMirror
+     * absorbs a dispatch into a destroyed view rather than throwing, verified
+     * on 6.43.8. A condition that can never be false is worse than no
+     * condition — it reads as a hazard someone has to keep respecting.
+     */
+    if (previous && previous !== view) {
+      previous.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: '' })) });
+    }
+
     this.#view = view;
     if (view) this.#sync();
     else this.status.set(EMPTY);

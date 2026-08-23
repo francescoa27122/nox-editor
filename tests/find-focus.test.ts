@@ -232,3 +232,54 @@ describe('what closing the panel leaves behind', () => {
     expect(find.status.get().total).toBe(2);
   });
 });
+
+/**
+ * Split panes each hold their own `EditorState`, so each holds its own copy of
+ * the search query the highlighter reads. The find panel is per-window and
+ * targets exactly one of them.
+ */
+describe('what switching panes leaves behind', () => {
+  /**
+   * The failure this prevents, measured in the browser build with a split:
+   * search "Nox" in the left pane (2 matches), click into the right one. The
+   * panel re-attached and re-counted correctly — it said "No results", which
+   * is true of the right pane — while the left pane still showed both matches
+   * boxed. A counter looking at one view and boxes painted in another, with
+   * no way to clear them but searching that pane again.
+   *
+   * Same shape as the Escape bug above: `clear()` only ever emptied the query
+   * on the view that happened to be attached, and `attach()` overwrote
+   * `#view` without saying anything to the one it was leaving.
+   */
+  it('clears the pane it is leaving', () => {
+    const build = (doc: string) => {
+      const target = document.createElement('div');
+      document.body.appendChild(target);
+      return new EditorView({
+        state: EditorState.create({ doc, extensions: [search({ top: true })] }),
+        parent: target,
+      });
+    };
+
+    const left = build('Nox one\nNox two\n');
+    const right = build('nothing here\n');
+    mounted = mountComponent(FindPanel);
+    const { find } = mounted.app;
+
+    try {
+      find.attach(left);
+      find.setQuery('Nox');
+      expect(getSearchQuery(left.state).search).toBe('Nox');
+      expect(find.status.get().total).toBe(2);
+
+      find.attach(right);
+
+      expect(getSearchQuery(left.state).search, 'the pane it left').toBe('');
+      expect(getSearchQuery(right.state).search, 'the pane it moved to').toBe('Nox');
+      expect(find.status.get().total).toBe(0);
+    } finally {
+      left.destroy();
+      right.destroy();
+    }
+  });
+});
