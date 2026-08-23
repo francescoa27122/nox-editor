@@ -340,7 +340,7 @@ Ties broken toward the smaller change; sequenced by what each unblocks.
 |---|---|---|---|
 | 0 | ✅ **Done 2026-08-23.** Adjudicate both walk bugs; correct the report | Neither was an app defect; the walk harness was | hours |
 | 1 | ✅ **Done 2026-08-23.** Diagnostics: the `error` backstop, a durable log, Copy Diagnostics | Every later phase produces evidence instead of prose | 1 session |
-| 2 | 🟡 **Linux and Windows green 2026-08-23**, driven in CI on every PR. macOS is now a matrix entry | Closes the last 1.0 gate and unblocks §4's other half | 2–3 sessions |
+| 2 | ✅ **Done 2026-08-23.** All three platforms driven in CI on every PR, four specs, under a second each | Closes the last 1.0 gate and unblocks §4's other half | 2–3 sessions |
 | 3 | The `onRequest` seam — four handlers | One seam, four features, and a ✅ that is currently overstated | 1–2 sessions |
 | 4 | Benchmarks — pure layers now, typing path on the harness | Guards the product's first adjective | 1 session |
 | 5 | Windows install/update rehearsal; menu-bar hardening | Rides on phase 2 | 1 session |

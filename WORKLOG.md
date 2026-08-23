@@ -8,6 +8,77 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, phase 2 done) — All three platforms, four specs, under a second
+
+The list from the last entry is finished bar one item that needs a permission
+I do not have.
+
+**macOS joined the matrix, and its first run earned its keep immediately** by
+failing on two things that were the *specs* being Windows-shaped rather than
+the app being wrong:
+
+- The in-window menu bar does not exist on macOS, and should not:
+  `TitleBar.svelte` draws it only when `capabilities.applicationMenu` is
+  false, and macOS has a real `NSMenu`. The spec now pins **both halves** —
+  present where the OS gives no menu, absent where it does — which also
+  guards against two bars claiming the same commands.
+- The palette answers to ⌘⇧P there, because `services/keymap.ts` resolves
+  `Mod` through `isMacHost`. Sending Ctrl does not fail loudly: the keystroke
+  goes nowhere, and it surfaced as a fifteen-second wait for a `.palette`
+  nobody had asked for.
+
+Both were caught on the platform's first automated run, which is precisely
+what the harness exists for and precisely what four months of not having one
+could not do.
+
+**`webkit2gtk-driver` dropped.** It was WebKitWebDriver, which the embedded
+provider replaced. Kept deliberately through the provider swap *and* the focus
+fix so each had exactly one variable; both were green, so it went, and Linux
+stayed green without it. `xvfb` stays — a GTK window still has to draw
+somewhere.
+
+Where the harness stands:
+
+| | | |
+|---|---|---|
+| Linux | 4 passing | 475 ms |
+| Windows | 4 passing | 1 s |
+| macOS | 4 passing | 708 ms |
+
+Three platforms, one embedded WebDriver server, **no external driver
+anywhere**, and every installer Nox ships is now launched and driven on every
+pull request.
+
+**Not done, and it needs the operator's hands.** Promoting the job into branch
+protection's required checks was blocked by this environment's permission
+guard on repository settings, which is a reasonable place to draw that line
+and not one worth working around. The command is in `e2e/README.md`. Two
+things to know before running it: only Linux and Windows have a record worth
+gating on (six and four consecutive green runs against macOS's one), and
+`main` has `enforce_admins`, so a required check that goes flaky blocks
+everyone with no override. That asymmetry is the argument for adding platforms
+one record at a time.
+
+Verified:
+
+- All three legs green, 4 passing each, read off the spec reporter. Timings
+  above are from the same lines.
+- Linux and Windows green in the same run that dropped `webkit2gtk-driver`,
+  which is what makes that removal safe rather than assumed.
+
+Next: **more specs.** Four is a smoke test, and the 2026-08-20 walk left
+twelve items UNSEEN. They are cheap now — a run is under a second, so the cost
+of a spec is writing it rather than waiting for it.
+
+Blocked: the required-checks promotion, above. The certificates remain the
+operator's.
+
+Confidence: high. Three platforms green with the specs named in the log, and
+the one removal in this change was validated by the two platforms it could
+have broken.
+
+---
+
 ## 2026-08-23 (PC, phase 2 cont.) — Six minutes to under a second
 
 The ten seconds per command are gone. Four specs against the packaged app:
