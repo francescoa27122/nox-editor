@@ -93,7 +93,29 @@ Make the packaged app drivable by a test.
   `tests/tab-dirty-affordance.test.ts`, three assertions, each
   mutation-checked. The report's summary line, which still read "1 confirmed"
   above its own refutation, now leads with **0 app defects**.
-- **Phase 2 — a WebDriver harness.** `tauri-driver` + WebdriverIO. Verified
+- **Phase 2 — 🟡 Linux landed 2026-08-23.** `e2e/` drives the packaged binary
+  in CI on every pull request: it launches, draws its chrome, draws the
+  in-window menu bar, opens the palette on its chord, and **closes it on
+  Escape** — the one input the manual harness ate at the OS level and could
+  never test. Four assertions, green, against a real Linux build that nobody
+  had ever launched.
+
+  Three corrections to what this section assumed, each found by a red CI run:
+  the service does **not** auto-detect the binary path from an empty
+  `tauri:options`; it does **not** install `tauri-driver` itself; and it now
+  defaults to the *embedded* provider, which needs a Rust plugin. All three
+  surface as WebdriverIO's misleading `No "browserName" defined in
+  capabilities`, because the service gives up before rewriting the capability
+  — so on this harness the useful line is always further up the log than the
+  failure.
+
+  Still open: Windows (a matrix entry), macOS (needs the embedded provider's
+  Rust crate registered in debug builds), and the six minutes the run spends
+  waiting for a plugin that is deliberately absent. That last one is the
+  thing to fix before this job is promoted into required checks.
+
+- **The original plan for phase 2, for the record.** `tauri-driver` +
+  WebdriverIO. Verified
   this session against the Tauri v2 docs: driven directly, **Windows and Linux
   only** — "macOS has no WKWebView driver tool available". The WebdriverIO
   service's *embedded* WebDriver server claims macOS as well; treat that as a
@@ -318,7 +340,7 @@ Ties broken toward the smaller change; sequenced by what each unblocks.
 |---|---|---|---|
 | 0 | ✅ **Done 2026-08-23.** Adjudicate both walk bugs; correct the report | Neither was an app defect; the walk harness was | hours |
 | 1 | ✅ **Done 2026-08-23.** Diagnostics: the `error` backstop, a durable log, Copy Diagnostics | Every later phase produces evidence instead of prose | 1 session |
-| 2 | WebDriver harness — Windows, then Linux in CI | Closes the last 1.0 gate and unblocks §4's other half | 2–3 sessions |
+| 2 | 🟡 **Linux landed 2026-08-23**, green in CI. Windows and macOS next | Closes the last 1.0 gate and unblocks §4's other half | 2–3 sessions |
 | 3 | The `onRequest` seam — four handlers | One seam, four features, and a ✅ that is currently overstated | 1–2 sessions |
 | 4 | Benchmarks — pure layers now, typing path on the harness | Guards the product's first adjective | 1 session |
 | 5 | Windows install/update rehearsal; menu-bar hardening | Rides on phase 2 | 1 session |
