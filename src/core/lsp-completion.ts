@@ -1,5 +1,6 @@
 import type { Completion } from '@codemirror/autocomplete';
 import { offsetAt, type LspPosition } from './lsp-position';
+import { isLspRange } from './lsp-text-edit';
 
 /**
  * LSP completion items to CodeMirror completions.
@@ -43,7 +44,16 @@ export interface LspCompletionItem {
  *
  * `from`/`to` are not part of CodeMirror's `Completion` — they are carried
  * here for the source to read, because only the item knows whether the server
- * named its own range.
+ * named its own range. Absent when the server named none, or named one that
+ * is not a well-formed range.
+ *
+ * **`from` is applied and `to` deliberately is not.** A range may end *after*
+ * the caret — "replace the whole word I am standing in the middle of" — and
+ * honouring that is replace mode, which LSP gates behind
+ * `insertReplaceSupport`, a capability Nox does not advertise
+ * (`services/lsp/session.ts:155`). Insert mode is also what every editor does
+ * by default. `to` is read because reading the protocol honestly is what this
+ * module is for, and because the feature that wants it will want it here.
  */
 export type ConvertedCompletion = Completion & { from?: number; to?: number };
 
@@ -132,10 +142,19 @@ export function toCodeMirrorCompletions(
       // The server naming the exact range it wants replaced. Believed over
       // any range the client would guess.
       apply = isSnippet ? stripSnippet(item.textEdit.newText) : item.textEdit.newText;
-      range = {
-        from: offsetAt(text, item.textEdit.range.start),
-        to: offsetAt(text, item.textEdit.range.end),
-      };
+      // Checked, not assumed. The 3.16 `InsertReplaceEdit` shape is
+      // `{ newText, insert, replace }` with **no `range` at all**, and
+      // reaching into it threw a `TypeError` out of the whole completion
+      // source — which kills completions for that server and says nothing.
+      // Nox does not advertise `insertReplaceSupport`, so no conforming
+      // server should send one; this module reads a third-party process and
+      // does not get to rely on that.
+      if (isLspRange(item.textEdit.range)) {
+        range = {
+          from: offsetAt(text, item.textEdit.range.start),
+          to: offsetAt(text, item.textEdit.range.end),
+        };
+      }
     } else if (item.insertText !== undefined) {
       apply = isSnippet ? stripSnippet(item.insertText) : item.insertText;
     }
