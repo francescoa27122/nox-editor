@@ -1,6 +1,8 @@
 import { Signal } from '@core/signal';
 import type { NoteAnchor } from '@core/anchor';
+import { highestNumbered, type DamagedFile } from '@core/damaged-config';
 import type { Platform } from '@platform/types';
+import { preserveDamaged } from './damaged-config';
 
 /**
  * The user's own notes.
@@ -88,6 +90,13 @@ export class NotesService {
    * `TerminalService` uses for its own errors.
    */
   readonly error = new Signal<string | null>(null);
+  /**
+   * The index Nox could not read at boot, and where it kept a copy.
+   *
+   * Separate from `error` for the reason `ConfigService.damaged` is. Reported
+   * by `app.ts`, like `error`, so this service keeps its single dependency.
+   */
+  readonly damaged = new Signal<DamagedFile | null>(null);
 
   #platform: Platform;
   /** Note id → the config file holding its body. */
@@ -150,9 +159,16 @@ export class NotesService {
     try {
       parsed = JSON.parse(raw) as NotesFile;
     } catch {
+      await this.#reportDamage(raw);
       return;
     }
-    if (parsed.version !== VERSION || !Array.isArray(parsed.notes)) return;
+    // A version this build does not know is usually a newer Nox having
+    // written the file. Not corruption, but the consequence is identical:
+    // discarded, then overwritten by the next save.
+    if (parsed.version !== VERSION || !Array.isArray(parsed.notes)) {
+      await this.#reportDamage(raw);
+      return;
+    }
 
     const loaded: Note[] = [];
     for (const record of parsed.notes) {
@@ -179,6 +195,22 @@ export class NotesService {
     this.selectedId.set(
       loaded.some((note) => note.id === wanted) ? wanted : (loaded[0]?.id ?? null),
     );
+  }
+
+  /**
+   * Preserve an index that could not be read, and salvage the ordinal from it.
+   *
+   * `#nextOrdinal`'s own comment promises that a restart "cannot reissue one
+   * and overwrite the body file of an existing note" — a guarantee that held
+   * in every case except this one, where the ids it recomputes from never
+   * arrive. The ids and the body filenames both survive in the raw text of a
+   * file that will not parse, so the counter is recovered from whichever of
+   * the two reaches higher.
+   */
+  async #reportDamage(raw: string): Promise<void> {
+    this.#nextOrdinal =
+      Math.max(highestNumbered(raw, /"n(\d+)"/g), highestNumbered(raw, /note-(\d+)\.txt/g)) + 1;
+    this.damaged.set(await preserveDamaged(this.#platform, INDEX_FILE, raw));
   }
 
   /** Create an empty note, select it, and return its id. */

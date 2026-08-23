@@ -6,6 +6,32 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A settings, shortcuts, notes or session file Nox could not read was
+  quietly replaced.** If one of those four files would not parse — a stray
+  comma, a half-written save, a disk that lost a block — Nox treated it as
+  though it were not there, started from its defaults, and then wrote its own
+  file over the top. Every preference, every rebinding, every note in the
+  list, gone without a word. Now Nox keeps the old file as
+  `settings.damaged.json` (and so on) beside it, and tells you where it went
+  and what it means.
+- **Unsaved work could be overwritten after a damaged session file.** Text you
+  never saved lives in `unsaved-1.txt`, `unsaved-2.txt` and friends, and the
+  numbering restarted from 1 whenever the session index would not load — so
+  the first file you typed in landed on top of work from the session before.
+  The same was true of note bodies. Nox now reads the numbering out of the
+  damaged file itself, which still contains it, and carries on above it.
+- **A session written by a newer Nox no longer costs you your tabs.** Running
+  an older build once used to discard the session outright. It is now kept and
+  reported like any other file that could not be read.
+- **Windows: editing `.nox/settings.json` had no effect until you reopened the
+  folder**, and opening it from the command palette while it was already open
+  from the explorer gave you the same file twice, in two tabs, with two undo
+  histories and two dirty flags. The path was built with a forward slash on a
+  platform that uses backslashes, so two strings that named one file never
+  matched.
+
 ## [0.8.3] — 2026-08-22
 
 ### Added

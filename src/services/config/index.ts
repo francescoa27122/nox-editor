@@ -1,5 +1,8 @@
+import type { DamagedFile } from '@core/damaged-config';
+import { join } from '@core/path';
 import { Signal } from '@core/signal';
 import type { Platform } from '@platform/types';
+import { preserveDamaged } from '../damaged-config';
 import {
   coerce,
   coerceAll,
@@ -62,6 +65,15 @@ export class ConfigService {
    * failures, and toasted in `NoxApp.#wireServices`.
    */
   readonly error = new Signal<string | null>(null);
+  /**
+   * The settings file Nox could not read at boot, and where it kept a copy.
+   *
+   * Its own signal rather than a second use of `error`, which means "the last
+   * *write* failed" and is cleared by `#save` on the next write that lands —
+   * about 250 ms after the first preference the user changes. A damage notice
+   * that a save can erase is a damage notice nobody sees.
+   */
+  readonly damaged = new Signal<DamagedFile | null>(null);
 
   #platform: Platform;
   #saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -227,7 +239,12 @@ export class ConfigService {
     try {
       parsed = JSON.parse(raw);
     } catch {
-      return; // Corrupt file: fall back to defaults rather than refusing to start.
+      // The defaults still stand — booting is never refused over this. What
+      // changed is that the file is no longer treated as absent: the next
+      // `set()` serializes an empty diff and `#save` replaces the file with
+      // it, so without a copy every customisation in it is gone, silently.
+      this.damaged.set(await preserveDamaged(this.#platform, CONFIG_FILE, raw));
+      return;
     }
 
     this.#user = coerceAll(parsed);
@@ -281,7 +298,19 @@ export class ConfigService {
   }
 }
 
-/** Where a workspace keeps its settings. Exported for the command that opens it. */
+/**
+ * Where a workspace keeps its settings. Exported for the command that opens it.
+ *
+ * Through `join`, not a template with a hardcoded `/`. The literal separator
+ * produced `C:\proj/.nox/settings.json` on Windows, which is a real path to
+ * the OS and a different *string* from the `C:\proj\.nox\settings.json` the
+ * watcher reports and `join` builds everywhere else. Two consequences, both
+ * silent: the reload check in `NoxApp` is a `Set.has` on that string, so
+ * editing the file never applied it until the folder was reopened; and
+ * `findByPath` is an exact compare, so opening it from the palette while it
+ * was already open from the explorer made a *second* buffer for one file —
+ * two undo histories, two dirty flags, last save wins.
+ */
 export function workspaceConfigPath(root: string): string {
-  return `${root}/${WORKSPACE_CONFIG_PATH}`;
+  return join(root, ...WORKSPACE_CONFIG_PATH.split('/'));
 }
