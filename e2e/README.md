@@ -56,8 +56,40 @@ delivering a keystroke, and the platforms that have no other coverage at all.
 | | How |
 |---|---|
 | **Linux** | Running in CI, green. `webkit2gtk-driver` + `xvfb`, no Rust change. |
-| **Windows** | Next. A matrix entry; the service handles the Edge driver. |
+| **Windows** | **Blocked**, and not on a matrix entry — see below. Attempted in [#118](https://github.com/francescoa27122/nox-editor/pull/118), left open. |
 | **macOS** | Needs `tauri-plugin-wdio-webdriver` registered in debug builds — a source change, not a workflow one. Free; the paid CrabNebula driver is not required. |
+
+## Windows: the external driver is a dead end
+
+Everything up to the session works — `nox.exe` builds, the service detects
+WebView2 `151.0.4129.86`, downloads the **exactly matching** msedgedriver, and
+`tauri-driver` reports ready on 4444. Then `POST /session` waits sixty seconds
+and returns `session not created: DevToolsActivePort file doesn't exist`:
+msedgedriver launched the app and waited for a Chromium DevTools port that a
+Tauri WebView2 window never opened. Version skew, the usual cause of exactly
+that string, is ruled out by the exact match.
+
+Not a configuration mistake here. [`Haprog/tauri-wdio-win-test`][h] exists to
+do precisely this — Tauri 2, WebdriverIO, `tauri-driver`, `windows-latest` —
+and its author reports "hard issues using the latest version of WebdriverIO …
+I could not find any way to make it work", with only a downgrade to
+WebdriverIO **v7** succeeding and the Actions integration still marked WIP.
+
+[h]: https://github.com/Haprog/tauri-wdio-win-test
+
+**The fix is the embedded provider**, which replaces `tauri-driver` and
+msedgedriver with a WebDriver server inside the app
+(`tauri-plugin-wdio-webdriver`, published alongside the npm package). It is
+what the service now defaults to and the only way macOS is supported at all,
+so one change buys both remaining platforms — and it may also remove the six
+minutes below, which are spent waiting for that very plugin.
+
+It wants its own change: it adds a **remote-control surface to Nox's own
+crate**, so the dependency belongs behind a Cargo feature rather than only a
+gated call site — not merely unregistered in a release build but not compiled
+into one — plus `debug_assertions`, so the feature alone cannot arm it. And it
+edits `src-tauri/src/lib.rs`, the application entry point, on a machine with
+no `cargo`.
 
 ## Known: it is slower than it should be
 
