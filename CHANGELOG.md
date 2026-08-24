@@ -6,6 +6,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-08-24
+
+Nox could not tell you what went wrong. It can now — and three other things
+that were harder than they should have been are not any more: getting back to
+the screen that explains the editor, telling Nox what language a file is, and
+opening the Git panel from the keyboard.
+
 ### Added
 
 - **Nox can tell you what went wrong.** A failure used to leave nothing
@@ -1366,7 +1373,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/francescoa27122/nox-editor/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/francescoa27122/nox-editor/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/francescoa27122/nox-editor/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/francescoa27122/nox-editor/compare/v0.8.0...v0.8.1
