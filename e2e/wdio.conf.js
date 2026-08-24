@@ -23,20 +23,44 @@
  * root. Nothing about building or unit-testing Nox needs WebdriverIO.
  */
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
 /**
  * Where the binary is.
  *
- * Normally unset: the service detects it. Tauri names the built binary from
- * `productName` while Cargo names it from `package.name`, and those disagree
- * here — `Nox` against `nox` — so a hardcoded path is a guess that cannot be
- * checked without a Rust toolchain. The override exists for the case where
- * detection is the thing that turns out to be wrong.
+ * Set explicitly rather than detected. The service has automatic path
+ * detection but does not apply it to an empty `tauri:options` — the first CI
+ * run failed with "Tauri application path not specified", and because the
+ * service bails before rewriting the capability, the symptom is the confusing
+ * `No "browserName" defined in capabilities` from WebdriverIO itself rather
+ * than anything naming Tauri.
+ *
+ * The name is `nox`, from Cargo's `package.name` — **not** `Nox` from Tauri's
+ * `productName`, which is what the bundled application is called. Those
+ * disagree here, and `--no-bundle` stops before the rename, so this is the
+ * Cargo one. Read off the build log rather than reasoned about:
+ * `Built application at: …/src-tauri/target/debug/nox`.
+ *
+ * Absolute, from this file's own location, so it does not depend on where
+ * the runner happened to be standing.
  */
-const application = process.env.NOX_E2E_BINARY;
+const application =
+  process.env.NOX_E2E_BINARY ??
+  path.resolve(
+    here,
+    '..',
+    'src-tauri',
+    'target',
+    'debug',
+    process.platform === 'win32' ? 'nox.exe' : 'nox',
+  );
 
 export const config = {
   runner: 'local',
-  specs: ['./specs/**/*.e2e.js'],
+  specs: [path.join(here, 'specs', '**', '*.e2e.js')],
 
   // One at a time. Each instance is a real window belonging to a real
   // process, and Nox persists window geometry and session state to the same
@@ -46,7 +70,7 @@ export const config = {
   capabilities: [
     {
       browserName: 'tauri',
-      'tauri:options': application ? { application } : {},
+      'tauri:options': { application },
     },
   ],
 
