@@ -28,6 +28,9 @@ const config: StorybookConfig = {
     // can be checked against the real rendered story rather than described.
     // Only active while `npm run storybook` is up; it adds nothing to a build.
     '@storybook/addon-mcp',
+    // Runs every story as a vitest test: it renders, and axe checks it. The
+    // browser project this needs lives in vite.config.ts.
+    '@storybook/addon-vitest',
   ],
   framework: '@storybook/svelte-vite',
 };
