@@ -65,6 +65,32 @@ jobs:
         if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
         run: npm run storybook:build
 
+      # Deliberately without `--with-deps`, which shells out to apt — the same
+      # apt the rust job's cache comment documents degrading a 9s fetch into
+      # 22 minutes on these runners. The ubuntu-22.04 image ships most of what
+      # chromium links against, so the bet is that the bare install is enough.
+      # If this step starts failing on a missing shared library, that bet lost
+      # and the fix is the runner image, not `--with-deps`.
+      - name: Cache Playwright browsers
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: playwright-
+
+      - name: Install Chromium
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        run: npx playwright install chromium
+
+      # Every story rendered in a real browser with axe over it. One leg for
+      # the same reason as the Storybook build, and emphatically not part of
+      # `npm test`: that suite is node-only on four legs, and giving it a
+      # browser dependency would put this download on all of them.
+      - name: Test stories
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        run: npm run test:stories
+
   rust:
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
