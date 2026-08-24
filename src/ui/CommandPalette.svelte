@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
+  import { LANGUAGES } from '@core/languages';
   import { basename, dirname, relative } from '@core/path';
   import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
   import { createSymbolCache, symbolListState, type SymbolKind } from '@core/symbols';
@@ -50,12 +51,13 @@
     if (kind === 'go-to-line') return ':';
     if (kind === 'go-to-symbol') return '@';
     if (kind === 'git-branch') return '';
+    if (kind === 'language') return '';
     return '';
   }
 
   /** The active mode, which the prefix can change without reopening. */
   const effectiveMode = $derived.by<
-    'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches' | 'notes' | 'actions'
+    'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches' | 'notes' | 'actions' | 'languages'
   >(
     () => {
       // The branch picker is a picker, not the multiplexed palette: no prefix
@@ -68,6 +70,9 @@
       // Same again: an action's title is the server's prose and may start with
       // anything, so no prefix may switch this one either.
       if (mode === 'code-action') return 'actions';
+      // And again: a dedicated picker, so no prefix may switch it. `C++`
+      // starts with nothing special, but `>` is not worth the exception.
+      if (mode === 'language') return 'languages';
       if (text.startsWith('>')) return 'commands';
       if (text.startsWith('~')) return 'buffers';
       if (text.startsWith(':')) return 'line';
@@ -80,13 +85,16 @@
     effectiveMode === 'files' ||
     effectiveMode === 'branches' ||
     effectiveMode === 'notes' ||
-    effectiveMode === 'actions'
+    effectiveMode === 'actions' ||
+    effectiveMode === 'languages'
       ? text.trim()
       : text.slice(1).trim(),
   );
 
   const placeholder = $derived.by(() => {
     switch (effectiveMode) {
+      case 'languages':
+        return 'Edit this file as…';
       case 'commands':
         return 'Search commands…';
       case 'buffers':
@@ -188,6 +196,7 @@
     if (effectiveMode === 'branches') return branchRows(term);
     if (effectiveMode === 'notes') return noteRows(term);
     if (effectiveMode === 'actions') return actionRows(term);
+    if (effectiveMode === 'languages') return languageRows(term);
     return fileRows(term);
   });
   const rows = $derived(result.rows);
@@ -522,6 +531,53 @@
         accept: () => {
           ui.closeOverlay();
           void app.applyCodeAction(index);
+        },
+      });
+    }
+    return { rows, total: rows.length };
+  }
+
+  /**
+   * Every language a buffer can be edited as.
+   *
+   * Sorted by name rather than by the table's own order, because that order
+   * is about detection precedence — `tsx` before `typescript` — and means
+   * nothing to someone reading an alphabetical list looking for "Ruby".
+   *
+   * The current language keeps its place in that list rather than being
+   * pulled to the top: this picker is for changing the language, so promoting
+   * the one answer that changes nothing would put the least useful row under
+   * the cursor. It wears a badge instead.
+   *
+   * A language with no installed grammar is offered anyway, and says so. It
+   * is still the right answer — the LSP document is opened under this id too,
+   * and the status bar stops claiming the file is something it is not — so
+   * refusing it would be withholding a correct choice over a cosmetic one.
+   */
+  function languageRows(query: string): RowsResult {
+    // `void $buffers` for the dependency, then the service for the answer —
+    // the same shape `bufferRows` uses, because the snapshot list does not
+    // carry which of its entries is active.
+    void $buffers;
+    const active = workspace.activeSnapshot();
+    const rows: Row[] = [];
+
+    for (const language of [...LANGUAGES].sort((a, b) => a.name.localeCompare(b.name))) {
+      const match =
+        query.length === 0 ? { score: 0, positions: [] as number[] } : fuzzyMatch(query, language.name);
+      if (!match) continue;
+
+      const current = active?.languageId === language.id;
+      rows.push({
+        key: `language:${language.id}`,
+        title: language.name,
+        positions: match.positions,
+        icon: 'file',
+        ...(current ? { badge: 'current' } : {}),
+        ...(hasGrammar(language.id) ? {} : { detail: 'no grammar installed' }),
+        accept: () => {
+          ui.closeOverlay();
+          if (active) void app.commands.execute('lang.setLanguage', language.id);
         },
       });
     }

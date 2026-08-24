@@ -989,6 +989,37 @@ export class WorkspaceService {
     return true;
   }
 
+  /**
+   * Set a buffer's language by hand, overriding what its name implied.
+   *
+   * Until this existed the language was whatever `detectLanguage` inferred at
+   * open time and there was no way to disagree with it — which left every
+   * untitled buffer as plaintext until its first save, and every unusual
+   * extension unhighlighted for good.
+   *
+   * `buffer-reset` for the same reason `saveAs` emits it: the grammar has
+   * changed, and so has the language the LSP document was opened under, and
+   * the view has to re-sync to pick up both. That costs the scroll position,
+   * which is a view concern and not in the `EditorState` — acceptable for a
+   * rare, deliberate act, and the same price `saveAs` already pays.
+   *
+   * Returns false when nothing changed, so callers do not announce a no-op.
+   */
+  setLanguage(id: BufferId, languageId: string): boolean {
+    const buffer = this.#map.get(id);
+    if (!buffer) return false;
+
+    // `languageById` falls back to plaintext rather than throwing, so an id
+    // from a stale session cannot stop a buffer opening.
+    const language = languageById(languageId);
+    if (language.id === buffer.language.id) return false;
+
+    buffer.language = language;
+    this.#sync();
+    this.events.emit('buffer-reset', { id });
+    return true;
+  }
+
   /** Point a buffer at a new path, then save it there. */
   async saveAs(id: BufferId, path: string, options: Parameters<this['save']>[1] = {}): Promise<boolean> {
     const buffer = this.#map.get(id);

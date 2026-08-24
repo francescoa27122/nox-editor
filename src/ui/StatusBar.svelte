@@ -97,8 +97,18 @@
       : null,
   );
 
-  /** Pulled out so the click handler needs no narrowing inside the template. */
-  const languageCommand = $derived(languageStatus?.commandId ?? null);
+  /**
+   * What clicking the language item does. Never nothing, now.
+   *
+   * Falls back to the picker rather than replacing `commandId` with it: when
+   * this file *should* have language intelligence and does not, the item
+   * says so and offers the fix, and that behaviour is argued for at length in
+   * `lsp-status.ts`. Changing the language is the obvious meaning of a
+   * control labelled with a language, but it is the less urgent one, so it
+   * takes the states the other does not claim. The tooltip distinguishes
+   * them — "Markdown" against "Markdown — no language server configured".
+   */
+  const languageCommand = $derived(languageStatus?.commandId ?? 'lang.setLanguage');
   const languageTitle = $derived(languageStatus?.title ?? active?.languageName ?? '');
   const dirtyCount = $derived($buffers.filter((b) => b.isDirty).length);
 
@@ -302,9 +312,14 @@
         not", and the grammar half already said so here — a second control for
         the server half would have split one question across two places.
 
-        A button only when there is somewhere to go. "No server for this
-        language" has a fix and `lsp.configure` is it; a missing grammar does
-        not, so that stays the inert readout it has always been.
+        Always a button now. It used to be one only when there was somewhere
+        to go, which left it inert in the common case — the single dead item
+        in a row of live ones, labelled with a language and refusing to let
+        you change it. Changing the language *is* somewhere to go, and it is
+        the obvious reading of a control that names one, so it takes every
+        state `lsp.configure` does not claim. A missing grammar is no longer a
+        dead end either: picking a language you do have one for is a real
+        answer to it.
 
         The button keeps `.muted` — faint is how this bar says "not
         installed", and the audit's worry about inert and clickable items
@@ -312,26 +327,15 @@
         resting colour: `button.item:hover` outranks `.item.muted`, so this
         one lights up and takes a ground where `.item.static` does neither.
       -->
-      {#if languageCommand}
-        <button
-          class="item"
-          class:muted={languageStatus?.tone === 'muted'}
-          class:warn={languageStatus?.tone === 'warn'}
-          title={languageTitle}
-          onclick={() => void commands.execute(languageCommand)}
-        >
-          {active.languageName}
-        </button>
-      {:else}
-        <span
-          class="item static"
-          class:muted={languageStatus?.tone === 'muted'}
-          class:warn={languageStatus?.tone === 'warn'}
-          title={languageTitle}
-        >
-          {active.languageName}
-        </span>
-      {/if}
+      <button
+        class="item"
+        class:muted={languageStatus?.tone === 'muted'}
+        class:warn={languageStatus?.tone === 'warn'}
+        title={languageTitle}
+        onclick={() => void commands.execute(languageCommand)}
+      >
+        {active.languageName}
+      </button>
 
       <!--
         Inside `{#if active}`: wrap is a property of the buffer on screen, and

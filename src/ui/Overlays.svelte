@@ -28,7 +28,8 @@
       $overlay === 'go-to-symbol' ||
       $overlay === 'git-branch' ||
       $overlay === 'code-action' ||
-      $overlay === 'note-open',
+      $overlay === 'note-open' ||
+      $overlay === 'language',
   );
 
   function onScrimClick(event: MouseEvent) {
