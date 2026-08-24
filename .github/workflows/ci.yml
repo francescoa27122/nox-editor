@@ -51,6 +51,20 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Stories compile through the svelte-csf plugin, which nothing else in
+      # this pipeline runs, so a story can break in a way the rest of CI calls
+      # clean: duplicating a story name reports 0 errors from `npm run check`
+      # and fails this step with DuplicateStoryIdentifiersError. Storybook is
+      # where a component's states get looked at, and a preview that will not
+      # build is one nobody looks at until they next need it.
+      #
+      # One leg because compiling stories is the same work on every platform
+      # and both Node versions, and it is the whole job on the matrix that has
+      # no reason to differ. Measured at 4s locally for the seven story files.
+      - name: Build Storybook
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        run: npm run storybook:build
+
   rust:
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
