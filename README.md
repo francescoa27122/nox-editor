@@ -226,6 +226,8 @@ is why Umbra takes about 30 lines to describe rather than a second stylesheet.
 | <kbd>Mod R</kbd> | Jump to a symbol in this file |
 | <kbd>Mod E</kbd> | Switch between open files |
 | <kbd>Mod ⇧ F</kbd> | Search the whole project |
+| <kbd>Mod ⇧ G</kbd> | Git — stage, commit, switch branch |
+| <kbd>Mod .</kbd> | Fix what's under the cursor |
 | <kbd>Mod ⇧ A</kbd> | Answers from a model |
 | <kbd>Mod \\</kbd> | Split the editor |
 | <kbd>Mod ,</kbd> | Settings |
@@ -242,33 +244,57 @@ Also in the box: syntax highlighting for nine language families, multiple
 cursors, code folding, jumping to a function or class by name in the file
 you're in, sticky scroll to keep the enclosing declaration on screen, split
 panes, a terminal, your own notes, and project-wide search and replace that
-shows you a diff first. The settings panel is built from the same list the app
-reads its settings from, so it can't drift out of date with what you're
-actually able to change.
+shows you a diff first — one match at a time if that's what you want. The
+settings panel is built from the same list the app reads its settings from, so
+it can't drift out of date with what you're actually able to change.
+
+Nox guesses a file's language from its name, and you can disagree: click the
+language in the status bar and pick another. Every item in that bar does
+something — the cursor position, the indentation, the encoding, the line
+endings, the language, the wrap.
 
 ## Status
 
-**v0.5.** It's young, and it's a personal project rather than a product, but
-it's real software with 1421 tests and I use it. Expect rough edges, and open an
-issue if you hit one.
+**v0.9.** It's young, and it's a personal project rather than a product, but
+it's real software with 1983 tests and I use it. Expect rough edges, and open
+an issue if you hit one — and if you do, run **Copy Diagnostics** from the
+palette first. It puts the version, the platform and what recently went wrong
+on your clipboard, with your home directory stripped out of the paths.
 
 **Git arrived in 0.5.0** — a gutter marking what the index doesn't hold yet, a
 side-by-side or inline diff of the file against its base, and a focused panel
-to stage, unstage, commit and switch branches. Not a Git client: no push, pull,
-rebase or amend, and nothing that can discard your working tree.
+to stage, unstage, commit and switch branches (<kbd>Mod ⇧ G</kbd>). Not a Git
+client: no push, pull, rebase or amend, and nothing that can discard your
+working tree.
 
 Also in 0.5.0: **you can change the keys** (every command, including the ones
 with none), **a project can carry its own conventions** in `.nox/settings.json`,
 the explorer stays fast in a folder with tens of thousands of entries, and Nox
 can update itself.
 
-Language servers landed in 0.4.2 and finished in 0.4.3 — diagnostics,
-completion, hover, go to definition, find references, rename symbol and
-formatting, from a `servers.json` you write. Run **Configure Language Servers**
-from the palette and Nox creates it with a working `typescript-language-server`
-entry to start from; **Reload Language Servers** picks up your edits. Nox never
-starts a server you did not list there, and Format on Save is off until you
-turn it on. Not there yet: plugins, and blame. See [ROADMAP.md](ROADMAP.md).
+Since then: **Windows and Linux got a menu bar** in 0.8.0, drawn from the same
+table macOS's native one reads, so the two can't drift. **Files that aren't
+UTF-8 open** — UTF-16 on its own, anything else by clicking the encoding in the
+status bar — and they're written back in the encoding they arrived in. **The
+same file can sit in two panes**, each with its own cursor, edits showing in
+both. 0.7.0 turned notes into something you can search, pin and anchor to the
+code they're about; 0.6.0 was a pass over how much of this you can actually
+find.
+
+Language servers landed in 0.4.2 and have kept going — diagnostics, completion,
+hover, go to definition, find references, rename symbol, formatting, and
+**quick fixes** (<kbd>Mod .</kbd>), which asks your server what it can do where
+the cursor is. All of it from a `servers.json` you write. Run **Configure
+Language Servers** from the palette and Nox creates it with a working
+`typescript-language-server` entry to start from; **Reload Language Servers**
+picks up your edits. Nox never starts a server you did not list there, and
+Format on Save is off until you turn it on. Not there yet: plugins, and blame.
+See [ROADMAP.md](ROADMAP.md).
+
+Every release is driven before it ships. A test harness launches the packaged
+app on macOS, Windows and Linux and drives it the way you would — the window
+comes up, the menu bar is there, the palette opens on its chord and closes on
+<kbd>Esc</kbd> — on every change, on all three.
 
 ## Under the hood
 
@@ -291,6 +317,10 @@ npm test          # the unit suite (the count is in Status above)
 npm run check     # TypeScript + Svelte
 npm run app:build # a distributable, ~4 MB on macOS
 ```
+
+There's a second suite in [`e2e/`](e2e/README.md) that drives the built
+application rather than its source. It needs a Rust toolchain, so CI is where
+it usually runs — on all three platforms, on every change.
 
 ## License
 

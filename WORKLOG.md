@@ -8,6 +8,50 @@ are knowledge.**
 
 ---
 
+## 2026-08-24 (PC, release) — README brought current, and 0.9.0 cut
+
+The README described v0.5 and 1421 tests. Nox is on 0.9.0 with 1983, and four
+minor versions had landed since anything in that file was written.
+
+Updated, with the voice left alone — the operator asked for the facts to move
+and the reading to stay:
+
+- **Status** now says v0.9 and 1983, points at *Copy Diagnostics* as the first
+  thing to run before opening an issue, and covers what 0.6 through 0.8
+  brought: the in-window menu bar off macOS, non-UTF-8 files, the same file in
+  two panes, notes worth searching. Language servers no longer "finished in
+  0.4.3" — they gained quick fixes. It also records that every release is now
+  driven on three platforms before it ships, which is the claim phase 2 earned
+  and the README had no way to make before.
+- **The shortcut table** gained Git (`Mod ⇧ G`) and quick fixes (`Mod .`).
+- **The basics** now mention that a file's language is yours to change, and
+  that every item in the status bar does something — which became true today.
+- **Under the hood** points at `e2e/`.
+
+Cut **0.9.0**: version bumped in all three files, `[Unreleased]` closed with a
+lead paragraph, link refs added. The gate script CI runs on the tag was run
+locally against `v0.9.0` first — three files agreeing, tag matching — because
+it fires *after* the tag is pushed and a mismatch there means retagging.
+
+The tag builds all four platform artifacts and leaves a **draft**
+(`releaseDraft: true`). That is the right seam: cutting the release is mine,
+publishing it is the operator's, and the workflow already draws the line in
+the same place the charter does.
+
+Verified: `npm test` 1983 / 138, `npm run check` 977 files 0 errors,
+`npm run build` green, gate script green.
+
+Next: the operator publishes the draft. After that, the outstanding items are
+the e2e required-checks promotion (needs his permissions) and the Apple
+certificate.
+
+Blocked: publishing the release, deliberately.
+
+Confidence: high on the content; the build itself is CI's to prove, and the
+first tagged release with the Apple secrets absent is the same path 0.8.3 took.
+
+---
+
 ## 2026-08-24 (PC, UX) — Git gets the letter, and a standing directive
 
 Finding #4, the last from the sweep, plus a change to how I work.
