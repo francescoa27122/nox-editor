@@ -8,6 +8,63 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, phase 2 cont.) — Windows is wired and blocked, on someone else's bug
+
+Second slice of phase 2. The matrix is written and correct; **Windows does not
+pass, and it is not a matrix problem.** Left as an open PR (#118) rather than
+merged, because merging it puts a red tick on every pull request and a red
+tick people are told to ignore is worse than no check. Linux coverage is
+already on `main` from #117 and is unaffected.
+
+What works on the Windows leg, all of it verified in the log rather than
+assumed: `nox.exe` builds; the service detects WebView2 `151.0.4129.86`;
+it downloads the **exactly matching** msedgedriver; `tauri-driver` starts and
+reports ready on 4444. Then `POST /session` waits sixty seconds and returns
+`session not created: DevToolsActivePort file doesn't exist`. msedgedriver
+launched the app and waited for a Chromium DevTools port that a Tauri WebView2
+window never opened. Version skew — the usual cause of exactly this string —
+is ruled out by the exact match.
+
+**Not our configuration.** `Haprog/tauri-wdio-win-test` exists to do precisely
+this — Tauri 2, WebdriverIO, `tauri-driver`, the `windows-latest` runner — and
+its author reports "hard issues using the latest version of WebdriverIO … I
+could not find any way to make it work", with only a downgrade to WebdriverIO
+**v7** succeeding and the Actions integration still marked WIP. Two hours of
+config guessing would not have found that; the search did.
+
+**The fix, and why it is its own change.** `driverProvider: 'embedded'`
+replaces `tauri-driver` and msedgedriver with a WebDriver server inside the
+app (`tauri-plugin-wdio-webdriver` 1.3.0, published alongside the npm package,
+same repo). It is what the service now defaults to and **the only way macOS is
+supported at all**, so one change buys both remaining platforms. It is also:
+
+- a **remote-control surface added to Nox's own crate**. The dependency wants
+  a Cargo feature gate rather than only a gated call site, so it is not
+  compiled into a release build at all, *and* `debug_assertions`, so the
+  feature alone cannot arm it. That is a property worth being able to point
+  at, not a profile flag to trust.
+- an edit to `src-tauri/src/lib.rs`, the application entry point, on a machine
+  with no `cargo`. CI is the only compiler available, so it wants a focused
+  change rather than riding along with a workflow edit.
+
+Verified: the matrix guards, step order and `fail-fast: false` were confirmed
+by loading the YAML and printing the resolved job — and `fail-fast: false`
+earned its keep immediately, keeping the Linux pass visible next to the
+Windows failure instead of cancelling it.
+
+Next: **the embedded provider**, as its own PR — Windows and macOS together.
+Then the six-minute plugin wait, which that change may also remove, since the
+wait is for the very plugin it installs.
+
+Blocked: nothing new. The certificates remain the operator's.
+
+Confidence: high on the diagnosis — every step is a log line, and the one
+thing that would have made it our bug (driver version skew) is ruled out by an
+exact match. Medium on the embedded provider working first try; it is
+unverifiable here until CI compiles it.
+
+---
+
 ## 2026-08-23 (PC, phase 2) — Something other than a human has now launched Nox
 
 Phase 2, first slice. `e2e/` drives the **packaged binary** through WebDriver
