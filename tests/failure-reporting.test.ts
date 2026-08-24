@@ -156,6 +156,45 @@ describe('the uncaught-error backstop', () => {
     expect(messages(app)).toEqual([]);
   });
 
+  /**
+   * The regression 0.9.0 shipped, reported from a real first launch.
+   *
+   * `ResizeObserver loop …` is not a failure. The browser raises it when an
+   * observer callback resizes something and the loop needs another pass, and
+   * the specification calls for exactly that. It arrives with a message and
+   * no `error` object — the same shape as a cross-origin script error — so
+   * the fallback for that case reported it, and a new user's first launch
+   * opened with a red "Something went wrong". Nox has five `ResizeObserver`s
+   * and start-up is when panels measure themselves, so first launch is where
+   * it is likeliest.
+   */
+  it('says nothing about a ResizeObserver loop, which is not a failure', () => {
+    app = new NoxApp(new MemoryPlatform());
+
+    dispatchError({ message: 'ResizeObserver loop completed with undelivered notifications.' });
+    // The older spelling, which Chrome used before the current one.
+    dispatchError({ message: 'ResizeObserver loop limit exceeded' });
+
+    expect(messages(app)).toEqual([]);
+  });
+
+  /**
+   * The narrow half of that filter. Code inside an observer callback can fail
+   * like any other code, and that arrives *with* an `error` object — so
+   * matching on the message alone would have silenced a real exception for
+   * having the word ResizeObserver in it.
+   */
+  it('still reports a real error thrown inside an observer callback', () => {
+    app = new NoxApp(new MemoryPlatform());
+
+    dispatchError({
+      error: new Error('ResizeObserver loop: measure() read a null element'),
+      message: 'ResizeObserver loop: measure() read a null element',
+    });
+
+    expect(app.notifications.items.get()[0]?.message).toBe('Something went wrong');
+  });
+
   it('stops listening once the app is disposed', async () => {
     const instance = new NoxApp(new MemoryPlatform());
     await instance.dispose();

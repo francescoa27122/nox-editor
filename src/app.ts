@@ -860,6 +860,28 @@ export class NoxApp {
       // in the bubble phase, where the spec does not deliver them, and this
       // is the belt to that braces.
       if (error === undefined && message === undefined) return;
+
+      /**
+       * `ResizeObserver loop …` is not a failure, and 0.9.0 shipped saying it
+       * was.
+       *
+       * The browser raises it when an observer callback resizes something and
+       * the loop needs another pass. The specification calls for exactly that
+       * — deliver what is left next frame and carry on — so nothing is broken
+       * and nothing is lost. It arrives as an `error` event with a message
+       * and no `error` object, which is the same shape as the cross-origin
+       * case below, so the fallback there reported it: a red toast reading
+       * "Something went wrong", on first launch, as the first thing a new
+       * user saw. Nox has five `ResizeObserver`s and start-up is exactly when
+       * panels measure themselves, so first launch is where it is likeliest.
+       *
+       * Both spellings are matched — Chrome said "loop limit exceeded" before
+       * it said "loop completed with undelivered notifications" — and only
+       * when there is no `error` object, so a real exception *thrown inside*
+       * an observer callback still reports.
+       */
+      if (error === undefined && message?.startsWith('ResizeObserver loop')) return;
+
       // `error` is absent for a cross-origin script error, where the spec
       // gives only the sanitised "Script error." string. Reporting that is
       // still better than reporting nothing.
