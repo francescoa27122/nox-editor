@@ -114,9 +114,15 @@ jobs:
   # never opens - and which does not exist for macOS at all. One server, three
   # platforms, no external driver anywhere.
   #
-  # Not in branch protection's required checks on purpose, for now. A harness
-  # whose own flakiness is unmeasured should not be able to block a merge
-  # until it has a track record; promoting it is a deliberate later step.
+  # All three legs are required checks on `main` as of 2026-08-24, so a change
+  # that breaks the packaged app on any platform cannot land. Promoted on a
+  # measured record rather than a hunch: 36 job runs, zero flaky failures. The
+  # one failure in that window was macOS's first run, which caught two real
+  # defects in the specs - a true positive.
+  #
+  # `enforce_admins` is on, so a leg that goes flaky blocks everyone with no
+  # override. That is the argument for keeping this suite assertion-only and
+  # free of geometry, and for adding platforms one record at a time.
   e2e:
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
