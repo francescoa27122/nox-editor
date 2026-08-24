@@ -56,8 +56,52 @@ delivering a keystroke, and the platforms that have no other coverage at all.
 | | How |
 |---|---|
 | **Linux** | Running in CI, green. `webkit2gtk-driver` + `xvfb`, no Rust change. |
-| **Windows** | Next. A matrix entry; the service handles the Edge driver. |
+| **Windows** | Wired, **not passing**. See below — it is not a matrix problem. |
 | **macOS** | Needs `tauri-plugin-wdio-webdriver` registered in debug builds — a source change, not a workflow one. Free; the paid CrabNebula driver is not required. |
+
+## Windows: the external driver is a dead end
+
+The matrix entry works. Everything up to the session works — the build
+produces `nox.exe`, the service detects WebView2 `151.0.4129.86`, downloads
+the **exactly matching** msedgedriver, and `tauri-driver` comes up on 4444.
+Then `POST /session` waits sixty seconds and returns:
+
+```
+session not created: DevToolsActivePort file doesn't exist
+```
+
+msedgedriver launched the app and waited for a Chromium DevTools port that a
+Tauri WebView2 window never opened. Version skew — the usual cause — is ruled
+out by the exact match above.
+
+This is not a configuration mistake here. [`Haprog/tauri-wdio-win-test`][h]
+exists to do precisely this — a Tauri 2 app, WebdriverIO, `tauri-driver`, the
+`windows-latest` runner — and its author reports "hard issues using the latest
+version of WebdriverIO … I could not find any way to make it work", with only
+a downgrade to **WebdriverIO v7** succeeding and the Actions integration still
+marked WIP.
+
+[h]: https://github.com/Haprog/tauri-wdio-win-test
+
+**The way forward is the embedded provider, not a workaround.** The service
+supports `driverProvider: 'embedded'`, which replaces `tauri-driver` and
+msedgedriver with a WebDriver server inside the app itself
+(`tauri-plugin-wdio-webdriver`, v1.3.0, published alongside the npm package).
+It is the provider the service now defaults to, and it is also the only way
+macOS is supported at all — so one change buys both remaining platforms.
+
+It is not free, and it is not only a workflow edit:
+
+- It adds a **WebDriver server to Nox's own crate**. That is a remote-control
+  surface, and it must be impossible for it to reach a release. Gate the
+  *dependency* behind a Cargo feature rather than only the call site, so the
+  crate is not merely unregistered in a release build but not compiled into
+  one — and require `debug_assertions` as well, so the feature alone cannot
+  arm it.
+- It changes `src-tauri/src/lib.rs`, which is the application entry point, and
+  `cargo` is not installed on the development machine. CI is the only compiler
+  available, so it wants its own focused change rather than being bundled into
+  a workflow edit.
 
 ## Known: it is slower than it should be
 
