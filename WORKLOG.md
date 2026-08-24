@@ -8,6 +8,97 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, phase 0) — Both walk bugs closed, and a correction to the entry below
+
+Phase 0 of the production plan. It finished faster than planned and in a
+different place, because **the entry below got its headline finding wrong** and
+this session found out why.
+
+**The correction, first.** Yesterday's entry — and the plan and PR #114 that
+went with it — claimed `.desktop-pass-report.md` "currently asserts a defect
+against shipped code that may not exist". It does not. The report resolves
+BUG-1 in its **own next section**, an instrumented re-walk run the same
+afternoon. I had read the file's first forty lines, stopped at "Bugs found",
+and generalised from the part I had read. The `7302527` dating in that entry
+is correct and was verified twice; the conclusion drawn from it was not.
+
+**What is actually true is worse than a stale report.** The re-walk rebuilt
+Nox.app from the same main with a window-level event probe, and found:
+
+- An **invisible computer-use harness window over screen x≥970, y 53–773** —
+  excluded from the harness's own screenshots by native filtering — swallows
+  every click aimed into it. The probe recorded *zero* pointer events for
+  clicks on Close at its walk-time position, while clicks lower and left
+  arrived normally. Window moved out of that region: one click dismissed the
+  view instantly.
+- **Escape never reaches the app at all.** It is the harness's user-abort key,
+  eaten at the OS level. ⌘⇧P, typed characters and Enter all delivered;
+  Escape delivered through no injection path tried.
+
+So the instrument Nox is verified with manufactures false defects and cannot
+test one of the two dismissal paths *at all*. That is a far stronger argument
+for the WebDriver harness than "manual walks are expensive", and the plan now
+says so.
+
+Shipped:
+
+- **`tests/tab-dirty-affordance.test.ts`** — BUG-2 closed. It had sat as an
+  unconfirmed candidate for three days while three sessions of UI work went
+  past it; the re-check it asked for never happened, which is the failure mode
+  the "12 UNSEEN" number is about. Closed without a Mac, on two things that
+  can be checked from here: the report itself localises the tab's close button
+  to ≈x981, **inside the same dead region** proven to swallow BUG-1's clicks;
+  and `TabBar.svelte` reveals the glyph on `.close:hover`/`.close:focus-visible`
+  *unconditionally* while yielding the dot under exactly those two, so the
+  reported state is not one those rules can produce. Pinned as a stylesheet
+  contract rather than a behavioural test because the whole thing is `:hover`
+  over two stacked children — jsdom cannot evaluate it and
+  `tests/support/jsdom-layout.ts` forbids pretending. Same shape as
+  `cursor-affordance.test.ts`, and for the same stated reason: a comment
+  cannot fail.
+- **`.desktop-pass-report.md`** — the verdict summary read
+  "2 bugs (1 confirmed, 1 candidate)" directly above its own refutation. It now
+  leads with **0 app defects** and points at the two resolution sections; both
+  raised bugs are struck through in place rather than rewritten, so the
+  resolutions still have something to answer. A BUG-2 resolution section sits
+  beside BUG-1's.
+- **The plan and the entry below** — corrected, with the error named rather
+  than quietly edited.
+
+Verified:
+
+- `npm test` — **1929 passed, 133 files** (was 1926/132; the three are the new
+  file). `npm run check` — 0 errors.
+- All three new assertions mutation-checked, and each turned exactly one test
+  red — the wrong mutation failing the wrong test would have meant the
+  assertions were not measuring what they claim:
+  - `.close:hover` narrowed to `.close:hover:not(.dirty)`, which *is* the
+    reported regression → `expected [ …(4) ] to include '.close:hover
+    :global(svg)'`
+  - a third selector added to the dot-yield rule → `expected [ …(2) ] to
+    deeply equal [ …(1) ]`
+  - `:not(.dirty)` dropped from the tab-wide reveal → `expected '.tab:hover
+    .close :global(svg)' to contain '.close:not(.dirty)'`
+- BUG-1's own regression tests re-run in isolation: 2 passed.
+- **`cargo` is not installed on this machine**, so no desktop build was made
+  and nothing here was driven in the packaged app. Everything above is a
+  source-and-stylesheet argument plus the earlier re-walk's probe log. Said
+  plainly because the whole point of this plan is not to claim otherwise.
+
+Next: **phase 1, diagnostics.** Unchanged by any of this, and phase 0 sharpened
+the case — the only reason BUG-1 could be resolved at all is that someone hand-
+built a one-off probe writing to a log file, because the product has none.
+
+Blocked: nothing new. The certificates remain the operator's.
+
+Confidence: high that neither walk bug is an app defect — three independent
+lines of evidence for BUG-1 (probe, tests, browser target) and three for BUG-2
+(dead-region geometry, the rules themselves, now a test). Medium that a real
+pointer on real hardware resolves those rules as written; a stylesheet contract
+cannot reach that, and phase 2 is what would.
+
+---
+
 ## 2026-08-23 (PC, last) — Where production actually stands, and the five gaps
 
 No code this session. The operator asked where Nox goes next to be a
@@ -28,6 +119,9 @@ The five, each a claim the product cannot currently back:
    is tracked and public, so the repo currently asserts a defect against shipped
    code that may not exist. Root cause is the shape of the ritual, not the
    diligence: manual, expensive, unrepeatable, therefore skipped.
+   **[Corrected the same day — see the entry above. The last sentence of this
+   bullet is wrong: the report resolves BUG-1 in its own next section, which I
+   had not read. What is true is worse, and is recorded there.]**
 2. **No diagnostics at all.** Zero logging deps in `Cargo.toml` — no `log`, no
    `tracing`, no `tauri-plugin-log`; no log file anywhere. `app.ts:764` admits
    the release webview has no console. The backstop at `app.ts:779` covers
