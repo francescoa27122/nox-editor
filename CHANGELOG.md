@@ -8,6 +8,23 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Nox can tell you what went wrong.** A failure used to leave nothing
+  behind: the release window has no console to open, and a toast is gone once
+  it is dismissed, so a bug report could only ever be prose. Failures are now
+  written to `diagnostics.log` beside your settings, and *Copy Diagnostics*
+  puts the version, the platform and the recent failures on the clipboard,
+  ready to paste into an issue. Paths are stripped of your home directory
+  before anything is written.
+- **A way back to the welcome screen.** It has always listed the shortcuts
+  worth knowing and the folders you were last in, and it disappeared the
+  moment you opened a file — with no way to see it again short of closing
+  every tab. *Welcome*, in the Nox menu and the palette, brings it back.
+- **Choose what a file is edited as.** The language was guessed from the file
+  name when it opened and nothing could disagree, so an unnamed buffer stayed
+  plain text until you saved it and an unusual extension stayed unhighlighted
+  for good. Click the language in the status bar — or *Change Language Mode*,
+  in the Code menu — and pick from the list.
+
 - **The release build is ready to sign for macOS.** Nothing changes for now —
   builds are still ad-hoc signed and a fresh download still needs the `xattr`
   command — but the workflow reads the six Apple secrets when they exist, and
@@ -33,8 +50,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Result*, acting on the focused row. The results list is arrow-key navigable
   and its `×` was mouse-only.
 
+### Changed
+
+- **`Ctrl+Shift+G` (`⌘⇧G`) opens the Git panel.** Every other sidebar panel
+  had a shortcut on that pattern and Git was the one that did not, which left
+  it the only icon in the rail whose tooltip named no key. The chord used to
+  be *Find Previous*, which keeps `Shift+F3` — and one line in
+  `keybindings.json` takes the old binding back if you want it.
+
 ### Fixed
 
+- **A crash in the interface no longer passes in silence.** Nox listened for
+  one of the two ways JavaScript reports a failure and not the other, so a
+  whole class of error produced nothing at all — no message, no log, just a
+  window that had quietly stopped responding to something. Both are reported
+  now.
 - **A completion could leave part of what it replaced behind.** When the
   language server asked to replace more than the last word — a path inside a
   string, a longer expression — Nox inserted at the start of the word instead,

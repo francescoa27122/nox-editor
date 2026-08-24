@@ -4072,13 +4072,24 @@ export class NoxApp {
       // all taken — A is Answers, G is Find Previous — and Y is free on every
       // platform and unclaimed by CodeMirror's keymap.
       'Mod+Shift+Y': 'agents.show',
+      // The last panel with no chord, and the only rail icon whose tooltip
+      // named none. `G` is the letter every other editor uses for source
+      // control and the one this scheme was missing; it cost `edit.findPrevious`
+      // its `Mod+Shift+G`, which is argued where that binding used to be.
+      'Mod+Shift+G': 'git.focus',
 
       // Edit
       'Mod+F': 'edit.find',
       'Mod+Alt+F': 'edit.replace',
       'Mod+G': 'edit.findNext',
-      'Mod+Shift+G': 'edit.findPrevious',
       F3: 'edit.findNext',
+      // `Mod+Shift+G` used to be here, and is now the Git panel — see the
+      // sidebar block above. Find Previous keeps `Shift+F3`, which is the
+      // symmetric half of `F3` and so leaves that pair whole; what it costs
+      // is the shifted half of the `Mod+G` pair, and that is the whole price
+      // of the trade. One line of `keybindings.json` takes it back for anyone
+      // who wants it, which is the difference between removing a binding here
+      // and removing it from an editor that cannot be rebound.
       'Shift+F3': 'edit.findPrevious',
       'Mod+Shift+L': 'edit.selectAllMatches',
       // ⌘⇧[ / ⌘⇧] already switch tabs, so folding takes the ⌥ variants.
