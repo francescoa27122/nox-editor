@@ -165,10 +165,16 @@ describe('the status bar', () => {
     flush();
 
     expect(item(container, 'typescript-language-server')).toBeDefined();
-    // And the language item stays a readout, because there is nothing to fix.
-    const language = [...container.querySelectorAll('span')].find(
+
+    // The language item keeps saying which server is serving this file — and
+    // is now a *button* rather than the readout it used to be in this state.
+    // It was the one dead item in a row of live ones, labelled with a
+    // language and refusing to let you change it; changing the language is
+    // what it does wherever `lsp.configure` has nothing to offer.
+    const language = [...container.querySelectorAll('button')].find(
       (element) => element.textContent?.trim() === 'TypeScript',
     );
+    expect(language).toBeDefined();
     expect(language?.getAttribute('title')).toBe('TypeScript — typescript-language-server');
   });
 

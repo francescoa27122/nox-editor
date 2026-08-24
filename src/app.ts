@@ -14,6 +14,7 @@ import {
 } from '@codemirror/commands';
 import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
+import { languageById } from '@core/languages';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
 import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
 import { codeActionsOf, overlapping, type CodeAction } from '@core/lsp-code-action';
@@ -2886,6 +2887,34 @@ export class NoxApp {
         keywords: ['agents.json', 'add agent', 'ai'],
         capabilities: ['fs.create'],
         run: () => this.openAgentConfig(),
+      },
+      {
+        id: 'lang.setLanguage',
+        title: 'Change Language Mode…',
+        // `Language`, which is the Code menu — the same category the LSP
+        // commands use, because "what language is this" is the question they
+        // all turn on. The overlay kind is named `language` for the same
+        // reason and says so where it is declared.
+        category: 'Language',
+        keywords: ['language', 'mode', 'syntax', 'highlighting', 'grammar', 'set', 'change'],
+        enabled: bufferEnabled,
+        /**
+         * With an id, set it. Without one, open the picker.
+         *
+         * One command rather than two so the palette lists a single row and
+         * the picker's own rows can dispatch it — the status bar, the Code
+         * menu and every row of the list all end up in the same place.
+         */
+        run: (arg) => {
+          const active = this.workspace.activeSnapshot();
+          if (!active) return;
+          if (typeof arg !== 'string') {
+            this.ui.openOverlay('language');
+            return;
+          }
+          if (!this.workspace.setLanguage(active.id, arg)) return;
+          this.notifications.info(`Editing as ${languageById(arg).name}`);
+        },
       },
       {
         id: 'lsp.configure',

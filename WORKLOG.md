@@ -8,6 +8,84 @@ are knowledge.**
 
 ---
 
+## 2026-08-24 (PC, UX) — The status bar's one dead item can be pressed now
+
+Finding #3 from the ease-of-use sweep. The language indicator was the only
+readout in a row of five buttons — a control labelled with a language that
+refused to let you change it — and **nothing anywhere could set a buffer's
+language**. It was inferred from the file name at open and that was that, so
+an untitled buffer stayed plaintext until its first save and a `.conf` full of
+JSON stayed unhighlighted for good.
+
+Shipped: `workspace.setLanguage`, a `lang.setLanguage` command in the
+`Language` category (which is the **Code** menu), a `language` overlay mode in
+the one prefix-switched palette, and a status-bar item that is always a
+button. 25 languages, alphabetical, the current one badged rather than
+promoted — this picker is for *changing* the language, so putting the answer
+that changes nothing under the cursor would be the least useful default.
+
+Decisions worth not re-litigating:
+
+- **`buffer-reset`, reusing what `saveAs` already does.** A rename that
+  changes the extension has always had to solve exactly this, and it changes
+  the same two things: the grammar, and the language the LSP document was
+  opened under. Inventing a targeted `languageCompartment.reconfigure` would
+  have kept the scroll position and got the LSP half wrong. The scroll is the
+  price, and `saveAs` already pays it.
+- **The status-bar click falls back to the picker rather than replacing
+  `lsp.configure`.** That affordance is argued at length in `lsp-status.ts` —
+  when this file *should* have language intelligence and does not, the item
+  says so and offers the fix. Changing the language is the obvious meaning of
+  a control that names one, but it is the less urgent, so it takes every state
+  the other does not claim. Adding a feature is not a reason to overturn an
+  argued decision.
+- **A grammar-less language is offered anyway**, and says so on the row. The
+  LSP document is opened under the id too, and the status bar stops claiming
+  the file is something it is not, so refusing it would withhold a correct
+  choice over a cosmetic one.
+
+**A bug found by clicking, not by compiling — and now by a test.**
+`Overlays.svelte` decides which kinds are the palette with a hand-written `||`
+chain. Adding `language` to `OverlayKind`, opening it from a command and
+giving `CommandPalette` a mode for it **compiled perfectly and put nothing on
+screen**. Same shape as the `SETTING_TO_COMPARTMENTS` trap the CodeMirror
+notes call the likeliest mistake there: a mapping the compiler does not check,
+whose omission is silence.
+
+`tests/overlay-routing.test.ts` closes it for good. `EVERY_KIND` is a
+`Record<OverlayKind, string>`, so a new kind **fails to compile** until it is
+listed, and listing it runs it through the assertion. Eleven kinds, eleven
+assertions that the right overlay is on screen.
+
+Verified:
+
+- `npm test` **1980 passed / 137 files** (was 1969/136 before the routing
+  suite, 1960/135 before this change). `npm run check` 976 files 0 errors,
+  `npm run build` green.
+- Four mutations, each killing the right test: dropping the `buffer-reset`;
+  removing the no-op guard; reverting the status-bar item to a readout; and
+  removing `language` from the `isPalette` chain.
+- Driven in the browser build end to end: the status bar is now **six buttons
+  and no readout**, clicking the language opens "Edit this file as…" with 25
+  rows and `Markdown current` badged, and picking Python leaves the bar
+  reading Python with the palette closed.
+
+One test was updated rather than added: `status-bar.test.ts` asserted the
+language item "stays a readout, because there is nothing to fix". That was the
+design, and it is the design that changed; the assertion now pins the button
+and records why.
+
+Next: the last sweep finding — Git is the only rail icon whose tooltip names
+no chord, which needs a decision about freeing `Ctrl+Shift+G` from Find
+Previous. Or more e2e specs.
+
+Blocked: nothing new.
+
+Confidence: high. Behaviour pinned by fifteen new tests, mutation-checked, and
+driven in the running app.
+
+---
+
 ## 2026-08-23 (PC, UX) — A way back to the one screen that explains Nox
 
 A sweep of the running app for ease of use, and the one finding worth building.

@@ -18,6 +18,9 @@ export type OverlayKind =
   | 'go-to-symbol'
   | 'git-branch'
   | 'code-action'
+  // The language a buffer is *edited* as, not anything to do with a language
+  // server — see the `Language` command category, which holds both.
+  | 'language'
   // Not 'notes': `SidebarView` and `FocusZone` below both already have one,
   // and three unions sharing a member name makes a bare string literal
   // ambiguous at every call site.
