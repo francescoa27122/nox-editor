@@ -15,6 +15,27 @@ import { browser, $, $$, expect } from '@wdio/globals';
  * text, and state transitions — the things that are either true or not.
  */
 
+/**
+ * Which platform the app is running on.
+ *
+ * `process.platform` rather than `browser.capabilities`: the worker and the
+ * app are the same machine in every configuration this harness supports, and
+ * this is the value that decides what the *app* does — `platform/host.ts`
+ * makes the same call from `navigator` and hands the answer to the keymap.
+ */
+const MAC = process.platform === 'darwin';
+
+/**
+ * `Mod`, spelled the way this host spells it.
+ *
+ * `services/keymap.ts` resolves `Mod` through `isMacHost`, so the palette
+ * answers to ⌘⇧P on macOS and Ctrl+Shift+P everywhere else. Sending the wrong
+ * one does not fail loudly — the keystroke simply goes nowhere and the panel
+ * never opens, which is how this first showed up: a fifteen-second wait for a
+ * `.palette` that was never asked for.
+ */
+const MOD = MAC ? 'Meta' : 'Control';
+
 /** The shell is up when its root and the editor surface both exist. */
 async function waitForBoot() {
   await $('.nox-shell').waitForExist({ timeout: 60_000 });
@@ -35,13 +56,24 @@ describe('the packaged app', () => {
   });
 
   /**
-   * The in-window menu bar is drawn by Nox on Windows and Linux because those
-   * platforms get no native menu — `menu.rs` returns `Ok(())` off macOS. It
-   * is also the newest code in the product and has already produced two
-   * defects, which makes "does it exist on the platforms that depend on it"
-   * a question worth asking automatically.
+   * Where the menu lives is a platform contract, and this pins both halves.
+   *
+   * Windows and Linux get no native menu, so Nox draws its own in the window
+   * — the newest code in the product, which has already produced two defects.
+   * macOS gets a real `NSMenu`, and `TitleBar.svelte` reads
+   * `capabilities.applicationMenu` to decide, so the in-window bar must be
+   * *absent* there rather than merely unused. Two bars claiming the same
+   * commands is the failure this direction guards.
+   *
+   * The macOS half can only assert the absence: WebDriver sees the webview,
+   * and an `NSMenu` is not in it.
    */
-  it('draws the in-window menu bar off macOS', async () => {
+  it('draws its own menu bar only where the OS gives it no native one', async () => {
+    if (MAC) {
+      await expect($('.menu-bar')).not.toBeExisting();
+      return;
+    }
+
     await expect($('.menu-bar')).toBeExisting();
     const titles = await $$('.menu-title');
     expect(titles.length).toBeGreaterThan(0);
@@ -63,7 +95,7 @@ describe('the command palette', () => {
   });
 
   it('opens on its chord and filters what it lists', async () => {
-    await browser.keys(['Control', 'Shift', 'p']);
+    await browser.keys([MOD, 'Shift', 'p']);
     await $('.palette').waitForExist({ timeout: 15_000 });
 
     await browser.keys('settings');
@@ -87,7 +119,7 @@ describe('the command palette', () => {
    * the desktop at all. It has one now.
    */
   it('closes on Escape, which no manual walk could ever verify', async () => {
-    await browser.keys(['Control', 'Shift', 'p']);
+    await browser.keys([MOD, 'Shift', 'p']);
     await $('.palette').waitForExist({ timeout: 15_000 });
     await expect($('.palette')).toBeExisting();
 
