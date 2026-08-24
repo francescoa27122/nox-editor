@@ -19,10 +19,11 @@ const preview: Preview = {
     // Storybook's own backgrounds would paint over `--nox-bg-*` and make
     // every contrast reading optimistic. The tokens are the background.
     backgrounds: { disable: true },
-    // 'todo' surfaces violations in the addon panel without failing anything.
-    // Raising this to 'error' is a decision to make once the existing set is
-    // known to be clean, not before.
-    a11y: { test: 'todo' },
+    // 'error' rather than 'todo' because the set is now known to be clean:
+    // all seven stories pass axe under `npm run test:stories`, measured before
+    // this line moved. 'todo' only surfaced violations in the addon panel,
+    // which meant a regression waited for someone to open the panel and look.
+    a11y: { test: 'error' },
   },
   globalTypes: {
     theme: {

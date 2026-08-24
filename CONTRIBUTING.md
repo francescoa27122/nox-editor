@@ -78,6 +78,7 @@ what it costs on a 10 MB file. Prefer viewport-bounded work
 4. Add a setting if it is configurable.
 5. Write tests against `MemoryPlatform`.
 6. *Then* build the component.
+7. Give it a story if it has a state that is awkward to reach by hand.
 
 If a step needs an exception, the feature is probably in the wrong layer.
 
@@ -110,6 +111,13 @@ renders first is ordering, not markup, and is fair game.
 restate the implementation. Coverage percentage is not a goal — behaviour that
 would break someone's work is. A test asserting a `font-weight` is still
 worthless, in a component suite exactly as it was everywhere else.
+
+The two stylesheet suites are not an exception to that.
+`tests/token-contrast.test.ts` measures the contrast ratios `tokens.css`
+argues in prose, and `tests/component-css-tokens.test.ts` fails on a colour
+literal anywhere in `src/ui`. Neither asserts what a component looks like.
+Both fail on something that otherwise only holds while someone keeps noticing
+it.
 
 Component suites are named after the component and grouped by component, not
 split per behaviour: one jsdom file costs roughly half a second of environment

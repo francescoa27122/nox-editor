@@ -108,7 +108,7 @@
   }
 
   .toast.error {
-    border-color: rgba(240, 97, 109, 0.36);
+    border-color: color-mix(in srgb, var(--nox-danger) 36%, transparent);
   }
 
   .text {
