@@ -101,7 +101,15 @@ jobs:
         # other than a release. fs.rs and pty.rs have had Windows branches all
         # along and nothing has ever built them — a release runner alone would
         # have found that out at tag time, which is the worst moment.
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        #
+        # Both Ubuntu versions because they link different WebKit builds and
+        # only one of them was ever tested. jammy is what the e2e job and the
+        # release path use; noble is what a Claude Code on the web container
+        # runs, so it is where `cargo test` actually gets run day to day (see
+        # .claude/hooks/session-start.sh). Testing only jammy meant a green run
+        # in a session and a green CI leg were claims about different
+        # toolchains, and neither noticed the other's breakage.
+        os: [ubuntu-22.04, ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
 
@@ -113,16 +121,21 @@ jobs:
       # was 55.6 MB in 9s, degraded was the same 55.6 MB in 22min 12s.
       # Caching the .debs is what actually removes the exposure; the retry
       # inside the action bounds the cost of a cold cache on a bad day.
+      # Keyed by `matrix.os`, not a fixed `jammy`, now that two Ubuntu versions
+      # run this step: jammy and noble resolve the same package names to
+      # different .debs, so a shared key would have the two legs overwriting
+      # each other's archives on every run — the same eviction the e2e job's
+      # separate key exists to avoid.
       - name: Cache apt archives
-        if: matrix.os == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         uses: actions/cache@v6
         with:
           path: ~/apt-archives
-          key: apt-jammy-base-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
-          restore-keys: apt-jammy-base-
+          key: apt-${{ matrix.os }}-base-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
+          restore-keys: apt-${{ matrix.os }}-base-
 
       - name: Install Linux build dependencies
-        if: matrix.os == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         uses: ./.github/actions/linux-build-deps
         # A backstop only: the action's own per-attempt timeouts should fire
         # long before this does.
@@ -134,9 +147,18 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # `--locked` because without it `cargo test` silently rewrites Cargo.lock
+      # to whatever the resolver picks that day and carries on green, so a
+      # lockfile can drift out of date for months without anything saying so —
+      # which is exactly what had happened here: the committed lockfile was
+      # missing `tauri-plugin-wdio-webdriver` altogether, and every `cargo`
+      # invocation in a fresh checkout regenerated 343 lines before doing any
+      # work. With this flag a stale lockfile fails the job and is fixed by
+      # committing the regenerated one, which is the only way the build stays
+      # reproducible.
       - name: Test
         working-directory: src-tauri
-        run: cargo test
+        run: cargo test --locked
 
   # The first automated check that ever launches the packaged app.
   #

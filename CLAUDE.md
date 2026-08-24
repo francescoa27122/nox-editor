@@ -10,7 +10,9 @@ npm test && npm run check
 
 Both are mandatory before pushing. CI also runs `npm run build` — it catches bundler-level breaks that neither tests nor `svelte-check` see, so run it before claiming a release-path change is good.
 
-Rust: `cargo test --manifest-path src-tauri/Cargo.toml`. **`cargo` may not be installed on this machine.** If it isn't, write the tests, say plainly they are unrun locally, and let CI run them — do not report them as passing.
+Rust: `cargo test --locked --manifest-path src-tauri/Cargo.toml`. Pass `--locked` — CI does, and without it cargo quietly rewrites `Cargo.lock` and leaves you with a dirty tree you did not ask for. If it fails *because* the lockfile is out of date, regenerate and commit it as its own change; do not fold a dependency bump into an unrelated one.
+
+**`cargo` may not be installed on this machine.** If it isn't, write the tests, say plainly they are unrun locally, and let CI run them — do not report them as passing. In a Claude Code on the web container it *is* installed, and `.claude/hooks/session-start.sh` has already installed the GTK/WebKit stack it needs to link, so there the tests genuinely run and there is no excuse for guessing.
 
 | Task | Command |
 |---|---|
