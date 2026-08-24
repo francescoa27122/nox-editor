@@ -8,6 +8,56 @@ are knowledge.**
 
 ---
 
+## 2026-08-24 (PC, UX) — Git gets the letter, and a standing directive
+
+Finding #4, the last from the sweep, plus a change to how I work.
+
+**The directive**, recorded in memory: for anything in nox-editor, a finding I
+would recommend fixing is a fix to make in the same session — not a report to
+hand back. Stated after four consecutive turns of "yes, do that too". The stop
+list still stops; nothing else does.
+
+**Git has a shortcut.** The sidebar scheme is `Mod+Shift+<letter>` — E, F, N,
+M, A, Y — and Git was the only panel without one, which made it the only rail
+icon whose tooltip named no key. `Mod+Shift+G` is now `git.focus`.
+
+The trade, which is why the previous pass left it: that chord was
+`edit.findPrevious`. It keeps `Shift+F3`, the symmetric half of `F3`, so that
+pair stays whole; what it loses is the shifted half of the `Mod+G` pair. `G`
+is the letter every other editor uses for source control and the one this
+scheme was missing, and one line of `keybindings.json` takes the old binding
+back — which is the difference between removing a binding here and removing
+one from an editor that cannot be rebound.
+
+`tests/rail-chords.test.ts` asserts it table-wide rather than for Git alone,
+for the reason `command-titles.test.ts` gives: each tooltip is individually
+plausible and nothing had looked at the row as a whole. Asserted on the
+*rendered tooltip* rather than the binding table, because References
+deliberately has no chord of its own and borrows `Shift+F12` through
+`chordFrom` — reading the table would call that a gap; reading the tooltip
+sees what the user sees.
+
+Verified:
+
+- `npm test` **1983 passed / 138 files**, `npm run check` 977 files 0 errors.
+- Mutation-checked: removing the binding fails with the message the test
+  writes — "the Git rail icon should name its chord: expected 'Git' to match".
+- The suite also pins the other half of the trade: both Find Next and Find
+  Previous still resolve a chord.
+
+Also written: `CHANGELOG.md` now carries this session's user-facing work —
+diagnostics and *Copy Diagnostics*, the welcome screen's way back, *Change
+Language Mode*, the Git chord under **Changed** because it moves an existing
+binding, and the silent-crash fix under **Fixed**.
+
+Next: the README, then a release.
+
+Blocked: nothing new.
+
+Confidence: high.
+
+---
+
 ## 2026-08-24 (PC, UX) — The status bar's one dead item can be pressed now
 
 Finding #3 from the ease-of-use sweep. The language indicator was the only
