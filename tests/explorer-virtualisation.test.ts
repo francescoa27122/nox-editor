@@ -74,7 +74,13 @@ function scrollTo(tree: HTMLElement, top: number) {
 const names = (tree: HTMLElement) =>
   [...tree.querySelectorAll('.row .name')].map((n) => n.textContent);
 
-describe('the explorer window', () => {
+// Twenty seconds, for the reason spelled out at the same place in
+// `search-virtualisation.test.ts`. These cases are cheaper — 0.2-1.0s idle
+// rather than 1.4-2.0s, because seeding 600 files costs less than searching
+// them — but the worst of them still sits close enough to vitest's 5s default
+// that a loaded worker can cross it, and a timeout here would read as a
+// windowing bug rather than as a busy machine.
+describe('the explorer window', { timeout: 20_000 }, () => {
   it('a small tree renders every row, windowing or not', async () => {
     const { tree } = await setup(30);
     giveHeight(tree);

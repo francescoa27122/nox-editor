@@ -130,7 +130,18 @@ function press(list: HTMLElement, key: string) {
   list.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
 }
 
-describe('the search results window', () => {
+// Twenty seconds rather than vitest's default five. Every case here pays for
+// `setup`, which seeds 100 files, runs a real streaming `MemoryPlatform` search
+// over them and mounts a panel of 600 rows — measured at 1.4-2.0s each on an
+// idle 4-core machine, so the default leaves barely 3x headroom. That is not
+// enough: the suite runs 139 files across parallel workers, and a case
+// measured at 1566ms idle was seen taking 5071ms that way, failing with
+// "Test timed out in 5000ms" rather than any assertion. The fixture size is
+// the point of the file (see the header), so the timeout is what gives.
+//
+// A ceiling this high still catches a genuinely hung test; it just refuses to
+// call a loaded CI box a bug.
+describe('the search results window', { timeout: 20_000 }, () => {
   it('a small result set renders every row, windowing or not', async () => {
     const { list } = await setup(10);
     giveHeight(list);
