@@ -23,19 +23,20 @@ why the harness is verified in CI rather than locally.
 
 ```bash
 npm ci                                        # at the repository root
-npm run tauri build -- --debug --no-bundle    # the binary being driven
+npm run tauri build -- --debug --no-bundle --features wdio   # see below
 cd e2e && npm ci && npm test
 ```
 
-On Linux add `xvfb-run -a` before `npm test`, and install `webkit2gtk-driver`
-— that package *is* WebKitWebDriver, which is what actually drives the
-webview. The service installs `tauri-driver` itself, and on Windows downloads
-the Edge driver matching the installed WebView2, which is the usual cause of
-a suite that hangs instead of failing.
+`--features wdio` is not optional: it is what compiles the WebDriver server
+into the binary. Without it the app builds and runs perfectly well and nothing
+can drive it. On Linux add `xvfb-run -a` before `npm test`, because a GTK
+window still needs somewhere to draw. **No driver to install on any platform** —
+that is the point of the embedded provider.
 
-Set `NOX_E2E_BINARY` to point at the binary if automatic detection picks the
-wrong one. Tauri names the built binary from `productName` and Cargo names it
-from `package.name`, and those disagree here — `Nox` against `nox`.
+Set `NOX_E2E_BINARY` to point at the binary if the configured path is wrong.
+Tauri names the built binary from `productName` and Cargo names it from
+`package.name`, and those disagree here — `Nox` against `nox`. `--no-bundle`
+stops before the rename, so it is the Cargo one.
 
 ## What belongs here
 
@@ -55,11 +56,11 @@ delivering a keystroke, and the platforms that have no other coverage at all.
 
 | | How |
 |---|---|
-| **Linux** | Running in CI, green. `webkit2gtk-driver` + `xvfb`, no Rust change. |
-| **Windows** | **Blocked**, and not on a matrix entry — see below. Attempted in [#118](https://github.com/francescoa27122/nox-editor/pull/118), left open. |
-| **macOS** | Needs `tauri-plugin-wdio-webdriver` registered in debug builds — a source change, not a workflow one. Free; the paid CrabNebula driver is not required. |
+| **Linux** | Running in CI, green. Embedded provider; `xvfb` only. |
+| **Windows** | Running in CI, green. Embedded provider; no external driver. |
+| **macOS** | Now a matrix entry away: the plugin it needed is registered. Untried. |
 
-## Windows: the external driver is a dead end
+## Why the external driver was abandoned (historical)
 
 Everything up to the session works — `nox.exe` builds, the service detects
 WebView2 `151.0.4129.86`, downloads the **exactly matching** msedgedriver, and
@@ -77,32 +78,33 @@ WebdriverIO **v7** succeeding and the Actions integration still marked WIP.
 
 [h]: https://github.com/Haprog/tauri-wdio-win-test
 
-**The fix is the embedded provider**, which replaces `tauri-driver` and
-msedgedriver with a WebDriver server inside the app
-(`tauri-plugin-wdio-webdriver`, published alongside the npm package). It is
-what the service now defaults to and the only way macOS is supported at all,
-so one change buys both remaining platforms — and it may also remove the six
-minutes below, which are spent waiting for that very plugin.
+**Resolved by moving the server into the app**, which is what
+`driverProvider: 'embedded'` and `src-tauri`'s `wdio` feature now do. Both
+platforms went green on the same change, and macOS became reachable with it.
+Kept here because the failure is not obvious from the outside — an exactly
+matching driver that still cannot open a session looks like a configuration
+mistake for a long time before it looks like a dead end.
 
-It wants its own change: it adds a **remote-control surface to Nox's own
-crate**, so the dependency belongs behind a Cargo feature rather than only a
-gated call site — not merely unregistered in a release build but not compiled
-into one — plus `debug_assertions`, so the feature alone cannot arm it. And it
-edits `src-tauri/src/lib.rs`, the application entry point, on a machine with
-no `cargo`.
+## Known: every command takes about ten seconds
 
-## Known: it is slower than it should be
+Four assertions take **six minutes**, on both platforms.
 
-Four assertions take **six minutes**. That is not the app being slow to start
-— the session is established about two seconds in. The log shows a tight
-`executeAsyncScript` poll returning `false` roughly every 50 ms, following the
-service's `Waiting for Tauri plugin initialization…`. It is waiting for
-`tauri-plugin-wdio-webdriver`, which this setup deliberately does not have,
-and giving up slowly.
+The first guess here was wrong and is worth recording as such: this was
+written up as the service's `Waiting for Tauri plugin initialization…` giving
+up slowly, and the embedded provider was expected to remove it by supplying
+the very plugin being waited for. It did not — 6m15s became 5m53s.
 
-That cost is paid per session, so it does not grow much with more specs — but
-it is six minutes of every pull request for nothing, and it is the first thing
-to fix before this job is promoted into branch protection's required checks.
-The service's log-capture and plugin-wait behaviour are configurable; the
-option names want reading from its configuration reference rather than
-guessing.
+The real shape is one WebDriver command per ten seconds. Consecutive
+`findElement` calls in `waitForBoot` land at `:43:52`, `:44:02`, `:44:12` —
+a flat ten-second round trip each, not a retry loop, since WebdriverIO's own
+poll interval is 500 ms. Roughly thirty-five commands across four specs is the
+entire six minutes, which is also why the number barely moved when the
+provider changed: it is per *command*, not per session, so **it will grow
+linearly with every spec added.** That makes it the thing to fix before this
+job is promoted into branch protection's required checks, and before the suite
+grows much.
+
+Ten seconds is a suspiciously round number — a default timeout being waited
+out somewhere in the driver, rather than work being done. Worth starting from
+the service's log-forwarding, which injects a script around commands, and from
+whatever implicit-wait the embedded server applies.
