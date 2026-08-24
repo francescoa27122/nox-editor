@@ -100,22 +100,19 @@ jobs:
 
   # The first automated check that ever launches the packaged app.
   #
-  # Everything above this job tests source. The desktop binary has only ever
-  # been verified by a human walking it, once, on macOS - and that walk marked
+  # Everything above this job tests source. Before this existed the desktop
+  # binary had been verified once, by a human, on macOS - and that walk marked
   # 12 of its 17 items UNSEEN and reported two defects that were later traced
-  # to the walk harness rather than the app. Linux and Windows ship installers
-  # nobody has launched.
+  # to the walker's own harness rather than to Nox. Windows and Linux shipped
+  # installers nobody had ever launched.
   #
-  # Both platforms drive through a WebDriver server compiled *into* the app,
-  # behind `src-tauri`'s `wdio` feature. That replaced an external
-  # `tauri-driver`, which worked on Linux and is a dead end on Windows: with
+  # All three platforms drive through a WebDriver server compiled *into* the
+  # app, behind `src-tauri`'s `wdio` feature. That replaced an external
+  # `tauri-driver`, which worked on Linux and is a dead end on Windows - with
   # the exactly matching msedgedriver in place, `POST /session` still waited
   # sixty seconds for a Chromium DevTools port that a Tauri WebView2 window
-  # never opens.
-  #
-  # The same server is the only route to macOS, which has no external driver
-  # available at all — so that platform is now a matrix entry rather than a
-  # research problem.
+  # never opens - and which does not exist for macOS at all. One server, three
+  # platforms, no external driver anywhere.
   #
   # Not in branch protection's required checks on purpose, for now. A harness
   # whose own flakiness is unmeasured should not be able to block a merge
@@ -127,13 +124,17 @@ jobs:
     # this workflow, and a timeout there would read as a harness failure.
     timeout-minutes: 60
     strategy:
-      # Windows is the operator's own platform and the one whose installer has
-      # never been launched by anyone; Linux is where this started because it
-      # needs no Rust change. Neither result may hide the other, so no
-      # fail-fast — a Windows-only defect is exactly what this matrix is for.
+      # All three desktop platforms Nox ships an installer for. No fail-fast:
+      # a defect on one platform is exactly what this matrix exists to find,
+      # and cancelling the others on the first red hides the comparison that
+      # makes such a defect readable.
+      #
+      # macOS is the one with prior art — the 2026-08-20 hand walk — and it is
+      # the least trustworthy of the three, because 12 of its 17 items were
+      # never seen and both defects it reported were the walker's own harness.
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest]
+        os: [ubuntu-22.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v7
 
@@ -153,19 +154,19 @@ jobs:
           key: apt-jammy-e2e-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
           restore-keys: apt-jammy-e2e-
 
-      # Linux only. `xvfb` is needed regardless — a GTK window still has to
-      # draw somewhere, and a runner has no display.
+      # Linux only, and `xvfb` is the whole of it now — a GTK window still has
+      # to draw somewhere and a runner has no display. `webkit2gtk-driver` was
+      # here for WebKitWebDriver, which the embedded provider replaced; it was
+      # kept through that swap and through the focus fix so each had exactly
+      # one variable, and both are green, so it goes.
       #
-      # `webkit2gtk-driver` should now be dead weight: the embedded provider
-      # replaces WebKitWebDriver, which is the only thing that package was
-      # for. It is kept for this change anyway, so that if the run goes red
-      # the cause is unambiguously the provider swap and not a dependency
-      # removed in the same breath. Drop it once this is green.
+      # Windows and macOS need nothing: the WebDriver server is inside the
+      # binary, and both runners have a desktop session to draw into.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux-build-deps
         with:
-          extra-packages: webkit2gtk-driver xvfb
+          extra-packages: xvfb
         timeout-minutes: 20
 
       - uses: dtolnay/rust-toolchain@stable
