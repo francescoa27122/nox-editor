@@ -56,9 +56,12 @@ delivering a keystroke, and the platforms that have no other coverage at all.
 
 | | How |
 |---|---|
-| **Linux** | Running in CI, green. Embedded provider; `xvfb` only. |
-| **Windows** | Running in CI, green. Embedded provider; no external driver. |
-| **macOS** | Now a matrix entry away: the plugin it needed is registered. Untried. |
+| **Linux** | Green in CI. `xvfb` only — nothing else to install. |
+| **Windows** | Green in CI. Nothing to install. |
+| **macOS** | Green in CI. Nothing to install. |
+
+All three run the same four specs against the same embedded WebDriver server,
+in well under a second each.
 
 ## Why the external driver was abandoned (historical)
 
@@ -116,9 +119,21 @@ symptom, is what found a 4 ms operation inside a ten-second wait.
 
 ## Still to do
 
-- **Drop `webkit2gtk-driver`.** The embedded provider replaced
-  WebKitWebDriver, so the package is dead weight. Kept deliberately through
-  the provider swap and the fix above so each had exactly one variable.
-- **macOS.** A matrix entry now that the plugin is registered; untried.
-- **Promote into required checks**, once there is a flakiness record to
-  justify it.
+- **Promote into branch protection's required checks.** Linux and Windows have
+  a record to justify it — six and four consecutive green runs. macOS has one,
+  and the rule this list has followed throughout is that a check with no
+  flakiness record should not be able to block a merge. Adding the first two,
+  additively, without disturbing the other settings:
+
+  ```bash
+  gh api --method POST "repos/<owner>/nox-editor/branches/main/protection/required_status_checks/contexts" -f 'contexts[]=e2e (ubuntu-22.04)' -f 'contexts[]=e2e (windows-latest)'
+  ```
+
+  Worth knowing before running it: `main` has `enforce_admins` on, so a
+  required check that goes flaky blocks **everyone**, with no override. That
+  is the argument for adding platforms one record at a time rather than all
+  three at once.
+
+- **More specs.** Four is a smoke test. The 2026-08-20 walk left twelve items
+  UNSEEN, and they are now cheap to express: a run is under a second, so the
+  cost of a spec is writing it rather than waiting for it.
