@@ -106,6 +106,38 @@ export const config = {
   reporters: ['spec'],
   logLevel: process.env.CI ? 'info' : 'debug',
 
+  /**
+   * Disarm the service's per-command window-focus check. This is worth ten
+   * seconds on every single command.
+   *
+   * `TauriWorkerService.beforeCommand` calls `ensureActiveWindowFocus` for
+   * `findElement`, `findElements`, `$`, `$$`, `getTitle` and `elementClick` —
+   * which is everything a spec does. That asks the app for its window states
+   * over `window.__TAURI__.core.invoke`, and **Nox does not expose
+   * `window.__TAURI__` at all**: the renderer reaches Tauri through
+   * `platform/tauri.ts`, which is the boundary the whole architecture rests
+   * on, and `withGlobalTauri` would put an invoke bridge on the global object
+   * of a webview that renders other people's code. So the lookup cannot
+   * succeed, and it fails by *timing out* — 5s in the `before` hook and 5s
+   * again per command. Measured: a `findElement` that takes 4 ms was costing
+   * a flat ten seconds, and four specs took six minutes.
+   *
+   * The service turns the check off for a session in which the caller has
+   * chosen a window explicitly — `afterCommand` on a successful
+   * `switchToWindow` calls its `suppressActiveWindowFocus`. Switching to the
+   * handle we are already on is exactly that statement and nothing else: it
+   * moves nothing, and the service's own guard for its internal recovery
+   * switches does not fire, because that reads an `AsyncLocalStorage` only
+   * its own code sets.
+   *
+   * Suppressing it is also *correct*, not merely fast. Focus recovery exists
+   * for apps with several windows; `tauri.conf.json` declares one and Nox has
+   * no API to open another, so there is no window for it to recover to.
+   */
+  before: async (_capabilities, _specs, browser) => {
+    await browser.switchToWindow(await browser.getWindowHandle());
+  },
+
   // Generous, and not arbitrary: the first launch of a debug build on a cold
   // CI runner pays for the webview starting as well as the app.
   waitforTimeout: 15_000,
