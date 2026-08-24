@@ -97,3 +97,88 @@ jobs:
       - name: Test
         working-directory: src-tauri
         run: cargo test
+
+  # The first automated check that ever launches the packaged app.
+  #
+  # Everything above this job tests source. The desktop binary has only ever
+  # been verified by a human walking it, once, on macOS - and that walk marked
+  # 12 of its 17 items UNSEEN and reported two defects that were later traced
+  # to the walk harness rather than the app. Linux and Windows ship installers
+  # nobody has launched.
+  #
+  # Linux first because it is the platform CI can build and drive end to end
+  # with no external account and no Rust plugin: the service drives WebKit
+  # through tauri-driver, which it installs itself. Windows is the next
+  # target and needs only a matrix entry; macOS needs the embedded provider's
+  # Rust crate registered in debug builds, which is a source change rather
+  # than a workflow one.
+  #
+  # Not in branch protection's required checks on purpose, for now. A harness
+  # whose own flakiness is unmeasured should not be able to block a merge
+  # until it has a track record; promoting it is a deliberate later step.
+  e2e:
+    name: e2e (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      # Its own key rather than the `rust` job's: this installs a different
+      # package set, and sharing a key would make the two jobs evict each
+      # other's archives on every run.
+      - name: Cache apt archives
+        uses: actions/cache@v6
+        with:
+          path: ~/apt-archives
+          key: apt-jammy-e2e-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
+          restore-keys: apt-jammy-e2e-
+
+      # `webkit2gtk-driver` is WebKitWebDriver, which is what actually drives
+      # the webview; `xvfb` because a GTK window needs a display server and a
+      # runner has none.
+      - name: Install Linux build dependencies
+        uses: ./.github/actions/linux-build-deps
+        with:
+          extra-packages: webkit2gtk-driver xvfb
+        timeout-minutes: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install harness dependencies
+        working-directory: e2e
+        run: npm ci
+
+      # `--debug` because a release build costs several minutes more for a
+      # binary that behaves the same under WebDriver, and `--no-bundle`
+      # because the installer is not what is being driven - the binary is.
+      - name: Build the app
+        run: npm run tauri build -- --debug --no-bundle
+
+      - name: Drive it
+        working-directory: e2e
+        run: xvfb-run -a npm test
+
+      # The point of the whole exercise is an artefact to look at afterwards,
+      # so keep whatever the run produced even when - especially when - it
+      # failed.
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            e2e/logs/
+            e2e/*.log
+          if-no-files-found: ignore
