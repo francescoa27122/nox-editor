@@ -8,6 +8,68 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, phase 2 cont.) — Six minutes to under a second
+
+The ten seconds per command are gone. Four specs against the packaged app:
+
+| | before | after |
+|---|---|---|
+| Linux | 5m 52.5s | **575 ms** |
+| Windows | 5m 52.9s | **666 ms** |
+
+The `findElement` underneath had always taken **4 ms**. Everything else was
+`TauriWorkerService.beforeCommand` running `ensureActiveWindowFocus`, which
+fires for `findElement`, `findElements`, `$`, `$$`, `getTitle` and
+`elementClick` — everything a spec does. It asks the app for its window states
+over `window.__TAURI__.core.invoke`, and **Nox does not expose
+`window.__TAURI__` at all**: the renderer reaches Tauri through
+`platform/tauri.ts`. So the lookup could not succeed, and it failed by *timing
+out* rather than erroring — 5 s in the `before` hook and 5 s again per command.
+
+The fix is one line in `wdio.conf.js`: switch to the window handle we are
+already on, once. The service reads any successful `switchToWindow` as the
+caller choosing a window and calls its own `suppressActiveWindowFocus`, which
+disarms the check for the session. It moves nothing, and the guard for the
+service's internal recovery switches does not fire because that reads an
+`AsyncLocalStorage` only its own code sets.
+
+Suppressing it is **correct as well as fast**: focus recovery is for apps with
+several windows, `tauri.conf.json` declares one, and Nox has no API to open
+another.
+
+**Rejected: `withGlobalTauri: true`.** It would have made the lookup succeed
+by putting a working invoke bridge on `window` in the shipped app — a security
+regression traded for test convenience, in a webview that renders other
+people's code.
+
+Verified:
+
+- Both platforms green, 4 passing each, timings above read from the spec
+  reporter. Zero `core.invoke not available` warnings remain in either log.
+- One variable: `webkit2gtk-driver` is still dead weight and was deliberately
+  left in place through both this change and the provider swap, so each had
+  exactly one thing to attribute a result to.
+
+**The method is the part worth keeping.** The first diagnosis was wrong twice
+over: it blamed the service waiting for a missing plugin, and predicted the
+embedded provider would fix it by supplying that plugin. It did not — 6m15s
+became 5m53s, which should have been the tell. What found it was reading the
+log for what actually sat *between* a command and its result, instead of
+reasoning from the symptom, and finding a 4 ms operation inside a ten-second
+wait.
+
+Next: drop `webkit2gtk-driver`, then macOS — a matrix entry now that the
+plugin is registered. Promoting the job into required checks wants a
+flakiness record first, which is now much cheaper to accumulate.
+
+Blocked: nothing new. The certificates remain the operator's.
+
+Confidence: high. The numbers are from the spec reporter on both platforms,
+and the mechanism was read out of the service's own source rather than guessed
+at.
+
+---
+
 ## 2026-08-23 (PC, phase 2 cont.) — Windows and Linux are both driven now
 
 The embedded provider landed and **both platforms go green on the same

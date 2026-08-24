@@ -85,26 +85,40 @@ Kept here because the failure is not obvious from the outside — an exactly
 matching driver that still cannot open a session looks like a configuration
 mistake for a long time before it looks like a dead end.
 
-## Known: every command takes about ten seconds
+## Solved: the ten seconds per command
 
-Four assertions take **six minutes**, on both platforms.
+Four specs used to take **six minutes**. They now take **575 ms** on Linux and
+**666 ms** on Windows. The `findElement` underneath had always taken 4 ms.
 
-The first guess here was wrong and is worth recording as such: this was
-written up as the service's `Waiting for Tauri plugin initialization…` giving
-up slowly, and the embedded provider was expected to remove it by supplying
-the very plugin being waited for. It did not — 6m15s became 5m53s.
+The cost was `TauriWorkerService.beforeCommand`, which runs
+`ensureActiveWindowFocus` for `findElement`, `findElements`, `$`, `$$`,
+`getTitle` and `elementClick` — everything a spec does. It asks the app for its
+window states over `window.__TAURI__.core.invoke`, and Nox does not expose
+`window.__TAURI__` at all: the renderer reaches Tauri through
+`platform/tauri.ts`. So the lookup could not succeed, and it failed by *timing
+out* rather than erroring — 5 s in the `before` hook and 5 s again per command.
 
-The real shape is one WebDriver command per ten seconds. Consecutive
-`findElement` calls in `waitForBoot` land at `:43:52`, `:44:02`, `:44:12` —
-a flat ten-second round trip each, not a retry loop, since WebdriverIO's own
-poll interval is 500 ms. Roughly thirty-five commands across four specs is the
-entire six minutes, which is also why the number barely moved when the
-provider changed: it is per *command*, not per session, so **it will grow
-linearly with every spec added.** That makes it the thing to fix before this
-job is promoted into branch protection's required checks, and before the suite
-grows much.
+`wdio.conf.js` now switches to the window handle it is already on, once. The
+service reads any successful `switchToWindow` as the caller choosing a window
+and stops second-guessing it for the rest of the session. That is correct as
+well as fast: focus recovery is for apps with several windows, and
+`tauri.conf.json` declares one.
 
-Ten seconds is a suspiciously round number — a default timeout being waited
-out somewhere in the driver, rather than work being done. Worth starting from
-the service's log-forwarding, which injects a script around commands, and from
-whatever implicit-wait the embedded server applies.
+**Rejected:** `withGlobalTauri: true` would also have made the lookup succeed,
+by putting a working invoke bridge on `window` in the shipped app. That is a
+security regression traded for test convenience.
+
+The lesson worth keeping: the first diagnosis here was wrong — it blamed the
+service waiting for a missing plugin, and predicted the embedded provider
+would fix it. It did not (6m15s → 5m53s). Reading the log for what was
+actually between a command and its result, rather than reasoning from the
+symptom, is what found a 4 ms operation inside a ten-second wait.
+
+## Still to do
+
+- **Drop `webkit2gtk-driver`.** The embedded provider replaced
+  WebKitWebDriver, so the package is dead weight. Kept deliberately through
+  the provider swap and the fix above so each had exactly one variable.
+- **macOS.** A matrix entry now that the plugin is registered; untried.
+- **Promote into required checks**, once there is a flakiness record to
+  justify it.
