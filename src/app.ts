@@ -466,6 +466,25 @@ export class NoxApp {
       // should show the new file's changes, not put the view away.
     });
 
+    // The welcome screen's whole purpose is offering somewhere to go, so it
+    // has to get out of the way once you go there.
+    //
+    // On the *event* rather than on `activeId` above, and that is the whole
+    // reason the event exists. Clicking a file in the explorer that is
+    // already open activates it without changing anything: `open` finds the
+    // existing buffer and calls `setActive` with the id that is already
+    // active, so `Signal.set` no-ops and the subscription above never fires.
+    // That is the most likely way back from this screen — the tab strip
+    // belongs to `EditorArea` and is not on screen while this is — so hooked
+    // to the signal, the screen sat there ignoring the click.
+    //
+    // `review` and `agents` have the same hole for the same reason. Left
+    // alone: putting a staged change set away is a decision with a cost, and
+    // this is not.
+    this.workspace.events.on('buffer-activated', () => {
+      if (this.ui.welcomeOpen.get()) this.ui.welcomeOpen.set(false);
+    });
+
     // Servers are per workspace, so they start when one opens and stop when it
     // changes. Nothing starts without a root: a server given a root of nowhere
     // indexes nothing and reports nothing, which looks exactly like a broken
@@ -3937,6 +3956,18 @@ export class NoxApp {
         // Returned, not voided: execute() awaits run's return value, and a
         // caller (or test) that awaits the command should see the check done.
         run: () => this.updates.checkNow({ manual: true }),
+      },
+      {
+        id: 'app.showWelcome',
+        title: 'Welcome',
+        // The Nox menu, which off macOS is the only place resembling a Help
+        // menu — `predefined('about')` and its neighbours are native items
+        // that the in-window bar cannot draw, so on Windows and Linux that
+        // menu held six settings-and-updates entries and nothing that
+        // answers "where do I start".
+        category: 'Application',
+        keywords: ['help', 'about', 'start', 'getting started', 'shortcuts', 'home', 'recent'],
+        run: () => this.ui.showWelcome(),
       },
       {
         id: 'app.copyDiagnostics',

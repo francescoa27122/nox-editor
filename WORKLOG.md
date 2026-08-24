@@ -8,6 +8,80 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, UX) — A way back to the one screen that explains Nox
+
+A sweep of the running app for ease of use, and the one finding worth building.
+
+**The finding.** `Welcome.svelte` is the only place Nox explains itself — the
+essential chords, a context-aware Start list, recent folders — and it rendered
+*only* when no buffer was open, with no command to bring it back. Open one
+file and it was gone until you closed every tab.
+
+That mattered more off macOS than it sounds. Measured in the running app: the
+Nox menu there holds **six** items — Check for Updates, Copy Diagnostics, Open
+Settings, Keyboard Shortcuts, Reset All Settings, Open Workspace Settings.
+`predefined('about')` and its neighbours are native items the in-window bar
+cannot draw, so on Windows and Linux an app with **148 commands** offered
+nothing in its chrome that answered "where do I start", and no About at all.
+
+Shipped: `ui.welcomeOpen` in the editor slot beside `reviewOpen`/`agentsOpen`/
+`diffOpen`, an `app.showWelcome` command in the `Application` category — which
+puts **Welcome** in the Nox menu, the nearest thing to a Help menu that
+platform has — and a `dismissTop` branch.
+
+**The bug the tests caught, which is the part worth remembering.** The first
+draft cleared the screen from the existing `activeId` subscription. That
+misses the most likely way back: choosing a file that is *already open*
+activates it without changing anything, so `Signal.set` no-ops and the
+subscription never fires. The screen sat there ignoring the click. The tab
+strip is no help either — it belongs to `EditorArea` and is not on screen
+while the welcome screen is, so the route is the explorer.
+
+Fixed with a new `buffer-activated` workspace event, emitted by `setActive`
+**unconditionally**. "The user asked for this buffer" is a different fact from
+"the active buffer changed", and only the first one is true when you re-pick
+the file you are on. `review` and `agents` have the identical hole; left alone
+deliberately, because putting a staged change set away is a decision with a
+cost and this is not — recorded rather than fixed in passing.
+
+Verified:
+
+- `npm test` **1960 passed / 135 files** (was 1953/134), `npm run check` 974
+  files 0 errors, `npm run build` green.
+- Three mutations, each killing the right test. The one that earned its keep:
+  moving the handler back onto `activeId` fails *only* the same-id test, which
+  is what proves that test distinguishes the event from the signal.
+- Driven in the browser build: Welcome appears in the Nox menu, shows with a
+  file still open, and clicking the already-open README in the explorer
+  restores the editor and its tab.
+
+**Also swept and found healthy**, so nobody re-walks it: explorer rows are
+properly named; the Problems empty state's action behaves correctly on every
+target, including explaining itself in the browser build where there is no
+config file to open; `openServerConfig` creates `servers.json`, opens it and
+names the next step; Settings has 38 entries across 5 categories with a
+working search; and all 16 command categories reach a menu — no orphans.
+
+Two findings not built, both already known to the roadmap:
+
+- **The language indicator is the only inert item in the status bar.** Its
+  five neighbours are buttons that do something; `Markdown` is a `<span>`, and
+  no command sets a buffer's language at all. Roadmap v0.2, "Untitled buffer
+  language picker".
+- **Git is the only rail icon whose tooltip names no chord.** Known, and
+  waiting on the operator's call about freeing `Ctrl+Shift+G` from Find
+  Previous.
+
+Next: either of the two above, or more e2e specs — a run is under a second
+now, so the cost of a spec is writing it.
+
+Blocked: nothing new.
+
+Confidence: high. The behaviour is pinned by seven tests, mutation-checked,
+and driven in the running app.
+
+---
+
 ## 2026-08-23 (PC, phase 2 done) — All three platforms, four specs, under a second
 
 The list from the last entry is finished bar one item that needs a permission
