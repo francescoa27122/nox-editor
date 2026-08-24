@@ -8,6 +8,64 @@ are knowledge.**
 
 ---
 
+## 2026-08-24 (PC) — 0.9.0's first-launch error was mine, and was not an error
+
+A bug report from the released build: *"ResizeObserver loop completed with
+undelivered notifications"*, bottom right, on first run of a fresh v0.9.0
+download.
+
+**It is not a failure and never was.** The browser raises that when an
+observer callback resizes something and the loop needs another pass; the
+specification calls for exactly that — deliver the rest next frame and carry
+on. Nox has five `ResizeObserver`s and start-up is when panels measure
+themselves, so a fresh launch is where it is likeliest.
+
+**The defect was the reporting, and I shipped it.** The `error` backstop added
+in 0.9.0 falls back to the message when there is no `error` object, which is
+right for a cross-origin script error — and the ResizeObserver notice has that
+exact shape. So a benign browser notice became a red *"Something went wrong"*,
+on first launch, as the first thing a new user saw.
+
+There is something worth keeping in how this arrived. The backstop exists
+because a whole class of failure used to produce nothing at all; the first
+thing it caught was itself being wrong. That is the feature working — the
+window did not quietly stop, it said something — and the fix is to make it say
+it about the right things.
+
+Fixed in `app.ts`: ignore `ResizeObserver loop …` **when there is no `error`
+object**. Both spellings (Chrome said "loop limit exceeded" before "loop
+completed with undelivered notifications"), and the `error === undefined`
+half is what keeps it narrow — a real exception thrown inside an observer
+callback still reports, because that arrives *with* an error object.
+
+Two tests in `failure-reporting.test.ts`, mutation-checked on both halves:
+
+- removing the filter → the shipped bug returns, `expected [ 'Something went
+  wrong', …(1) ] to deeply equal []`
+- filtering on the message alone → a real error inside a callback goes silent,
+  `expected undefined to be 'Something went wrong'`
+
+Cut **0.9.1**. Five files this time, not three: the release gate holds
+`package.json`, `tauri.conf.json` and `Cargo.toml` to each other, and says
+nothing about `Cargo.lock` (a stale one fails a `--locked` build) or
+`package-lock.json` (`npm ci` refuses a lockfile that disagrees with its
+manifest, which would take out every CI job on the tag). Gate script run
+locally against all five before tagging.
+
+Verified: `npm test` 1985 / 138, `npm run check` 977 files 0 errors, build
+green.
+
+Next: the operator publishes the 0.9.1 draft. A fresh 0.9.0 download shows the
+false error until then; an existing install updates to 0.9.1 once published.
+
+Blocked: publishing, deliberately. The Apple certificate is with Apple.
+
+Confidence: high on the fix. The underlying resize pass was not chased — it is
+benign by specification and self-correcting, and chasing it across five
+observers without a reproduction would be building on a guess.
+
+---
+
 ## 2026-08-24 (PC) — The packaged app can now block a merge
 
 `e2e (ubuntu-22.04)`, `e2e (windows-latest)` and `e2e (macos-latest)` are in

@@ -256,7 +256,7 @@ endings, the language, the wrap.
 ## Status
 
 **v0.9.** It's young, and it's a personal project rather than a product, but
-it's real software with 1983 tests and I use it. Expect rough edges, and open
+it's real software with 1985 tests and I use it. Expect rough edges, and open
 an issue if you hit one — and if you do, run **Copy Diagnostics** from the
 palette first. It puts the version, the platform and what recently went wrong
 on your clipboard, with your home directory stripped out of the paths.
