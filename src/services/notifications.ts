@@ -1,3 +1,4 @@
+import { Emitter } from '@core/emitter';
 import { Signal } from '@core/signal';
 
 /**
@@ -36,8 +37,24 @@ const DEFAULT_TIMEOUTS: Record<NotificationKind, number> = {
   error: 0,
 };
 
+export interface NotificationEvents {
+  /** Raised once per notification, at the moment it is shown. */
+  notified: Notification;
+}
+
 export class NotificationService {
   readonly items = new Signal<Notification[]>([]);
+
+  /**
+   * Every notification, as it is raised.
+   *
+   * An emitter rather than a subscription to `items`, because that signal is
+   * *evicted* from: four transient notifications arriving together push the
+   * fifth out, and `clear()` empties it wholesale. A consumer diffing the
+   * list would therefore miss exactly the bursts most worth recording. This
+   * fires once per notification and never again, which is what a log wants.
+   */
+  readonly events = new Emitter<NotificationEvents>();
   #nextId = 1;
   #timers = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -78,6 +95,10 @@ export class NotificationService {
         setTimeout(() => this.dismiss(id), timeout),
       );
     }
+
+    // After the list update rather than before, so a handler that reads
+    // `items` sees the notification it was told about.
+    this.events.emit('notified', notification);
     return id;
   }
 

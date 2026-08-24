@@ -8,6 +8,96 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, phase 1) — Nox can now say what went wrong
+
+Phase 1 of the production plan. Before this, a failure in a released build
+left nothing behind: no log file anywhere, no `log`/`tracing`/`tauri-plugin-log`
+in `Cargo.toml`, and `app.ts` admitting in its own comment that the release
+webview has no console. A bug report could only ever be prose.
+
+Shipped:
+
+- **`src/services/diagnostics.ts`** — a bounded log of the failures the user
+  was shown, written to `diagnostics.log` in the config directory beside
+  `settings.json` and `notes.json`. **It needed no Rust and no new `Platform`
+  method**: `readConfigFile`/`writeConfigFile` already existed, which is the
+  reason this landed in one session on a machine with no `cargo`.
+- **The other half of the backstop.** `app.ts` had listened for
+  `unhandledrejection` since it was written and never for `error`, so a
+  *synchronous* throw — a Svelte effect, a DOM handler, a CodeMirror
+  extension — produced nothing at all: no toast, no log, no console. The only
+  symptom was the UI quietly stopping. `#installRejectionBackstop` is now
+  `#installFailureBackstops` and registers both.
+- **`app.copyDiagnostics`** — the report on the clipboard, ready to paste into
+  an issue.
+
+Three decisions worth not re-litigating:
+
+- **Ingestion is one tap on `NotificationService.notify`**, not a `record`
+  call beside each of the hundred-odd places that raise a notification. Every
+  failure the user is shown already passes through there, so command
+  failures, git refusals, service errors and both window backstops are
+  captured without any of them knowing diagnostics exist — and anything added
+  later is covered by default rather than by someone remembering. An
+  `Emitter` rather than a subscription to `items`, because that signal is
+  *evicted* from: four transient notifications push the fifth out, so a
+  consumer diffing the list would miss exactly the bursts worth recording.
+- **Redaction happens on the way in.** `redactHome` replaces the home
+  directory with `~` before the entry is stored, so the string naming the
+  user is never held in memory or written to disk — a redaction applied only
+  at the report would leave it sitting in a file on their machine. Both
+  separator spellings, because a path through an LSP URI comes back with the
+  other one. `split`/`join` rather than a `RegExp`, because a Windows home is
+  full of backslashes and building a pattern from it needs escaping that is
+  easy to get subtly wrong.
+- **`category: 'Application'`, not a new `Help`.** A category `LAYOUT` does
+  not name is a command that reaches no menu at all — that table is the whole
+  defence against a command nobody can find, and `tests/menu-bar.test.ts`
+  caught the omission the moment `Help` was introduced. The Nox menu is
+  already where this app's meta lives, beside About and Check for Updates; a
+  top-level Help menu is a design decision, not a side effect of a
+  diagnostics command.
+
+Verified:
+
+- `npm test` — **1953 passed, 134 files** (was 1929/133). `npm run check` —
+  973 files, 0 errors. `npm run build` green.
+- Five mutations, and **the fifth is the reason this entry is worth reading**:
+  - the `error` listener never registered → 2 red
+  - the notification tap recording nothing → 2 red
+  - redaction moved to the way out only → 1 red
+  - the resource-error guard dropped → 1 red
+  - **coalescing turned into a debounce → all 28 still green.** The burst test
+    could not tell a throttle from a debounce, because twenty synchronous
+    records leave one timer either way — a test passing for the wrong reason.
+    The distinguishing property is *starvation*: a debounce restarts the clock
+    on every record, so a failure arriving steadily postpones the write
+    indefinitely and a crash mid-loop loses everything. `is not starved by a
+    stream of failures that never stops` records at 0 and 0.6, advances to
+    1.2, and expects the write to have happened. It fails under the debounce.
+- **A methodology error cost the middle of this session.** The mutation loop
+  used `git checkout -- src/app.ts` to revert, which restores from the *index*
+  — and the phase-1 edits were unstaged, so the first mutation silently
+  destroyed all seven of them. Two later mutations then "passed" against
+  untouched HEAD code and told me nothing. All seven were rewritten and the
+  loop now stages first and asserts `git diff --quiet` after each revert.
+
+Not done, deliberately: **the Rust half.** An `Err` returned from a Tauri
+command reaches the log only once it becomes a toast, so a failure swallowed
+inside `src-tauri` still leaves nothing behind. That wants `tracing` on the
+command boundary; `cargo` is not installed here, so it is a CI-only edit and
+does not belong bundled with a change this size.
+
+Next: **phase 2, the WebDriver harness** — Windows first, since it is the
+operator's platform and has never been walked.
+
+Blocked: nothing new. The certificates remain the operator's.
+
+Confidence: high. Every claim above is a command that ran, and the one place
+the tests were weaker than they looked is named rather than smoothed over.
+
+---
+
 ## 2026-08-23 (PC, phase 0) — Both walk bugs closed, and a correction to the entry below
 
 Phase 0 of the production plan. It finished faster than planned and in a

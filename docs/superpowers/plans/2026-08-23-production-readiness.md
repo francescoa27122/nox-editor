@@ -142,7 +142,22 @@ will ever open.
 The consequence for a public repo publishing releases: a bug report can only
 ever be prose. And it makes every other item here harder to close.
 
-### The fix
+### The fix — ✅ shipped 2026-08-23
+
+Built as described below, with two departures worth recording. The log needed
+**no Rust and no new `Platform` method**: `readConfigFile`/`writeConfigFile`
+already existed, and `diagnostics.log` sits in the config directory beside
+`settings.json` and `notes.json`, which is where Nox's own files live. And the
+ingestion is **one tap on `NotificationService.notify`** rather than `record`
+calls spread across the app — every failure the user is shown already passes
+through there, so command failures, service errors and both window backstops
+are captured without any of them knowing diagnostics exist.
+
+Still open, and deliberately: the Rust half. A `Err` returned from a Tauri
+command reaches the log only once it becomes a toast, so a failure swallowed
+inside `src-tauri` still leaves nothing. That wants `tracing` on the command
+boundary and is its own change — `cargo` is not installed on the development
+machine, so it is a CI-only edit and does not belong bundled with this one.
 
 - **Complete the backstop.** Add the `'error'` listener beside the
   `unhandledrejection` one in `#installRejectionBackstop`, sharing
@@ -302,7 +317,7 @@ Ties broken toward the smaller change; sequenced by what each unblocks.
 | # | Work | Why here | Size |
 |---|---|---|---|
 | 0 | ✅ **Done 2026-08-23.** Adjudicate both walk bugs; correct the report | Neither was an app defect; the walk harness was | hours |
-| 1 | Diagnostics: `window.onerror`, log sink via `Platform`, Copy Diagnostics | Every later phase produces evidence instead of prose | 1 session |
+| 1 | ✅ **Done 2026-08-23.** Diagnostics: the `error` backstop, a durable log, Copy Diagnostics | Every later phase produces evidence instead of prose | 1 session |
 | 2 | WebDriver harness — Windows, then Linux in CI | Closes the last 1.0 gate and unblocks §4's other half | 2–3 sessions |
 | 3 | The `onRequest` seam — four handlers | One seam, four features, and a ✅ that is currently overstated | 1–2 sessions |
 | 4 | Benchmarks — pure layers now, typing path on the harness | Guards the product's first adjective | 1 session |
