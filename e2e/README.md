@@ -55,6 +55,22 @@ delivering a keystroke, and the platforms that have no other coverage at all.
 
 | | How |
 |---|---|
-| **Linux** | Running in CI. `webkit2gtk-driver` + `xvfb`, no Rust change. |
+| **Linux** | Running in CI, green. `webkit2gtk-driver` + `xvfb`, no Rust change. |
 | **Windows** | Next. A matrix entry; the service handles the Edge driver. |
 | **macOS** | Needs `tauri-plugin-wdio-webdriver` registered in debug builds — a source change, not a workflow one. Free; the paid CrabNebula driver is not required. |
+
+## Known: it is slower than it should be
+
+Four assertions take **six minutes**. That is not the app being slow to start
+— the session is established about two seconds in. The log shows a tight
+`executeAsyncScript` poll returning `false` roughly every 50 ms, following the
+service's `Waiting for Tauri plugin initialization…`. It is waiting for
+`tauri-plugin-wdio-webdriver`, which this setup deliberately does not have,
+and giving up slowly.
+
+That cost is paid per session, so it does not grow much with more specs — but
+it is six minutes of every pull request for nothing, and it is the first thing
+to fix before this job is promoted into branch protection's required checks.
+The service's log-capture and plugin-wait behaviour are configurable; the
+option names want reading from its configuration reference rather than
+guessing.

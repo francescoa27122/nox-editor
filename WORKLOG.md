@@ -8,6 +8,98 @@ are knowledge.**
 
 ---
 
+## 2026-08-23 (PC, phase 2) — Something other than a human has now launched Nox
+
+Phase 2, first slice. `e2e/` drives the **packaged binary** through WebDriver
+in CI. Everything in `tests/` checks source; this is the first thing that has
+ever started the artefact users install — and it did it on Linux, a platform
+that ships an installer nobody had ever launched.
+
+Four assertions, green against a real build:
+
+```
+the packaged app
+   ✓ launches and draws its chrome
+   ✓ draws the in-window menu bar off macOS
+the command palette
+   ✓ opens on its chord and filters what it lists
+   ✓ closes on Escape, which no manual walk could ever verify
+4 passing (6m 15.4s)
+```
+
+The last one is the point of the exercise. The computer-use harness ate
+Escape at the OS level as its own user-abort key, so a keystroke Nox binds
+globally (`app.ts:4065`) had **no desktop verification path at all** — which
+is half of why BUG-1 was reported as a confirmed defect against code that was
+fine. That gap is closed, and closed unattended on every pull request.
+
+Shipped:
+
+- **`e2e/`** — WebdriverIO + `@wdio/tauri-service`, its own `package.json` so
+  the large `@wdio/*` tree stays out of the root install all seven existing
+  checks pay for. Plain JavaScript in a TypeScript repository, deliberately:
+  nothing here can be run locally without `cargo`, so every iteration is a CI
+  round trip and a TS loader is one more thing that can fail for reasons
+  unrelated to what is being tested.
+- **A new `e2e` CI job** on ubuntu-22.04 — `webkit2gtk-driver` (which *is*
+  WebKitWebDriver) and `xvfb` through the existing `linux-build-deps` action's
+  `extra-packages` input, so that action needed no change and the `rust` job's
+  apt cache key stays valid.
+
+**Three assumptions in the plan were wrong, and CI found each one.** All three
+present as WebdriverIO's `No "browserName" defined in capabilities`, because
+the service gives up before rewriting the capability — so on this harness the
+useful line is always *further up the log than the failure*. Worth knowing
+before the next person debugs it:
+
+1. The service does **not** auto-detect the binary from an empty
+   `tauri:options`. It must be told. The name is `nox` from Cargo's
+   `package.name`, not `Nox` from Tauri's `productName` — `--no-bundle` stops
+   before the rename. Read off `Built application at: …/target/debug/nox`
+   rather than reasoned about, because the two names genuinely disagree here.
+2. It now defaults to the **embedded** provider, which needs
+   `tauri-plugin-wdio-webdriver` registered in `lib.rs`. With no plugin the
+   app launched fine (PID and all) and then nothing answered on port 4445 for
+   60 s. *An app spawning is not the same as an app being drivable.*
+   `driverProvider: 'external'` is the path that needs no Rust change.
+3. It does **not** install `tauri-driver` itself, despite advertising
+   automatic driver management. `cargo install tauri-driver --locked`, cached
+   by binary since `rust-cache` covers the workspace target directory and not
+   `~/.cargo/bin`.
+
+Verified:
+
+- **The `e2e` job is green**, 9m20s, and the spec reporter shows 4 passing —
+  checked rather than inferred from a green tick, because a harness that ran
+  zero specs also goes green.
+- `npm test` 1953 passed / 134 files and `npm run check` 973 files 0 errors,
+  both unchanged: vitest's include is `tests/**` and tsconfig's is
+  `src`/`tests`/`.storybook`, so `e2e/` is invisible to both.
+
+Known, and recorded in `e2e/README.md` rather than left to be rediscovered:
+**four assertions take six minutes.** Not the app starting — the session is up
+two seconds in. The log shows a tight `executeAsyncScript` poll returning
+`false` every ~50 ms after the service's `Waiting for Tauri plugin
+initialization…`: it is waiting on the plugin this setup deliberately does not
+have, and giving up slowly. Paid per session rather than per spec, so it will
+not grow much, but it is six minutes of every PR for nothing.
+
+Deliberately **not** in branch protection's required checks. A harness whose
+own flakiness is unmeasured should not be able to block a merge until it has a
+record, and the six minutes should go first.
+
+Next: **Windows** — a matrix entry, and the operator's own platform. Then the
+plugin wait, then macOS, which needs the embedded provider's Rust crate
+registered in debug builds.
+
+Blocked: nothing new. The certificates remain the operator's.
+
+Confidence: high that the harness works — it is green and the four assertions
+are named in the log. Medium on how it behaves over time: one green run is not
+a flakiness record, which is exactly why it is not a required check yet.
+
+---
+
 ## 2026-08-23 (PC, phase 1) — Nox can now say what went wrong
 
 Phase 1 of the production plan. Before this, a failure in a released build
