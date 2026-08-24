@@ -20,6 +20,14 @@ coverage/
 # invariants the same way ARCHITECTURE.md does, and CLAUDE.md references them.
 !.claude/skills/
 !.claude/skills/**
+# …and the session-start hook, which is infrastructure rather than personal
+# config: it is what makes a Claude Code on the web container able to run the
+# suite at all, so it has to reach the default branch to be worth anything.
+# `settings.json` is named exactly, so `settings.local.json` — the per-agent
+# file the exclusion above is really aimed at — stays out.
+!.claude/hooks/
+!.claude/hooks/**
+!.claude/settings.json
 
 # Compiled helper, rebuilt on demand.
 scripts/.window-id.bin
