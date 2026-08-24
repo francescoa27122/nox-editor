@@ -58,6 +58,27 @@ const application =
     process.platform === 'win32' ? 'nox.exe' : 'nox',
   );
 
+/**
+ * Which WebDriver actually drives the webview.
+ *
+ * `external` means `tauri-driver` in front of WebKitWebDriver, which the
+ * service installs itself and which the `webkit2gtk-driver` package provides.
+ * It needs **no change to the Rust crate**, which is the entire reason Linux
+ * is the platform this harness starts on.
+ *
+ * The service now defaults to `embedded` instead, and that default is what
+ * the second CI run died on: the embedded provider needs
+ * `tauri-plugin-wdio-webdriver` registered in `lib.rs`, so with no plugin
+ * present the app launched fine and then nothing ever answered on port 4445
+ * until the 60s timeout. The app spawning is not the same as the app being
+ * drivable.
+ *
+ * Adopting the embedded provider is a real option later — it is how macOS is
+ * supported at all — but it is a source change to `src-tauri`, and `cargo` is
+ * not installed on the development machine, so it belongs in its own step.
+ */
+const DRIVER = { driverProvider: 'external' };
+
 export const config = {
   runner: 'local',
   specs: [path.join(here, 'specs', '**', '*.e2e.js')],
@@ -71,10 +92,15 @@ export const config = {
     {
       browserName: 'tauri',
       'tauri:options': { application },
+      'wdio:tauriServiceOptions': DRIVER,
     },
   ],
 
-  services: ['@wdio/tauri-service'],
+  // Set at both levels on purpose. `onPrepare` is a *launcher* hook and reads
+  // the options given here; the capability is what a worker reads. They carry
+  // the same object, so there is nothing to disagree about, and setting only
+  // one leaves which-of-the-two-wins as something to discover from a CI log.
+  services: [['@wdio/tauri-service', DRIVER]],
   framework: 'mocha',
   reporters: ['spec'],
   logLevel: process.env.CI ? 'info' : 'debug',
