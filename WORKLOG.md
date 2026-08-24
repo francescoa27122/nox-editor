@@ -8,6 +8,57 @@ are knowledge.**
 
 ---
 
+## 2026-08-24 (PC) — The packaged app can now block a merge
+
+`e2e (ubuntu-22.04)`, `e2e (windows-latest)` and `e2e (macos-latest)` are in
+`main`'s required status checks. A change that breaks the app as installed
+cannot land. Until now the harness was advice.
+
+**Promoted on a measured record, not a hunch.** Twelve CI runs, three legs:
+
+| | |
+|---|---|
+| ubuntu-22.04 | 12 / 12 |
+| windows-latest | 12 / 12 |
+| macos-latest | 11 / 12 |
+
+**Zero flaky failures in 36 job runs.** The single failure was macOS's *first*
+run, at 22:59 on 2026-08-23, which caught two real defects — the specs assumed
+an in-window menu bar macOS correctly does not draw, and `Ctrl` where macOS
+uses `⌘`. A true positive. Eleven consecutive green since, across four
+branches and main. That distinction is why the run history was read rather
+than the pass count: a recent intermittent failure would have meant the
+opposite conclusion from the same 11/12.
+
+Used the additive `required_status_checks/contexts` endpoint rather than a
+`PUT` on the whole protection object, which would have rewritten every other
+setting from whatever I sent. Verified afterwards that nothing else moved:
+`strict` true, `enforce_admins` true, force pushes and deletions still off,
+ten contexts.
+
+What this costs day to day, since `enforce_admins` means there is no override:
+every PR now waits on a Rust build per platform, and `strict` means a branch
+must be up to date when main moves. The escape hatch is the same call in
+reverse and is written down in `e2e/README.md` next to the reason it might be
+needed.
+
+Also corrected: the `ci.yml` comment and `e2e/README.md` both said the job was
+deliberately *not* required. That was true when written and is the kind of
+stale comment that outlives its fact.
+
+Verified: the protection object read back after the change, ten contexts, the
+other settings unchanged.
+
+Next: more specs. Four is a smoke test and the 2026-08-20 walk left twelve
+items UNSEEN — and a run is now under a second, so the cost of a spec is
+writing it.
+
+Blocked: the Apple certificate, which is with Apple.
+
+Confidence: high.
+
+---
+
 ## 2026-08-24 (PC, release) — README brought current, and 0.9.0 cut
 
 The README described v0.5 and 1421 tests. Nox is on 0.9.0 with 1983, and four

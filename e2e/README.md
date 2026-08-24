@@ -117,23 +117,32 @@ would fix it. It did not (6m15s → 5m53s). Reading the log for what was
 actually between a command and its result, rather than reasoning from the
 symptom, is what found a 4 ms operation inside a ten-second wait.
 
-## Still to do
+## Required to merge
 
-- **Promote into branch protection's required checks.** Linux and Windows have
-  a record to justify it — six and four consecutive green runs. macOS has one,
-  and the rule this list has followed throughout is that a check with no
-  flakiness record should not be able to block a merge. Adding the first two,
-  additively, without disturbing the other settings:
+All three legs are in `main`'s required status checks as of 2026-08-24, so a
+change that breaks the packaged app on any platform cannot land. That is the
+whole point of the harness, and until it gated a merge it was only ever
+advice.
+
+The record it was promoted on, measured rather than asserted: **36 job runs,
+zero flaky failures.** The single failure in that window was macOS's first
+ever run, which caught two real defects — the specs assumed an in-window menu
+bar that macOS correctly does not have, and `Ctrl` where macOS uses `⌘`. A
+true positive, not noise.
+
+Two things worth knowing about the shape of that gate:
+
+- `main` is `strict`, so a branch must be up to date before merging. When main
+  moves, `gh pr update-branch` and a second pass.
+- `enforce_admins` is on, so a leg that *does* go flaky blocks everyone with
+  no override. Removing one is the same call in reverse:
 
   ```bash
-  gh api --method POST "repos/<owner>/nox-editor/branches/main/protection/required_status_checks/contexts" -f 'contexts[]=e2e (ubuntu-22.04)' -f 'contexts[]=e2e (windows-latest)'
+  gh api --method DELETE "repos/<owner>/nox-editor/branches/main/protection/required_status_checks/contexts" -f 'contexts[]=e2e (macos-latest)'
   ```
 
-  Worth knowing before running it: `main` has `enforce_admins` on, so a
-  required check that goes flaky blocks **everyone**, with no override. That
-  is the argument for adding platforms one record at a time rather than all
-  three at once.
+## Still to do
 
-- **More specs.** Four is a smoke test. The 2026-08-20 walk left twelve items
-  UNSEEN, and they are now cheap to express: a run is under a second, so the
-  cost of a spec is writing it rather than waiting for it.
+- **More specs.** Four is a smoke test, and the 2026-08-20 walk left twelve
+  items UNSEEN. They are cheap now — a run is under a second, so the cost of a
+  spec is writing it rather than waiting for it.
