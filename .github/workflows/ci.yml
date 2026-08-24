@@ -153,6 +153,24 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # The service advertises automatic driver management and does not do it
+      # here: the run before this one died on "tauri-driver not found",
+      # surfacing as WebdriverIO's misleading `No "browserName" defined in
+      # capabilities` because the service gives up before rewriting the
+      # capability. Cached by binary rather than rebuilt, since `cargo
+      # install` compiles it from source and `rust-cache` covers the workspace
+      # target directory, not `~/.cargo/bin`.
+      - name: Cache tauri-driver
+        id: tauri-driver-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/tauri-driver
+          key: tauri-driver-jammy-v1
+
+      - name: Install tauri-driver
+        if: steps.tauri-driver-cache.outputs.cache-hit != 'true'
+        run: cargo install tauri-driver --locked
+
       - name: Install root dependencies
         run: npm ci
 
