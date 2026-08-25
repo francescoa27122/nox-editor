@@ -73,6 +73,19 @@ export default defineConfig({
       },
       {
         extends: true,
+        test: {
+          name: 'bench',
+          environment: 'node',
+          // `include` is deliberately empty: this project carries benchmarks,
+          // not tests, so `npm test` must find nothing here. Without it the
+          // default `**/*.test.ts` would pull the whole unit suite in a second
+          // time under a second name.
+          include: [],
+          benchmark: { include: ['bench/**/*.bench.ts'] },
+        },
+      },
+      {
+        extends: true,
         plugins: [storybookTest({ configDir: r('./.storybook') })],
         test: {
           name: 'stories',

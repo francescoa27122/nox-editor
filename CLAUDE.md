@@ -8,6 +8,8 @@ A fast, dark, keyboard-first text editor. Tauri 2 (Rust) + Svelte 5 (runes) + Co
 npm test && npm run check && npm run lint
 ```
 
+`npm run bench` reports durations for the pure layers; nothing gates on them, and `tests/complexity.test.ts` is what actually holds those functions to their stated complexity in CI.
+
 Both are mandatory before pushing. CI also runs `npm run build` — it catches bundler-level breaks that neither tests nor `svelte-check` see, so run it before claiming a release-path change is good.
 
 Rust: `cargo test --manifest-path src-tauri/Cargo.toml`. **`cargo` may not be installed on this machine.** If it isn't, write the tests, say plainly they are unrun locally, and let CI run them — do not report them as passing.

@@ -28,6 +28,7 @@
     "src/**/*.ts",
     "src/**/*.svelte",
     "tests/**/*.ts",
+    "bench/**/*.ts",
     // Storybook config and its story-support components. Included so
     // `npm run check` covers them: a story that imports a wrapper is
     // only type-checked if the wrapper resolves as a module.

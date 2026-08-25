@@ -73,6 +73,13 @@ Before adding work that runs per keystroke, per scroll or per cursor move, ask
 what it costs on a 10 MB file. Prefer viewport-bounded work
 (`view.visibleRanges`), debouncing, or doing it in Rust.
 
+Two things help you answer that rather than guess. `npm run bench` reports
+durations for the pure layers against a 16 ms frame — read it, nothing gates
+on it. `tests/complexity.test.ts` *does* gate: it measures how each function's
+cost grows with its input and fails if the exponent moves, which is the one
+performance property a shared CI runner can check honestly. If you add a
+function to a hot path, add it there too.
+
 ---
 
 ## Adding a feature
