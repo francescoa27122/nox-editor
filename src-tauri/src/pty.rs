@@ -368,6 +368,11 @@ fn poisoned<T>(_: T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only `read_until` uses these, and it is `#[cfg(unix)]` — the pty tests
+    // that need a real shell do not run on Windows. Ungated, this import was
+    // dead on the Windows leg: `cargo test` printed the warning and passed
+    // anyway, so it sat there until Clippy's `-D warnings` made it a failure.
+    #[cfg(unix)]
     use std::time::{Duration, Instant};
 
     #[test]
