@@ -69,6 +69,12 @@ export default defineConfig({
           name: 'unit',
           environment: 'node',
           include: ['tests/**/*.test.ts'],
+          // `tests/browser/` needs a browser, and the glob above would
+          // otherwise claim those files for this project as well — `npm test`
+          // went from 140 files to 141 the moment they existed. They fail
+          // rather than mislead when that happens, which is the good version
+          // of the accident, but they belong to the `editor` project.
+          exclude: ['tests/browser/**'],
         },
       },
       {
@@ -82,6 +88,25 @@ export default defineConfig({
           // time under a second name.
           include: [],
           benchmark: { include: ['bench/**/*.bench.ts'] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'editor',
+          // The typing path, in a browser that has layout. Separate from
+          // `stories` because it drives an `EditorView` directly rather than
+          // rendering a component through Storybook, and separate from `unit`
+          // because jsdom returns zeros for every measurement CodeMirror makes
+          // - see `tests/support/jsdom-layout.ts`. A keystroke measured
+          // without layout is not a keystroke.
+          include: ['tests/browser/**/*.test.ts'],
+          browser: {
+            enabled: true,
+            headless: true,
+            provider: playwright(),
+            instances: [{ browser: 'chromium' }],
+          },
         },
       },
       {
