@@ -59,6 +59,38 @@ describe('FileTreeService', () => {
     expect(tree.fileIndex.get().some((p) => p.includes('node_modules'))).toBe(false);
   });
 
+  /**
+   * The bound that keeps quick-open inside a frame, and until now nothing
+   * asserted the walk stopped at all.
+   *
+   * It is not about memory — the index is a list of strings. It is about what
+   * `CommandPalette.fileRows` has to score between a keystroke and the next
+   * frame, which is linear in this number. `filetree.ts` carries the
+   * measurement behind the value; this only pins that the walk honours it,
+   * which is the half a refactor can quietly break while every other index
+   * test still passes.
+   */
+  it('stops walking at the file cap', async () => {
+    const platform = new MemoryPlatform();
+    // Comfortably past the cap, and spread over directories so the breadth-first
+    // walk has to stop mid-tree rather than at a convenient boundary.
+    for (let dir = 0; dir < 40; dir++) {
+      for (let file = 0; file < 500; file++) {
+        platform.seedFile(`/w/d${dir}/f${file}.ts`, '');
+      }
+    }
+
+    const tree = new FileTreeService(platform);
+    await tree.setRoot('/w');
+    await tree.buildIndex();
+
+    const indexed = tree.fileIndex.get();
+    expect(indexed.length).toBeLessThanOrEqual(14_000);
+    // And it really did stop rather than fail: a cap that returned nothing
+    // would also satisfy the line above.
+    expect(indexed.length).toBeGreaterThan(13_000);
+  });
+
   it('indexes files recursively', async () => {
     const { tree } = setup();
     await tree.setRoot('/w');
