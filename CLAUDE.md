@@ -5,7 +5,7 @@ A fast, dark, keyboard-first text editor. Tauri 2 (Rust) + Svelte 5 (runes) + Co
 ## Verify before claiming anything works
 
 ```bash
-npm test && npm run check
+npm test && npm run check && npm run lint
 ```
 
 Both are mandatory before pushing. CI also runs `npm run build` — it catches bundler-level breaks that neither tests nor `svelte-check` see, so run it before claiming a release-path change is good.
@@ -48,7 +48,7 @@ Five project skills cover the subsystems in depth. Use them rather than re-deriv
 
 **And the one that is easiest to forget:** *nothing new on the typing path* (`CONTRIBUTING.md:65-69`). Before adding per-keystroke, per-scroll or per-cursor work, ask what it costs on a 10 MB file; prefer `view.visibleRanges`, debouncing, or pushing it to Rust.
 
-**`services/` and `core/` never import `@codemirror/view`** — that is what keeps them runnable headless under Vitest. They do use `@codemirror/state` and `@codemirror/commands` deliberately: `services/workspace.ts` owns an `EditorState` per buffer, which is what makes per-tab undo work. CodeMirror *extensions* live in `src/editor/`; `ui/EditorPane.svelte` owns the one `EditorView` instance. Nothing lints this — it holds by review.
+**`services/` and `core/` never import `@codemirror/view`** — that is what keeps them runnable headless under Vitest. They do use `@codemirror/state` and `@codemirror/commands` deliberately: `services/workspace.ts` owns an `EditorState` per buffer, which is what makes per-tab undo work. CodeMirror *extensions* live in `src/editor/`; `ui/EditorPane.svelte` owns the one `EditorView` instance. `npm run lint` enforces this, along with the `Platform` boundary above it — see `eslint.config.js`.
 
 ## House style
 

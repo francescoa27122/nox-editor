@@ -463,7 +463,6 @@
       expressions are the toggles beside the box.
     </PanelEmpty>
   {:else}
-    <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
     <div
       class="results nox-scroll"
       role="listbox"

@@ -48,7 +48,7 @@ function deps(options: Options = {}): { deps: CompletionDeps; count: { resolves:
     label: 'readFileSync',
     kind: 3,
     ...(options.listEdits !== undefined
-      ? { additionalTextEdits: options.listEdits as never }
+      ? { additionalTextEdits: options.listEdits }
       : {}),
   };
 

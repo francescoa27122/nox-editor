@@ -201,7 +201,10 @@
           {#if session.status === 'failed'}
             <p class="failed">{failure(session)}</p>
           {:else if session.answer !== null}
-            {#each answerParts(session.answer) as piece}
+            <!-- Keyed by index deliberately: an answer streams in, so a
+                 piece grows in place and should keep its node. A content key
+                 would tear down and rebuild the paragraph on every token. -->
+            {#each answerParts(session.answer) as piece, index (index)}
               {#if piece.code}
                 <pre class="code">{piece.text}</pre>
               {:else}

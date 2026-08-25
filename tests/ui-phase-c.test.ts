@@ -25,7 +25,7 @@ afterEach(() => {
   mounted = null;
 });
 
-async function withFile(component: typeof StatusBar | typeof Sidebar | typeof Toasts) {
+async function withFile(component: typeof StatusBar    ) {
   mounted = mountComponent(component);
   const { app, platform } = mounted;
   platform.seedFile('/w/a.ts', 'one\ntwo\n');

@@ -55,7 +55,7 @@ function marks(state: EditorState): [number, number, string][] {
   const out: [number, number, string][] = [];
   const cursor = state.field(provenanceField).iter();
   while (cursor.value) {
-    out.push([cursor.from, cursor.to, (cursor.value as ProvenanceValue).provenance.changeSetId]);
+    out.push([cursor.from, cursor.to, (cursor.value).provenance.changeSetId]);
     cursor.next();
   }
   return out;

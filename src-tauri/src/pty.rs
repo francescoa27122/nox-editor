@@ -186,6 +186,13 @@ fn default_shell() -> String {
 
 /// Open a terminal. `id` is chosen by the renderer, as for agents, so output
 /// can be routed without a round trip to learn what the session was called.
+// Eight parameters, and the shape is not ours to choose: a `#[tauri::command]`
+// takes its arguments by name from the renderer's call, so the list *is* the
+// IPC contract. `app` and `state` are injected by Tauri and never appear on
+// the wire, which leaves the six the caller actually passes. Collapsing the
+// rest into a struct would nest them under one key on the JavaScript side and
+// break every existing caller to satisfy a count.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn nox_pty_open(
     app: AppHandle,
@@ -361,6 +368,11 @@ fn poisoned<T>(_: T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only `read_until` uses these, and it is `#[cfg(unix)]` — the pty tests
+    // that need a real shell do not run on Windows. Ungated, this import was
+    // dead on the Windows leg: `cargo test` printed the warning and passed
+    // anyway, so it sat there until Clippy's `-D warnings` made it a failure.
+    #[cfg(unix)]
     use std::time::{Duration, Instant};
 
     #[test]

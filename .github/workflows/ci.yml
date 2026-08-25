@@ -13,6 +13,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Its own job rather than a step inside `web`, for one reason: lint output is
+  # the same on every platform and every Node version, so running it on all
+  # four `web` legs would be four copies of one answer. One runner, no matrix.
+  #
+  # It is a linter and not a formatter, and that line is deliberate. Three plan
+  # documents under `docs/superpowers/plans/` record the decision not to run
+  # prettier — it rewrites the repo to double quotes against house style — and
+  # `cargo fmt --check` is left out of the `rust` job below for exactly the
+  # same reason: nothing here has ever been rustfmt'd, so adding that check
+  # means a 6,000-line reformat, which is its own change and not a thing to
+  # smuggle in beside a lint config. Whitespace stays with review; the rules
+  # that are here are the ones review cannot be relied on to hold forever.
+  lint:
+    name: lint
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # No `--max-warnings 0`. The config keeps two rules at warning level on
+      # purpose — `no-useless-assignment` over nine defensive initialisers in
+      # `services/`, and `no-floating-promises` over a discard that `app.ts`
+      # argues for — and each says why in `eslint.config.js`. Errors block;
+      # warnings are there to be read.
+      - name: Lint
+        run: npm run lint
+
   web:
     name: web (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
@@ -133,6 +166,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+
+      # Before `cargo test`, because a lint failure is cheaper to read than a
+      # test failure and `--all-targets` compiles the test code anyway, so the
+      # cache it warms is the one the next step wants.
+      #
+      # `-D warnings` covers rustc's own warnings as well as clippy's, which is
+      # the half that matters most here: the three-platform matrix means a
+      # `#[cfg(windows)]` branch that has gone stale now says so on Windows
+      # rather than compiling quietly and failing at release time.
+      #
+      # Not `--all-features`: the `wdio` feature compiles an entire WebDriver
+      # server that only the e2e job wants.
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
         working-directory: src-tauri

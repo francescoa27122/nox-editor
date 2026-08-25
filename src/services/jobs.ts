@@ -199,7 +199,7 @@ export class JobRunner {
       result,
     };
 
-    this.#jobs.set(id, { job: job as Job<unknown>, controller, cancellable });
+    this.#jobs.set(id, { job, controller, cancellable });
     if (options.key) this.#byKey.set(options.key, id);
     this.#publish();
     return job;

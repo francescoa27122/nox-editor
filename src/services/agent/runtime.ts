@@ -355,7 +355,7 @@ export class AgentRuntime {
     const about = new Signal<AnswerTarget | null>(null);
 
     const record = (action: NewAction) => {
-      actions.update((current) => [...current, { ...action, at: Date.now() } as AgentAction]);
+      actions.update((current) => [...current, { ...action, at: Date.now() }]);
       this.#publish();
     };
 
@@ -1025,7 +1025,7 @@ export class ProviderTransport implements AgentTransport {
               method: 'session.note' as const,
               params: { text: chunk.text },
             }
-          : ({ ...chunk.request, id: nextId++ } as AgentRequest);
+          : { ...chunk.request, id: nextId++ };
 
       response = await send(request);
     }

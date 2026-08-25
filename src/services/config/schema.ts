@@ -337,22 +337,22 @@ export function coerce(key: SettingKey, value: unknown): Settings[SettingKey] {
   const descriptor: SettingDescriptor = SETTINGS_SCHEMA[key];
   switch (descriptor.kind) {
     case 'boolean':
-      return (typeof value === 'boolean' ? value : descriptor.default) as Settings[SettingKey];
+      return typeof value === 'boolean' ? value : descriptor.default;
     case 'number': {
       if (typeof value !== 'number' || !Number.isFinite(value)) {
-        return descriptor.default as Settings[SettingKey];
+        return descriptor.default;
       }
       const clamped = Math.min(descriptor.max, Math.max(descriptor.min, value));
-      return clamped as Settings[SettingKey];
+      return clamped;
     }
     case 'string':
-      return (typeof value === 'string' ? value : descriptor.default) as Settings[SettingKey];
+      return typeof value === 'string' ? value : descriptor.default;
     case 'enum':
       return (
         typeof value === 'string' && descriptor.options.includes(value)
           ? value
           : descriptor.default
-      ) as Settings[SettingKey];
+      );
   }
 }
 
@@ -372,7 +372,7 @@ export function coerceWorkspace(raw: unknown): Partial<Settings> {
     if (!(key in source)) continue;
     out[key] = coerce(key, source[key]);
   }
-  return out as Partial<Settings>;
+  return out;
 }
 
 /** Validate a whole persisted object, dropping unknown and invalid keys. */
@@ -384,5 +384,5 @@ export function coerceAll(raw: unknown): Partial<Settings> {
     if (!(key in source)) continue;
     out[key] = coerce(key, source[key]);
   }
-  return out as Partial<Settings>;
+  return out;
 }

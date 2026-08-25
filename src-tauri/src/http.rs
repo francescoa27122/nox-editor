@@ -46,10 +46,7 @@ pub fn is_loopback(url: &str) -> bool {
     if parsed.scheme() != "http" {
         return false;
     }
-    match parsed.host_str() {
-        Some("localhost") | Some("127.0.0.1") | Some("[::1]") => true,
-        _ => false,
-    }
+    matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
 }
 
 /// The client used for every request, built once rather than per call.

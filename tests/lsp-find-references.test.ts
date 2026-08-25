@@ -93,7 +93,7 @@ function messages(app: Mounted['app']): string[] {
 function rowsShown(): { file: boolean; text: string }[] {
   return [...panel!.container.querySelectorAll<HTMLElement>('.row')].map((row) => ({
     file: row.classList.contains('file'),
-    text: row.textContent!.replace(/\s+/g, ' ').trim(),
+    text: row.textContent.replace(/\s+/g, ' ').trim(),
   }));
 }
 

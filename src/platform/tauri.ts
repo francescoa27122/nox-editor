@@ -758,7 +758,7 @@ export class TauriPlatform implements Platform {
  */
 async function call<T>(command: string, args: Record<string, unknown>): Promise<T> {
   try {
-    return (await invoke(command, args)) as T;
+    return await invoke(command, args);
   } catch (raw) {
     const text = String(raw);
     const [head, ...rest] = text.split(': ');

@@ -108,7 +108,7 @@ export class MemoryPlatform implements Platform {
     if (this.#repos.has(r)) return;
     this.#repos.set(r, {
       branch,
-      heads: new Map([[branch, new Map()]]),
+      heads: new Map([[branch, new Map<string, string>()]]),
       index: new Map(),
       commits: [],
       conflicts: new Map(),
@@ -542,7 +542,7 @@ export class MemoryPlatform implements Platform {
       if (repo.heads.has(name)) {
         throw new PlatformError(`fatal: a branch named '${name}' already exists`, 'io');
       }
-      repo.heads.set(name, new Map(repo.heads.get(repo.branch)!));
+      repo.heads.set(name, new Map(repo.heads.get(repo.branch)));
       repo.branch = name;
       this.#notifyGitMeta(repoRoot);
       return;

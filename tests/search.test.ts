@@ -528,7 +528,11 @@ describe('previewReplacement over a windowed preview', () => {
     await runSearch(search, 'needle');
 
     search.options.update((current) => ({ ...current, regexp: true }));
-    search.query.set('const (\w+)');
+    // Escaped, because `'\w'` is just `'w'` in a normal string — this query
+    // never held the word class it appeared to. The assertion turns on the
+    // query differing from the one the stored match came from, so the test
+    // was always testing its subject; it just was not saying what it meant.
+    search.query.set('const (\\w+)');
     search.setReplacement('[$1]');
 
     const match = search.results.get().find((file) => file.path === '/w/src/main.ts')!.matches[0]!;

@@ -34,7 +34,7 @@
     // not worth an exception in the middle of a click handler's flush.
     untrack(() => listEl)
       ?.querySelectorAll('.row')
-      [focused]?.scrollIntoView?.({ block: 'nearest' });
+      ?.[focused]?.scrollIntoView?.({ block: 'nearest' });
   });
 
   const rows = $derived($list?.rows ?? []);

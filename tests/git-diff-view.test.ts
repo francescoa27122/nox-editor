@@ -65,7 +65,7 @@ async function setup() {
 }
 
 function body(): string {
-  return panel!.container.textContent!.replace(/\s+/g, ' ');
+  return panel!.container.textContent.replace(/\s+/g, ' ');
 }
 
 describe('the surface', () => {
@@ -216,7 +216,7 @@ describe('the dismissal, end to end through the shell', () => {
     flush();
     await app.commands.execute('git.showDiff');
     flush();
-    expect(panel!.container.querySelector('section.diff')).not.toBeNull();
+    expect(panel.container.querySelector('section.diff')).not.toBeNull();
     return { app };
   }
 

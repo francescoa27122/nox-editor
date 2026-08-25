@@ -586,7 +586,7 @@ export class SearchService {
      * nothing has been changed yet.
      */
     const job = this.#jobs.run(
-      { title: `Replacing \"${query}\"`, key: REPLACE_JOB },
+      { title: `Replacing "${query}"`, key: REPLACE_JOB },
       async (context) => {
         const journal: ReplaceRecord[] = [];
         const failed: string[] = [];

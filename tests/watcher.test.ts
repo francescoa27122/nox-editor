@@ -1,4 +1,3 @@
-import type { TransactionSpec } from '@codemirror/state';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import { FileTreeService } from '../src/services/filetree';
@@ -455,19 +454,19 @@ describe('reload behaviour', () => {
     const { platform, workspace } = await setup();
     const id = (await workspace.open('/w/a.ts'))!;
 
-    const dispatched: string[] = [];
+    let dispatched = 0;
     workspace.addViewDispatcher((bufferId, spec) => {
       if (bufferId !== id) return false;
-      dispatched.push(String((spec as TransactionSpec).changes));
+      dispatched += 1;
       // Simulate the view applying it, as EditorPane does.
-      workspace.applyTransaction(id, workspace.stateOf(id)!.update(spec as TransactionSpec));
+      workspace.applyTransaction(id, workspace.stateOf(id)!.update(spec));
       return true;
     });
 
     platform.externalWrite('/w/a.ts', 'via view\n');
     await workspace.reloadFromDisk(id);
 
-    expect(dispatched).toHaveLength(1);
+    expect(dispatched).toBe(1);
     expect(workspace.textOf(id)).toBe('via view\n');
   });
 

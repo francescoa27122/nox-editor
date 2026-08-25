@@ -1,6 +1,5 @@
 import type { JsonLinesStream, Platform } from '@platform/types';
 import type { Edit } from '../transactions';
-import type { BufferId } from '../workspace';
 import type { OllamaAgentConfig } from './config';
 import type { CoreResponse, RequestBody } from './protocol';
 import type { ModelProvider, ModelRequest, ModelStream } from './provider';
@@ -179,7 +178,7 @@ function objectSpans(content: string): Candidate[] {
     pendingEscape = false;
     if (char !== '{' && char !== '}') continue;
 
-    const stack = stacks[quotesOdd ? 1 : 0]!;
+    const stack = stacks[quotesOdd ? 1 : 0];
     if (char === '{') stack.push(index);
     else if (stack.length > 0) endOf.set(stack.pop()!, index + 1);
   }
@@ -467,7 +466,7 @@ function withOffsets(
 
     const resolved = resolveEdit(text, edit.find, edit.replace);
     if ('error' in resolved) return { error: resolved.error };
-    edits.push({ bufferId: edit.bufferId as BufferId, changes: resolved });
+    edits.push({ bufferId: edit.bufferId, changes: resolved });
   }
 
   const description = typeof record.description === 'string' ? record.description : 'Agent proposal';
@@ -648,9 +647,27 @@ export class OllamaProvider implements ModelProvider {
   async #ask(messages: ChatMessage[], signal: AbortSignal | undefined): Promise<string | null> {
     const url = `${this.#config.host.replace(/\/+$/, '')}/api/chat`;
     let content = '';
-    let failure: string | null = null;
-    /** An error the server sent as a frame rather than as an HTTP status. */
-    let reported: string | null = null;
+    /**
+     * The two failure channels, in an object rather than as two `let`s.
+     *
+     * Both are written only from inside the callbacks below, and TypeScript's
+     * flow analysis does not follow an assignment made inside a callback. As
+     * plain `let`s it therefore still believed both were `null` at the guards
+     * further down — so `if (failure !== null)` narrowed the body to `never`,
+     * and **everything inside those guards stopped being type-checked**. It
+     * compiled clean; `npm run check` reported nothing. An object property is
+     * re-read rather than flow-narrowed across the `await`, which is what
+     * restores the checking.
+     *
+     * Found by `@typescript-eslint/restrict-template-expressions`, which
+     * objected to a `never` reaching a template literal. That objection is
+     * the only reason any of this was visible.
+     */
+    const failed: {
+      transport: string | null;
+      /** An error the server sent as a frame rather than as an HTTP status. */
+      reported: string | null;
+    } = { transport: null, reported: null };
 
     await new Promise<void>((resolve) => {
       let settled = false;
@@ -697,7 +714,7 @@ export class OllamaProvider implements ModelProvider {
               // all — so a check on the HTTP status cannot see it and a reader
               // that only looks at `message.content` files it as an empty turn.
               if (typeof frame.error === 'string' && frame.error !== '') {
-                reported = frame.error;
+                failed.reported = frame.error;
                 return;
               }
               content += frame.message?.content ?? '';
@@ -707,7 +724,7 @@ export class OllamaProvider implements ModelProvider {
             }
           },
           (error) => {
-            failure = error;
+            failed.transport = error;
             finish();
           },
         )
@@ -725,7 +742,7 @@ export class OllamaProvider implements ModelProvider {
           signal.addEventListener('abort', onAbort, { once: true });
         })
         .catch((error: unknown) => {
-          failure = error instanceof Error ? error.message : String(error);
+          failed.transport = error instanceof Error ? error.message : String(error);
           finish();
         });
     });
@@ -736,19 +753,21 @@ export class OllamaProvider implements ModelProvider {
     // purpose.
     if (signal?.aborted) return null;
 
-    if (failure !== null) {
-      const message = reportedError(failure);
+    if (failed.transport !== null) {
+      const message = reportedError(failed.transport);
       // Naming the host in both: a refused connection is nearly always the
       // wrong one, and `agents.json` is not on screen for the user to check.
       throw new Error(
         message === null
-          ? `Could not reach the model server at ${this.#config.host}: ${failure}`
+          ? `Could not reach the model server at ${this.#config.host}: ${failed.transport}`
           : `The model server at ${this.#config.host} refused the request: ${message}`,
       );
     }
 
-    if (reported !== null) {
-      throw new Error(`The model server at ${this.#config.host} reported: ${reported}`);
+    if (failed.reported !== null) {
+      throw new Error(
+        `The model server at ${this.#config.host} reported: ${failed.reported}`,
+      );
     }
 
     return content;

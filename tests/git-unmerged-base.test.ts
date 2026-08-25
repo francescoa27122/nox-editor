@@ -68,7 +68,7 @@ async function activate(app: Mounted['app'], path: string) {
 }
 
 function text(container: HTMLElement): string {
-  return container.textContent!.replace(/\s+/g, ' ');
+  return container.textContent.replace(/\s+/g, ' ');
 }
 
 describe('the base of a file that is mid-merge', () => {
