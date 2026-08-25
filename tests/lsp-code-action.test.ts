@@ -42,23 +42,87 @@ describe('codeActionsOf', () => {
    * `workspace/executeCommand` and a server-request handler, neither of which
    * exists — so it comes back listed and not runnable, never dropped.
    */
-  it('keeps a bare Command, and marks it not runnable', () => {
+  /**
+   * A bare `Command` carries its identifier at the top level. Runnable as of
+   * 2026-08-25: Nox sends `workspace/executeCommand` and the server answers by
+   * calling `workspace/applyEdit` back.
+   */
+  it('reads a bare Command and offers to run it', () => {
     const [action] = codeActionsOf([
       { title: 'Organize imports', command: 'typescript.organizeImports' },
     ]);
 
     expect(action?.title).toBe('Organize imports');
-    expect(action?.runnable).toBe(false);
-    expect(action?.reason).toMatch(/command/i);
+    expect(action?.runnable).toBe(true);
+    expect(action?.command).toEqual({ command: 'typescript.organizeImports' });
+    expect(action?.plan).toBeUndefined();
   });
 
-  it('keeps a CodeAction whose only payload is a command', () => {
+  /** A `CodeAction` nests the same thing under `command`. */
+  it('reads a CodeAction whose only payload is a command', () => {
     const [action] = codeActionsOf([
-      { title: 'Extract function', kind: 'refactor.extract', command: { title: 'x', command: 'rust-analyzer.applySourceChange' } },
+      {
+        title: 'Extract function',
+        kind: 'refactor.extract',
+        command: { title: 'x', command: 'rust-analyzer.applySourceChange', arguments: [{ id: 3 }] },
+      },
+    ]);
+
+    expect(action?.runnable).toBe(true);
+    expect(action?.kind).toBe('refactor.extract');
+    expect(action?.command).toEqual({
+      command: 'rust-analyzer.applySourceChange',
+      arguments: [{ id: 3 }],
+    });
+  });
+
+  /**
+   * Both halves. The specification is explicit that the edit is applied first
+   * and the command run after, so both have to survive parsing.
+   */
+  it('keeps the edit and the command when an action carries both', () => {
+    const [action] = codeActionsOf([
+      { title: 'Fix all', edit: EDIT, command: { command: 'ts.fixAll', arguments: [1] } },
+    ]);
+
+    expect(action?.runnable).toBe(true);
+    expect(action?.plan?.files).toHaveLength(1);
+    expect(action?.command).toEqual({ command: 'ts.fixAll', arguments: [1] });
+  });
+
+  it('refuses an entry with neither an edit nor a command', () => {
+    const [action] = codeActionsOf([{ title: 'Nothing here' }]);
+
+    expect(action?.runnable).toBe(false);
+    expect(action?.reason).toMatch(/no edit and no command/i);
+  });
+
+  /**
+   * The rename rule, applied to the pair: an action whose edit half would
+   * rename a file is refused *entirely*, command included. Running half of it
+   * is the partial application that rule exists to prevent.
+   */
+  it('refuses a command whose edit half asks for a file operation', () => {
+    const [action] = codeActionsOf([
+      {
+        title: 'Move to new file',
+        edit: { documentChanges: [{ kind: 'rename', oldUri: 'file:///a', newUri: 'file:///b' }] },
+        command: { command: 'ts.move' },
+      },
     ]);
 
     expect(action?.runnable).toBe(false);
-    expect(action?.kind).toBe('refactor.extract');
+    expect(action?.command).toBeUndefined();
+  });
+
+  /** `edit: {}` beside a command means "the command does the work". */
+  it('runs a command whose edit is empty', () => {
+    const [action] = codeActionsOf([
+      { title: 'Organize', edit: {}, command: { command: 'ts.organize' } },
+    ]);
+
+    expect(action?.runnable).toBe(true);
+    expect(action?.command).toEqual({ command: 'ts.organize' });
   });
 
   /** The server's own 3.16 `disabled`, whose reason belongs to the user. */

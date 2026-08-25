@@ -53,6 +53,12 @@ handler is what advertises it. Claiming a capability with no handler is worse
 than not claiming it — the server stops looking for those settings anywhere
 else — and a handler with no capability is never asked.
 
+When a handler needs to touch the user's work — `workspace/applyEdit` is the
+one — take it as an `LspServiceOptions` callback rather than doing it in the
+service. The protocol belongs here; the **policy** does not. For that one the
+policy is `NoxApp.applyServerEdit`, and it is deliberately the same rule code
+actions use: reach decides, so one file lands and more than one stages.
+
 Put the reply's shape in a pure `core/lsp-*.ts` function and test it there;
 `core/lsp-configuration.ts` is the pattern. Where a reply is positional — one
 answer per requested item — **map, never filter**: a dropped entry shifts every

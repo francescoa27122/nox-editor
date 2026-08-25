@@ -17,9 +17,14 @@ import type { EditorView } from '@codemirror/view';
 import { languageById } from '@core/languages';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
 import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
-import { codeActionsOf, overlapping, type CodeAction } from '@core/lsp-code-action';
+import {
+  codeActionsOf,
+  overlapping,
+  type CodeAction,
+  type ServerCommand,
+} from '@core/lsp-code-action';
 import { prepareRenameSeed } from '@core/lsp-rename';
-import { workspaceEditPlan } from '@core/lsp-workspace-edit';
+import { workspaceEditPlan, type WorkspaceEditPlan } from '@core/lsp-workspace-edit';
 import { changesOf, textEditsOf } from '@core/lsp-text-edit';
 import { offsetAt, positionAt } from '@core/lsp-position';
 import { ANCHOR_WINDOW, resolveAnchor } from '@core/anchor';
@@ -254,8 +259,16 @@ export class NoxApp {
 
     this.agentConfig = new AgentConfigService(platform);
     this.serverRegistry = new ServerRegistry(platform);
-    this.lsp = LspService.spawnedBy(platform, this.workspace, this.serverRegistry, () =>
-      this.workspace.rootPath.get() ?? '',
+    this.lsp = LspService.spawnedBy(
+      platform,
+      this.workspace,
+      this.serverRegistry,
+      () => this.workspace.rootPath.get() ?? '',
+      // The policy half of `workspace/applyEdit`. Here rather than in the
+      // service because deciding whether a server may write to a file you have
+      // not opened is a decision about the user's work, and it has to match
+      // the one code actions already make.
+      (edit, serverName) => this.applyServerEdit(edit, serverName),
     );
     this.terminal = new TerminalService(
       platform,
@@ -4522,7 +4535,7 @@ export class NoxApp {
     const pending = this.#pendingCodeActions;
     this.#pendingCodeActions = null;
     const action = pending?.actions[index];
-    if (!pending || !action?.runnable || !action.plan) return;
+    if (!pending || !action?.runnable) return;
 
     if (this.workspace.revisionOf(pending.bufferId) !== pending.revision) {
       this.notifications.warn(
@@ -4532,25 +4545,127 @@ export class NoxApp {
       return;
     }
 
-    const files = action.plan.files;
+    // The edit half first, and only then the command. The specification is
+    // explicit about that order, and it matters: a command that expects its
+    // own action's edit to be in place will do the wrong thing otherwise.
+    if (action.plan) {
+      const applied = await this.#applyPlanByReach(action.plan, action.title, pending.bufferId);
+      // A failed edit stops the command. Running the second half of an action
+      // whose first half did not land is the partial application the reach
+      // rule exists to avoid.
+      if (!applied) return;
+    }
+
+    if (action.command) await this.#runServerCommand(action.command, action.title);
+  }
+
+  /**
+   * Ask the server to carry out a command it named.
+   *
+   * There is nothing to apply here: the server does the work and asks *back*
+   * with `workspace/applyEdit`, which arrives at `applyServerEdit` while this
+   * request is still in flight. That is why this says nothing on success —
+   * whatever the user should see has already happened by then.
+   */
+  async #runServerCommand(command: ServerCommand, title: string): Promise<void> {
+    const languageId = this.workspace.activeSnapshot()?.languageId;
+    if (!languageId) return;
+
+    if (this.lsp.capabilitiesFor(languageId)?.executeCommandProvider === undefined) {
+      this.notifications.warn(`${title} was not run`, 'The language server does not run commands.');
+      return;
+    }
+
+    try {
+      await this.lsp.requestFor(languageId, 'workspace/executeCommand', {
+        command: command.command,
+        ...(command.arguments ? { arguments: command.arguments } : {}),
+      });
+    } catch (error) {
+      // The server's own message: it is the only thing that knows why, and a
+      // command failing is usually specific ("no symbol at that position").
+      this.notifications.error(
+        `${title} failed`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  /**
+   * A `WorkspaceEdit` a server asked Nox to apply, on its own initiative.
+   *
+   * Same rule as a code action, deliberately: **reach decides, not trust.** The
+   * alternative would be a second policy for the same act — a server writing
+   * to a file — differing only in which message carried it, and two rules for
+   * one thing is how one of them ends up wrong.
+   *
+   * Returns what goes back on the wire as `applied`. Servers act on it: some
+   * report a failure to the user, some roll back their own state. So a refusal
+   * has to be an honest `false` rather than a swallowed exception.
+   */
+  async applyServerEdit(edit: unknown, serverName: string): Promise<boolean> {
+    const plan = workspaceEditPlan(edit);
+
+    if (plan.unsupported.length > 0) {
+      this.notifications.warn(
+        `${serverName} asked for a change Nox does not make`,
+        `It would ${[...new Set(plan.unsupported)].join(', ')} a file. Nothing was changed.`,
+      );
+      return false;
+    }
+
+    if (plan.files.length === 0) {
+      // Reported rather than passed over, and `false` rather than a charitable
+      // `true`. Nox cannot tell a deliberately empty edit from one it failed
+      // to read — both arrive as zero files — so it takes the reading that
+      // shows up: a server that meant nothing by it ignores the answer, and
+      // one whose edit was unreadable has at least said so to somebody.
+      this.notifications.warn(
+        `${serverName} asked for a change Nox could not read`,
+        'Nothing was changed.',
+      );
+      return false;
+    }
+
+    return this.#applyPlanByReach(plan, serverName, this.workspace.activeId.get());
+  }
+
+  /**
+   * Apply a plan, choosing between landing it and staging it by **how far it
+   * reaches**.
+   *
+   * One file lands directly: a change inside the file you are looking at is not
+   * a proposal, and putting it behind a diff would make Format Document's
+   * argument — "a format is not a proposal" — apply to it and be ignored.
+   * More than one file stages in review, because a change to files you have not
+   * opened is exactly what review is for, and it is the shape rename produces.
+   *
+   * Shared by the code-action path and by `workspace/applyEdit` so the two
+   * cannot drift apart. Returns whether anything was applied or staged.
+   */
+  async #applyPlanByReach(
+    plan: WorkspaceEditPlan,
+    description: string,
+    returnTo: BufferId | null,
+  ): Promise<boolean> {
     const edits: ChangeSetSpec['edits'] = [];
-    for (const file of files) {
+    for (const file of plan.files) {
       let filePath: string;
       try {
         filePath = uriToPath(file.uri);
       } catch {
-        this.notifications.warn(`${action.title} touches a file Nox cannot open`, `${file.uri} \u2014 nothing was changed.`);
-        return;
+        this.notifications.warn(`${description} touches a file Nox cannot open`, `${file.uri} \u2014 nothing was changed.`);
+        return false;
       }
       // Open before staging anything, so every buffer holds the text the
       // server saw — rename's reason, and the same all-or-nothing refusal.
       const bufferId = await this.workspace.open(filePath);
       if (!bufferId) {
-        this.notifications.warn(`${action.title} stopped`, `${basename(filePath)} could not be opened, so nothing was changed.`);
-        return;
+        this.notifications.warn(`${description} stopped`, `${basename(filePath)} could not be opened, so nothing was changed.`);
+        return false;
       }
       const bufferText = this.workspace.textOf(bufferId);
-      if (bufferText === undefined) return;
+      if (bufferText === undefined) return false;
       edits.push({ bufferId, changes: changesOf(bufferText, file.edits) });
     }
 
@@ -4558,21 +4673,25 @@ export class NoxApp {
       const only = edits[0]!;
       const applied = this.workspace.applyEdits(only.bufferId, only.changes as { from: number; to: number; insert: string }[]);
       if (!applied) {
-        this.notifications.warn(`${action.title} was not applied`, 'The server\u2019s edit does not fit the file any more.');
+        this.notifications.warn(`${description} was not applied`, 'The server\u2019s edit does not fit the file any more.');
       }
-      return;
+      return applied;
     }
 
-    // Opening activates, and the user asked from their own file: the review
-    // panel is what they look at next, and their file is what should be behind
-    // it.
-    this.workspace.setActive(pending.bufferId);
+    // Opening activates, and the user was looking at something else: the review
+    // panel is what they look at next, and their own file is what should be
+    // behind it.
+    if (returnTo) this.workspace.setActive(returnTo);
     const staged = this.review.stage({
-      description: action.title,
+      description,
       author: { kind: 'user' },
       edits,
     });
-    if (!staged) this.notifications.info('Nothing to change', 'That action would change nothing.');
+    if (!staged) {
+      this.notifications.info('Nothing to change', 'That action would change nothing.');
+      return false;
+    }
+    return true;
   }
 
   /**

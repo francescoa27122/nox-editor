@@ -22,6 +22,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reading was that it was broken. The status bar now shows what it is doing and
   how far in ("rust-analyzer — Indexing 3/840 20%"). Servers that report no
   progress, tsserver among them, are unchanged.
+- **Code actions that are server commands now run.** `Organize Imports`,
+  rust-analyzer's refactors and anything else a server carries out itself were
+  listed and disabled with the reason "Nox cannot run an action that is a server
+  command yet". Nox now sends `workspace/executeCommand` and applies the edit
+  the server asks for in reply, by the same rule code actions already used:
+  a change to the file at your caret lands directly, one that reaches further
+  stages in review.
 
 ## [0.9.1] — 2026-08-24
 
