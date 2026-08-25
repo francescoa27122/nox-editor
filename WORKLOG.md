@@ -8,6 +8,87 @@ are knowledge.**
 
 ---
 
+## 2026-08-25 (PC) — The layering rules stopped being a promise
+
+`CLAUDE.md` said "Nothing lints this — it holds by review." It *did* hold: a
+grep across all 41k lines of `src/` finds no violation of any of the four
+boundaries. Nothing would have said so on a day it stopped.
+
+Shipped **#131**: ESLint 10 + typescript-eslint + eslint-plugin-svelte as its
+own CI job, `cargo clippy --all-targets -- -D warnings` added to the existing
+`rust` job. `eslint.config.js`, `npm run lint`.
+
+**A linter, not a formatter, and that line is load-bearing.** Three plan
+documents under `docs/superpowers/plans/` already record the decision not to
+run prettier. `cargo fmt --check` is left out for the same reason — nothing has
+ever been rustfmt'd, so it means a 6,000-line reformat, which is its own
+change. Whitespace stays with review.
+
+**The four boundaries are the point**, as `no-restricted-imports` /
+`no-restricted-globals` carrying the CONTRIBUTING.md rule number in each
+message. Verified by planting a violation of each and confirming it reports —
+which is how the one hole in the first draft surfaced: **flat config
+*replaces* a rule's options rather than merging them**, so the
+`headless-services` block silently dropped the Tauri pattern across all of
+`services/` and `core/`. Three probes were caught; the fourth was not. Worth
+remembering the next time a rule is set in two blocks.
+
+**441 problems on the first run → 0 errors.** Three rules were wrong about this
+codebase and are off with the reason recorded: `require-await` (179 of the
+441, every one a `Platform` implementation answering synchronously through an
+async interface), `svelte/prefer-svelte-reactivity` (four collections built
+inside a `$derived.by` and discarded on the next recompute), and the
+`no-unsafe-*` family in **tests only**, where a fake is untyped at exactly the
+seam the rule watches.
+
+**The find that justified the commit.** In `ollama.ts`, `failure` and
+`reported` were assigned only inside callbacks. TypeScript's flow analysis
+does not follow that, so at the guards below it still believed both were
+`null` — narrowing the guarded bodies to `never` and **switching off type
+checking inside them entirely**. It compiled clean and `npm run check`
+reported nothing. Confirmed with a probe: a nonsense assignment type-checked
+there. Both now live on an object, whose properties are re-read rather than
+flow-narrowed. `tsc` cannot see this class of thing; the linter could.
+
+Smaller and also real: an ASI hazard in two panels (a newline before
+`[focused]`); five `svelte-ignore` comments silencing warnings the compiler
+does not raise — `svelte-check` still reports 0 warnings without them, which
+is the proof; `tests/search.test.ts` used `'const (\w+)'`, which is only ever
+`const (w+)`; `tests/watcher.test.ts` stringified a `ChangeSet` into an array
+it only measured; 48 assertions typescript-eslint proved redundant.
+
+**Clippy found two things in 6,194 lines**, which is the useful result rather
+than the failure. `http.rs`'s loopback test became `matches!`;
+`nox_pty_open`'s eight arguments are allowed with the reason — a
+`#[tauri::command]`'s parameter list *is* its IPC contract, and `app`/`state`
+never reach the wire. Then Windows failed alone and found a third: a
+`use std::time::{Duration, Instant}` in `pty.rs`'s tests that only a
+`#[cfg(unix)]` helper needs, dead on that platform since the file was written.
+`cargo test` had been printing that warning on every Windows run and passing.
+Exactly what the matrix comment says the three platforms are for.
+
+Verified: `npm run lint` 0 errors / 9 warnings • vitest unit **1986 passed,
+139 files** • stories **21 passed, 7 files** in chromium with axe •
+svelte-check **978 files, 0 errors** • `npm run build` and
+`npm run storybook:build` green • all **11** CI checks green on the PR and on
+`main` after merge.
+
+Next: **`lint` is not yet a required check.** The ten contexts on `main`
+predate it, and the API call to add it was refused by this machine's tool
+policy, so until someone runs
+
+```bash
+gh api --method POST repos/francescoa27122/nox-editor/branches/main/protection/required_status_checks/contexts -f 'contexts[]=lint'
+```
+
+a PR that fails lint can still be merged. Everything else about the job works.
+
+Blocked: nothing. `cargo` is still not installed here, so all three Rust
+findings were found and fixed through CI rather than locally — three rounds.
+
+Confidence: high on the TypeScript side, which ran here. High on the Rust
+side too, but on CI's word rather than mine.
+
 ## 2026-08-24 (PC) — 0.9.0's first-launch error was mine, and was not an error
 
 A bug report from the released build: *"ResizeObserver loop completed with
