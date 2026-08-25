@@ -29,6 +29,19 @@ remembered:
 
 ## 1. The packaged app cannot be verified, and the one record we have contradicts the source
 
+**CLOSED 2026-08-25.** Phase 0 and the harness closed 2026-08-23; what remained
+was this section's own fix — *"port the 17-item walk script into it, so the
+twelve UNSEEN rows become assertions rather than intentions."* Four of the
+twelve are now assertions: A4, C5 and C8 against the packaged app (the suite
+went from four specs to eight), and C1 in jsdom, because **the WebDriver
+harness cannot deliver a right-click** — two approaches, three engines, no
+`contextmenu` event on any of them. The other eight are triaged in
+`.desktop-pass-report.md`'s header note.
+
+That limit is the section's own thesis appearing again: phase 0 found that the
+*manual* instrument dropped inputs, and this found that the automated one drops
+a different input. Both are recorded rather than routed around.
+
 **Priority: highest.** This is the last named 1.0 gate — *"Nothing in the
 release notes says 'unverified'"* — and it is in the worst state of anything
 here.
@@ -310,6 +323,22 @@ every test that exists and would ship.**
 ---
 
 ## 5. Four installers ship; three have never been run by anyone
+
+**HALF CLOSED 2026-08-25 — the half that is mine.** *"Hardening the in-window
+menu bar now that it is load-bearing on two platforms"* is done:
+`e2e/specs/menu-bar.e2e.js` drives it on Windows and Linux, and the regression
+it guards is the real one — `7389643`, where `ContextMenu`'s click-away layer
+covered the bar's own titles and clicking a second menu dismissed instead of
+switching. The observable is the one that commit recorded, `aria-expanded`
+staying false on the second title, so the guard needs no geometry.
+
+**Still open and not mine:** the Apple and Windows certificates (stop-list 4).
+**Still open and mine, but blocked on those:** the install-and-update
+rehearsal. The update *logic* has tests — `update-service`, `update-platform`,
+`update-command` — but rehearsing a real 0.9.1 → 0.9.2 download needs two
+published releases with a reachable `latest.json`, and publishing a release is
+the operator's (stop-list 6). A draft release for a test build would not
+exercise the updater, which reads the published one.
 
 **Priority: medium — and the expensive half is not mine to buy.**
 
