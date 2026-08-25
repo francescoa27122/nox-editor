@@ -25,6 +25,12 @@ jobs:
   # means a 6,000-line reformat, which is its own change and not a thing to
   # smuggle in beside a lint config. Whitespace stays with review; the rules
   # that are here are the ones review cannot be relied on to hold forever.
+  #
+  # A required check on `main` as of 2026-08-25, alongside the other ten, so a
+  # change that crosses one of the four layering boundaries cannot land. With
+  # `enforce_admins` on there is no override, which is the argument for keeping
+  # the config's error tier to rules that are about the architecture rather
+  # than about taste — and for the two that stay at warning level.
   lint:
     name: lint
     runs-on: ubuntu-22.04
