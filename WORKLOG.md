@@ -8,6 +8,82 @@ are knowledge.**
 
 ---
 
+## 2026-08-25 (PC) — A keystroke has a number, and CI holds it flat
+
+**Production readiness §4 is closed.** Its last bullet was the typing path
+proper, and #140 measured it. The rule underneath is CONTRIBUTING.md's fifth —
+"nothing new on the typing path" — which had been enforced by review alone
+since v0.1.
+
+§4 said this was gated on §1's harness. The *dependency* was real; the harness
+it named was not the only candidate by the time it came due. #130 brought
+vitest browser mode and Playwright chromium, which is a far lighter tool for a
+measurement than driving the packaged app. A new `editor` project uses it.
+jsdom genuinely cannot: `tests/support/jsdom-layout.ts` already records that it
+measures everything as zero, and viewport calculation, line measurement and DOM
+reconciliation are most of what a keystroke costs.
+
+**0.34 ms in a 16,000-line document, and the same at 64,000:**
+
+```
+     500 lines (   28 K chars)  0.32 ms
+   2,000 lines (  116 K chars)  0.31 ms
+   8,000 lines (  472 K chars)  0.25 ms
+  16,000 lines (  966 K chars)  0.34 ms
+  64,000 lines ( 3.96 M chars)  0.26 ms
+```
+
+No trend over a 140x range. That is what viewport-bounded work looks like, and
+CI now asserts it as a ratio — budget 3x against thirty local samples that ran
+0.77x-1.42x.
+
+**Two things worth carrying forward, both from the draft being wrong.**
+
+*Chrome clamps `performance.now()` to 100 microseconds* unless the page is
+cross-origin isolated. A keystroke is well below that floor, so timing one
+returned exactly `0.100` or `0.000` every time and a ratio of two of those came
+out `Infinity` — **while the suite passed**, reporting a beautifully flat typing
+path it had never measured. The batch-and-calibrate fix is the same one
+`growth.ts` needed, for the same reason, three sessions earlier. Twice now the
+first version of a timing harness has measured below its own clock; assume the
+next one does too until a printed number says otherwise.
+
+*A document-wide scan does not produce an 8x ratio.* Planting the exact
+regression rule 5 forbids — a `ViewPlugin` decorating every line instead of
+`view.visibleRanges` — measures **4.13x**, because the scan is added to a fixed
+baseline both sizes pay. A *mild* document-wide scan is the hardest kind to
+catch, which is why the budget is 3x rather than the 4x that first looked
+generous.
+
+The absolute check stays alongside the ratio, loose at 8 ms, and the two catch
+different things: the planted scan *passes* the absolute one at 2.35 ms.
+
+Also: `unit` needed `exclude: ['tests/browser/**']` — its glob claimed the new
+files the moment they existed and took `npm test` from 140 to 141. They failed
+rather than misled, which is the good version of that accident.
+
+Verified: eslint 0 errors · vitest unit **1998 passed, 140 files** · editor 2
+passed (run eight times locally, green each) · stories 21 passed · svelte-check
+**984 files, 0 errors** · build green · 11/11 CI, and the step confirmed in the
+runner log as `editor (chromium)` rather than skipped.
+
+Scope, stated rather than implied: this is the editor half — CodeMirror plus
+Nox's extensions. The service half of a keystroke (`workspace.applyTransaction`,
+dirty tracking) is node-measurable and already has its number: `doc.eq` at the
+2 MB `EXACT_DIRTY_LIMIT` is 2.6 ms, in `workspace.ts`.
+
+Next: **§4 is done, so the next thing is §3** — the LSP seam with zero callers.
+`JsonRpcTransport.onRequest` exists and nothing calls it, and four features
+wait on it: `workspace/executeCommand` for server-command code actions,
+`workspace/applyEdit`, `workspace/configuration`, and work-done progress. One
+seam, four features.
+
+Blocked: nothing.
+
+Confidence: high on the number and on the guard, which was watched failing
+before it was trusted. Medium on 3x being the right budget on a runner busier
+than the one it was set on — it has one CI run behind it, not a record.
+
 ## 2026-08-25 (PC) — The corpus was the assumption, and it was wrong
 
 Closing the risk left open by #136. The answer changed the answer.
