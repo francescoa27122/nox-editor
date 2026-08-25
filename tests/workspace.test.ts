@@ -181,7 +181,7 @@ describe('tabs', () => {
     const { workspace } = setup();
     await workspace.open('/work/README.md');
     const second = workspace.newUntitled();
-    workspace.setActive((await workspace.open('/work/src/main.ts'))!);
+    workspace.setActive((await workspace.open('/work/src/main.ts')));
 
     const order = workspace.buffers.get().map((b) => b.name);
     expect(order[1]).toBe(second ? workspace.buffers.get()[1]!.name : '');

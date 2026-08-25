@@ -189,7 +189,6 @@
   });
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <!--
   The keydown lives on the menubar rather than each button because arrow keys
   move *between* buttons: the WAI-ARIA menubar pattern makes the bar one tab

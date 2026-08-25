@@ -463,9 +463,9 @@ function fakePlatform(replies: string[], before?: (turn: number) => void) {
 async function drain(provider: OllamaProvider, instruction = 'do a thing') {
   const chunks = [];
   const stream = provider.complete({ instruction, context: '' });
-  let response: never | undefined = undefined;
+  const response: undefined = undefined;
   for (;;) {
-    const step = await stream.next(response as never);
+    const step = await stream.next(response);
     if (step.done) break;
     chunks.push(step.value);
   }
@@ -710,7 +710,7 @@ describe('the provider', () => {
     const stream = provider.complete({ instruction: 'x', context: '', signal: controller.signal });
     await stream.next();
     controller.abort();
-    const after = await stream.next(undefined as never);
+    const after = await stream.next(undefined);
 
     expect(after.done).toBe(true);
   });

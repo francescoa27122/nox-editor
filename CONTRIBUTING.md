@@ -16,7 +16,12 @@ Before pushing:
 ```bash
 npm test
 npm run check
+npm run lint
 ```
+
+`npm run lint` is a linter and not a formatter: it has no opinion about
+whitespace or quote style, and it is what enforces rules 1 and 2 below rather
+than leaving them to a reviewer. Warnings are advisory; errors block CI.
 
 ---
 

@@ -78,7 +78,7 @@ describe('the git panel, read-only', () => {
   it('opens the file on row click', async () => {
     const { container, app } = await setup();
     const row = [...container.querySelectorAll('.section.changes .row .open')].find((r) =>
-      r.textContent!.includes('edited.ts'),
+      r.textContent.includes('edited.ts'),
     ) as HTMLElement;
     row.click();
     await settle();
@@ -88,7 +88,7 @@ describe('the git panel, read-only', () => {
   it('the view affordance opens the file and the diff surface', async () => {
     const { container, app } = await setup();
     const view = [...container.querySelectorAll('.section.changes .row')]
-      .find((r) => r.textContent!.includes('edited.ts'))!
+      .find((r) => r.textContent.includes('edited.ts'))!
       .querySelector('[title="Show Changes"]') as HTMLElement;
     view.click();
     await settle();
@@ -115,7 +115,7 @@ describe('stage and unstage', () => {
     expect(app.git.hunks.get().has(id)).toBe(true);
 
     const stage = [...container.querySelectorAll('.section.changes .row')]
-      .find((r) => r.textContent!.includes('edited.ts'))!
+      .find((r) => r.textContent.includes('edited.ts'))!
       .querySelector('[title="Stage"]') as HTMLElement;
     stage.click();
     await settle();
@@ -149,7 +149,7 @@ describe('stage and unstage', () => {
       throw new Error("fatal: pathspec 'edited.ts' did not match any files");
     };
     const stage = [...container.querySelectorAll('.section.changes .row')]
-      .find((r) => r.textContent!.includes('edited.ts'))!
+      .find((r) => r.textContent.includes('edited.ts'))!
       .querySelector('[title="Stage"]') as HTMLElement;
     stage.click();
     await settle();
@@ -510,7 +510,7 @@ describe('joining status paths onto the repository', () => {
     await settle();
 
     const row = [...container.querySelectorAll('.section.changes .row')].find(
-      (r) => (r.querySelector('.open') as HTMLElement | null)?.textContent?.trim() === 'a.txt',
+      (r) => (r.querySelector('.open'))?.textContent?.trim() === 'a.txt',
     )!;
     (row.querySelector('[title="Stage"]') as HTMLElement).click();
     await settle();
@@ -530,7 +530,7 @@ describe('joining status paths onto the repository', () => {
     flush();
 
     const row = [...container.querySelectorAll('.section.changes .row')].find((r) =>
-      r.textContent!.includes('edited.ts'),
+      r.textContent.includes('edited.ts'),
     )!;
     const openEl = row.querySelector('.open') as HTMLElement;
     // Rows still render — this is a refusal, not a crash.
@@ -615,7 +615,7 @@ describe('a row that names a directory rather than a file', () => {
     expect(raw.unstaged.map((e) => e.path)).not.toContain('fresh/m.txt');
 
     const row = [...container.querySelectorAll('.section.changes .row')].find((r) =>
-      r.textContent!.includes('fresh/'),
+      r.textContent.includes('fresh/'),
     )!;
     return { app, platform, container, row };
   }
@@ -688,7 +688,7 @@ describe('a deleted row', () => {
     await settle();
 
     const row = [...container.querySelectorAll('.section.changes .row')].find((r) =>
-      r.textContent!.includes('gone.ts'),
+      r.textContent.includes('gone.ts'),
     )!;
     const openEl = row.querySelector('.open') as HTMLElement;
     expect(openEl.tagName).toBe('SPAN');

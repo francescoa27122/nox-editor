@@ -32,7 +32,7 @@ export interface MenuPlacement {
 export function placeMenu(box: MenuBox): MenuPlacement {
   const margin = box.margin ?? 8;
   let x = box.anchorX;
-  let y = box.anchorY;
+  const y = box.anchorY;
 
   // Horizontal: flip to the anchor's other side, then keep it on screen. A
   // menu wider than the viewport is pinned at the margin rather than centred,

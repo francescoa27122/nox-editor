@@ -29,7 +29,7 @@ async function settle() {
   flush();
 }
 
-const text = () => mounted!.container.textContent!.replace(/\s+/g, ' ');
+const text = () => mounted!.container.textContent.replace(/\s+/g, ' ');
 
 describe('the search panel shell', () => {
   it('names itself, like every other panel', () => {

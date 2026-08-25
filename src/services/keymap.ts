@@ -182,7 +182,7 @@ function keyTokenFromEvent(event: KeyboardEvent): string {
     Period: '.',
     Slash: '/',
   };
-  if (named[code]) return named[code]!;
+  if (named[code]) return named[code];
   if (/^F\d{1,2}$/.test(code)) return code.toLowerCase();
 
   return (event.key || '').toLowerCase();

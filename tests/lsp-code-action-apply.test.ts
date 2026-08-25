@@ -38,7 +38,7 @@ async function appWith(
     asked.push({ method, params: params as Record<string, unknown> });
     return respond(method, params);
   }) as typeof app.lsp.requestFor;
-  app.lsp.capabilitiesFor = (() => ({ codeActionProvider: true })) as typeof app.lsp.capabilitiesFor;
+  app.lsp.capabilitiesFor = (() => ({ codeActionProvider: true }));
 
   return { app, asked, platform };
 }
@@ -260,7 +260,7 @@ describe('choosing an action', () => {
 describe('the command itself', () => {
   it('is disabled when the server offers no code actions', async () => {
     const { app } = await appWith(() => []);
-    app.lsp.capabilitiesFor = (() => ({})) as typeof app.lsp.capabilitiesFor;
+    app.lsp.capabilitiesFor = (() => ({}));
 
     expect(app.commands.isEnabled('lsp.codeAction')).toBe(false);
   });

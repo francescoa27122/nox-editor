@@ -151,7 +151,7 @@ describe('true counts', () => {
     setQuery(mounted.container, '>zebrastripe');
 
     const shown = mounted.container.querySelectorAll('.row').length;
-    const count = mounted.container.querySelector('.result-count')!.textContent!.trim();
+    const count = mounted.container.querySelector('.result-count')!.textContent.trim();
     expect(count).toBe(String(shown));
     expect(count).not.toContain('first');
   });
@@ -166,7 +166,7 @@ describe('true counts', () => {
     flush();
 
     expect(mounted.container.querySelectorAll('.row').length).toBe(200);
-    const count = mounted.container.querySelector('.result-count')!.textContent!.trim();
+    const count = mounted.container.querySelector('.result-count')!.textContent.trim();
     const parsed = /^first 200 of (\d+)$/.exec(count);
     expect(parsed, count).not.toBeNull();
     // The real total: the 210 bulk commands plus whatever the app registers.

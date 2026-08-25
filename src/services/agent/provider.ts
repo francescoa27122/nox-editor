@@ -88,7 +88,7 @@ export class ScriptedProvider implements ModelProvider {
     // A plain array is the common case for a fixed script and cannot make use
     // of the responses; a generator gets them fed back one at a time.
     if (Symbol.asyncIterator in source) {
-      const stream = source as ModelStream;
+      const stream = source;
       let response: CoreResponse | undefined;
       while (true) {
         const step = await stream.next(response);
@@ -97,7 +97,7 @@ export class ScriptedProvider implements ModelProvider {
       }
     }
 
-    for (const chunk of source as Iterable<ModelChunk>) {
+    for (const chunk of source) {
       if (request.signal?.aborted) return;
       yield chunk;
     }

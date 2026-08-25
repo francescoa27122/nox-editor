@@ -274,7 +274,7 @@ describe('enforcement in the dispatcher', () => {
       capabilities: ['fs.write'],
       resourceFrom: (arg) => (typeof arg === 'string' ? arg : undefined),
       run: (arg) => {
-        saved.push(String(arg ?? 'active'));
+        saved.push(typeof arg === 'string' ? arg : 'active');
       },
     };
     const move: Command = {

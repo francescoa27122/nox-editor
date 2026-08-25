@@ -1,4 +1,3 @@
-import type { TransactionSpec } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import { SessionService } from '../src/services/session';
@@ -627,7 +626,7 @@ describe('one file in two groups', () => {
         (target, spec) => {
           if (target !== id) return false;
           reached.push(name);
-          const transaction = state.update(spec as TransactionSpec);
+          const transaction = state.update(spec);
           state = transaction.state;
           if (transaction.annotation(mirroredAnnotation)) return true;
           workspace.applyTransaction(target, transaction, self);
@@ -670,7 +669,7 @@ describe('one file in two groups', () => {
 
     workspace.addViewDispatcher((target, spec) => {
       if (target !== id) return false;
-      paneB.state = paneB.state.update(spec as Parameters<typeof paneB.state.update>[0]).state;
+      paneB.state = paneB.state.update(spec).state;
       return true;
     }, { owner: paneB });
 

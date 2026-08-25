@@ -15,6 +15,10 @@ const silent = () => new ProviderTransport(new ScriptedProvider(() => []));
 /** A provider that never finishes, so the session stays running until cancelled. */
 const hangs = () =>
   new ProviderTransport(
+    // Yielding nothing is the point: this generator exists to leave the
+    // session running so a test can cancel it. A `yield` would end the hang
+    // it is written to produce.
+    // eslint-disable-next-line require-yield
     new ScriptedProvider(async function* () {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
     }),

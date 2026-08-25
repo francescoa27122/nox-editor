@@ -1,4 +1,4 @@
-import { EditorState, type TransactionSpec } from '@codemirror/state';
+import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { NoxApp } from '../src/app';
 import { MemoryPlatform } from '../src/platform/memory';
@@ -42,7 +42,7 @@ class FakePane {
     return this.#workspace.addViewDispatcher(
       (target, spec) => {
         if (target !== this.#showing) return false;
-        const transaction = this.state.update(spec as TransactionSpec);
+        const transaction = this.state.update(spec);
         this.state = transaction.state;
         // The pane's own guard: a change forwarded from the other pane has
         // already been recorded by the workspace.
