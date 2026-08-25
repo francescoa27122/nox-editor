@@ -8,6 +8,86 @@ are knowledge.**
 
 ---
 
+## 2026-08-25 (PC) — Quick-open is back inside the frame
+
+The benchmark from #134 found it and #136 fixed it: a 16,000-path index cost
+more than a 16 ms frame per keystroke, so on a project that size quick-open
+*was* the frame.
+
+**Most of it was not the matcher.** `fileRows` rebuilt the derived half of the
+index on every keystroke — `relative`, `basename`, `dirname` over all 16,000
+paths, and `basename` *twice* per path — over inputs that had not changed since
+the last one. **6.6 ms**, and it was paid even by a query that matched nothing.
+Now memoised on the index array's identity, which `FileTreeService` replaces
+when it rebuilds, so a stale entry cannot outlive the paths it describes.
+
+The matcher itself gave up three `Float64Array` allocations per candidate
+(scratch buffers that only grow) and its one-character string indexing
+(`charCodeAt`, plus a 128-entry separator table in place of a `Set<string>`).
+The pattern is prepared once behind a one-entry memo, and the filename half is
+matched from an offset rather than against `path.slice(nameStart)` — another
+allocation per candidate, 3.0 ms per keystroke.
+
+Same benchmark either side, entries pre-derived on both so it is the matcher
+being compared:
+
+```
+one character    14.55 ms -> 3.4 ms    (max 16.8 -> 4.9)
+nine characters  23.95 ms -> 11.4 ms   (max 26.7 -> 14.4)
+no matches        2.52 ms -> 1.7 ms
+```
+
+End to end, including the memoised derivation: **17.7 / 21.8 / 26.6 ms** for
+one / four / nine characters became **5.8 / 7.6 / 11.2**.
+
+**Two things worth keeping from how this went.**
+
+*The benchmark had the wrong shape and overstated nothing — it understated.*
+#134 measured `fuzzyFilter` over raw paths and reported 15.3 ms. Quick-open
+does not call that: it calls `fuzzyMatchPath`, which is *two* `fuzzyMatch`
+calls, over display paths it derives itself, stopping at 4,000 survivors. The
+real figure was 26.6 ms. A proxy is a guess until you have checked it against
+the call site.
+
+*One change was reverted for failing to pay.* Deferring highlight positions to
+the hundred rows that render should have cut the allocation the p99 was made
+of. Measured 14.51 -> 14.81 ms, which is noise: the nine-character case is
+DP-bound, not allocation-bound. The exported function and the two-phase
+`fileRows` came back out.
+
+The state this introduced — a shared buffer and a memo — fails by producing
+results that depend on call *order*, which is the worst shape a bug can have:
+every test passes alone and the palette ranks wrongly only after you typed
+something else first. Five tests for exactly that, mutation-checked (keying the
+memo on the lowercased pattern fails the case test; skipping the row reset
+fails three others). Plus a differential run against the old implementation
+over 54,000 pattern/path pairs, and the real palette driven in the browser —
+`dcnotes` still finds `docs/notes.md`, and highlights land on the typed
+characters even where the offset is large.
+
+**The e2e suite produced its first flake**, on Windows, on a renderer-only
+change: the embedded WebDriver server never answered on port 4445 inside 60s,
+so `onPrepare` failed and no spec ran. Green on re-run. `ci.yml`'s "36 job
+runs, zero flaky failures" is corrected in place rather than left standing —
+`enforce_admins` rests on that record, so the honest version of it matters.
+
+Verified: eslint 0 errors · vitest unit **1997 passed, 140 files** · stories 21
+passed · svelte-check **982 files, 0 errors** · build green · all 11 CI checks
+green after the re-run.
+
+Next: **the typing path proper** — still §4's remaining bullet, still gated on
+the e2e harness, because measuring a keystroke in the editor needs a real
+`EditorView`. Everything measured so far is a pure layer or a component's
+arithmetic.
+
+Blocked: nothing.
+
+Confidence: high on the numbers, which were taken with one harness either side
+of the change. Medium on "16,000 paths with a 20% match rate" being the right
+worst case — `projectPaths` builds names from a sixteen-word vocabulary, which
+is denser in matches than a real repository, so the nine-character figure is
+pessimistic by an unknown amount.
+
 ## 2026-08-25 (PC) — The first word now has a number under it
 
 CLAUDE.md line 3 has always opened "A fast, dark, keyboard-first text editor".
