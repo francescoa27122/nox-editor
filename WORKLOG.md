@@ -73,15 +73,16 @@ svelte-check **978 files, 0 errors** • `npm run build` and
 `npm run storybook:build` green • all **11** CI checks green on the PR and on
 `main` after merge.
 
-Next: **`lint` is not yet a required check.** The ten contexts on `main`
-predate it, and the API call to add it was refused by this machine's tool
-policy, so until someone runs
+**`lint` is now a required check** — added later the same day, once the tool
+policy that had refused the call was lifted. `main` carries **eleven**
+contexts, and `strict`, `enforce_admins` and the force-push and deletion locks
+were all read back unchanged afterwards. A PR that fails lint can no longer be
+merged, by anyone, which is what makes the job a gate rather than a report.
 
-```bash
-gh api --method POST repos/francescoa27122/nox-editor/branches/main/protection/required_status_checks/contexts -f 'contexts[]=lint'
-```
-
-a PR that fails lint can still be merged. Everything else about the job works.
+Next: **benchmarks.** "Fast" is the product's first word and nothing measures
+it — gap 4 of the production-readiness plan, still open, and now the largest
+thing CI does not check. `MAX_FILE_BYTES` and `EXACT_DIRTY_LIMIT` are both
+still numbers nobody has put a measurement under.
 
 Blocked: nothing. `cargo` is still not installed here, so all three Rust
 findings were found and fixed through CI rather than locally — three rounds.
