@@ -77,8 +77,13 @@ export interface ParsedTurn {
  * cubic. 8KB of trailing whitespace with no closing fence took over three
  * minutes; this is a bounded, single pass over the string with `indexOf` and
  * `lastIndexOf` instead.
+ *
+ * Exported for `tests/complexity.test.ts`. The bound above is the whole point
+ * of this function and it is invisible in its output — every input produces
+ * the same string either way — so the only thing that can hold it is a test
+ * that measures how the cost grows.
  */
-function unfence(content: string): string {
+export function unfence(content: string): string {
   const trimmed = content.trim();
   if (!trimmed.startsWith('```')) return content;
 
@@ -98,7 +103,7 @@ function unfence(content: string): string {
 }
 
 /** A balanced-brace span: `[start, end)`, `start` on `{` and `end` past `}`. */
-interface Candidate {
+export interface Candidate {
   start: number;
   end: number;
 }
@@ -150,8 +155,12 @@ interface Candidate {
  * Nested spans are reported alongside their enclosing one, so a later step
  * can promote an inner object when an outer one is valid JSON but
  * semantically wrong (`{"tool_call": {...}}`, or the `command.execute` test).
+ *
+ * Exported for `tests/complexity.test.ts`, for the reason above `unfence`:
+ * the linearity argued for at length here is not observable in the return
+ * value, so a guard on it has to be able to call this directly.
  */
-function objectSpans(content: string): Candidate[] {
+export function objectSpans(content: string): Candidate[] {
   /** Matched opens, keyed by start. A `{` that never closes is simply absent. */
   const endOf = new Map<number, number>();
   /** Open braces per interpretation: index 0 for even quote parity, 1 for odd. */

@@ -118,7 +118,7 @@ export default tseslint.config(
   // payoff there is small — `npm run check` already type-checks components
   // through svelte-check, which is the tool that actually understands runes.
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.ts', 'tests/**/*.ts', 'bench/**/*.ts'],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
