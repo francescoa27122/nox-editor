@@ -94,6 +94,10 @@
      not have stopped any of the 44. */
   --nox-text-faint: #626d80;
   --nox-text-on-accent: #04161a;
+  /* The label on a filled danger button. Measured 5.86:1 on --nox-danger
+     and 8.21:1 on --nox-danger-bright, so the hover state is the safe
+     half of the pair and the resting fill is what has to clear 1.4.3. */
+  --nox-text-on-danger: #2a070a;
 
   /* --- Accents ---------------------------------------------------------- */
   --nox-accent: #7dd3e0; /* glacial cyan — moonlight on water */
@@ -106,6 +110,10 @@
   --nox-success: #7bd88f;
   --nox-warning: #e3b341;
   --nox-danger: #f0616d;
+  /* Danger's hover fill, and lifted rather than mixed: #f0616d toward
+     white desaturates to pink, so this saturates instead and cannot be
+     written as a color-mix of the token above. */
+  --nox-danger-bright: #ff8a93;
   --nox-info: #6aa9e8;
   --nox-modified: #e3b341; /* dirty-buffer dot */
 

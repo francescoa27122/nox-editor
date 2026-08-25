@@ -177,7 +177,7 @@
   }
 
   .button.danger:not(.primary):hover {
-    background: rgba(240, 97, 109, 0.1);
+    background: color-mix(in srgb, var(--nox-danger) 10%, transparent);
     border-color: var(--nox-danger);
   }
 
@@ -187,11 +187,11 @@
   .button.primary.danger {
     background: var(--nox-danger);
     border-color: var(--nox-danger);
-    color: #2a070a;
+    color: var(--nox-text-on-danger);
   }
 
   .button.primary.danger:hover {
-    background: #ff8a93;
-    border-color: #ff8a93;
+    background: var(--nox-danger-bright);
+    border-color: var(--nox-danger-bright);
   }
 </style>

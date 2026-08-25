@@ -241,7 +241,7 @@
   }
 
   .item.danger.active:not(:disabled) {
-    background: rgba(240, 97, 109, 0.14);
+    background: color-mix(in srgb, var(--nox-danger) 14%, transparent);
   }
 
   .item:disabled {

@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
+import { playwright } from '@vitest/browser-playwright';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 
@@ -55,7 +57,33 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    // Two projects because they need opposite environments and only one of
+    // them is allowed to be slow. `unit` is the suite that has always run
+    // here: node, no DOM unless a file asks for jsdom, and it stays the thing
+    // `npm test` means. `stories` needs a real browser, so it is a separate
+    // project a separate script selects.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          environment: 'node',
+          include: ['tests/**/*.test.ts'],
+        },
+      },
+      {
+        extends: true,
+        plugins: [storybookTest({ configDir: r('./.storybook') })],
+        test: {
+          name: 'stories',
+          browser: {
+            enabled: true,
+            headless: true,
+            provider: playwright(),
+            instances: [{ browser: 'chromium' }],
+          },
+        },
+      },
+    ],
   },
 });

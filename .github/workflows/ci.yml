@@ -84,6 +84,46 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Stories compile through the svelte-csf plugin, which nothing else in
+      # this pipeline runs, so a story can break in a way the rest of CI calls
+      # clean: duplicating a story name reports 0 errors from `npm run check`
+      # and fails this step with DuplicateStoryIdentifiersError. Storybook is
+      # where a component's states get looked at, and a preview that will not
+      # build is one nobody looks at until they next need it.
+      #
+      # One leg because compiling stories is the same work on every platform
+      # and both Node versions, and it is the whole job on the matrix that has
+      # no reason to differ. Measured at 4s locally for the seven story files.
+      - name: Build Storybook
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        run: npm run storybook:build
+
+      # Deliberately without `--with-deps`, which shells out to apt — the same
+      # apt the rust job's cache comment documents degrading a 9s fetch into
+      # 22 minutes on these runners. The ubuntu-22.04 image ships most of what
+      # chromium links against, so the bet is that the bare install is enough.
+      # If this step starts failing on a missing shared library, that bet lost
+      # and the fix is the runner image, not `--with-deps`.
+      - name: Cache Playwright browsers
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: playwright-
+
+      - name: Install Chromium
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        run: npx playwright install chromium
+
+      # Every story rendered in a real browser with axe over it. One leg for
+      # the same reason as the Storybook build, and emphatically not part of
+      # `npm test`: that suite is node-only on four legs, and giving it a
+      # browser dependency would put this download on all of them.
+      - name: Test stories
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        run: npm run test:stories
+
   rust:
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

@@ -485,7 +485,7 @@
   }
 
   .switch.on {
-    background: rgba(125, 211, 224, 0.18);
+    background: color-mix(in srgb, var(--nox-accent) 18%, transparent);
     border-color: var(--nox-accent-dim);
   }
 
