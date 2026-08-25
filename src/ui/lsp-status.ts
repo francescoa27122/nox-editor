@@ -1,3 +1,4 @@
+import { progressLabel } from '@core/lsp-progress';
 import type { SessionStatusRow } from '@services/lsp';
 
 /**
@@ -62,6 +63,16 @@ export function serverStatusLabel(
   // keeps the tooltip — which lists every server's real state — reachable.
   // The per-file item is where the absence is spelled out.
   if (relevant.length === 0) return countLabel(sessions);
+
+  // Above `starting`, and above a plain name, because it is the only state
+  // here that answers "is it doing anything?". rust-analyzer spends its first
+  // half-minute indexing, during which it is `running` and answers nothing —
+  // a status line reading just its name is true and reads as broken.
+  const working = relevant.find((session) => session.progress.length > 0);
+  if (working) {
+    const label = progressLabel(working.progress);
+    if (label !== null) return `${working.name} — ${label}`;
+  }
 
   const starting = relevant.find((session) => session.status === 'initializing');
   if (starting) return `${starting.name} — starting`;

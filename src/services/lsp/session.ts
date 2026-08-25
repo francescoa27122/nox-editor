@@ -306,7 +306,22 @@ export class LspSession {
   #clientCapabilities(): Record<string, unknown> {
     const workspace: Record<string, unknown> = {};
     if (this.#requestHandlers.has('workspace/configuration')) workspace.configuration = true;
-    return Object.keys(workspace).length > 0 ? { workspace } : {};
+
+    const window: Record<string, unknown> = {};
+    // Gated on the `create` handler rather than on anything about `$/progress`
+    // itself, and that is the right gate: server-initiated progress *starts*
+    // with the server asking to reserve a token, so a client that cannot
+    // answer that request never sees a notification either. Advertising it
+    // without the handler is the worst case — rust-analyzer asks, is refused,
+    // and reports nothing.
+    if (this.#requestHandlers.has('window/workDoneProgress/create')) {
+      window.workDoneProgress = true;
+    }
+
+    return {
+      ...(Object.keys(workspace).length > 0 ? { workspace } : {}),
+      ...(Object.keys(window).length > 0 ? { window } : {}),
+    };
   }
 
   #flush(): void {

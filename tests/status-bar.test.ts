@@ -131,6 +131,7 @@ describe('the status bar', () => {
         languages: ['typescript', 'javascript'],
         error: null,
         stderr: [],
+        progress: [],
       },
     ]);
     flush();
@@ -160,6 +161,7 @@ describe('the status bar', () => {
         languages: ['typescript', 'javascript'],
         error: null,
         stderr: [],
+        progress: [],
       },
     ]);
     flush();
