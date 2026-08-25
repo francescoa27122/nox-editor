@@ -6,6 +6,17 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Language servers can now read the settings you write for them.** A
+  `servers.json` entry takes a `settings` object, and a server that asks
+  `workspace/configuration` gets it — pyright reads `python.analysis.*`, gopls
+  reads `gopls.*`, rust-analyzer reads `rust-analyzer.*`. All three ask as they
+  start, and until now all three silently fell back to their own defaults with
+  nothing anywhere saying so. Distinct from `initializationOptions`, which is
+  sent once before the server can do anything; this is asked for, whenever the
+  server likes. A server with no `settings` block behaves exactly as before.
+
 ## [0.9.1] — 2026-08-24
 
 ### Fixed
