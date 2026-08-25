@@ -122,3 +122,90 @@ describe('segmentMatch', () => {
     expect(segments.map((s) => s.text).join('')).toBe('scheduler');
   });
 });
+
+/**
+ * The matcher keeps two pieces of state between calls now — the scratch
+ * buffers the DP runs in, and a one-entry memo of the last prepared pattern.
+ * Both are invisible when they work and produce results that depend on call
+ * *order* when they do not, which is the worst shape a bug can have: every
+ * test passes alone and the palette ranks wrongly only after you have typed
+ * something else first.
+ *
+ * These are the tests that would catch that. Each one runs a case in isolation
+ * and then again after something designed to poison the shared state.
+ */
+describe('the matcher carries no state between calls', () => {
+  /** The same call, made after `poison()` has run. */
+  const after = (poison: () => void, run: () => unknown) => {
+    const alone = JSON.stringify(run());
+    poison();
+    return { alone, polluted: JSON.stringify(run()) };
+  };
+
+  it('is unaffected by a longer candidate scored first', () => {
+    // The scratch buffers only grow, so a long candidate leaves a big array
+    // with stale scores in it. Filling past `n` would make the short one read
+    // the tail of the long one's row.
+    const { alone, polluted } = after(
+      () => void fuzzyMatch('src', 'src/'.repeat(200) + 'deeply/nested/file.ts'),
+      () => fuzzyMatch('src', 'src/main.ts'),
+    );
+    expect(polluted).toBe(alone);
+  });
+
+  it('is unaffected by a different pattern scored first', () => {
+    const { alone, polluted } = after(
+      () => void fuzzyMatch('zzz', 'zzz'),
+      () => fuzzyMatch('src', 'src/main.ts'),
+    );
+    expect(polluted).toBe(alone);
+  });
+
+  /**
+   * The memo is keyed on the raw pattern, and it has to be: `BONUS_CASE`
+   * rewards an exact-case hit, so `TS` and `ts` are different questions. A
+   * memo keyed on the lowercased pattern would answer the second with the
+   * first's prepared codes and silently drop the bonus.
+   */
+  it('does not confuse two patterns differing only in case', () => {
+    const upper = fuzzyMatch('TS', 'TSConfig')!;
+    const lower = fuzzyMatch('ts', 'TSConfig')!;
+    expect(upper.score).toBeGreaterThan(lower.score);
+
+    // And again in the other order, so neither is merely the one that ran first.
+    const lowerAgain = fuzzyMatch('ts', 'TSConfig')!;
+    const upperAgain = fuzzyMatch('TS', 'TSConfig')!;
+    expect(lowerAgain.score).toBe(lower.score);
+    expect(upperAgain.score).toBe(upper.score);
+  });
+
+  it('gives fuzzyMatchPath the same answer whatever ran before it', () => {
+    const path = 'src/services/workspace.ts';
+    const nameStart = path.length - 'workspace.ts'.length;
+    const { alone, polluted } = after(
+      () => {
+        fuzzyMatch('other', 'a/completely/different/candidate/entirely.ts');
+        fuzzyFilter('zz', ['zzz', 'zz'], (s) => s);
+      },
+      () => fuzzyMatchPath('wsp', path, nameStart),
+    );
+    expect(polluted).toBe(alone);
+  });
+
+  /**
+   * Interleaving two patterns across the same candidates is what the palette
+   * actually does as someone types and deletes. A one-entry memo makes every
+   * one of these a miss, which is correct but is the case most likely to be
+   * got wrong.
+   */
+  it('survives interleaved patterns over the same candidates', () => {
+    const items = ['src/core/path.ts', 'src/ui/Palette.svelte', 'README.md'];
+    const pathOnly = fuzzyFilter('path', items, (s) => s);
+    const uiOnly = fuzzyFilter('ui', items, (s) => s);
+
+    for (let i = 0; i < 3; i++) {
+      expect(fuzzyFilter('path', items, (s) => s)).toEqual(pathOnly);
+      expect(fuzzyFilter('ui', items, (s) => s)).toEqual(uiOnly);
+    }
+  });
+});
