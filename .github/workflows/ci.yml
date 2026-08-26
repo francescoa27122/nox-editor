@@ -34,6 +34,11 @@ jobs:
   lint:
     name: lint
     runs-on: ubuntu-22.04
+    # Same reasoning as the `rust` job below, which is where the unbounded
+    # hang actually happened. 10 against a 30-second run: nothing here should
+    # ever approach it, and an unbounded required check is the thing being
+    # removed rather than a duration being tuned.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -55,6 +60,12 @@ jobs:
   web:
     name: web (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
+    # 20 against a 2-3 minute run. Bounded for the `rust` job's reason and with
+    # a specific hazard of its own: this suite spawns real child processes and
+    # the matrix comment below says Windows is where that class of thing has
+    # broken before. A child that never exits would hold this open exactly the
+    # way `cargo test` did.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -149,6 +160,26 @@ jobs:
   rust:
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Bounded because it was not, and that cost eight hours. On 2026-08-25 the
+    # Windows leg of the 0.10.0 release commit passed Clippy and then wedged in
+    # `cargo test`, running until it was cancelled by hand the next morning.
+    # The job had no timeout, so nothing stopped it: a required check with
+    # `enforce_admins` on, held open indefinitely by a hung runner.
+    #
+    # 45 rather than something tighter, because the honest answer to "how long
+    # is a legitimate cold build here?" is that nobody knows. A warm run is
+    # 3-4 minutes; the only cold data point is the hang itself. The `e2e` job
+    # below budgets 60 for a cold Windows Rust cache *plus* a Tauri bundle, and
+    # this builds less than that, so 45 sits above any real build and two
+    # orders of magnitude below what actually happened. A false timeout on a
+    # required check is the expensive mistake, which is the argument for
+    # erring high rather than low.
+    #
+    # Worth knowing about the release specifically: a version bump rewrites
+    # `Cargo.lock`, which changes the `rust-cache` key, so **every release
+    # commit gets a cold cache here**. The slow run is expected; the unbounded
+    # one was not.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
