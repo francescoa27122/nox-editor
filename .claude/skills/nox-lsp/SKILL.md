@@ -34,6 +34,30 @@ Then put the response conversion in a pure `core/lsp-*.ts` function and test it 
 
 Check `capabilitiesFor(languageId)` before sending — capabilities are read from the server's `initialize` reply, never assumed.
 
+## Answering a request the server makes
+
+Use `LspSession.onRequest(method, handler)`, and register it **before**
+`start()`. Not for tidiness: a server may ask during the handshake —
+`workspace/configuration` is asked by pyright, gopls and rust-analyzer as they
+start, and one of them asks before `initialized` goes out. A handler wired
+after `start()` resolves arrives to find `JsonRpcTransport.#answer` has already
+replied `MethodNotFound`. That reply is correct and is why the gap is
+invisible: the server does not stall, it does without.
+
+Handlers are held on the session and replayed onto each new transport, so a
+restart keeps them.
+
+**Do not add the client capability by hand.** `session.ts#clientCapabilities`
+derives the `initialize` block from the registered handlers, so registering the
+handler is what advertises it. Claiming a capability with no handler is worse
+than not claiming it — the server stops looking for those settings anywhere
+else — and a handler with no capability is never asked.
+
+Put the reply's shape in a pure `core/lsp-*.ts` function and test it there;
+`core/lsp-configuration.ts` is the pattern. Where a reply is positional — one
+answer per requested item — **map, never filter**: a dropped entry shifts every
+later answer onto the wrong question.
+
 ## Document sync
 
 **Full-text sync, deliberately, even where the server offers incremental.** Incremental is an optimisation whose failure mode is silent: one off-by-one desynchronises the server's copy, and from then on every diagnostic lands on the wrong line while looking entirely plausible. Full sync cannot drift.
@@ -88,4 +112,6 @@ Entries with no `command` or no `languages` are dropped — an entry claiming no
 | A second version counter | Drifts from the buffer revision, invisibly |
 | Trusting a diagnostic range | Out-of-range throws in CodeMirror |
 | Subscribing to notifications after `start()` | Misses the first diagnostics batch |
+| Registering a request handler after `start()` | A handshake-time question is already refused |
+| Writing a client capability by hand | Drifts from the handler; a claim with no handler degrades the server |
 | Framing/`Content-Length` in TS | Byte vs UTF-16 mismatch on the first non-ASCII character |

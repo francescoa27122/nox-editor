@@ -1856,6 +1856,53 @@ tests were *not* shaped to see:
   the first pane instead. `TabBar` knew its `groupId` all along. `Close All
   Files` had the same root: it iterated the deduplicated `buffers` list, so a
   mirrored file was closed once and survived in the other pane.
+### Registering the handler is what advertises the capability
+
+`JsonRpcTransport.onRequest` was written with the client and had **no caller in
+`src/` for four months**. Every question a server asked was answered
+`MethodNotFound` — which is the correct answer, and is exactly why nobody
+noticed. A server told "I do not know that method" does not stall; it does
+without. pyright, gopls and rust-analyzer all ask `workspace/configuration` as
+they start, and all three silently used their own defaults instead of the
+user's settings.
+
+The seam now lives on `LspSession` rather than the transport, for the reason
+`onNotification` already did and one more. `onNotification`'s reason is that
+diagnostics arrive unasked and a subscriber that waited for the handshake would
+miss the first batch. The stronger reason here is that **a server may ask
+during the handshake** — one of the three asks before `initialized` goes out —
+so a handler registered after `start()` returns arrives to find the question
+already refused.
+
+The part worth arguing for is smaller and less obvious. `initialize` carries
+the client's capabilities, and the block has always been written by hand under
+a comment saying *"Nox advertises what it implements and nothing else."* That
+comment is a rule a person has to remember, and it can fail in both directions:
+a capability claimed with no handler is **worse than not claiming it**, because
+the server stops looking for those settings anywhere else; a handler with no
+capability is never asked at all.
+
+So the capability is *derived* from the handler map at `start()`, not written
+beside it. `workspace.configuration` appears in `initialize` if and only if
+something registered a `workspace/configuration` handler. The rule stops being
+a comment and becomes the code. `tests/lsp-session.test.ts` pins both halves,
+and the mutation that advertises unconditionally fails it.
+
+**`settings` is a separate field from `initializationOptions`, and the
+distinction is not cosmetic.** The latter is pushed once, unasked, before the
+server can do anything, and is where a server wants what it needs to start. The
+former is *pulled*, whenever the server likes and as often as it likes, and is
+where the user's ordinary options live. Servers that want both want different
+things in each, so folding them together would make one of the two wrong.
+Neither is validated: what counts as a valid setting is the server's question,
+and a client that rejected what it did not recognise would break every server
+the moment one added an option.
+
+The reply is a `map` over the requested items and never a `filter`, because a
+server reads `result[i]` as the answer to `items[i]`. Dropping an unknown
+section shifts every later answer onto the wrong question — a bug that
+presents as the user having misconfigured a setting they never touched.
+
 ### A code action lands where it reaches, not where it is classified
 
 The eighth `textDocument/*` feature, and the one the others were leading to:
@@ -1881,9 +1928,11 @@ exactly what review is for, and it is the shape rename already produces.
 **The half Nox cannot run is shown, not hidden.** An action may carry a
 `Command` instead of an edit; running one means `workspace/executeCommand`,
 and the server answers by calling `workspace/applyEdit` *back* — which needs
-the server-request handler (`JsonRpcTransport.onRequest`, still zero callers)
-and a decision about whether a server-named command may write to buffers
-unprompted. Neither gets answered in passing. So those actions are listed and
+a `workspace/applyEdit` handler on the server-request seam and a decision about
+whether a server-named command may write to buffers unprompted. The seam is no
+longer the blocker: `LspSession.onRequest` landed 2026-08-25 with
+`workspace/configuration` as its first caller, so what remains here is the
+handler and the decision. Neither gets answered in passing. So those actions are listed and
 disabled with the reason: a picker that hid them would say the server offered
 nothing where it offered something unbuilt, and the user would conclude their
 language server was broken rather than that Nox has not built that half.
@@ -2191,7 +2240,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
 | Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default — so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
-| A code action that is a server command cannot be run | Listed and disabled with the reason, never hidden. Running one needs `workspace/executeCommand` plus a handler for the `workspace/applyEdit` the server sends back — `JsonRpcTransport.onRequest` exists with zero callers — and a decision about whether a server-named command may write to buffers unprompted. That handler is also what `workspace/configuration`, `client/registerCapability` and work-done progress each wait on, so it is one seam and four features. |
+| A code action that is a server command cannot be run | Listed and disabled with the reason, never hidden. Running one needs `workspace/executeCommand` plus a handler for the `workspace/applyEdit` the server sends back, and a decision about whether a server-named command may write to buffers unprompted — the answer consistent with what is already built is the rule code actions use: reach decides, so one file at the caret applies directly and more than one stages in review. **The seam it waited on exists as of 2026-08-25** (`LspSession.onRequest`, first used by `workspace/configuration`), which leaves the handler and the decision. `client/registerCapability` and work-done progress are the other two that were waiting, and are still unbuilt. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
 | No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
 | Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |

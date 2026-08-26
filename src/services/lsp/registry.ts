@@ -24,6 +24,22 @@ export interface ServerConfig {
   args?: string[];
   /** Passed through verbatim in `initialize`. */
   initializationOptions?: unknown;
+  /**
+   * What this server gets when it asks `workspace/configuration`.
+   *
+   * Distinct from `initializationOptions`, and the difference is not cosmetic:
+   * that is sent once, unasked, and is where a server wants things it needs
+   * before it can start. This is *pulled*, whenever the server likes and as
+   * often as it likes, and is where the user's ordinary settings live —
+   * pyright reads `python.analysis.*` this way, gopls reads `gopls.*`,
+   * rust-analyzer reads `rust-analyzer.*`. Servers that want both want
+   * different things in each.
+   *
+   * Shaped as the server expects to read it, so a section of `python.analysis`
+   * finds `{ "python": { "analysis": { ... } } }`. Unknown sections answer
+   * `null`, which every server reads as "not configured".
+   */
+  settings?: unknown;
 }
 
 interface ServersFile {
@@ -75,6 +91,10 @@ function normalise(entry: unknown): ServerConfig | null {
     ...(record.initializationOptions !== undefined
       ? { initializationOptions: record.initializationOptions }
       : {}),
+    // Passed through unvalidated, deliberately: what is a valid setting is the
+    // server's question, not Nox's, and a client that rejected what it did not
+    // recognise would break every server the moment one added an option.
+    ...(record.settings !== undefined ? { settings: record.settings } : {}),
   };
 }
 

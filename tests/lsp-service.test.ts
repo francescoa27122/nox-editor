@@ -328,3 +328,98 @@ describe('requests see the current document', () => {
     }
   });
 });
+
+/**
+ * `workspace/configuration`, end to end from `servers.json` to the reply.
+ *
+ * The unit tests above it cover the resolution and the seam; this covers the
+ * wiring between them, which is the part that was missing rather than wrong.
+ */
+describe('answering a server that asks for its settings', () => {
+  async function setupWith(entry: Record<string, unknown>) {
+    const platform = new MemoryPlatform();
+    platform.seedFile('/w/main.py', 'x = 1\n');
+    await platform.writeConfigFile(SERVERS_FILE, JSON.stringify({ servers: [entry] }));
+
+    const workspace = new WorkspaceService(platform, () => []);
+    await workspace.openFolder('/w');
+    const registry = new ServerRegistry(platform);
+    await registry.load();
+
+    const spawned: FakeLanguageServer[] = [];
+    const service = new LspService(workspace, registry, {
+      rootPath: () => '/w',
+      open: async () => {
+        const server = new FakeLanguageServer();
+        spawned.push(server);
+        return server;
+      },
+    });
+    return { service, spawned };
+  }
+
+  /** What pyright does, spelled the way pyright spells it. */
+  it('answers from the settings the user wrote for that server', async () => {
+    const { service, spawned } = await setupWith({
+      languages: ['python'],
+      command: 'pyright-langserver',
+      settings: { python: { analysis: { typeCheckingMode: 'strict' } } },
+    });
+    await service.start();
+
+    spawned[0]!.say({
+      jsonrpc: '2.0',
+      id: 42,
+      method: 'workspace/configuration',
+      params: { items: [{ section: 'python.analysis' }, { section: 'python.nothing' }] },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const reply = spawned[0]!.written.find((message) => message.id === 42) as
+      | { result?: unknown }
+      | undefined;
+    expect(reply?.result).toEqual([{ typeCheckingMode: 'strict' }, null]);
+  });
+
+  /**
+   * A server configured without a `settings` block gets exactly what it got
+   * before this handler existed — nothing — so adding the handler cannot
+   * change a working setup. It gets it as a well-formed reply rather than as
+   * MethodNotFound, which is the only difference.
+   */
+  it('answers nulls when the entry has no settings', async () => {
+    const { service, spawned } = await setupWith({
+      languages: ['typescript'],
+      command: 'tsserver',
+    });
+    await service.start();
+
+    spawned[0]!.say({
+      jsonrpc: '2.0',
+      id: 43,
+      method: 'workspace/configuration',
+      params: { items: [{ section: 'typescript' }] },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const reply = spawned[0]!.written.find((message) => message.id === 43) as
+      | { result?: unknown; error?: unknown }
+      | undefined;
+    expect(reply?.error).toBeUndefined();
+    expect(reply?.result).toEqual([null]);
+  });
+
+  /** And the capability that invites the question is now sent. */
+  it('tells the server it may ask', async () => {
+    const { service, spawned } = await setupWith({
+      languages: ['typescript'],
+      command: 'tsserver',
+    });
+    await service.start();
+
+    const initialize = spawned[0]!.written.find((message) => message.method === 'initialize');
+    expect(initialize?.params).toMatchObject({
+      capabilities: { workspace: { configuration: true } },
+    });
+  });
+});

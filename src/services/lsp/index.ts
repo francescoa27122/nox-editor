@@ -1,5 +1,6 @@
 import type { LspPosition } from '@core/lsp-position';
 import { Signal } from '@core/signal';
+import { configurationReply } from '@core/lsp-configuration';
 import { pathToUri, uriToPath } from '@core/uri';
 import type { LanguageServerProcess, Platform } from '@platform/types';
 import type { WorkspaceService } from '@services/workspace';
@@ -208,6 +209,25 @@ export class LspService {
     session.onNotification('textDocument/publishDiagnostics', (params) => {
       this.#publishDiagnostics(entry, params);
     });
+
+    /**
+     * Registered before the start for a stronger reason than diagnostics:
+     * pyright, gopls and rust-analyzer all ask this *during* the handshake,
+     * and one of them asks before `initialized` goes out. It is also what
+     * makes `LspSession` advertise `workspace.configuration` at all — see
+     * `#clientCapabilities` there.
+     *
+     * Answering from the config rather than from Nox's own settings is the
+     * whole design: these are a particular server's options, spelled the way
+     * that server spells them, and Nox has no business having an opinion about
+     * `python.analysis.typeCheckingMode`. A server with no `settings` block
+     * gets `null` for everything, which is exactly what it saw before this
+     * existed — so adding the handler cannot change what a working
+     * configuration does.
+     */
+    session.onRequest('workspace/configuration', (params) =>
+      Promise.resolve(configurationReply(params, config.settings)),
+    );
     session.onExit(() => this.#died(entry));
 
     await session.start();

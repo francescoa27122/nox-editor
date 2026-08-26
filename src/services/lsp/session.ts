@@ -62,6 +62,7 @@ export class LspSession {
   #queue: (() => void)[] = [];
   #stderr: string[] = [];
   #notificationHandlers = new Map<string, ((params: unknown) => void)[]>();
+  #requestHandlers = new Map<string, (params: unknown) => Promise<unknown>>();
   #exitHandlers: ((code: number | null) => void)[] = [];
   #stopping = false;
 
@@ -108,6 +109,32 @@ export class LspSession {
   }
 
   /**
+   * Answer something the server *asks*, rather than tells.
+   *
+   * Against the session rather than the transport, for the reason
+   * `onNotification` gives and then one more: a server may ask during the
+   * handshake. `workspace/configuration` is the case that matters — pyright,
+   * gopls and rust-analyzer all ask as they start, and one of them asks before
+   * `initialized` has even been sent. A handler registered after `start()`
+   * would arrive to find the question already answered `MethodNotFound` by
+   * `JsonRpcTransport.#answer`, which is correct behaviour and a silently
+   * unconfigured server.
+   *
+   * **Registering here is also what advertises the capability.** `start()`
+   * derives the `initialize` reply's client capabilities from what is in this
+   * map, so "Nox advertises what it implements and nothing else" is enforced
+   * by construction rather than by remembering to edit two places.
+   *
+   * One handler per method, matching the transport: a second registration for
+   * the same method replaces the first, because two answers to one question is
+   * not a thing the protocol has.
+   */
+  onRequest(method: string, handler: (params: unknown) => Promise<unknown>): void {
+    this.#requestHandlers.set(method, handler);
+    this.#transport?.onRequest(method, handler);
+  }
+
+  /**
    * Start the server and complete the handshake.
    *
    * Resolves either way — a server that cannot start is a state to render, not
@@ -138,6 +165,11 @@ export class LspSession {
     for (const [method, handlers] of this.#notificationHandlers) {
       for (const handler of handlers) transport.onNotification(method, handler);
     }
+    // Before `initialize` is written, not merely before the reply: a server is
+    // entitled to ask its first question the moment it has been asked one.
+    for (const [method, handler] of this.#requestHandlers) {
+      transport.onRequest(method, handler);
+    }
 
     server.onMessage((message) => transport.receive(message));
     server.onStderr((line) => {
@@ -154,6 +186,7 @@ export class LspSession {
         rootUri: this.#options.rootUri,
         capabilities: {
           general: { positionEncodings: ['utf-16'] },
+          ...this.#clientCapabilities(),
           textDocument: {
             synchronization: { dynamicRegistration: false },
             publishDiagnostics: { relatedInformation: false },
@@ -176,7 +209,11 @@ export class LspSession {
           },
         },
         // Nox advertises what it implements and nothing else. Claiming a
-        // capability invites the server to use it.
+        // capability invites the server to use it — which is why the workspace
+        // block above is derived from the registered handlers rather than
+        // written out here. Adding one without the other is the bug it
+        // prevents, in both directions: a claim with no handler stalls or
+        // degrades the server, and a handler with no claim is never asked.
         workspaceFolders: null,
         // Omitted rather than sent as null when unset: a server is entitled to
         // read a present-but-null field differently from an absent one.
@@ -255,6 +292,21 @@ export class LspSession {
     }
 
     this.#queue.push(() => void transport.notify(method, params));
+  }
+
+  /**
+   * The client capabilities that follow from what is actually handled.
+   *
+   * Each entry here is a promise the server will hold Nox to, so each is gated
+   * on the handler that keeps it. `workspace.configuration` tells a server it
+   * may ask for settings; a server told that and then answered
+   * `MethodNotFound` is worse off than one never told, because it stops
+   * looking for the settings anywhere else.
+   */
+  #clientCapabilities(): Record<string, unknown> {
+    const workspace: Record<string, unknown> = {};
+    if (this.#requestHandlers.has('workspace/configuration')) workspace.configuration = true;
+    return Object.keys(workspace).length > 0 ? { workspace } : {};
   }
 
   #flush(): void {

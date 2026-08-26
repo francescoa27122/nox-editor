@@ -380,3 +380,130 @@ describe('a real child process', () => {
     expect(published[0]).toMatchObject({ uri: 'file:///w/a.ts' });
   });
 });
+
+/**
+ * The seam that had no callers.
+ *
+ * `JsonRpcTransport.onRequest` has existed and worked since the client was
+ * written; nothing in `src/` ever registered a handler, so every question a
+ * server asked was answered `MethodNotFound`. That is the correct thing to
+ * answer and it is why the gap was invisible: the server does not stall, it
+ * quietly does without.
+ */
+describe('answering what the server asks', () => {
+  /**
+   * The timing is the whole point. pyright, gopls and rust-analyzer all ask
+   * for configuration while starting, and a handler wired onto the transport
+   * after `start()` returns would be too late — the question is asked and
+   * answered during the handshake.
+   */
+  it('answers a request made during the handshake', async () => {
+    const asked: unknown[] = [];
+    const server = new FakeServer((message, self) => {
+      if (message.method === 'initialize') {
+        // Asked *before* the initialize reply, which is legal and is what
+        // makes registering after `start()` insufficient.
+        self.say({
+          jsonrpc: '2.0',
+          id: 900,
+          method: 'workspace/configuration',
+          params: { items: [{ section: 'python.analysis' }] },
+        });
+        self.say({ jsonrpc: '2.0', id: message.id, result: { capabilities: {} } });
+      }
+    });
+
+    const session = sessionFor(server);
+    session.onRequest('workspace/configuration', (params) => {
+      asked.push(params);
+      return Promise.resolve([{ typeCheckingMode: 'strict' }]);
+    });
+
+    await session.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(asked).toEqual([{ items: [{ section: 'python.analysis' }] }]);
+    const reply = server.written.find((message) => message.id === 900);
+    expect(reply).toBeDefined();
+    expect((reply as unknown as { result?: unknown }).result).toEqual([
+      { typeCheckingMode: 'strict' },
+    ]);
+  });
+
+  /**
+   * Registering the handler is what advertises the capability, so that the two
+   * cannot drift. A claim with no handler leaves the server worse off than no
+   * claim at all: told it may ask, answered MethodNotFound, and it stops
+   * looking for those settings anywhere else.
+   */
+  it('claims workspace.configuration only when it can answer it', async () => {
+    const silent = politeServer();
+    await sessionFor(silent).start();
+    const withoutHandler = silent.written.find((m) => m.method === 'initialize');
+    expect(
+      (withoutHandler?.params?.capabilities as { workspace?: unknown } | undefined)?.workspace,
+    ).toBeUndefined();
+
+    const answering = politeServer();
+    const session = sessionFor(answering);
+    session.onRequest('workspace/configuration', () => Promise.resolve([null]));
+    await session.start();
+    const withHandler = answering.written.find((m) => m.method === 'initialize');
+    expect(withHandler?.params?.capabilities).toMatchObject({ workspace: { configuration: true } });
+  });
+
+  /**
+   * A handler registered once must survive the transport being rebuilt, the
+   * same way notification handlers do — otherwise a server that restarts comes
+   * back unconfigured and nothing says so.
+   */
+  it('keeps answering after a restart builds a new transport', async () => {
+    // A fresh process per start, which is what a restart actually is. Handing
+    // the same fake back twice would leave two transports subscribed to one
+    // message stream and count every question twice.
+    const started: FakeServer[] = [];
+    const session = new LspSession(
+      async () => {
+        const server = politeServer();
+        started.push(server);
+        return server;
+      },
+      { name: 'typescript-language-server', rootUri: 'file:///w' },
+    );
+
+    let answers = 0;
+    session.onRequest('workspace/configuration', () => {
+      answers += 1;
+      return Promise.resolve([null]);
+    });
+
+    await session.start();
+    await session.start();
+    expect(started).toHaveLength(2);
+
+    // The *second* process asks, which only the replayed handler can answer.
+    started[1]!.say({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'workspace/configuration',
+      params: { items: [{}] },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(answers).toBe(1);
+    const reply = started[1]!.written.find((message) => message.id === 7);
+    expect(reply).toBeDefined();
+  });
+
+  /** Anything with no handler still gets the MethodNotFound it always got. */
+  it('still refuses a method nothing handles', async () => {
+    const server = politeServer();
+    await sessionFor(server).start();
+
+    server.say({ jsonrpc: '2.0', id: 11, method: 'window/showMessageRequest', params: {} });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const reply = server.written.find((message) => message.id === 11);
+    expect((reply as unknown as { error?: { code: number } }).error?.code).toBe(-32601);
+  });
+});
