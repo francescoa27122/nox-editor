@@ -8,6 +8,77 @@ are knowledge.**
 
 ---
 
+## 2026-08-25 (PC) — The seam with no callers now has three
+
+Production readiness §3. `JsonRpcTransport.onRequest` was written with the LSP
+client and had **no caller in `src/`** since — every question a server asked
+was answered `MethodNotFound`. That is the correct answer, and it is exactly
+why nobody noticed: a server told "I do not know that method" does not stall,
+it does without.
+
+Three of the four shipped, in the plan's order:
+
+**#142 — the seam, and `workspace/configuration`.** pyright, gopls and
+rust-analyzer all ask for settings as they start; all three were silently using
+their own defaults. `servers.json` gains a `settings` object, distinct from
+`initializationOptions` because one is pushed once before the server can do
+anything and the other is pulled whenever it likes.
+
+**#143 — `$/progress`.** rust-analyzer indexes a cold project for thirty
+seconds answering nothing, and looked hung. The status bar now reads
+`rust-analyzer — Indexing 3/840 20%`.
+
+**#144 — `workspace/executeCommand` and `workspace/applyEdit`.** The debt
+table's "a code action that is a server command cannot be run", closed. The
+decision it flagged — may a server-named command write to buffers unprompted —
+is answered by **reach, not trust**: the rule code actions already used, now
+shared by both paths so they cannot drift.
+
+**The design point worth keeping** is smaller than any of them. `initialize`'s
+capability block had always been written by hand under a comment reading "Nox
+advertises what it implements and nothing else". That is a rule a person has to
+remember, and it fails in *both* directions: a capability claimed with no
+handler is worse than not claiming it, because the server stops looking
+elsewhere; a handler with no capability is never asked. The block is now
+derived from the registered handler map, so registering the handler is what
+advertises it. The rule stopped being a comment.
+
+**The fourth is not what the plan says it is, and that is worth recording.**
+§3 lists `client/registerCapability` as "how rust-analyzer and gopls ask to
+watch files. They never get to." They never *ask* — Nox advertises no dynamic
+registration at all, and `synchronization.dynamicRegistration` is explicitly
+`false`, so a conforming server does not send the request and watches files
+itself instead. This is **conforming rather than broken**, and the mildest of
+the four rather than a claim the product cannot back. (Derived from the
+specification and from what rust-analyzer's client-capability check does, not
+measured — there is no rust-analyzer on this machine.)
+
+What is actually lost is efficiency: N servers each running a watcher over the
+same tree with their own ignore rules, instead of one `FileWatcherService`
+fanning out. Building it is a feature and not a handler — accept the
+registration, match its globs, derive created/changed/deleted, send
+`workspace/didChangeWatchedFiles`, honour the unregister. The seams exist
+(`onPathsChanged` takes a listener that "may care about a file nothing has
+open"; `globToRegExp` is already written), so it is tractable; it is simply not
+the same kind of work as the other three, and accepting a registration Nox
+would not honour is worse than never inviting one.
+
+Verified across the three: eslint 0 errors · vitest **2056 passed, 142 files**
+(from 2020) · svelte-check **988 files, 0 errors** · build green · 11/11 CI on
+each.
+
+Next: **§1 and §5 are the plan's remaining gaps**, and both are about the
+packaged app rather than the code. §2 (failure reporting) shipped in 0.9.0, §4
+closed 2026-08-25, §3 is three-quarters closed with the last quarter reclassified
+above.
+
+Blocked: nothing.
+
+Confidence: high on the three that shipped — each is mutation-checked, and the
+capability derivation is pinned from both directions. Medium on the
+reclassification of the fourth, which rests on the specification and on
+reading what servers do rather than on having watched one.
+
 ## 2026-08-25 (PC) — A keystroke has a number, and CI holds it flat
 
 **Production readiness §4 is closed.** Its last bullet was the typing path

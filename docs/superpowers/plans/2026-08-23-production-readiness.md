@@ -202,6 +202,19 @@ per-cursor. Logging is exactly the kind of well-meaning addition that
 
 ## 3. One LSP seam has zero callers, and four features wait on it
 
+**THREE OF FOUR CLOSED 2026-08-25.** The seam and `workspace/configuration` in
+#142, `$/progress` in #143, `workspace/executeCommand` + `workspace/applyEdit`
+in #144.
+
+**The fourth is reclassified rather than outstanding.** The table below says
+`client/registerCapability` is "how rust-analyzer and gopls ask to watch files.
+They never get to." They never *ask*: Nox advertises no dynamic registration at
+all, so a conforming server does not send the request and watches files itself.
+That is conforming, not degraded. What is lost is efficiency — N watchers over
+one tree instead of one fanning out — which makes it a feature rather than the
+unbacked claim this section is about. It is in the Known debt table with what
+building it would take.
+
 **Priority: high.** The worklog already named this "the highest-leverage piece
 of LSP work left". Re-verified this session and it is still true.
 
