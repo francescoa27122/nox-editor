@@ -1435,7 +1435,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/francescoa27122/nox-editor/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/francescoa27122/nox-editor/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/francescoa27122/nox-editor/compare/v0.8.3...v0.9.0
 [0.8.3]: https://github.com/francescoa27122/nox-editor/compare/v0.8.2...v0.8.3

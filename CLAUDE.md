@@ -64,6 +64,6 @@ Five project skills cover the subsystems in depth. Use them rather than re-deriv
 
 ## Gotchas
 
-- **The version is triple-sourced.** `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` must agree or the release workflow refuses the tag (`.github/workflows/release.yml:28-54`).
+- **The version is triple-sourced, and `CHANGELOG.md` is the fourth.** `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` must agree or the release workflow refuses the tag (`.github/workflows/release.yml:33-69`), and `CHANGELOG.md` must carry a `## [<version>]` section with something under it — that section *is* the release body (`.github/workflows/release.yml:71-94`).
 - Do not touch the `conditions` spread at `vite.config.ts:28` — the comment above it records that the obvious rewrite broke `npm run dev`.
 - Tests use relative `'../src/…'` imports, never the `@core`/`@services` aliases.

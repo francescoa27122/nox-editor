@@ -14,6 +14,11 @@ jobs:
   gate:
     name: gate
     runs-on: ubuntu-22.04
+    # The release body, read out of CHANGELOG.md once and handed to all four
+    # build jobs. Computed here rather than in each of them because this is
+    # the job that already refuses a tag it does not believe in.
+    outputs:
+      notes: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -26,6 +31,7 @@ jobs:
       # release and nothing complains. Checked before anything expensive
       # runs, and it also holds the three version files to each other.
       - name: Check the tag matches the configured version
+        id: version
         run: |
           set -eu
           configured=$(node -p "require('./src-tauri/tauri.conf.json').version")
@@ -52,6 +58,39 @@ jobs:
           esac
 
           echo "Tag $GITHUB_REF_NAME matches version $configured."
+
+          # The version, not the tag: a v0.3.0-rc1 build takes 0.3.0's notes,
+          # which is the same rule the case statement above just applied.
+          echo "version=$configured" >> "$GITHUB_OUTPUT"
+
+      # Every release from v0.1.0 to v0.10.0 shipped the same hardcoded Install
+      # blurb and nothing else, so no release page has ever said what changed
+      # in it. The changelog always did. This is the join, and it is a gate
+      # step because a tag whose changelog was forgotten should cost seconds
+      # rather than twenty minutes of binaries.
+      - name: Read the release notes out of CHANGELOG.md
+        id: notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          notes=$(node scripts/release-notes.mjs "$VERSION")
+
+          # Printed as well as captured: when a release page reads oddly, the
+          # first question is what the workflow actually sent.
+          echo "Release notes for $VERSION:"
+          echo "$notes"
+
+          # A heredoc delimiter, and one carrying the run id, because the notes
+          # are many lines of arbitrary markdown — the plain NAME=value form
+          # truncates at the first newline, and a fixed delimiter is a line the
+          # changelog could in principle contain.
+          delimiter="NOX_RELEASE_NOTES_${GITHUB_RUN_ID}"
+          {
+            echo "body<<$delimiter"
+            echo "$notes"
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
 
       - run: npm ci
       - run: npm run check
@@ -263,9 +302,11 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Nox ${{ github.ref_name }}
-          # Left as a draft deliberately: the notes below are the minimum a
-          # download needs to work, not the release notes. Write those, then
-          # publish by hand.
+          # Left as a draft deliberately: publishing is a person's decision,
+          # not a workflow's. What the draft arrives with is now the changelog
+          # section for this version — read and validated by the gate — above
+          # the Install text below, so the page explains itself before anyone
+          # touches it.
           #
           # The file names below must match `bundle.targets` in
           # src-tauri/tauri.conf.json — today `app`, `dmg`, `deb`, `rpm`,
@@ -276,6 +317,10 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }} ${{ steps.updater.outputs.args }}
           releaseBody: |
+            ${{ needs.gate.outputs.notes }}
+
+            ---
+
             ## Install
 
             **macOS** — download the `.dmg` for your chip (`aarch64` is Apple
