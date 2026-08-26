@@ -306,6 +306,7 @@ export class LspSession {
   #clientCapabilities(): Record<string, unknown> {
     const workspace: Record<string, unknown> = {};
     if (this.#requestHandlers.has('workspace/configuration')) workspace.configuration = true;
+    if (this.#requestHandlers.has('workspace/applyEdit')) workspace.applyEdit = true;
 
     const window: Record<string, unknown> = {};
     // Gated on the `create` handler rather than on anything about `$/progress`

@@ -212,18 +212,41 @@ describe('choosing an action', () => {
     expect(app.workspace.textOf(id)).toBe('// later\nconst a = 1;\nconst b = 2;\n');
   });
 
-  it('does nothing for an action it said it could not run', async () => {
-    const { app } = await appWith(() => [
-      { title: 'Organize imports', command: 'typescript.organizeImports' },
+  it('sends the command for an action that carries one', async () => {
+    const { app, asked } = await appWith(() => [
+      { title: 'Organize imports', command: 'typescript.organizeImports', arguments: ['/w/a.ts'] },
     ]);
+    app.lsp.capabilitiesFor = (() => ({
+      codeActionProvider: true,
+      executeCommandProvider: {},
+    }));
     await ask(app);
 
-    expect(app.ui.codeActions.get()[0]).toMatchObject({ runnable: false });
+    expect(app.ui.codeActions.get()[0]).toMatchObject({ runnable: true });
 
     await app.applyCodeAction(0);
 
-    const id = app.workspace.activeId.get()!;
-    expect(app.workspace.textOf(id)).toBe('const a = 1;\nconst b = 2;\n');
+    // Nox edits nothing itself here: the server does the work and asks back
+    // with `workspace/applyEdit`, which is a separate arrival.
+    const executed = asked.find((entry) => entry.method === 'workspace/executeCommand');
+    expect(executed?.params).toEqual({
+      command: 'typescript.organizeImports',
+      arguments: ['/w/a.ts'],
+    });
+  });
+
+  /**
+   * A server that registered no commands cannot run one, and saying so beats
+   * sending a request it is bound to refuse.
+   */
+  it('refuses a command when the server does not run commands', async () => {
+    const { app, asked } = await appWith(() => [
+      { title: 'Organize imports', command: 'typescript.organizeImports' },
+    ]);
+    await ask(app);
+    await app.applyCodeAction(0);
+
+    expect(asked.some((entry) => entry.method === 'workspace/executeCommand')).toBe(false);
   });
 
   /**
@@ -231,7 +254,7 @@ describe('choosing an action', () => {
    * offered nothing where it offered something unbuilt, and the user would
    * blame their language server.
    */
-  it('offers a command-only action rather than pretending there was none', async () => {
+  it('offers a command-only action as runnable', async () => {
     const { app } = await appWith(() => [
       { title: 'Organize imports', command: 'typescript.organizeImports' },
     ]);
@@ -239,7 +262,7 @@ describe('choosing an action', () => {
     await ask(app);
 
     expect(app.ui.overlay.get()).toBe('code-action');
-    expect(app.ui.codeActions.get()[0]?.reason).toMatch(/command/i);
+    expect(app.ui.codeActions.get()[0]).toMatchObject({ runnable: true, reason: undefined });
   });
 
   /** One offer, one apply: a second click cannot replay the first. */
@@ -268,5 +291,88 @@ describe('the command itself', () => {
   it('is enabled when it does', async () => {
     const { app } = await appWith(() => []);
     expect(app.commands.isEnabled('lsp.codeAction')).toBe(true);
+  });
+});
+
+/**
+ * `workspace/applyEdit` — the server asking Nox to change files, on its own
+ * initiative, usually as the second half of a command it was told to run.
+ *
+ * The rule is the same one code actions use, and that is the point: whether a
+ * server may write to a file you have not opened is one question, and having
+ * two answers to it depending on which message carried the edit is how one of
+ * them ends up wrong.
+ */
+describe('an edit the server asks for', () => {
+  const twoFiles = {
+    '/w/a.ts': 'const a = 1;\nconst b = 2;\n',
+    '/w/b.ts': 'const c = 3;\n',
+  };
+
+  it('lands directly when it reaches one file', async () => {
+    const { app } = await appWith(() => [], twoFiles);
+
+    const applied = await app.applyServerEdit(edit('file:///w/a.ts', 0, 10, 11, '9'), 'tsserver');
+
+    expect(applied).toBe(true);
+    const id = app.workspace.findByPath('/w/a.ts')!.id;
+    expect(app.workspace.textOf(id)).toBe('const a = 9;\nconst b = 2;\n');
+    // Nothing to review: a change to the file in front of you is not a proposal.
+    expect(app.review.staged.get()).toBeNull();
+  });
+
+  it('stages when it reaches more than one', async () => {
+    const { app } = await appWith(() => [], twoFiles);
+
+    const applied = await app.applyServerEdit(
+      {
+        changes: {
+          'file:///w/a.ts': [
+            { range: { start: { line: 0, character: 10 }, end: { line: 0, character: 11 } }, newText: '9' },
+          ],
+          'file:///w/b.ts': [
+            { range: { start: { line: 0, character: 10 }, end: { line: 0, character: 11 } }, newText: '9' },
+          ],
+        },
+      },
+      'tsserver',
+    );
+
+    expect(applied).toBe(true);
+    expect(app.review.staged.get()).not.toBeNull();
+    // Staged, not written: the buffers still hold what they held.
+    const id = app.workspace.findByPath('/w/a.ts')!.id;
+    expect(app.workspace.textOf(id)).toBe('const a = 1;\nconst b = 2;\n');
+  });
+
+  /**
+   * Rename's rule, and the reply the server needs. `applied: false` is acted
+   * on — several servers report it or roll back their own state — so a refusal
+   * has to come back as a refusal rather than as a silent no-op.
+   */
+  it('refuses a file operation, and says so on the wire', async () => {
+    const { app } = await appWith(() => [], twoFiles);
+
+    const applied = await app.applyServerEdit(
+      { documentChanges: [{ kind: 'rename', oldUri: 'file:///w/a.ts', newUri: 'file:///w/z.ts' }] },
+      'tsserver',
+    );
+
+    expect(applied).toBe(false);
+    expect(app.notifications.items.get().some((n) => /does not make/i.test(n.message))).toBe(true);
+  });
+
+  it('refuses an edit it could not read, rather than reporting success', async () => {
+    const { app } = await appWith(() => [], twoFiles);
+
+    expect(await app.applyServerEdit({}, 'tsserver')).toBe(false);
+    expect(await app.applyServerEdit(undefined, 'tsserver')).toBe(false);
+    expect(app.notifications.items.get().some((n) => /could not read/i.test(n.message))).toBe(true);
+  });
+
+  it('names the server in what it tells the user', async () => {
+    const { app } = await appWith(() => [], twoFiles);
+    await app.applyServerEdit({}, 'rust-analyzer');
+    expect(app.notifications.items.get()[0]?.message).toMatch(/rust-analyzer/);
   });
 });

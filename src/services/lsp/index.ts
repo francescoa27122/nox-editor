@@ -71,6 +71,22 @@ export interface LspServiceOptions {
   open: (config: ServerConfig) => Promise<LanguageServerProcess>;
   /** Waits between restart attempts. Doubling, and capped by its own length. */
   backoffMs?: readonly number[];
+  /**
+   * Apply a `WorkspaceEdit` the server asked for, and say whether it landed.
+   *
+   * An option rather than something this service does itself, and the split is
+   * the one the whole codebase runs on: the protocol is here, the **policy**
+   * is not. Whether a server-named command may write to a file you have not
+   * opened is a decision about the user's work, and it belongs where the other
+   * such decisions live — beside the code-action rule it has to match.
+   *
+   * Absent means the capability is not advertised at all, so a server never
+   * asks. That is the honest default: a client that claimed `applyEdit` and
+   * then always answered `applied: false` would be worse than one that never
+   * claimed it, because the server would have already thrown away whatever it
+   * was going to do instead.
+   */
+  applyWorkspaceEdit?: (edit: unknown, serverName: string) => Promise<boolean>;
 }
 
 /** 1s, 2s, 4s, then stop. Three attempts is enough to ride out a flap. */
@@ -114,6 +130,7 @@ export class LspService {
     workspace: WorkspaceService,
     registry: ServerRegistry,
     rootPath: () => string,
+    applyWorkspaceEdit?: (edit: unknown, serverName: string) => Promise<boolean>,
   ): LspService {
     return new LspService(workspace, registry, {
       rootPath,
@@ -123,6 +140,10 @@ export class LspService {
           args: config.args,
           cwd: rootPath(),
         }),
+      // Optional so a caller that has no policy for it — a test, or anything
+      // that only wants diagnostics — does not advertise a capability it
+      // cannot honour.
+      ...(applyWorkspaceEdit ? { applyWorkspaceEdit } : {}),
     });
   }
 
@@ -254,6 +275,24 @@ export class LspService {
      * makes `LspSession` advertise `window.workDoneProgress`.
      */
     session.onRequest('window/workDoneProgress/create', () => Promise.resolve(null));
+
+    /**
+     * The other half of running a server command. Nox sends
+     * `workspace/executeCommand`; the server does its work and asks *back*
+     * with the edit it wants applied, and the reply says whether it landed.
+     *
+     * `applied: false` matters to a server — several will report a failure to
+     * the user or roll back their own state — so a refusal has to be honest
+     * rather than a swallowed exception.
+     */
+    const apply = this.#options.applyWorkspaceEdit;
+    if (apply) {
+      session.onRequest('workspace/applyEdit', async (params) => {
+        const edit = (params as { edit?: unknown } | null)?.edit;
+        const applied = await apply(edit, config.command);
+        return { applied };
+      });
+    }
 
     session.onNotification('$/progress', (params) => {
       const event = progressEvent(params);
