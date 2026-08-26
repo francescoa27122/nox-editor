@@ -2200,6 +2200,47 @@ the wrong layer.
 
 ---
 
+### Completion sources are registered, never overridden
+
+`autocompletion()` takes an `override` option, and using it was a defect that
+looked like configuration. `override` **replaces** the source list CodeMirror
+gathers from language data rather than adding to it
+(`@codemirror/autocomplete`, `CompletionState.update`), so
+`autocompletion({ override: [lspSource] })` silently switched off every source
+the grammar packages register — `lang-html`'s tags and attributes,
+`lang-css`'s properties, `lang-javascript`'s locals were all in the bundle,
+wired up, and unreachable. The visible symptom was worse than that:
+**a file whose language had no server got no completions at all**, which is
+most languages, since Nox never spawns a server it was not told about.
+
+The sources now go in through the bare `EditorState.languageData` facet, whose
+entries `languageDataAt` merges with whatever the language itself contributes.
+Two consequences are worth writing down:
+
+- **The sources are built once, outside the provider.** CodeMirror finds a
+  running query by *identity* of the source function. The provider is called on
+  every transaction, so constructing sources inside it hands back a new pair
+  each time, no in-flight query is ever recognised as its own, and each is
+  reset to pending by the transaction that would have delivered its result.
+  The picker then never opens — a hang, not a wrong list. This was written
+  wrong first and `tests/completion-sources.test.ts` is what caught it.
+- **Nothing structural can test this.** Asserting that the html source is
+  registered passes with `override` still in place, because `override` is a
+  config facet and language data is untouched. Every case in that suite goes
+  through the real picker and reads what CodeMirror actually offered.
+
+**The word fallback is a floor, and it stands down twice.** It uses
+CodeMirror's own `completeAnyWord`, which caches per rope node so an edit
+rescans one chunk. It declines when a language server offers completion for
+the document's language — server items carry `detail`, so CodeMirror's
+cross-source dedupe would not collapse a bare word against the same symbol
+described properly, and the list would carry both — and it declines above
+`WORD_COMPLETION_MAX_BYTES` (§6). A language that brings its own source keeps
+the fallback as well: those sources answer in syntactic positions rather than
+everywhere, so the overlap is small and the words are what fill the gap.
+
+---
+
 ## 6. Performance notes
 
 - **Startup:** grammars are dynamic imports, chunked separately by Vite. Opening
@@ -2217,6 +2258,13 @@ the wrong layer.
   was 20,000 until 2026-08-25 and came down on a measurement: scoring that many
   took 80-85% of a 16 ms frame per keystroke on the machine it was measured on,
   which leaves nothing for a slower one. `filetree.ts` carries the curve.
+- **Word completion:** the fallback declines above 1 MB
+  (`WORD_COMPLETION_MAX_BYTES`). `completeAnyWord` caches per rope node, but
+  above ~2000 distinct words the *merged* result is never cached, so every
+  query re-merges the cached child lists and the cost tracks distinct words.
+  Measured over synthetic source text, per query after the first: 0.25 MB
+  2-3 ms, 0.5 MB 3-4 ms, 1 MB ~8 ms, 2 MB ~23 ms, 10 MB ~112 ms. The cap is
+  where a query still leaves most of a frame — the rule that set quick-open's.
 - **The typing path:** a keystroke costs **0.34 ms** in a 16,000-line document
   and the same at 64,000 — measured in chromium, 2026-08-25, best of seven
   batched samples. Flat in document size because every editor extension is
@@ -2254,6 +2302,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | A damaged config file is preserved, but never repaired | `<name>.damaged.<ext>` is a copy, not a merge: Nox does not attempt to recover the *contents* of an index it could not parse, only the one counter that stops the next write destroying a body file. Recovering a truncated `notes.json`'s rows is possible and unbuilt. |
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
+| The word fallback is capped by size, not by work | It declines above 1 MB (§6) rather than scanning an interruptible slice, so a large file gets no word completions at all instead of the ones near the caret. Bounded in the harmless direction — the fallback is a convenience and a language server, where there is one, is unaffected — but the honest fix is a bounded scan around the viewport rather than a cliff. `completeAnyWord` offers no way to ask for one; it would mean Nox owning the scan. |
 | Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default — so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
 | Servers run their own file watchers | Nox advertises no dynamic registration at all — not `workspace.didChangeWatchedFiles.dynamicRegistration`, and `synchronization.dynamicRegistration` is explicitly `false` — so a conforming server never sends `client/registerCapability` and falls back to watching files itself, which rust-analyzer and gopls both do. **That makes this conforming rather than broken**, and the mildest of the four items that waited on the server-request seam; the production-readiness plan's "they never get to" overstated it. What is lost is efficiency and consistency: N servers each running a watcher over the same tree, with their own ignore rules, rather than one `FileWatcherService` fanning out. Building it is a feature and not a handler — accept a registration, match its globs (`onPathsChanged` is already the right seam and `globToRegExp` already exists), derive created/changed/deleted, send `workspace/didChangeWatchedFiles`, honour `client/unregisterCapability` — and accepting a registration Nox would not honour is worse than never inviting one. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
