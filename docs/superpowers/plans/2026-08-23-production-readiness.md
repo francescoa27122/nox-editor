@@ -32,10 +32,15 @@ remembered:
 **CLOSED 2026-08-25.** Phase 0 and the harness closed 2026-08-23; what remained
 was this section's own fix — *"port the 17-item walk script into it, so the
 twelve UNSEEN rows become assertions rather than intentions."* Four of the
-twelve are now assertions (A4, C1, C5, C8) and the other eight are triaged in
-`.desktop-pass-report.md`'s header note: three are style contracts for a
-stylesheet test, two need a git workspace, one needs a language server, and two
-are follow-on. The specs went from four to eleven.
+twelve are now assertions: A4, C5 and C8 against the packaged app (the suite
+went from four specs to eight), and C1 in jsdom, because **the WebDriver
+harness cannot deliver a right-click** — two approaches, three engines, no
+`contextmenu` event on any of them. The other eight are triaged in
+`.desktop-pass-report.md`'s header note.
+
+That limit is the section's own thesis appearing again: phase 0 found that the
+*manual* instrument dropped inputs, and this found that the automated one drops
+a different input. Both are recorded rather than routed around.
 
 **Priority: highest.** This is the last named 1.0 gate — *"Nothing in the
 release notes says 'unverified'"* — and it is in the worst state of anything
