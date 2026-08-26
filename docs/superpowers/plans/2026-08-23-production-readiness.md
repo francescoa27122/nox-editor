@@ -246,6 +246,13 @@ argument for it.
 
 ## 4. "Fast" is the product's first word and nothing measures it
 
+**CLOSED 2026-08-25.** `npm run bench` and `tests/complexity.test.ts` landed in
+#134; the typing path proper in #140, which measures a keystroke at 0.34 ms in
+a 16,000-line document and holds it flat in CI. Both thresholds below now carry
+a measured number in `workspace.ts`. The one finding that came out of it —
+quick-open costing more than a frame on a large index — was fixed in #136 and
+bounded in #138.
+
 **Priority: medium-high.** Lower cost-of-error than the three above, but it
 guards the one thing users notice most.
 
