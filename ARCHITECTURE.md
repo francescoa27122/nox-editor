@@ -2148,8 +2148,11 @@ the wrong layer.
 - **Search:** match counting stops at 10,000 (`MAX_COUNTED_MATCHES`) and the
   count is shown as `10000+`. Highlighting is viewport-bounded, so a query with
   40,000 hits costs the same as one with three.
-- **Quick-open index:** capped at 20,000 files and 12 directory levels, built
-  off the main path and abandoned if the root changes mid-walk.
+- **Quick-open index:** capped at 14,000 files and 12 directory levels, built
+  off the main path and abandoned if the root changes mid-walk. The file cap
+  was 20,000 until 2026-08-25 and came down on a measurement: scoring that many
+  took 80-85% of a 16 ms frame per keystroke on the machine it was measured on,
+  which leaves nothing for a slower one. `filetree.ts` carries the curve.
 - **Fuzzy matching:** an optimal DP rather than a greedy scan. Greedy ranking is
   visibly wrong on paths — typing `path` should not match the scattered
   `p`,`a`,`t`,`h` across `src/core/…`. Inputs are short, so the DP is well
@@ -2166,7 +2169,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Item | Detail |
 |---|---|
 | Nine defensive initialisers are dead assignments | `no-useless-assignment` is right that the `let x = <value>` opening a `try` in `config/index.ts`, `keymap.ts`, `session.ts`, `updates.ts`, `watcher.ts` and `workspace.ts` is never read — every path that reaches a use overwrites it first. It is also the thing that stops TypeScript reporting a read before assignment on the early-return paths, so removing it is a change to what the compiler checks, not a tidy-up. Left at warning level in `eslint.config.js` rather than fixed in passing, because three of the nine are in `workspace.ts`, which owns unsaved work. |
-| Quick-open's worst case is close to the frame, not clear of it | Fixed 2026-08-25 for the cases that were over budget — a 16,000-path index now costs **3.4 ms** for one character and **1.7 ms** when nothing matches, against 14.6 ms and 2.5 ms before. What remains is the long-query case: nine characters over that index is **11.4 ms mean, 14.4 ms worst**, which is under a 16 ms frame with less headroom than the rest. It is DP-bound rather than allocation-bound — nine pattern characters against ~3,300 survivors, twice each, is 2.5 M cell updates and no amount of tuning removes them. The remaining levers all change behaviour: narrowing incrementally while the query only grows (sound, since subsequence matching is monotone, but it interacts with the 4,000-candidate cap), or bounding the candidate set before scoring. |
+| Quick-open's cost is bounded by a cap rather than by the algorithm | The scan is linear in the index and the index is the whole project, so what keeps it inside a frame is `INDEX_MAX_FILES` (14,000, measured — see `filetree.ts`) and the 4,000-survivor break in `fileRows`, not anything about the matcher. Worst realistic query at the cap is ~10 ms of 16 ms. Two consequences worth knowing: a workspace larger than the cap has files quick-open can never find, and the survivor break means `total` is a lower bound and a perfect match late in index order can be missed on a dense query. Removing both needs the scan to become interruptible — chunked across frames — which makes the palette's result path async. |
 | Problems and References are not windowed | They share the flat-row shape the explorer and search now window (see §4), but their natural limits are lower. Re-decide on their own merits rather than inheriting the explorer spec's out-of-scope line. |
 | Commit is enabled while a merge conflict is unresolved | The panel names conflicts and refuses to stage them, but the Commit button does not know about them. Real git refuses ("committing is not possible because you have unmerged files") and the refusal surfaces through the existing error path, so the outcome is correct and merely late. `MemoryPlatform.gitCommit` does not model the refusal, so nothing tests it. |
 | `undoSession` still revokes grants as a side effect | Revocation is its own command now (`permissions.revokeGrants`), so undoing an agent's *work* arguably should leave its *permissions* alone. The two are still welded in `agent/runtime.ts`; the panel's toast says so rather than surprising the user. |
