@@ -8,6 +8,63 @@ are knowledge.**
 
 ---
 
+## 2026-08-26 (PC) — 0.10.0 is out
+
+Tagged and published on the operator's explicit instruction. Normally the tag
+and the publish are both his under stop-list 6; he asked for both directly, so
+this records that it was his call rather than mine and moves on.
+
+**Live:** `v0.10.0`, 13 assets, all four platforms plus `latest.json` and the
+`.sig` files. Verified after publishing rather than assumed — the public
+download URL answers 200, the `api.github.com/.../releases/assets/{id}` URL the
+updater actually uses answers 200, and `latest.json` serves version 0.10.0 with
+nine platform entries.
+
+That last check was worth making. The manifest's URLs are API asset URLs rather
+than `releases/download/...` ones, which looks wrong for a published release
+until you compare it with 0.9.1's — byte-identical shape, and 0.9.1 updated
+fine. It is what `tauri-action` emits, and it resolves because the repository
+is public.
+
+**The eight-hour hang.** The Windows leg of the release commit passed Clippy
+and wedged in `cargo test`, running until it was cancelled by hand. Re-run
+unchanged, it passed in 3m24s — a stuck runner, not the change. What it exposed
+was real: **no CI job had a `timeout-minutes`** except `e2e`, so a hung runner
+held a required check open indefinitely with `enforce_admins` on and no
+override. All four are bounded now — lint 10, web 20, rust 45, e2e 60.
+
+45 for `rust` rather than tighter because the honest answer to "how long is a
+legitimate cold build?" is that nobody knows: warm is 3-4 minutes and the only
+cold data point was the hang itself. A false timeout on a required check is the
+expensive mistake.
+
+Recorded beside the number because it recurs: **a version bump rewrites
+`Cargo.lock`, which changes the `rust-cache` key, so every release commit gets
+a cold Rust cache.** Slow is expected there. Unbounded was not.
+
+**A gap found while publishing, and only half fixed.** `release.yml` hardcodes
+the release body — a fixed Install blurb, byte-identical across 0.9.1 and
+0.10.0 — so **no release has ever said what changed in it**. Fine for a
+one-line patch; poor for a minor with three new capabilities and a change that
+takes something away. This release's notes were written by hand onto the draft
+before publishing. The next one will revert to the template unless the workflow
+learns to read `CHANGELOG.md`.
+
+Next: **teach `release.yml` to put the changelog in the release body.** The
+gate job already parses versions out of three files; reading the top section of
+`CHANGELOG.md` and passing it as `releaseBody` is the same shape of work, and
+it is the difference between a release page that explains itself and one that
+does not.
+
+Blocked: the Apple and Windows certificates, unchanged. A fresh macOS download
+still needs `xattr -dr`, and Windows still shows SmartScreen; the notes say so.
+
+Confidence: high on what shipped — CI green on the exact SHA tagged, all five
+version files agreed, `npm ci` accepted the lockfile, and the built bundle
+carried 0.10.0. Untested by anyone: the three LSP features against a *real*
+language server. They are covered against fakes, thoroughly, and the first
+real pyright or rust-analyzer is the honest test.
+
 ## 2026-08-25 (PC) — The walk items became assertions, and the harness found its own limit
 
 Production readiness **§1 closed** and the half of **§5 that is mine** (#146).
