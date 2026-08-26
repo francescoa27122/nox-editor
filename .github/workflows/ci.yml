@@ -210,9 +210,19 @@ jobs:
   #
   # All three legs are required checks on `main` as of 2026-08-24, so a change
   # that breaks the packaged app on any platform cannot land. Promoted on a
-  # measured record rather than a hunch: 36 job runs, zero flaky failures. The
-  # one failure in that window was macOS's first run, which caught two real
-  # defects in the specs - a true positive.
+  # measured record rather than a hunch: 36 job runs, zero flaky failures at
+  # the time. The one failure in that window was macOS's first run, which
+  # caught two real defects in the specs - a true positive.
+  #
+  # The first flake arrived 2026-08-25 on Windows (PR #136, a renderer-only
+  # change): the app spawned and its embedded WebDriver server never answered
+  # on port 4445 inside the 60s window, so `onPrepare` failed and no spec ran
+  # at all. It passed on re-run. Recorded rather than smoothed over, because
+  # the argument for `enforce_admins` on this suite rests on that record and
+  # the honest version of it is now "one flake in ~40", not zero. A failure
+  # that names `onPrepare` and a port is the harness, not the app - the specs
+  # never started - and it is worth checking which of the two you have before
+  # reaching for a re-run.
   #
   # `enforce_admins` is on, so a leg that goes flaky blocks everyone with no
   # override. That is the argument for keeping this suite assertion-only and
