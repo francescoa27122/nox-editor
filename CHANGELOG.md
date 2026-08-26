@@ -6,6 +6,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-25
+
+Language servers stop guessing. This release is mostly about the three things
+Nox never said back to them: the settings you wrote, the commands only they can
+run, and — the other way round — telling you when one is busy rather than
+broken. Quick open also got quicker on large projects, and the file cap that
+keeps it that way came down.
+
 ### Added
 
 - **Language servers can now read the settings you write for them.** A
@@ -29,6 +37,23 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the server asks for in reply, by the same rule code actions already used:
   a change to the file at your caret lands directly, one that reaches further
   stages in review.
+
+### Changed
+
+- **Quick open is two to five times faster on a large project.** On a
+  16,000-file index a keystroke cost more than a frame — the list was the
+  thing making the window feel slow. Typing one character now costs about a
+  quarter of what it did, a whole word about half, and a search that matches
+  nothing about a fifth. Nothing about the ranking changed: the same files come
+  back in the same order.
+- **Quick open indexes 14,000 files rather than 20,000.** The number was never
+  measured; now it is. At 20,000 the scan took 80–85% of a frame on the machine
+  it was measured on, which leaves nothing for a slower one, and the curve is
+  flat between 12,000 and 14,000 — those two thousand files are free. **On a
+  workspace larger than the cap, files past it will not appear in quick open**,
+  which is the cost of the guarantee. `files.excludeFromExplorer` keeps
+  `node_modules`, `.git`, `target` and `dist` out of the count, so the cap is
+  further away than a directory listing suggests.
 
 ## [0.9.1] — 2026-08-24
 

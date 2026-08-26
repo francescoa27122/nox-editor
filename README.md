@@ -255,8 +255,8 @@ endings, the language, the wrap.
 
 ## Status
 
-**v0.9.** It's young, and it's a personal project rather than a product, but
-it's real software with 1985 tests and I use it. Expect rough edges, and open
+**v0.10.** It's young, and it's a personal project rather than a product, but
+it's real software with 2,060 tests and I use it. Expect rough edges, and open
 an issue if you hit one — and if you do, run **Copy Diagnostics** from the
 palette first. It puts the version, the platform and what recently went wrong
 on your clipboard, with your home directory stripped out of the paths.
@@ -293,8 +293,10 @@ See [ROADMAP.md](ROADMAP.md).
 
 Every release is driven before it ships. A test harness launches the packaged
 app on macOS, Windows and Linux and drives it the way you would — the window
-comes up, the menu bar is there, the palette opens on its chord and closes on
-<kbd>Esc</kbd> — on every change, on all three.
+comes up, the menu bar opens and switches between its menus, the palette opens
+on its chord and closes on <kbd>Esc</kbd>, a close prompt puts the keyboard on
+the safe answer rather than the destructive one — on every change, on all
+three.
 
 ## Under the hood
 
