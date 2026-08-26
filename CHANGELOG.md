@@ -16,6 +16,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing anywhere saying so. Distinct from `initializationOptions`, which is
   sent once before the server can do anything; this is asked for, whenever the
   server likes. A server with no `settings` block behaves exactly as before.
+- **A server that is indexing now says so.** rust-analyzer spends the first
+  half-minute on a cold project building its index, during which it is running
+  and answers nothing — no hover, no go-to-definition — and the only available
+  reading was that it was broken. The status bar now shows what it is doing and
+  how far in ("rust-analyzer — Indexing 3/840 20%"). Servers that report no
+  progress, tsserver among them, are unchanged.
 
 ## [0.9.1] — 2026-08-24
 

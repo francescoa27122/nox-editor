@@ -21,6 +21,7 @@ function row(overrides: Partial<SessionStatusRow> = {}): SessionStatusRow {
     languages: ['typescript', 'javascript'],
     error: null,
     stderr: [],
+    progress: [],
     ...overrides,
   };
 }
@@ -242,6 +243,7 @@ describe('announcing a failure', () => {
     languages: ['typescript'],
     error,
     stderr: [],
+    progress: [],
   });
 
   it('announces a failure the first time', () => {
@@ -279,5 +281,49 @@ describe('announcing a failure', () => {
     const { announce } = newlyFailed([row(), row({ name: 'rust-analyzer' })], new Set());
 
     expect(announce).toEqual([]);
+  });
+});
+
+/**
+ * Progress in the status line.
+ *
+ * The decision worth asserting is the *ordering*: a server that is indexing is
+ * `running` and answers nothing, so a line reading just its name is true and
+ * reads as broken. Progress therefore outranks a bare name and outranks
+ * "starting" — but not "failed", which is an alarm rather than a report.
+ */
+describe('a server that is busy', () => {
+  const busy = (over: Partial<SessionStatusRow> = {}) =>
+    row({ progress: [{ title: 'Indexing', message: '3/840', percentage: 20 }], ...over });
+
+  it('says what it is doing instead of only its name', () => {
+    expect(serverStatusLabel([busy()], 'typescript')).toBe(
+      'typescript-language-server — Indexing 3/840 20%',
+    );
+  });
+
+  it('says so while still initializing, rather than just "starting"', () => {
+    expect(serverStatusLabel([busy({ status: 'initializing' })], 'typescript')).toBe(
+      'typescript-language-server — Indexing 3/840 20%',
+    );
+  });
+
+  /** A dead server is an alarm and still outranks everything. */
+  it('does not hide a failure behind progress', () => {
+    const dead = row({ name: 'rust-analyzer', status: 'failed', error: 'no' });
+    expect(serverStatusLabel([busy(), dead], 'typescript')).toBe('rust-analyzer — failed');
+  });
+
+  it('goes back to the plain name once the work ends', () => {
+    expect(serverStatusLabel([row()], 'typescript')).toBe('typescript-language-server');
+  });
+
+  /**
+   * Progress on a server that has nothing to do with this file must not take
+   * over the line — the same relevance rule the rest of the label follows.
+   */
+  it('ignores progress from a server that does not serve this file', () => {
+    const other = busy({ name: 'rust-analyzer', languages: ['rust'] });
+    expect(serverStatusLabel([row(), other], 'typescript')).toBe('typescript-language-server');
   });
 });

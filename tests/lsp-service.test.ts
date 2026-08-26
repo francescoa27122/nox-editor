@@ -423,3 +423,81 @@ describe('answering a server that asks for its settings', () => {
     });
   });
 });
+
+/**
+ * `$/progress`, from the server saying so to the status row carrying it.
+ *
+ * The symptom: rust-analyzer indexes a cold project for thirty seconds before
+ * it can answer anything, and did so in silence. Hover returned nothing,
+ * definition returned nothing, and the only available reading was that the
+ * server was broken.
+ */
+describe('showing what a server is busy with', () => {
+  async function running() {
+    const { service, spawned } = await setup();
+    await service.start();
+    return { service, server: spawned[0]! };
+  }
+
+  const rowFor = (service: LspService) => service.sessions.get()[0]!;
+
+  it('carries work from begin to end', async () => {
+    const { service, server } = await running();
+    expect(rowFor(service).progress).toEqual([]);
+
+    server.say({
+      jsonrpc: '2.0',
+      method: '$/progress',
+      params: { token: 'idx', value: { kind: 'begin', title: 'Indexing' } },
+    });
+    expect(rowFor(service).progress).toEqual([{ title: 'Indexing' }]);
+
+    server.say({
+      jsonrpc: '2.0',
+      method: '$/progress',
+      params: { token: 'idx', value: { kind: 'report', message: '3/840', percentage: 20 } },
+    });
+    expect(rowFor(service).progress).toEqual([
+      { title: 'Indexing', message: '3/840', percentage: 20 },
+    ]);
+
+    server.say({
+      jsonrpc: '2.0',
+      method: '$/progress',
+      params: { token: 'idx', value: { kind: 'end' } },
+    });
+    expect(rowFor(service).progress).toEqual([]);
+  });
+
+  /**
+   * Server-initiated progress *starts* with the server asking to reserve a
+   * token, and a server refused there does not go on to send notifications. So
+   * a client that never answers this never sees progress at all, however well
+   * it handles `$/progress`.
+   */
+  it('lets the server reserve a progress token', async () => {
+    const { server } = await running();
+
+    server.say({
+      jsonrpc: '2.0',
+      id: 77,
+      method: 'window/workDoneProgress/create',
+      params: { token: 'idx' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const reply = server.written.find((message) => message.id === 77) as
+      | { result?: unknown; error?: unknown }
+      | undefined;
+    expect(reply?.error).toBeUndefined();
+    expect(reply).toHaveProperty('result');
+  });
+
+  it('tells the server it can render progress', async () => {
+    const { server } = await running();
+    const initialize = server.written.find((message) => message.method === 'initialize');
+    expect(initialize?.params).toMatchObject({
+      capabilities: { window: { workDoneProgress: true } },
+    });
+  });
+});

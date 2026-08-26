@@ -1,6 +1,7 @@
 import type { LspPosition } from '@core/lsp-position';
 import { Signal } from '@core/signal';
 import { configurationReply } from '@core/lsp-configuration';
+import { applyProgress, progressEvent, type WorkDone } from '@core/lsp-progress';
 import { pathToUri, uriToPath } from '@core/uri';
 import type { LanguageServerProcess, Platform } from '@platform/types';
 import type { WorkspaceService } from '@services/workspace';
@@ -46,6 +47,16 @@ export interface SessionStatusRow {
   /** Why it failed, when it did. */
   error: string | null;
   stderr: readonly string[];
+  /**
+   * What the server is busy with, oldest first.
+   *
+   * Empty for a server that is idle or one that never reports progress, which
+   * is most of them — tsserver says nothing here. It is rust-analyzer and
+   * gopls that spend thirty seconds indexing before they can answer anything,
+   * and this is the difference between that looking like work and looking
+   * like a hang.
+   */
+  progress: readonly WorkDone[];
 }
 
 export interface LspServiceOptions {
@@ -71,6 +82,8 @@ interface Running {
   sync: DocumentSync;
   /** URIs this server has published anything for. */
   published: Set<string>;
+  /** Work-done progress in flight, keyed by token. Replaced, never mutated. */
+  progress: ReadonlyMap<string, WorkDone>;
   attempts: number;
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -199,6 +212,7 @@ export class LspService {
       session,
       sync: new DocumentSync(this.#workspace),
       published: new Set(),
+      progress: new Map(),
       attempts,
       timer: null,
     };
@@ -228,6 +242,28 @@ export class LspService {
     session.onRequest('workspace/configuration', (params) =>
       Promise.resolve(configurationReply(params, config.settings)),
     );
+
+    /**
+     * Reserving a progress token. The reply is the whole handler — there is
+     * nothing to set up, because `$/progress` carries the token again and
+     * `applyProgress` keys on it.
+     *
+     * It exists to be *refusable*: a client that cannot render progress should
+     * say so here, and a server that is refused does not then flood the
+     * connection with notifications nobody reads. Answering it is also what
+     * makes `LspSession` advertise `window.workDoneProgress`.
+     */
+    session.onRequest('window/workDoneProgress/create', () => Promise.resolve(null));
+
+    session.onNotification('$/progress', (params) => {
+      const event = progressEvent(params);
+      if (!event) return;
+      const next = applyProgress(entry.progress, event);
+      // Republishing on every `report` is what makes a percentage move, and
+      // those arrive a few times a second at most — this is not a typing path.
+      entry.progress = next;
+      this.#publishStatus();
+    });
     session.onExit(() => this.#died(entry));
 
     await session.start();
@@ -320,6 +356,7 @@ export class LspService {
         languages: entry.config.languages,
         error: entry.session.error,
         stderr: entry.session.stderr,
+        progress: [...entry.progress.values()],
       })),
     );
   }
