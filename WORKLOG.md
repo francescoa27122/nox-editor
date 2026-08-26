@@ -8,6 +8,63 @@ are knowledge.**
 
 ---
 
+## 2026-08-25 (PC) — The walk items became assertions, and the harness found its own limit
+
+Production readiness **§1 closed** and the half of **§5 that is mine** (#146).
+
+§1's own fix read: *port the 17-item walk script into it, so the twelve UNSEEN
+rows become assertions rather than intentions.* Four of the twelve now are.
+**A4** (the destructive confirm focuses a safe choice), **C5** (the line-ending
+item flips and dirties) and **C8** (the sidebar chord) run against the packaged
+app on all three platforms; the suite went from four specs to eight. **C1** is
+in jsdom instead, for a reason worth keeping.
+
+**The WebDriver harness cannot deliver a right-click.** Established, not
+guessed: `element.click({ button: 'right' })` and the explicit W3C pointer
+sequence, on WebKitGTK, WebView2 and macOS — six attempts, every one reporting
+success, none producing a `contextmenu` event, while the other ten specs in the
+same run passed on all three engines. So the tab menu's contents, its shortcut
+hints and its suppression of the webview's own menu are asserted in
+`tests/tab-context-menu.test.ts`, and the gesture alone stays unverified in CI.
+
+That is §1's thesis appearing a second time. Phase 0 found the *manual*
+instrument dropped inputs — Escape, eaten at the OS level, which is half of why
+a defect was once filed against code that was fine. This found the *automated*
+one drops a different input. Both are written down rather than routed around —
+in the CI comment, the walk report's header, and the plan — because a suite
+that quietly stopped asserting C1 would look identical to one that never tried.
+
+§5 names the in-window menu bar as the freshest code on the least-verified
+platform, with two defects already to its name. `menu-bar.e2e.js` guards the
+real one — `7389643`, where `ContextMenu`'s click-away layer covered the bar's
+own titles so clicking a second menu dismissed instead of switching — using the
+observable that commit recorded, `aria-expanded` staying false on the second
+title. No geometry.
+
+**Every interaction was driven in the browser build before being written.**
+`cargo` is not installed here, so a Tauri build cannot run on this machine and
+these specs are CI-only by construction. Verifying the selectors, the
+`aria-expanded` transitions, the seven context-menu entries, the LF/CRLF flip,
+the sidebar toggle and the confirm dialog's focus against the real code first
+is what made ten of eleven pass on the first CI run. The eleventh is precisely
+the one that could not be verified that way: a synthesized right-click works in
+Chromium and in neither shipping webview.
+
+Verified: eslint 0 errors · vitest **2060 passed, 143 files** · svelte-check
+**989 files, 0 errors** · 11/11 CI.
+
+Next: **nothing in the production-readiness plan is open that is mine.** §1
+closed, §2 shipped in 0.9.0, §3 three-quarters with the fourth reclassified,
+§4 closed, §5 half. What is left of §5 is the Apple and Windows certificates
+(stop-list 4) and, blocked behind them, the install-and-update rehearsal — it
+needs two published releases with a reachable `latest.json`, and publishing a
+release is stop-list 6.
+
+Blocked: those two, and only those two.
+
+Confidence: high. The eight packaged-app specs ran green on three engines, and
+the one limitation found is recorded with the six attempts behind it.
+
 ## 2026-08-25 (PC) — The seam with no callers now has three
 
 Production readiness §3. `JsonRpcTransport.onRequest` was written with the LSP
