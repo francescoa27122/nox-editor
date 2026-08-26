@@ -8,6 +8,68 @@ are knowledge.**
 
 ---
 
+## 2026-08-25 (PC) — The corpus was the assumption, and it was wrong
+
+Closing the risk left open by #136. The answer changed the answer.
+
+**I reported the risk backwards.** #136 said the nine-character figure was
+"pessimistic by an unknown amount" because the synthetic corpus builds names
+from a sixteen-word vocabulary. The density claim was right and the direction
+was wrong. Against real paths that query matches **one file in 13,154**, not
+20% of them — but real paths are **71 characters** against the corpus's 42, and
+at the index cap the worst *real* query costs more than the synthetic one ever
+did. Lower density, longer paths, and the second wins.
+
+Two corpora had to be thrown away before one was honest. The first "real" set
+was 70% `node_modules`, which `files.excludeFromExplorer` removes by default —
+measuring what Nox does not index. The second applied the real excludes and is
+what the numbers below come from.
+
+**#138: `INDEX_MAX_FILES` 20,000 -> 14,000**, on the curve rather than a
+feeling:
+
+```
+    8,000   7.3- 8.0 ms   46-50% of a 16 ms frame
+   12,000   9.7-10.2      60-64%
+   14,000   9.8-10.4      61-65%
+   20,000  12.8-13.6      80-85%   (15.7 once, under load)
+```
+
+Flat between 12,000 and 14,000 — two thousand files for no more time — and
+80-85% leaves nothing for a slower machine.
+
+**The thing to remember about this constant**: 2.5x the files costs 1.7x the
+time, because the 4,000-survivor break in `fileRows` truncates the scan sooner
+as the index grows. So it is a *weak* lever, and that is exactly why it is the
+safe one. The survivor break has the better exchange rate if headroom is ever
+wanted again — but the two cost different things. `INDEX_MAX_FILES` decides
+which files quick-open can ever find; the survivor break decides how deep it
+looks for a particular query. Both are in the debt table.
+
+The walk's bound had never been asserted at all. Pinned now from both sides —
+a cap returning nothing would satisfy "at most 14,000" too — and
+mutation-checked against restoring 20,000.
+
+The trade, stated plainly because it is a real one: a workspace with more than
+14,000 indexable files now has files quick-open cannot find that it could
+before. That is the price of the frame guarantee, and it is why this was a
+decision put to the operator rather than a fix taken unilaterally.
+
+Verified: eslint 0 errors · vitest **1998 passed, 140 files** · svelte-check
+**982 files, 0 errors** · build green · 11/11 CI green.
+
+Next: **the typing path proper** — §4's last open bullet, still gated on the
+e2e harness, because measuring a keystroke in the editor needs a real
+`EditorView`. Everything measured across #134, #136 and #138 is a pure layer or
+a component's arithmetic.
+
+Blocked: nothing.
+
+Confidence: high. The lesson is cheap to state and was expensive to learn
+twice in one day — **a corpus is an assumption until it has been checked
+against the real thing**, and so is a benchmark's shape (#136) and an exclude
+list (#138).
+
 ## 2026-08-25 (PC) — Quick-open is back inside the frame
 
 The benchmark from #134 found it and #136 fixed it: a 16,000-path index cost
