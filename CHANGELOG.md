@@ -6,7 +6,7 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.10.0] — 2026-08-25
+## [0.10.0] — 2026-08-26
 
 Language servers stop guessing. This release is mostly about the three things
 Nox never said back to them: the settings you wrote, the commands only they can
