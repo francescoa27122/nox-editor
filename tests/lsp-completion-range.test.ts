@@ -3,7 +3,7 @@ import { CompletionContext } from '@codemirror/autocomplete';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createLspCompletionSource, type CompletionDeps } from '../src/editor/completion';
+import { createLspCompletionSource, type LspDeps } from '../src/editor/completion';
 import type { LspCompletionItem } from '../src/core/lsp-completion';
 import { installRangeRects } from './support/jsdom-layout';
 
@@ -33,7 +33,7 @@ const CURSOR = 20;
 /** What CodeMirror's own word match would give: the start of `ut`. */
 const WORD_START = 18;
 
-function deps(textEdit?: unknown, insertText?: string): CompletionDeps {
+function deps(textEdit?: unknown, insertText?: string): LspDeps {
   const item: LspCompletionItem = {
     label: 'REPLACED',
     kind: 17,
@@ -72,7 +72,7 @@ afterEach(() => {
  * the raw request-time numbers would be testing itself.
  */
 async function accept(
-  d: CompletionDeps,
+  d: LspDeps,
   before?: (v: EditorView) => { from: number; to: number },
 ): Promise<string> {
   const context = new CompletionContext(EditorState.create({ doc: DOC }), CURSOR, false);

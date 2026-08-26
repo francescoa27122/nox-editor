@@ -2,7 +2,7 @@ import type { Extension } from '@codemirror/state';
 import { hoverTooltip, type EditorView, type Tooltip } from '@codemirror/view';
 import { hoverBlocks, type HoverBlock } from '@core/lsp-hover';
 import { offsetAt, positionAt, type LspPosition } from '@core/lsp-position';
-import type { CompletionDeps } from './completion';
+import type { LspDeps } from './completion';
 
 /**
  * What the server says about the symbol under the pointer.
@@ -48,7 +48,7 @@ export function renderHover(blocks: readonly HoverBlock[]): HTMLElement {
 }
 
 export function createLspHoverSource(
-  deps: CompletionDeps,
+  deps: LspDeps,
 ): (view: EditorView, pos: number) => Promise<Tooltip | null> {
   return async (view, pos) => {
     const document_ = deps.documentOf();
@@ -93,6 +93,6 @@ export function createLspHoverSource(
 }
 
 /** The extension, for the pane's LSP compartment. */
-export function lspHoverExtension(deps: CompletionDeps): Extension {
+export function lspHoverExtension(deps: LspDeps): Extension {
   return hoverTooltip(createLspHoverSource(deps), { hoverTime: HOVER_TIME_MS });
 }

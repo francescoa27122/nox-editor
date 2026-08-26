@@ -265,6 +265,14 @@ export function noxTheme(options: ThemeOptions): Extension {
         fontFamily: 'var(--nox-font-ui)',
         fontSize: 'var(--nox-fs-sm)',
       },
+      // CodeMirror ships a glyph for each of its own thirteen completion
+      // types and none for `snippet`, which is Nox's. Without this the row
+      // keeps the reserved icon column and draws nothing in it, so a snippet
+      // reads as an item whose kind failed to load rather than as a snippet.
+      '.cm-completionIcon-snippet:after': {
+        content: "'⌗'",
+        color: 'var(--nox-accent)',
+      },
       '.cm-tooltip .cm-tooltip-arrow:before': { borderTopColor: 'var(--nox-border-strong)' },
       '.cm-tooltip .cm-tooltip-arrow:after': { borderTopColor: 'var(--nox-bg-raised)' },
 

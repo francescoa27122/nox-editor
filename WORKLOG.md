@@ -8,6 +8,83 @@ are knowledge.**
 
 ---
 
+## 2026-08-26 (PC) — Snippets, both kinds, and the cursor bug under them
+
+Asked for snippets; the word has two readings and the answer was both, because
+the expensive half is shared. **Your own**, from `snippets.json` — keyed by
+language with a `*` bucket, short form `"log": "template"` or long form with a
+description, array bodies so multi-line needs no escaping, `//` keys as
+comments. **The server's** — `snippetSupport` is now claimed in the handshake,
+which `lsp/session.ts` only permits when the handler exists, and it does.
+
+**The dialects differ in the one place that matters.** CodeMirror's parser
+matches braced fields only (`index.cjs:1482`), and LSP tab stops are bare. So
+the first working build expanded `${1:value}` correctly and left `$0` sitting
+in the buffer as text. `toCodeMirrorTemplate` is the translation: brace a bare
+stop, reduce `${1|a,b|}` to `${1:a}`, unescape `\$`. Variables are left
+exactly as written — deleting `$TM_FILENAME` silently is worse than showing it.
+
+**Tab needed no mode flag.** `snippet()` self-installs its keymap at
+`Prec.highest` via `appendConfig` the first time it runs in a buffer, so field
+navigation wins while a snippet is live and falls through to accept-completion
+and then indent when it is not. That effect is carried explicitly in the spec —
+dropping it inserts the text and loses every field.
+
+**The bug worth remembering is not the snippet one.** Merging
+`additionalTextEdits` with the completion into a single transaction was right,
+and the selection kept with it was not: it was the position
+`insertCompletionText` computed for a document containing *only* the
+completion. An import merged above moves everything down and nothing moved the
+cursor. **Accepting a completion from a server that sends its imports in the
+list left the caret inside the import at the top of the file** — rust-analyzer,
+gopls, pyright; tsserver sends on resolve and dodged it, which is why nothing
+caught it. Found by probing the merge before extending it, and confirmed with a
+throwaway test that printed cursor 11 in `import { x |` where 34 was right.
+
+The fix stops merging two change sets that describe the same document: apply
+the extra edits to a throwaway state, build the completion against *that*, and
+`compose`. One position is still mapped — the completion's start — and it maps
+with **assoc 1**, because an import at offset 0 and a completion at offset 0 is
+the degenerate case and the default association puts the completion before the
+import. That cost a second red test before it was right.
+
+**Two smaller things the tests caught rather than review**: a `Snippets` command
+category creates a menu group, and `menu-bar.test.ts` refuses a group the shared
+LAYOUT does not name — it now has a block inside **Code**. And the starter
+`snippets.json` failed its own parser until `//` keys were understood, which the
+test asserting the template is valid is exactly for.
+
+Shipped:    `src/core/snippets.ts` (parse, resolve, `toCodeMirrorTemplate`);
+            `src/services/snippets.ts`; `src/editor/completion.ts` (`withEdits`,
+            `snippetSpec`, snippet source, `LspDeps`/`CompletionDeps` split);
+            `src/editor/hover.ts`, `src/editor/theme.ts` (the icon);
+            `src/services/lsp/session.ts`; `src/services/menu.ts`;
+            `src/ui/EditorPane.svelte`; `src/app.ts` (service, two commands,
+            reload-on-save); `tests/snippets.test.ts`,
+            `tests/snippet-service.test.ts`, `tests/snippet-expansion.test.ts`;
+            README, ARCHITECTURE (decision + 3 debt rows), ROADMAP, CHANGELOG.
+Verified:   `npm test` 150 files / 2145 tests passed, three consecutive clean
+            runs · `npm run check` 1008 files, 0 errors 0 warnings ·
+            `npm run lint` 0 errors, 9 pre-existing warnings ·
+            `npm run build` 787 ms · `npm run test:editor` 2 passed.
+            Mutation-checked three of three: the default position association,
+            the template conversion, and unregistering the snippet source each
+            turn the matching test red.
+Next:       The plugin API, or custom themes. With snippets in, the plugin API
+            is the largest thing left on the v0.6 table — and it is the one that
+            is a permanent compatibility promise, so it wants its own design
+            pass rather than a session.
+Blocked:    Nothing.
+Confidence: High on the code, all of it driven through the real picker and the
+            real snippet lifecycle. Medium on one observation: during one full
+            run `tests/lsp-rendering.test.ts`'s completion case timed out at
+            `pending` under load. It passed three times alone and in three
+            later full runs, and there is no mechanism by which a synchronous
+            source delays `active` — but it is written down rather than
+            waved off.
+
+---
+
 ## 2026-08-26 (PC) — Eleven named languages that had never been highlighted
 
 `core/languages.ts` names 25 languages; `editor/languages.ts` had loaders for

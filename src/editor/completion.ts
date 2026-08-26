@@ -1,12 +1,23 @@
 import {
   autocompletion,
   completeAnyWord,
+  completeFromList,
   insertCompletionText,
+  pickedCompletion,
+  snippet,
+  snippetCompletion,
   type Completion,
   type CompletionResult,
   type CompletionSource,
 } from '@codemirror/autocomplete';
-import { EditorState, type ChangeSpec, type Extension } from '@codemirror/state';
+import {
+  ChangeSet,
+  EditorState,
+  Transaction,
+  type Extension,
+  type TransactionSpec,
+} from '@codemirror/state';
+import { toCodeMirrorTemplate, type Snippet } from '@core/snippets';
 import type { EditorView } from '@codemirror/view';
 import {
   documentationOf,
@@ -37,7 +48,14 @@ export interface CompletionLsp {
   requestFor<T>(languageId: string, method: string, params: unknown): Promise<T>;
 }
 
-export interface CompletionDeps {
+/**
+ * What a source backed by a language server needs.
+ *
+ * Separate from `CompletionDeps` so hover, and the two sources that never
+ * look at a snippet, ask for exactly what they use. Requiring `snippets` of
+ * a hover tooltip would be a lie in a type.
+ */
+export interface LspDeps {
   lsp: CompletionLsp;
   /**
    * The document the view is showing, or null.
@@ -47,6 +65,36 @@ export interface CompletionDeps {
    * rebuilt.
    */
   documentOf: () => { uri: string; languageId: string } | null;
+  /**
+   * The snippets that apply to what is being edited.
+   *
+   * A function of no arguments rather than of a language id: resolving which
+   * language a buffer is, and layering the wildcard set under it, is
+   * `SnippetService`'s job. This layer needs only the answer, and needs it to
+   * change under the extension without it being rebuilt - the same reason
+   * `documentOf` is a function.
+   *
+   * Also the reason it is not read off `documentOf().languageId`: that is null
+   * for a buffer with no path, and an untitled scratch buffer is exactly where
+   * a snippet earns its keep.
+   */
+}
+
+/** What the picker as a whole needs: the server's answers, and the user's own. */
+export interface CompletionDeps extends LspDeps {
+  /**
+   * The snippets that apply to what is being edited.
+   *
+   * A function of no arguments rather than of a language id: resolving which
+   * language a buffer is, and layering the wildcard set under it, is
+   * `SnippetService`'s job. This layer needs only the answer, and needs it to
+   * change under the extension without it being rebuilt.
+   *
+   * Also the reason it is not read off `documentOf().languageId`: that is null
+   * for a buffer with no path, and an untitled scratch buffer is exactly where
+   * a snippet earns its keep.
+   */
+  snippets: () => Snippet[];
 }
 
 interface CompletionProvider {
@@ -130,7 +178,100 @@ function startFor(
   return named;
 }
 
-export function createLspCompletionSource(deps: CompletionDeps): CompletionSource {
+/**
+ * A snippet expansion, as a spec rather than a dispatch.
+ *
+ * `snippet()` dispatches for itself, which is right everywhere except here:
+ * the expansion may have to travel in the same transaction as an auto-import,
+ * and two transactions would be two undo steps. A `dispatch` that captures is
+ * the only seam it offers, and what it builds - the changes, a selection over
+ * the first field, the effect that arms the field keymap - is exactly what a
+ * spec needs.
+ */
+function snippetSpec(
+  template: string,
+  completion: Completion,
+  state: EditorState,
+  from: number,
+  to: number,
+): TransactionSpec {
+  let captured: Transaction | undefined;
+  // Translated on the way in: a server's `$0` is a tab stop and CodeMirror's
+  // parser only reads braced ones. See `toCodeMirrorTemplate`.
+  snippet(toCodeMirrorTemplate(template))(
+    {
+      state,
+      dispatch: (transaction: Transaction) => {
+        captured = transaction;
+      },
+    },
+    completion,
+    from,
+    to,
+  );
+
+  const built = captured;
+  if (!built) throw new Error('the snippet produced no transaction');
+
+  return {
+    changes: built.changes,
+    selection: built.newSelection,
+    // Carries `setActive`, and the `appendConfig` that installs the snippet
+    // field, its `Prec.highest` Tab keymap and its pointer handler the first
+    // time a snippet runs in a buffer. Dropping it would insert the text and
+    // lose every field with it.
+    effects: built.effects,
+    annotations: [pickedCompletion.of(completion), Transaction.userEvent.of('input.complete')],
+    scrollIntoView: true,
+  };
+}
+
+/**
+ * Apply a completion together with the edits that must land with it.
+ *
+ * **The subtlety is the cursor, and it was wrong from the day imports landed.**
+ * The old shape merged both change sets into one spec and kept the selection
+ * `insertCompletionText` had computed - but that selection is a position in a
+ * document containing only the completion. An import merged in above it moves
+ * everything down and nothing moved the cursor with it, so accepting a
+ * completion from a server that sends `additionalTextEdits` *in the list* left
+ * the caret inside the import at the top of the file. tsserver sends them on
+ * resolve instead and never hit it; rust-analyzer, gopls and pyright do not.
+ *
+ * So the extra edits are applied to a throwaway state **first** and the
+ * completion is built against that. Its positions are then already final, and
+ * `compose` is the honest way to join two change sets where the second is
+ * expressed in the first's output - there is no position mapping left to get
+ * wrong.
+ */
+function withEdits(
+  view: EditorView,
+  extra: Change[],
+  from: number,
+  to: number,
+  build: (state: EditorState, from: number, to: number) => TransactionSpec,
+): void {
+  if (extra.length === 0) {
+    view.dispatch(build(view.state, from, to));
+    return;
+  }
+
+  const changes = ChangeSet.of(extra, view.state.doc.length);
+  const base = view.state.update({ changes }).state;
+  // Both ends map with assoc 1, and the start is the one that matters: an
+  // import is inserted at offset 0, and a completion at the top of an
+  // otherwise empty file starts there too. Mapping the start with the
+  // default assoc leaves it *before* the import, so the completion replaces
+  // the import it was supposed to travel with.
+  const spec = build(base, changes.mapPos(from, 1), changes.mapPos(to, 1));
+
+  view.dispatch({
+    ...spec,
+    changes: changes.compose(ChangeSet.of(spec.changes ?? [], base.doc.length)),
+  });
+}
+
+export function createLspCompletionSource(deps: LspDeps): CompletionSource {
   return async (context): Promise<CompletionResult | null> => {
     const document_ = deps.documentOf();
     if (!document_) return null;
@@ -224,7 +365,8 @@ export function createLspCompletionSource(deps: CompletionDeps): CompletionSourc
       if (
         item.additionalTextEdits === undefined &&
         !provider.resolveProvider &&
-        option.from === undefined
+        option.from === undefined &&
+        option.snippet === undefined
       ) {
         continue;
       }
@@ -233,27 +375,27 @@ export function createLspCompletionSource(deps: CompletionDeps): CompletionSourc
       const named = option.from;
 
       const insert = typeof option.apply === 'string' ? option.apply : option.label;
+      /** The server's own template, when it sent one. */
+      const template = option.snippet;
 
-      option.apply = (view: EditorView, _completion: Completion, from: number, to: number) => {
+      option.apply = (view: EditorView, completion: Completion, from: number, to: number) => {
         const known = trustedChanges(text, view.state.doc.toString(), item.additionalTextEdits);
+        const start = startFor(named, requestFrom, from, to);
 
-        // The completion itself goes in through the same helper CodeMirror's
-        // string `apply` uses, so the transaction carries `input.complete`
-        // and the `pickedCompletion` annotation exactly as it did before.
-        const main = insertCompletionText(view.state, insert, startFor(named, requestFrom, from, to), to);
-        if (known) {
-          // One transaction, so one undo: a symbol without its import is not
-          // a state the user asked for, and must not be one undo stops at.
-          view.dispatch({
-            ...main,
-            changes: [main.changes as ChangeSpec, ...known],
-          });
-          return;
-        }
+        // One transaction, so one undo: a symbol without its import is not a
+        // state the user asked for, and must not be one undo stops at. The
+        // completion itself goes in through CodeMirror's own machinery - the
+        // string-`apply` helper, or the snippet lifecycle - so the transaction
+        // carries `input.complete` and `pickedCompletion` exactly as before.
+        withEdits(view, known ?? [], start, to, (state, at, until) =>
+          template === undefined
+            ? insertCompletionText(state, insert, at, until)
+            : snippetSpec(template, completion, state, at, until),
+        );
 
-        // Nothing known yet. The completion lands **now** — the typing path
-        // never waits on a server — and the import follows if one arrives.
-        view.dispatch(main);
+        // The import follows if one arrives - the typing path never waits on a
+        // server. A late edit elsewhere does not disturb an open snippet: its
+        // fields are ranges, and ranges map through a change.
         if (!provider.resolveProvider) return;
 
         void resolve().then((answer) => {
@@ -312,7 +454,7 @@ export const WORD_COMPLETION_MAX_BYTES = 1024 * 1024;
  * `text`, which is CodeMirror's own signal for "this is only a word that
  * appears in your file".
  */
-export function createWordCompletionSource(deps: CompletionDeps): CompletionSource {
+export function createWordCompletionSource(deps: LspDeps): CompletionSource {
   return (context) => {
     if (context.state.doc.length > WORD_COMPLETION_MAX_BYTES) return null;
 
@@ -322,6 +464,42 @@ export function createWordCompletionSource(deps: CompletionDeps): CompletionSour
     }
 
     return completeAnyWord(context);
+  };
+}
+
+/**
+ * How far a snippet outranks a plain word of the same prefix.
+ *
+ * Small on purpose. A snippet you wrote should beat a word that merely
+ * appears in the file, and should not beat a language server's exact match -
+ * the server knows what is in scope and a snippet list does not.
+ */
+const SNIPPET_BOOST = 1;
+
+/**
+ * The user's own snippets, from `snippets.json`.
+ *
+ * Built per query rather than cached, which is affordable because the list is
+ * a person's own snippets - tens of entries, not thousands - and because the
+ * alternative is a cache this layer would have to be told to invalidate every
+ * time the file is saved. `completeFromList` does the prefix matching that
+ * every other source in the picker already gets.
+ */
+export function createSnippetCompletionSource(deps: Pick<CompletionDeps, 'snippets'>): CompletionSource {
+  return (context) => {
+    const available = deps.snippets();
+    if (available.length === 0) return null;
+
+    return completeFromList(
+      available.map((entry) =>
+        snippetCompletion(toCodeMirrorTemplate(entry.body), {
+          label: entry.prefix,
+          type: 'snippet',
+          boost: SNIPPET_BOOST,
+          ...(entry.description === undefined ? {} : { detail: entry.description }),
+        }),
+      ),
+    )(context);
   };
 }
 
@@ -353,6 +531,7 @@ export function completionExtension(deps: CompletionDeps): Extension {
    */
   const languageData = [
     { autocomplete: createLspCompletionSource(deps) },
+    { autocomplete: createSnippetCompletionSource(deps) },
     { autocomplete: createWordCompletionSource(deps) },
   ];
 

@@ -2200,6 +2200,56 @@ the wrong layer.
 
 ---
 
+### Snippets: one lifecycle, two dialects, and a translation between them
+
+Snippets arrived as one feature with two faces — the user's own, from
+`snippets.json`, and the language server's, once `snippetSupport` is claimed in
+the handshake. Only the *sources* differ; the expansion is CodeMirror's
+`snippet()` in both cases, which is the whole reason building them together
+cost barely more than building either.
+
+**The dialects are not the same, and the difference is not cosmetic.**
+CodeMirror's parser matches braced fields only — `${1}`, `${1:label}` — while
+LSP's tab stops are bare: `$0`, `$1`. A server's template therefore expanded
+its placeholders correctly and left `$0` sitting in the buffer as text.
+`core/snippets.ts#toCodeMirrorTemplate` is the translation, and it does three
+things and no more: braces a bare stop, reduces the protocol's
+`${1|a,b|}` choice to `${1:a}` because there is no picker to offer the rest,
+and unescapes `\$`. **Variables are deliberately untouched.** Nox substitutes
+none of them, and `$TM_FILENAME` left visible is a thing the author can see and
+fix; silently deleted, it is a thing they cannot.
+
+**The capability and the handler landed together**, which is the rule
+`lsp/session.ts` states about every claim it makes. `snippetSupport` was absent
+before this not as an oversight but because claiming it invites a server to
+send something Nox would have flattened.
+
+**A snippet may have to travel with an auto-import**, and `snippet()` dispatches
+for itself. Handing it a `dispatch` that captures is the only seam it offers,
+and what it builds — changes, a selection over the first field, the effect that
+installs the field keymap — is exactly a transaction spec. That effect is
+load-bearing: it carries the `appendConfig` that arms the `Prec.highest` Tab
+binding the first time a snippet runs in a buffer, so Tab moves between fields
+without Nox owning a mode flag, and falls through to accept-completion and then
+indent when no snippet is active.
+
+**Fixing that path uncovered an older bug.** Merging `additionalTextEdits` and
+the completion into one transaction was right — one undo — but the selection
+kept was the one `insertCompletionText` computed for a document containing only
+the completion. An import merged in above moves everything down and nothing
+moved the cursor with it, so **accepting a completion from a server that sends
+its imports in the list left the caret inside the import at the top of the
+file**. tsserver sends them on `completionItem/resolve` and never hit it;
+rust-analyzer, gopls and pyright do not. The fix stops merging two change sets
+that describe the same document: the extra edits are applied to a throwaway
+state first and the completion is built against that, so `compose` joins them
+and no position is mapped by hand. The one position that is mapped — the
+completion's start — maps with assoc 1, because an import inserted at offset 0
+and a completion starting at offset 0 are the degenerate case, and the default
+association puts the completion *before* the import it was meant to accompany.
+
+---
+
 ### Completion sources are registered, never overridden
 
 `autocompletion()` takes an `override` option, and using it was a defect that
@@ -2310,6 +2360,9 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
 | The word fallback is capped by size, not by work | It declines above 1 MB (§6) rather than scanning an interruptible slice, so a large file gets no word completions at all instead of the ones near the caret. Bounded in the harmless direction — the fallback is a convenience and a language server, where there is one, is unaffected — but the honest fix is a bounded scan around the viewport rather than a cliff. `completeAnyWord` offers no way to ask for one; it would mean Nox owning the scan. |
+| A snippet's choice syntax keeps only its first option | `${1|const,let|}` becomes `${1:const}`. CodeMirror's snippet fields have no picker attached, so the alternatives have nowhere to be shown, and a field the user can type over beats a literal `|const,let|` in their code. Offering the real thing means a completion source that fires on entering the field — buildable, and a bigger feature than the conversion it would sit inside. |
+| Snippet variables are not substituted | `$TM_FILENAME`, `$CURRENT_YEAR` and the rest are left exactly as written. Resolving them is a table of a dozen names and a clock; deleting them silently is worse than leaving them, so leaving them is what happens. Visible, and fixable by the person who wrote it. |
+| `snippets.json` is only reloaded when Nox saves it | The file lives in the config directory, which no watcher covers — `FileWatcherService` has one root and it is the workspace. Saving the file *in Nox* reloads it, because `workspace`'s `saved` event names the path; editing it in another program needs **Reload Snippets**. Watching a second root for one small file is the fix, and it is the same machinery `keybindings.json` and `servers.json` would want. |
 | Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default — so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
 | Servers run their own file watchers | Nox advertises no dynamic registration at all — not `workspace.didChangeWatchedFiles.dynamicRegistration`, and `synchronization.dynamicRegistration` is explicitly `false` — so a conforming server never sends `client/registerCapability` and falls back to watching files itself, which rust-analyzer and gopls both do. **That makes this conforming rather than broken**, and the mildest of the four items that waited on the server-request seam; the production-readiness plan's "they never get to" overstated it. What is lost is efficiency and consistency: N servers each running a watcher over the same tree, with their own ignore rules, rather than one `FileWatcherService` fanning out. Building it is a feature and not a handler — accept a registration, match its globs (`onPathsChanged` is already the right seam and `globToRegExp` already exists), derive created/changed/deleted, send `workspace/didChangeWatchedFiles`, honour `client/unregisterCapability` — and accepting a registration Nox would not honour is worse than never inviting one. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |

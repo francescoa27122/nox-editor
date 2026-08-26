@@ -40,6 +40,7 @@ function noServer(languageId = 'plaintext'): CompletionDeps {
       },
     },
     documentOf: () => ({ uri: `file:///w/main.${languageId}`, languageId }),
+    snippets: () => [],
   };
 }
 
@@ -52,6 +53,7 @@ function withServer(label: string): CompletionDeps {
         ({ items: [{ label, kind: 6, detail: '(from the server)' }] }) as T,
     },
     documentOf: () => ({ uri: 'file:///w/main.ts', languageId: 'typescript' }),
+    snippets: () => [],
   };
 }
 

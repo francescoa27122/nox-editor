@@ -193,6 +193,13 @@ export class LspSession {
             // Rename Symbol asks `prepareRename` first when the server offers
             // it; tsserver offers it only to a client that says it will ask.
             rename: { prepareSupport: true },
+            // Claimed because it is implemented. A server that sees this
+            // answers with `${1:arg}` templates rather than flat text, and
+            // `editor/completion.ts` expands them through CodeMirror's
+            // snippet lifecycle. Before it existed the templates were
+            // flattened on arrival, which is why this was absent — the rule
+            // below is that a claim and its handler land together.
+            completion: { completionItem: { snippetSupport: true } },
             // Say that a `CodeAction` object is understood, or a server is
             // entitled to answer with the pre-3.8 bare `Command` shape — which
             // is the half Nox cannot run. The `valueSet` is deliberately empty:

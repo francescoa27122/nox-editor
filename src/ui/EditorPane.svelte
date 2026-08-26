@@ -86,6 +86,17 @@
       if (!buffer?.path) return null;
       return { uri: pathToUri(buffer.path), languageId: buffer.languageId };
     },
+    /**
+     * Read per query rather than captured, so saving `snippets.json` reaches
+     * an open pane without anything being rebuilt. The language comes off the
+     * buffer directly rather than through `documentOf`, which is null for an
+     * untitled one - and an untitled scratch buffer is exactly where a snippet
+     * earns its keep.
+     */
+    snippets: () => {
+      const buffer = workspace.buffers.get().find((b) => b.id === currentId);
+      return buffer ? app.snippets.forLanguage(buffer.languageId) : [];
+    },
   };
   const lspExtensions = [
     completionExtension(lspDeps),

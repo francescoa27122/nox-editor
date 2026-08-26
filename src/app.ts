@@ -63,6 +63,7 @@ import {
   type OllamaAgentConfig,
 } from '@services/agent/config';
 import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
+import { SnippetService, SNIPPETS_FILE } from '@services/snippets';
 import { OllamaProvider } from '@services/agent/ollama';
 import type { AgentTransport } from '@services/agent/protocol';
 import type { AnswerExpectation, ModelProvider } from '@services/agent/provider';
@@ -153,6 +154,7 @@ export class NoxApp {
   readonly agentConfig: AgentConfigService;
   /** Language servers the user has configured in `servers.json`. */
   readonly serverRegistry: ServerRegistry;
+  readonly snippets: SnippetService;
   /** Failures already announced, so a republished status does not repeat one. */
   #reportedFailures = new Set<string>();
   /** The running servers, and the diagnostics they publish. */
@@ -259,6 +261,7 @@ export class NoxApp {
 
     this.agentConfig = new AgentConfigService(platform);
     this.serverRegistry = new ServerRegistry(platform);
+    this.snippets = new SnippetService(platform);
     this.lsp = LspService.spawnedBy(
       platform,
       this.workspace,
@@ -342,6 +345,7 @@ export class NoxApp {
     await this.keymap.loadUserRules();
     await this.agentConfig.load();
     await this.serverRegistry.load();
+    await this.snippets.load();
     await this.notes.load();
     this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
 
@@ -542,6 +546,34 @@ export class NoxApp {
 
     // A closed tab should not keep its "changed on disk" warning suppressed.
     this.workspace.events.on('buffer-closed', ({ id }) => this.watcher.clearWarning(id));
+
+    /**
+     * Saving `snippets.json` in Nox applies it.
+     *
+     * The name is checked before the directory because `configDir` is a round
+     * trip and every save would otherwise pay for it. A project file that
+     * happens to be called `snippets.json` fails the second check and costs
+     * nothing; the watcher never sees this file at all, since it lives in the
+     * config directory rather than the workspace.
+     */
+    this.workspace.events.on('saved', ({ path }) => {
+      if (path === null || basename(path) !== SNIPPETS_FILE) return;
+
+      void this.platform
+        .configDir()
+        .then(async (directory) => {
+          // Null is the browser build, which has no config directory — so the
+          // file that was saved cannot be the one this means.
+          if (directory === null || path !== join(directory, SNIPPETS_FILE)) return;
+          await this.snippets.load();
+          const error = this.snippets.error.get();
+          if (error) this.notifications.error('snippets.json could not be read', error);
+        })
+        .catch(() => {
+          // No config directory is the browser build, where the file cannot
+          // have been the one we mean.
+        });
+    });
 
     this.workspace.buffers.subscribe(() => {
       this.#updateWindowTitle();
@@ -1305,6 +1337,37 @@ export class NoxApp {
       'Edit servers.json, then run "Reload Language Servers"',
       'Each entry needs a command and the languages it serves.',
     );
+  }
+
+  /**
+   * Open `snippets.json` for editing, creating it with examples if absent.
+   *
+   * No "then reload" instruction, unlike `servers.json`: saving this file in
+   * Nox reloads it, because the cost of doing so is reading one small file and
+   * the cost of not doing so is editing a snippet and wondering why it did not
+   * change. Restarting a language server is a different price.
+   */
+  async openSnippetConfig(): Promise<void> {
+    try {
+      await this.snippets.ensureFile();
+    } catch (error) {
+      this.notifications.error(
+        'Could not create snippets.json',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const directory = await this.platform.configDir().catch(() => null);
+    if (!directory) {
+      this.notifications.info(
+        'Snippets live in snippets.json',
+        'The browser build keeps settings in the browser, so there is no file to open here.',
+      );
+      return;
+    }
+
+    await this.openPaths([join(directory, SNIPPETS_FILE)]);
   }
 
   /** Open `agents.json` for editing, creating it with an example if absent. */
@@ -2949,6 +3012,31 @@ export class NoxApp {
           }
           if (!this.workspace.setLanguage(active.id, arg)) return;
           this.notifications.info(`Editing as ${languageById(arg).name}`);
+        },
+      },
+      {
+        id: 'snippets.configure',
+        title: 'Edit Snippets',
+        category: 'Snippets',
+        keywords: ['snippets.json', 'template', 'tab stop', 'expand'],
+        capabilities: ['fs.create'],
+        run: () => this.openSnippetConfig(),
+      },
+      {
+        id: 'snippets.reload',
+        title: 'Reload Snippets',
+        category: 'Snippets',
+        keywords: ['snippets.json', 'refresh'],
+        run: async () => {
+          await this.snippets.load();
+
+          const error = this.snippets.error.get();
+          if (error) {
+            // The set that was working stays live - see `SnippetService`.
+            this.notifications.error('snippets.json could not be read', error);
+            return;
+          }
+          this.notifications.info('Snippets reloaded');
         },
       },
       {
