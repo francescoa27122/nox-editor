@@ -8,6 +8,65 @@ are knowledge.**
 
 ---
 
+## 2026-08-25 (PC) — The first word now has a number under it
+
+CLAUDE.md line 3 has always opened "A fast, dark, keyboard-first text editor".
+There were 1,986 tests and zero benchmarks. **Production readiness §4, closed**
+(#134).
+
+Two things, because one of them cannot gate. `npm run bench` reports durations
+against a 16 ms frame and gates nothing — §4 is explicit that shared runners are
+too noisy for wall-clock to mean anything. The gate is
+`tests/complexity.test.ts`, which measures a **ratio**: a runner three times
+slower moves both halves together and divides out, and what survives is the
+exponent, which is the risk §4 actually names.
+
+**The harness is where the work was.** Timing one call put four of the six
+guards between **0.02 ms and 0.32 ms** — that is scheduler jitter with an
+algorithm inside it, and worse, the fixed per-call overhead is identical at both
+sizes, so it *flattens* the ratio and hides the regression instead of finding
+it. It now calibrates iterations to an 8 ms floor, warms up, takes a minimum
+rather than a mean, and interleaves the two sizes so a runner that slows down
+mid-measurement does not land entirely on one side of the division.
+
+Budget **24x** at 8x the input, from **90 local measurements** spanning
+7.3x–12.4x. Quadratic at those sizes is ~64x.
+
+**Verified by planting regressions, and by the ones that did not fire.**
+Caught: the quadratic `applyEdits` that `replace.ts` warns about (138.4x), and
+a nested loop in `diffText` (51.2x). *Not* caught, which is the more useful
+half: disabling both trims in `diffLines`, a naive O(N*M) LCS after them, and a
+per-line `indexOf`. Myers is O((N+M)*D) and a one-line edit keeps D at 2, so the
+trim is a constant factor there rather than an exponent — **the first draft of
+that guard's comment claimed the opposite, and the probe is the only reason it
+does not still say so.** Worth remembering: a passing complexity guard says
+nothing until you have watched it fail.
+
+Both thresholds §4 names now carry their number and both hold. `doc.eq` is
+2.6 ms at the 2 MB `EXACT_DIRTY_LIMIT`; opening at the 64 MB `MAX_FILE_BYTES`
+costs 35.9 ms of renderer work — checked from one side only, since the IPC copy
+and peak memory are unmeasured and both argue for lowering rather than raising.
+
+**One finding, now debt:** `fuzzyFilter` over a 16,000-path index is **15.3 ms
+mean** against a 16 ms frame, so on a project that size quick-open *is* the
+frame. Nothing is quadratic — linear is the problem, because the work is
+proportional to an index that is the whole project.
+
+Verified: all 11 CI checks green first try, the guard included, on all four
+`web` legs (two OS x two Node) — which is the flakiness evidence that mattered.
+Locally 10/10 green in 3.0–4.3s · vitest unit **1992 passed, 140 files** ·
+stories 21 passed · eslint 0 errors · svelte-check **982 files, 0 errors** ·
+build green.
+
+Next: **the typing path proper.** §4's second bullet is still open and stated
+rather than pretended — measuring a keystroke needs a real `EditorView`, which
+gates it on the e2e harness. Everything measured so far is a pure layer.
+
+Blocked: nothing.
+
+Confidence: high. The numbers are measured, the budgets come from a
+distribution rather than a guess, and the guards have been watched failing.
+
 ## 2026-08-25 (PC) — The layering rules stopped being a promise
 
 `CLAUDE.md` said "Nothing lints this — it holds by review." It *did* hold: a
