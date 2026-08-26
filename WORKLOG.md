@@ -8,6 +8,106 @@ are knowledge.**
 
 ---
 
+## 2026-08-26 (PC) — The release page says what changed in it
+
+The gap 0.10.0 exposed, closed (#150) — **and the gap is not the one the last
+entry described.** That entry said `release.yml` hardcodes the body so "no
+release has ever said what changed in it". Reading all fourteen release bodies
+says otherwise:
+
+```
+hand-written notes   v0.2.0  v0.4.0  v0.4.1  v0.6.0  v0.10.0
+Install blurb only   v0.5.0  v0.5.1  v0.7.0  v0.8.0  v0.8.1
+                     v0.8.2  v0.8.3  v0.9.0  v0.9.1
+```
+
+Five of fourteen explain themselves. The other nine — **including the last
+eight consecutive releases before 0.10.0** — are the boilerplate and nothing
+else. So the defect was never "the workflow cannot say what changed"; it was
+that saying so was a manual step performed before publishing, and a manual
+step performed five times out of fourteen is a step that does not exist. That
+is a better argument for automating it than the one I inherited, and it is the
+true one. The commit message and #150's description carry the inherited
+version; the PR body has been corrected, the commit stands as written.
+
+`scripts/release-notes.mjs` reads one version's section out of `CHANGELOG.md`.
+The gate — already the job that refuses a tag whose three version files
+disagree — reads it, prints it into the run log, and publishes it as a job
+output the four build jobs hand to `tauri-action` above the Install text. A
+tag whose section is missing or empty now fails in about fifteen seconds
+rather than after twenty minutes of binaries. Node builtins only, because the
+step runs before `npm ci`.
+
+**The failure this is really guarding against is silent.** A typo in
+`needs.gate.outputs.notes` is not an error in Actions — an unknown output
+evaluates to the empty string, and the release ships with the Install blurb
+alone, which is exactly the state being left behind. So the suite asserts the
+two sides of that name against each other, and a planted typo fails it.
+
+**Five mutations, five caught**: keeping the link-reference block, letting
+`###` count as a version heading, dropping the empty-section check, dropping
+the CRLF handling, and the output typo. The CRLF one is not hypothetical —
+git checks this repository out with CRLF here and LF on the runner, and
+removing that handling also failed the spec that reads the *real* changelog.
+
+**The parser is driven as a child process, not imported.** The contract the
+workflow depends on is the exit code and the bytes on stdout; a function
+returning the right string while exiting 0 on a missing section would pass an
+import-based test and ship an empty page.
+
+**A workflow that only fires on `v*` tags cannot be verified by a PR**, which
+is the awkward part of this change and the reason for three extra checks:
+
+- The gate step's shell was *extracted from the YAML* and run locally against
+  a fake `$GITHUB_OUTPUT`. 46 lines of markdown round-trip byte-identically
+  through the heredoc; the failure path exits 1 having written zero bytes.
+- The one thing local work cannot answer — whether a multi-line job output
+  survives substitution into a `|` block scalar — was answered by a throwaway
+  workflow on a throwaway branch. **52 lines, `## Install` flush-left, all
+  five assertions green.** Branch deleted after.
+- `release.yml` was parsed with `python -c "import yaml"` before merging.
+  Nothing in CI parses it, and a syntax error there surfaces only at a tag.
+  **python with pyyaml is on this machine** even though the repo has no YAML
+  dependency; it is the only workflow-syntax check available here.
+
+Also: **the changelog's own link block was stale** — no `[0.10.0]` definition
+at all, and `[Unreleased]` still comparing from v0.9.1. Found while reading
+the file, fixed in the same commit.
+
+Verified: eslint 0 errors · vitest **2072 passed, 144 files** (from 2060) ·
+svelte-check **990 files, 0 errors** · build green · **11/11 CI**, merged.
+
+**Found while surveying the releases, not touched: `v0.9.1` is still a
+draft.** It was built and never published, like v0.1.0, v0.3.0, v0.4.2 and
+v0.4.3 before it — so its one fix reached nobody as a download, and the last
+entry's "0.9.1 updated fine" leaned on a release whose assets are not publicly
+reachable. The conclusion it supported survives anyway, because 0.10.0's own
+URLs were checked directly. Publishing it is stop-list 6; deleting it is not
+mine to decide either. Flagged, left alone.
+
+Known limitation, unverified rather than solved: a section containing a
+*relative* markdown link (`[ARCHITECTURE.md](ARCHITECTURE.md)`, as 0.1.0's
+does) may not resolve on a release page. No section since 0.2.0 has one, and I
+have not checked how GitHub renders it, so this is a thing to watch rather
+than a known defect.
+
+Next: **the three 0.10.0 LSP features have never met a real language server.**
+`tests/lsp-integration.test.ts` already drives a real `typescript-language-server`
+from `devDependencies` through handshake, diagnostics, completion, hover,
+definition, references, rename and formatting — and stops exactly short of the
+three things 0.10.0 shipped: `workspace/configuration`, `$/progress`, and
+`workspace/executeCommand` + `applyEdit`. Organize Imports is a real tsserver
+command, so at least two of the three are directly testable against it. This
+is a shipped claim with no evidence under it, which outranks any new feature.
+
+Blocked: the Apple and Windows certificates, and the install-and-update
+rehearsal behind them. Unchanged.
+
+Confidence: high on what shipped. Lower, and deliberately so, on inherited
+prose: the premise this session started from was wrong in a way that only
+reading all fourteen release bodies could show, and it had already been
+written down twice.
+
 ## 2026-08-26 (PC) — 0.10.0 is out
 
 Tagged and published on the operator's explicit instruction. Normally the tag
