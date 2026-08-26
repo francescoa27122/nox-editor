@@ -4,7 +4,7 @@
   import { basename, dirname, relative } from '@core/path';
   import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
   import { createSymbolCache, symbolListState, type SymbolKind } from '@core/symbols';
-  import { cachedLanguage, hasGrammar } from '@editor/languages';
+  import { cachedLanguage, hasGrammar, hasSymbolStructure } from '@editor/languages';
   import type { Command } from '@services/commands';
   import { formatChord, normalizeChord } from '@services/keymap';
   import type { OverlayKind } from '@services/ui';
@@ -827,6 +827,7 @@
       language: buffer ? buffer.language.name : null,
       hasGrammar: buffer ? hasGrammar(buffer.language.id) : true,
       grammarLoaded: buffer ? cachedLanguage(buffer.language.id) !== null : true,
+      structuredGrammar: buffer ? hasSymbolStructure(buffer.language.id) : true,
       parsed: tree !== null,
       count: symbols.length,
     });
@@ -836,6 +837,11 @@
         return hintRow(
           `Nox has no parser for ${state.language}`,
           'Symbols come from the grammar, the same one syntax highlighting uses',
+        );
+      case 'no-structure':
+        return hintRow(
+          `Nox cannot list symbols in ${state.language} yet`,
+          'Its grammar colours the file but does not build the structure this reads',
         );
       case 'loading-grammar':
         return hintRow('Loading the grammar for this file', 'Reopen this list once it is ready');

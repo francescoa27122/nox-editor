@@ -375,6 +375,7 @@ export type SymbolListState =
   | { kind: 'no-grammar'; language: string }
   | { kind: 'loading-grammar' }
   | { kind: 'still-parsing' }
+  | { kind: 'no-structure'; language: string }
   | { kind: 'no-symbols' }
   | { kind: 'symbols'; partial: boolean };
 
@@ -386,6 +387,13 @@ export interface SymbolListFacts {
   hasGrammar: boolean;
   /** Whether that grammar has finished loading. */
   grammarLoaded: boolean;
+  /**
+   * Whether that grammar builds a tree, rather than only colouring tokens.
+   *
+   * A stream parser has no structure to scan, so its symbol count is always
+   * zero for reasons that have nothing to do with the file.
+   */
+  structuredGrammar: boolean;
   /** Whether the forced parse came back inside the palette's budget. */
   parsed: boolean;
   /** How many symbols the scan found. */
@@ -414,6 +422,10 @@ export function symbolListState(facts: SymbolListFacts): SymbolListState {
   if (facts.language !== null) {
     if (!facts.hasGrammar) return { kind: 'no-grammar', language: facts.language };
     if (!facts.grammarLoaded) return { kind: 'loading-grammar' };
+    // Also a grammar fact, and for the same reason as the two above it: a
+    // stream parser's scan comes back empty whatever the file contains, so
+    // reading the count first reports the file as bare.
+    if (!facts.structuredGrammar) return { kind: 'no-structure', language: facts.language };
   }
   if (facts.count === 0) return facts.parsed ? { kind: 'no-symbols' } : { kind: 'still-parsing' };
   return { kind: 'symbols', partial: !facts.parsed };

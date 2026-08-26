@@ -8,9 +8,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Opening any file no longer loads every grammar Nox ships.** The build put
+  all the parsers in one chunk, so opening a .json buffer downloaded and
+  parsed the JavaScript, HTML, CSS, Markdown, Python and Rust grammars too —
+  327 kB of them, and 640 kB once the eleven new ones landed. Each grammar is
+  now its own chunk: a .json file costs 2 kB and a .go file 31 kB.
 - **Completion now works in files with no language server, and in the three
-  languages that ship their own suggestions.** The completion extension was installed with
-  CodeMirror's `override` option, which *replaces* the suggestion sources a
+  languages that ship their own suggestions.** The completion extension was
+  installed with CodeMirror's `override` option, which *replaces* the sources a
   language contributes rather than adding to them. Nox bundles
   `@codemirror/lang-html`, `lang-css` and `lang-javascript`, each of which
   registers its own — HTML tags and attributes, CSS properties and values,
@@ -21,6 +26,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Syntax highlighting for the eleven languages Nox named and rendered flat.**
+  Go, Java, C, C++, PHP, SQL, XML, YAML, shell, TOML and Ruby have been in the
+  language list — in the status bar, in the language picker, matched by file
+  extension — since v0.1, and every one of them opened in plain grey. All
+  eleven now highlight. Shell, TOML and Ruby use stream parsers, which colour
+  the file without building a parse tree, so **Go to Symbol, sticky scroll and
+  folding stay empty in those three** — and Go to Symbol now says that, rather
+  than reporting a Ruby file full of classes as having nothing in it.
 - **Suggestions from the words already in the file**, as the floor under
   everything else. A language with no server — Go, YAML, shell, a plain text
   file, an untitled buffer — now completes from what you have already typed

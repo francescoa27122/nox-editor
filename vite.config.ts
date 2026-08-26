@@ -4,6 +4,9 @@ import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
+// @ts-expect-error — a build script, outside the tsconfig graph. Its own
+// module so `tests/chunks.test.ts` can hold it to its invariant.
+import { chunkFor } from './scripts/chunks.mjs';
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 const pkg = JSON.parse(readFileSync(r('./package.json'), 'utf8')) as { version: string };
@@ -46,14 +49,12 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: true,
-    // Chunk the language grammars so startup only pays for what it uses.
+    // Chunk the language grammars so startup only pays for what it uses —
+    // one chunk per grammar, which `scripts/chunks.mjs` explains and
+    // `tests/chunks.test.ts` enforces. A single chunk for all of them, which
+    // is what this was, made that comment false.
     rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (id.includes('@codemirror/lang-') || id.includes('@lezer/')) return 'grammars';
-          if (id.includes('@codemirror/')) return 'editor-engine';
-        },
-      },
+      output: { manualChunks: chunkFor },
     },
   },
   test: {
