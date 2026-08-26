@@ -243,6 +243,11 @@ jobs:
   # `enforce_admins` is on, so a leg that goes flaky blocks everyone with no
   # override. That is the argument for keeping this suite assertion-only and
   # free of geometry, and for adding platforms one record at a time.
+  #
+  # Eleven specs as of 2026-08-25, up from the original four. The additions are
+  # the walk items the 2026-08-20 manual pass marked UNSEEN (A4, C1, C5, C8)
+  # and the in-window menu bar, which production readiness §5 names as the
+  # freshest code in the product sitting on its least-verified platforms.
   e2e:
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
