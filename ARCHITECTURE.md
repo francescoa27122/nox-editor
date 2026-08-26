@@ -2153,6 +2153,11 @@ the wrong layer.
   was 20,000 until 2026-08-25 and came down on a measurement: scoring that many
   took 80-85% of a 16 ms frame per keystroke on the machine it was measured on,
   which leaves nothing for a slower one. `filetree.ts` carries the curve.
+- **The typing path:** a keystroke costs **0.34 ms** in a 16,000-line document
+  and the same at 64,000 — measured in chromium, 2026-08-25, best of seven
+  batched samples. Flat in document size because every editor extension is
+  viewport-bounded; `tests/browser/typing-path.test.ts` is what holds it that
+  way, and it catches a per-line document scan at 4.13x against a 3x budget.
 - **Fuzzy matching:** an optimal DP rather than a greedy scan. Greedy ranking is
   visibly wrong on paths — typing `path` should not match the scattered
   `p`,`a`,`t`,`h` across `src/core/…`. Inputs are short, so the DP is well

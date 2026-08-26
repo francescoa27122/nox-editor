@@ -8,7 +8,7 @@ A fast, dark, keyboard-first text editor. Tauri 2 (Rust) + Svelte 5 (runes) + Co
 npm test && npm run check && npm run lint
 ```
 
-`npm run bench` reports durations for the pure layers; nothing gates on them, and `tests/complexity.test.ts` is what actually holds those functions to their stated complexity in CI.
+`npm run bench` reports durations for the pure layers; nothing gates on them, and `tests/complexity.test.ts` is what actually holds those functions to their stated complexity in CI. `npm run test:editor` drives a real `EditorView` in chromium and is what holds the typing path flat in document size — the check behind `CONTRIBUTING.md` rule 5.
 
 Both are mandatory before pushing. CI also runs `npm run build` — it catches bundler-level breaks that neither tests nor `svelte-check` see, so run it before claiming a release-path change is good.
 

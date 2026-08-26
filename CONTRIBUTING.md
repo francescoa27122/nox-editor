@@ -73,12 +73,20 @@ Before adding work that runs per keystroke, per scroll or per cursor move, ask
 what it costs on a 10 MB file. Prefer viewport-bounded work
 (`view.visibleRanges`), debouncing, or doing it in Rust.
 
-Two things help you answer that rather than guess. `npm run bench` reports
+Three things help you answer that rather than guess. `npm run bench` reports
 durations for the pure layers against a 16 ms frame — read it, nothing gates
 on it. `tests/complexity.test.ts` *does* gate: it measures how each function's
 cost grows with its input and fails if the exponent moves, which is the one
 performance property a shared CI runner can check honestly. If you add a
 function to a hot path, add it there too.
+
+And `npm run test:editor` gates **this rule specifically**. It drives a real
+`EditorView` in chromium and asserts a keystroke costs the same in a
+16,000-line document as in a 2,000-line one — flat is what viewport-bounded
+work looks like, and a document-wide scan is what it is not. A keystroke
+currently costs **0.34 ms** at 16,000 lines and does not move at 64,000. It
+cannot run under jsdom, which measures everything as zero; that is why it is a
+browser project rather than another file in `tests/`.
 
 ---
 

@@ -130,6 +130,22 @@ jobs:
         if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
         run: npm run test:stories
 
+      # The typing path, in the chromium the step above already installed.
+      # This is the check behind CONTRIBUTING.md rule 5 - "nothing new on the
+      # typing path" - which was enforced by review alone until 2026-08-25.
+      # It asserts a keystroke costs the same in a 16,000-line document as in a
+      # 2,000-line one, which is what viewport-bounded work looks like and what
+      # a document-wide scan is not.
+      #
+      # It cannot run under jsdom and that is not a preference: jsdom returns
+      # zeros from every measurement CodeMirror makes (see
+      # tests/support/jsdom-layout.ts), and viewport calculation and layout are
+      # most of what a keystroke costs. One leg, for the same reason as the two
+      # steps above - the answer does not differ by platform or Node version.
+      - name: Test the typing path
+        if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
+        run: npm run test:editor
+
   rust:
     name: rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
