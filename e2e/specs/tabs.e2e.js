@@ -23,6 +23,23 @@ async function waitForBoot() {
   await $('.nox-statusbar').waitForExist({ timeout: 60_000 });
 }
 
+/**
+ * Right-click the first tab.
+ *
+ * The explicit W3C pointer sequence rather than `click({ button: 'right' })`,
+ * which reported success on both engines and produced no `contextmenu` event
+ * at all — the menu never opened, on WebKitGTK and on WebView2 alike.
+ */
+async function rightClickTab() {
+  const tab = await $('.tab');
+  await browser
+    .action('pointer', { parameters: { pointerType: 'mouse' } })
+    .move({ origin: tab })
+    .down({ button: 2 })
+    .up({ button: 2 })
+    .perform();
+}
+
 describe('the tab context menu', () => {
   before(async () => {
     await waitForBoot();
@@ -50,7 +67,7 @@ describe('the tab context menu', () => {
   });
 
   it('opens on a right-click, with its full set of entries', async () => {
-    await $('.tab').click({ button: 'right' });
+    await rightClickTab();
     await $('.menu').waitForExist({ timeout: 10_000 });
 
     const elements = await $$('.menu .item .label');
@@ -82,7 +99,7 @@ describe('the tab context menu', () => {
    * nothing. Asserting one exists is asserting that path ran.
    */
   it('shows the keyboard shortcut beside an entry that has one', async () => {
-    await $('.tab').click({ button: 'right' });
+    await rightClickTab();
     await $('.menu').waitForExist({ timeout: 10_000 });
 
     const hints = await $$('.menu .item .hint');
@@ -92,7 +109,7 @@ describe('the tab context menu', () => {
   it('closes on Escape without acting on anything', async () => {
     const before = (await $$('.tab')).length;
 
-    await $('.tab').click({ button: 'right' });
+    await rightClickTab();
     await $('.menu').waitForExist({ timeout: 10_000 });
     await browser.keys(['Escape']);
     await $('.menu').waitForExist({ reverse: true, timeout: 10_000 });
