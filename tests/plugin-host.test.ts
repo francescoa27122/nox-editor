@@ -301,6 +301,71 @@ describe('when a plugin fails', () => {
   });
 });
 
+describe('status items', () => {
+  /** A plugin that puts something on the bar as soon as it is running. */
+  function announcer(text = 'ready') {
+    return fakePlugin((message, send) => {
+      const id = message.id as number;
+      if (message.method === 'command.invoke') {
+        send({ id: 42, method: 'status.set', params: { name: 'state', text } });
+        send({ id, ok: true });
+      }
+    });
+  }
+
+  it('appear on the bar, namespaced to the plugin', async () => {
+    const { commands, host } = setup({ plugin: announcer() });
+
+    await commands.execute('plugin.demo.run');
+
+    await vi.waitFor(() => {
+      expect(host.status.items.get()).toHaveLength(1);
+      expect(host.status.items.get()[0]?.id).toBe('plugin.demo.state');
+    });
+  });
+
+  it('are taken back when the plugin dies', async () => {
+    const plugin = announcer();
+    const { commands, host } = setup({ plugin });
+
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(host.status.items.get()).toHaveLength(1));
+
+    plugin.die(1);
+
+    // A readout stops being true the moment the thing reporting it stops, and
+    // there is nothing left running to correct it.
+    expect(host.status.items.get()).toEqual([]);
+  });
+
+  it('are taken back when the plugin is stopped', async () => {
+    const { commands, host } = setup({ plugin: announcer() });
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(host.status.items.get()).toHaveLength(1));
+
+    await host.stopAll();
+
+    expect(host.status.items.get()).toEqual([]);
+  });
+});
+
+describe('activation', () => {
+  it('leaves a `command` plugin alone until one is invoked', () => {
+    const { plugin } = setup();
+
+    expect(plugin.written).toHaveLength(0);
+  });
+
+  it('starts a `startup` plugin at load, because its items need it running', async () => {
+    const plugin = fakePlugin(() => {});
+    const { host } = setup({ manifest: manifestFor({ activation: 'startup' }), plugin });
+
+    // A status item's content is only known to running code, so a plugin that
+    // sets one can never be woken by a command the way a lazy one is.
+    await vi.waitFor(() => expect(host.stateOf('demo')).toBe('running'));
+  });
+});
+
 describe('stopping', () => {
   it('kills what is running and takes every command back', async () => {
     const { commands, host, plugin } = setup();

@@ -73,6 +73,26 @@ describe('the shape of a manifest', () => {
   });
 });
 
+describe('activation', () => {
+  it('waits for a command by default', () => {
+    const parsed = parse(MINIMAL);
+    expect(parsed.ok && parsed.manifest.activation).toBe('command');
+  });
+
+  it('takes `startup` for a plugin that has to be running to be useful', () => {
+    // A status item's content is only known to running code, so a plugin that
+    // puts one on the bar cannot be started lazily by one.
+    const parsed = parse({ ...MINIMAL, activation: 'startup' });
+    expect(parsed.ok && parsed.manifest.activation).toBe('startup');
+  });
+
+  it('refuses a word it does not know rather than defaulting quietly', () => {
+    // Defaulting would start a plugin lazily that asked to start eagerly, and
+    // the symptom would be a status item that never appears.
+    expect(parse({ ...MINIMAL, activation: 'eager' }).ok).toBe(false);
+  });
+});
+
 describe('the id', () => {
   it('refuses anything that is not a plain lowercase name', () => {
     // The id becomes part of a command id and part of a policy key. A dot

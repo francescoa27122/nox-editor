@@ -120,9 +120,37 @@ listen.
    line is replayed the moment a handler attaches, which is one statement
    before `#awaitHello` installs its waiter. `helloVersion` closes it.
 
+## Status items *(added the same day)*
+
+Runtime, not declared: an item's *content* is only known to running code. That
+forced the one new manifest field, `"activation": "startup" | "command"`.
+`command` stays the default and the one to want — the plugin sleeps until one
+of its commands is invoked — but a plugin that puts something on the bar cannot
+be woken by a command, because it has to already be running to have put
+anything there. Written down rather than inferred, so the cost is visible to
+whoever installs it.
+
+**Every limit on the store is about the bar being a shared row with no
+scrollbar.** Three items per plugin, forty characters each, and plugin items
+always drawn *after* Nox's own — a plugin appearing mid-session must not slide
+the Save-all button out from under the pointer. An unchanged `set` does not
+emit, so a plugin that polls and reports the same thing costs nothing.
+
+Items are taken back on every path that stops a plugin: exit, disable, and
+`stopAll`. A crashed plugin otherwise leaves a readout asserting something that
+stopped being true, with nothing running to correct it.
+
+**Nox pushes no events to plugins, and this is where that first bites.** There
+is no "the buffer changed" message — a plugin woken per keystroke is exactly
+what the out-of-process architecture exists to prevent — so an item changes
+only when the plugin does something: at startup, when one of its commands runs,
+or on a timer it owns. A readout that tracks the editor live is not something
+this API can do, and `examples/plugins/counter/` says so rather than implying
+otherwise.
+
 ## Deliberately not in this pass
 
-Status items, sidebar panels, declarative editor decorations, plugin settings,
+Sidebar panels, declarative editor decorations, plugin settings,
 and any install flow. `SidebarView` is a closed union and `Sidebar.svelte`'s
 `VIEWS` is a hardcoded table; opening those up is its own work. Promising the
 whole roadmap row in one pass is exactly the compatibility promise 1.0 was

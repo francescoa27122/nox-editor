@@ -11,6 +11,7 @@
   const { workspace, config, commands, files, jobs, review, ui, lsp, keymap, agentConfig, agents } =
     app;
   const diagnostics = lsp.diagnostics;
+  const pluginStatus = app.plugins.status.items;
   const problemCounts = $derived(problemTotals($diagnostics));
 
   /**
@@ -246,6 +247,30 @@
         {active.externalState === 'deleted' ? 'Deleted on disk' : 'Changed on disk'}
       </button>
     {/if}
+
+    <!--
+      Plugin items, last on this side.
+
+      Last because everything above is Nox's own and must not move when a
+      plugin appears: the row is shared, and a plugin that arrives mid-session
+      should not slide the Save-all button out from under the pointer. A plugin
+      may own three of these at most, each capped in length — see
+      `services/plugin/status.ts`, where the reason is that this bar cannot
+      scroll.
+    -->
+    {#each $pluginStatus as item (item.id)}
+      {#if item.command}
+        <button
+          class="item plugin"
+          title={item.tooltip ?? item.text}
+          onclick={() => void commands.execute(item.command ?? '')}
+        >
+          {item.text}
+        </button>
+      {:else}
+        <span class="item static plugin" title={item.tooltip ?? item.text}>{item.text}</span>
+      {/if}
+    {/each}
   </div>
 
   <div class="side right">
@@ -390,6 +415,17 @@
     transition:
       background var(--nox-dur-fast) var(--nox-ease),
       color var(--nox-dur-fast) var(--nox-ease);
+  }
+
+  /*
+     Plugin items read as Nox's own except for this: a plugin should not be
+     able to pass its readout off as the editor's, and a leading mark is the
+     smallest thing that says whose it is without a second row of chrome.
+  */
+  .item.plugin::before {
+    content: '2';
+    color: var(--nox-accent-dim);
+    font-size: 9px;
   }
 
   button.item:hover {

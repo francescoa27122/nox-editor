@@ -33,10 +33,26 @@ export interface ContributedCommand {
   title: string;
 }
 
+/**
+ * When a plugin should be started.
+ *
+ * `command` is the default and the one to want: the plugin stays unstarted
+ * until one of its commands is first invoked, so a plugin nobody uses costs a
+ * directory read and nothing else.
+ *
+ * `startup` exists because some contributions cannot be declared. A status
+ * item's *content* is only known to running code, so a plugin that puts one on
+ * the bar has to be running to have put anything there. Written down in the
+ * manifest rather than inferred, so the cost is visible to whoever installs it
+ * rather than a consequence of a feature they did not notice being used.
+ */
+export type Activation = 'command' | 'startup';
+
 export interface PluginManifest {
   id: string;
   label: string;
   entry: PluginEntry;
+  activation: Activation;
   /** Every capability its commands may use. Validated whole; see above. */
   capabilities: string[];
   commands: ContributedCommand[];
@@ -199,6 +215,15 @@ export function parseManifest(value: unknown, knownCapabilities: ReadonlySet<str
   const entry = entryOf(record);
   if (typeof entry === 'string') return { ok: false, reason: `plugin "${id}" ${entry}` };
 
+  const declaredActivation = record.activation;
+  if (declaredActivation !== undefined && declaredActivation !== 'command' && declaredActivation !== 'startup') {
+    // Named back only when it is a word. An object stringifies to
+    // `[object Object]`, which tells the author nothing they did not know.
+    const named = typeof declaredActivation === 'string' ? ` "${declaredActivation}"` : '';
+    return { ok: false, reason: `plugin "${id}" has an unknown activation${named}` };
+  }
+  const activation: Activation = declaredActivation ?? 'command';
+
   const capabilities = capabilitiesOf(record, knownCapabilities);
   if (typeof capabilities === 'string') {
     return { ok: false, reason: `plugin "${id}" ${capabilities}` };
@@ -207,5 +232,5 @@ export function parseManifest(value: unknown, knownCapabilities: ReadonlySet<str
   const problems: string[] = [];
   const commands = commandsOf(record, problems);
 
-  return { ok: true, manifest: { id, label, entry, capabilities, commands }, problems };
+  return { ok: true, manifest: { id, label, entry, activation, capabilities, commands }, problems };
 }
