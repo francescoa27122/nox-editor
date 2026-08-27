@@ -126,6 +126,7 @@ function setup(options: HarnessOptions = {}) {
     stage: () => true,
     notify: (title, detail) => notifications.push({ title, detail }),
     showPanel: (viewId) => shown.push(viewId),
+    documentLength: () => 100,
     connect: async () => {
       // The greeting arrives unprompted, the way a real plugin's does: it is
       // the first thing written, before anything is asked of it.
@@ -137,6 +138,7 @@ function setup(options: HarnessOptions = {}) {
     },
     handshakeTimeoutMs: 50,
     invokeTimeoutMs: 50,
+    changeDebounceMs: 10,
   });
 
   host.load([{ manifest: options.manifest ?? manifestFor(), directory: '/w/.nox/plugins/demo' }]);
@@ -429,6 +431,86 @@ describe('panels', () => {
     // The rail button stays — it came from the manifest and the panel can be
     // refilled. What goes is content that stopped being true.
     expect(host.panels.contents.get().size).toBe(0);
+  });
+});
+
+describe('decorations', () => {
+  /** A plugin that decorates on demand, and again whenever told to. */
+  function decorator() {
+    return fakePlugin((message, send) => {
+      const id = message.id as number;
+      if (message.method === 'command.invoke' || message.method === 'document.changed') {
+        send({
+          id: 900,
+          method: 'editor.decorate',
+          params: { bufferId: 'b1', ranges: [{ from: 0, to: 5, kind: 'warning' }] },
+        });
+        send({ id, ok: true });
+      }
+    });
+  }
+
+  it('stores what a plugin asked to have drawn', async () => {
+    const { host, commands } = setup({ plugin: decorator() });
+
+    await commands.execute('plugin.demo.run');
+
+    await vi.waitFor(() => expect(host.decorations.forBuffer('b1')).toHaveLength(1));
+  });
+
+  it('tells a plugin when a buffer it decorated goes quiet', async () => {
+    const plugin = decorator();
+    const { host, commands } = setup({ plugin });
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(host.decorations.forBuffer('b1')).toHaveLength(1));
+
+    host.noteDocumentChanged('b1');
+
+    // Debounced: the plugin hears once, after the typing stops.
+    await vi.waitFor(() =>
+      expect(plugin.written.some((m) => m.method === 'document.changed')).toBe(true),
+    );
+  });
+
+  it('says nothing about a buffer the plugin never decorated', async () => {
+    const plugin = decorator();
+    const { host, commands } = setup({ plugin });
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(host.decorations.forBuffer('b1')).toHaveLength(1));
+    const before = plugin.written.filter((m) => m.method === 'document.changed').length;
+
+    host.noteDocumentChanged('somewhere-else');
+
+    // It decorated `b1` and nothing else, so typing in another buffer is not
+    // its business. This is what keeps the channel from becoming an ambient
+    // event feed — which is the thing being out of process exists to prevent.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(plugin.written.filter((m) => m.method === 'document.changed')).toHaveLength(before);
+  });
+
+  it('coalesces a burst of typing into one notification', async () => {
+    const plugin = decorator();
+    const { host, commands } = setup({ plugin });
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(host.decorations.forBuffer('b1')).toHaveLength(1));
+
+    for (let i = 0; i < 20; i++) host.noteDocumentChanged('b1');
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    // Twenty keystrokes, one wake-up. The debounce is the whole reason a
+    // plugin is not on the typing path.
+    expect(plugin.written.filter((m) => m.method === 'document.changed')).toHaveLength(1);
+  });
+
+  it('takes its marks back when the plugin dies', async () => {
+    const plugin = decorator();
+    const { host, commands } = setup({ plugin });
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(host.decorations.forBuffer('b1')).toHaveLength(1));
+
+    plugin.die(1);
+
+    expect(host.decorations.forBuffer('b1')).toEqual([]);
   });
 });
 

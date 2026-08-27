@@ -38,6 +38,7 @@
   import { onGitGutterClick, setGitGutter } from '@editor/git-gutter';
   import { gutterLines } from '@core/git-gutter';
   import { applyDiagnostics } from '@editor/lsp';
+  import { applyPluginDecorations } from '@editor/plugin-decorations';
   import { pathToUri } from '@core/uri';
   import { useApp } from './context';
   import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
@@ -133,7 +134,14 @@
 
         publishCursor();
         find.refresh();
-        if (docChanged) scheduleAutosave();
+        if (docChanged) {
+          scheduleAutosave();
+          // Beside the autosave timer because it is the same shape and the
+          // same cost: one call that resets one timer. Plugins hear about
+          // this once the typing stops, and only the ones that already
+          // decorated this buffer hear about it at all.
+          app.plugins.noteDocumentChanged(id);
+        }
       },
     });
 
@@ -183,6 +191,7 @@
     const offDiagnostics = lsp.diagnostics.subscribe(() => paintDiagnostics());
     // Same trap, same fix: keyed off `currentId`, painted from the pane.
     const offGit = app.git.hunks.subscribe(() => paintGitGutter());
+    const offDecorations = app.plugins.decorations.revision.subscribe(() => paintPluginMarks());
 
     syncToBuffer(activeId);
 
@@ -202,6 +211,7 @@
       offDispatcher();
       offDiagnostics();
       offGit();
+      offDecorations();
       if (autosaveTimer) clearTimeout(autosaveTimer);
       app.unregisterGroupView(groupId);
       view?.destroy();
@@ -236,6 +246,18 @@
     // No entry clears: the buffer may have just lost its last hunk, or the
     // view may still carry the previous buffer's marks after a swap.
     view.dispatch({ effects: setGitGutter.of(entry ? gutterLines(entry.hunks) : []) });
+  }
+
+  /**
+   * Draw whatever plugins have asked for in the buffer this view is showing.
+   *
+   * Keyed off `currentId` like the two above, and clearing when there is
+   * nothing — a view that has just swapped buffers would otherwise keep the
+   * marks of the file it was showing a moment ago.
+   */
+  function paintPluginMarks() {
+    if (!view || !currentId) return;
+    applyPluginDecorations(view, app.plugins.decorations.forBuffer(currentId));
   }
 
   function paintDiagnostics() {
@@ -298,6 +320,7 @@
     // state is still loaded lands on the wrong buffer.
     paintDiagnostics();
     paintGitGutter();
+    paintPluginMarks();
 
     publishCursor();
     find.attach(view);

@@ -125,6 +125,10 @@
   --nox-gutter-fg: #3d4657;
   --nox-gutter-active-fg: #93a2ba;
   --nox-match-bracket: rgba(125, 211, 224, 0.2);
+  /* A plugin's `highlight` decoration. Weaker than a search match and
+     weaker than the selection on purpose: a plugin's opinion about a
+     range should not outrank what the user is looking for or holding. */
+  --nox-plugin-highlight: rgba(125, 211, 224, 0.14);
   --nox-search-match: rgba(227, 179, 65, 0.22);
   --nox-search-match-active: rgba(227, 179, 65, 0.45);
 

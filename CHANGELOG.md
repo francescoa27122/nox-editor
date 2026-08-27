@@ -72,8 +72,20 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when you pick one, which is what turns a list of findings into a list of
   places to go. A plugin cannot send markup; Nox draws every pixel.
 
-  Deliberately narrow for now: commands, status items and panels. Drawing in
-  the editor comes next, and the reasoning is written down in
+  Finally, a plugin can **mark up the editor** — a linter's findings, a
+  spell-checker's doubts, anything worth pointing at. It names ranges and one
+  of four kinds (error, warning, info, highlight) and Nox draws them; it does
+  not get to pick colours or ship a stylesheet. Marks follow the text as you
+  type rather than vanishing on the first keystroke, and the whole cost of that
+  is flat in file size: with the maximum two thousand marks in a document, a
+  keystroke measured the same at 16,000 lines as at 2,000.
+
+  Decorating a buffer is also the one thing that gets a plugin told about
+  changes to it — once, after you stop typing, and only for files it has
+  already marked up. There is deliberately no way for a plugin to watch you
+  type.
+
+  The reasoning behind all of it is written down in
   `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
 
 - **Snippets.** Write your own in `snippets.json` — keyed by language, with a

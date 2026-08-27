@@ -4,6 +4,7 @@ import type { CommandRegistry } from '../commands';
 import type { Capability, Principal } from '../permissions';
 import type { Edit } from '../transactions';
 import type { BufferId } from '../workspace';
+import { PluginDecorationStore } from './decorations';
 import { panelViewId, PluginPanelStore } from './panels';
 import { PluginStatusStore } from './status';
 import {
@@ -98,9 +99,12 @@ export interface PluginHostDeps {
   notify(title: string, detail?: string): void;
   /** Switch the sidebar to a view id. Injected so the host stays UI-free. */
   showPanel(viewId: string): void;
+  /** A buffer's length, or null if there is no such buffer. */
+  documentLength(bufferId: string): number | null;
   connect(plugin: DiscoveredPlugin): Promise<PluginConnection>;
   handshakeTimeoutMs?: number;
   invokeTimeoutMs?: number;
+  changeDebounceMs?: number;
 }
 
 const HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -122,6 +126,16 @@ const INVOKE_TIMEOUT_MS = 60_000;
  * fail is a row in the palette that lies about what the editor can do.
  */
 const MAX_FAILURES = 3;
+
+/**
+ * How long a buffer must be quiet before a plugin hears that it changed.
+ *
+ * Long enough that a burst of typing is one notification rather than dozens,
+ * short enough that a decoration is not visibly stale after a pause. The same
+ * order as the git gutter's 300 ms recompute, which is the nearest thing Nox
+ * already does on this cadence.
+ */
+const CHANGE_DEBOUNCE_MS = 400;
 
 interface Loaded {
   plugin: DiscoveredPlugin;
@@ -163,8 +177,13 @@ export class PluginHost {
   /** What plugins have put in their panels. Owned here for the same reason. */
   readonly panels = new PluginPanelStore();
 
+  /** What plugins have asked to have drawn in the editor. Same lifetime. */
+  readonly decorations = new PluginDecorationStore();
+
   #deps: PluginHostDeps;
   #loaded = new Map<string, Loaded>();
+  /** One pending change notification per buffer. See `noteDocumentChanged`. */
+  #changeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(deps: PluginHostDeps) {
     this.#deps = deps;
@@ -324,6 +343,46 @@ export class PluginHost {
     entry.failures = 0;
   }
 
+  /**
+   * Note that a buffer changed, and tell whoever decorated it once it is quiet.
+   *
+   * **This is the whole of what plugins added to the per-edit path, and it is
+   * deliberately the cheapest version of it.** Per call: one map lookup, one
+   * `clearTimeout`, one `setTimeout`. No scan, nothing proportional to the
+   * document, and no plugin touched at all until the typing stops.
+   *
+   * The debounce is what keeps a plugin off the typing path proper: a burst
+   * of typing is one notification, after it ends.
+   */
+  noteDocumentChanged(bufferId: string): void {
+    const existing = this.#changeTimers.get(bufferId);
+    if (existing !== undefined) clearTimeout(existing);
+
+    this.#changeTimers.set(
+      bufferId,
+      setTimeout(() => {
+        this.#changeTimers.delete(bufferId);
+        void this.#announceChange(bufferId);
+      }, this.#deps.changeDebounceMs ?? CHANGE_DEBOUNCE_MS),
+    );
+  }
+
+  /** Tell every running plugin that had already decorated this buffer. */
+  async #announceChange(bufferId: string): Promise<void> {
+    for (const entry of this.#loaded.values()) {
+      // Only plugins that already decorated it. A plugin that has never shown
+      // an interest in a buffer is not woken by someone typing in it, which
+      // is what stops this becoming an ambient event channel.
+      if (!this.decorations.buffersFor(entry.plugin.manifest.id).includes(bufferId)) continue;
+      if (entry.state !== 'running' || !entry.connection) continue;
+
+      await this.#request(entry, entry.connection, {
+        method: 'document.changed',
+        params: { bufferId },
+      });
+    }
+  }
+
   /** Stop everything and take every contributed command back. */
   async stopAll(): Promise<void> {
     const running = [...this.#loaded.values()];
@@ -335,6 +394,7 @@ export class PluginHost {
         entry.dispose();
         this.status.clearFor(entry.plugin.manifest.id);
         this.panels.clearFor(entry.plugin.manifest.id);
+        this.decorations.clearFor(entry.plugin.manifest.id);
         this.#settleAll(entry, 'internal', 'Nox is shutting the plugin down');
         await entry.connection?.kill().catch(() => {});
       }),
@@ -375,6 +435,7 @@ export class PluginHost {
       // running to correct them, so they go with it.
       this.status.clearFor(entry.plugin.manifest.id);
       this.panels.clearFor(entry.plugin.manifest.id);
+      this.decorations.clearFor(entry.plugin.manifest.id);
       // Every question still outstanding dies with it. Without this an invoke
       // waits out its whole timeout on a process that is already gone.
       this.#settleAll(entry, 'internal', 'the plugin stopped');
@@ -562,6 +623,24 @@ export class PluginHost {
           this.panels.clear(entry.plugin.manifest.id, request.params.name);
           return await this.#reply(entry, { id: request.id, ok: true });
 
+        case 'editor.decorate': {
+          const length = this.#deps.documentLength(request.params.bufferId);
+          if (length === null) {
+            return await this.#reply(entry, failure(request.id, 'not-found', 'no such buffer'));
+          }
+
+          const dropped = this.decorations.set(
+            entry.plugin.manifest.id,
+            request.params.bufferId,
+            request.params.ranges,
+            length,
+          );
+          // The count goes back rather than being swallowed: a plugin whose
+          // marks half-appeared should be able to find out why without
+          // guessing at Nox's rules.
+          return await this.#reply(entry, { id: request.id, ok: true, result: { dropped } });
+        }
+
         case 'hello':
           // Answered in `#receive`. A second one is a plugin restating itself.
           return;
@@ -611,6 +690,7 @@ export class PluginHost {
       entry.dispose();
       this.status.clearFor(entry.plugin.manifest.id);
       this.panels.clearFor(entry.plugin.manifest.id);
+      this.decorations.clearFor(entry.plugin.manifest.id);
       void entry.connection?.kill().catch(() => {});
       entry.connection = null;
       this.#deps.notify(

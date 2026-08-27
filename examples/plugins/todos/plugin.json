@@ -1,0 +1,6 @@
+{
+  "id": "todos",
+  "label": "TODOs",
+  "worker": "main.js",
+  "commands": [{ "name": "mark", "title": "Mark TODOs in This File" }]
+}
