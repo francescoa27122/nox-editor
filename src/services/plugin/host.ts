@@ -4,6 +4,7 @@ import type { CommandRegistry } from '../commands';
 import type { Capability, Principal } from '../permissions';
 import type { Edit } from '../transactions';
 import type { BufferId } from '../workspace';
+import { panelViewId, PluginPanelStore } from './panels';
 import { PluginStatusStore } from './status';
 import {
   failure,
@@ -95,6 +96,8 @@ export interface PluginHostDeps {
     baseRevisions?: ReadonlyMap<BufferId, number>;
   }): boolean;
   notify(title: string, detail?: string): void;
+  /** Switch the sidebar to a view id. Injected so the host stays UI-free. */
+  showPanel(viewId: string): void;
   connect(plugin: DiscoveredPlugin): Promise<PluginConnection>;
   handshakeTimeoutMs?: number;
   invokeTimeoutMs?: number;
@@ -157,6 +160,9 @@ export class PluginHost {
    */
   readonly status = new PluginStatusStore();
 
+  /** What plugins have put in their panels. Owned here for the same reason. */
+  readonly panels = new PluginPanelStore();
+
   #deps: PluginHostDeps;
   #loaded = new Map<string, Loaded>();
 
@@ -177,8 +183,30 @@ export class PluginHost {
       const principal: Principal = { kind: 'plugin', pluginId: entry.manifest.id };
       const capabilities = entry.manifest.capabilities as readonly Capability[];
 
-      const dispose = this.#deps.commands.registerAll(
-        entry.manifest.commands.map((command) => ({
+      /**
+       * A panel's focus command, registered by Nox rather than the plugin.
+       *
+       * It shares the `plugin.<id>.<name>` space with contributed commands,
+       * which is why `parseManifest` drops a panel whose name a command
+       * already claimed: `CommandRegistry.register` throws on a duplicate id,
+       * so the collision would take the window down at load rather than
+       * merely confuse. Showing the panel is also what *starts* the plugin,
+       * which is what lets a plugin with a panel keep the lazy activation one
+       * with only commands has.
+       */
+      const panelCommands = entry.manifest.panels.map((panel) => ({
+        id: contributedCommandId(entry.manifest.id, panel.name),
+        title: `Show ${panel.title}`,
+        category: entry.manifest.label,
+        run: () => {
+          this.#deps.showPanel(panelViewId(entry.manifest.id, panel.name));
+          void this.showPanel(entry.manifest.id, panel.name);
+        },
+      }));
+
+      const dispose = this.#deps.commands.registerAll([
+        ...panelCommands,
+        ...entry.manifest.commands.map((command) => ({
           id: contributedCommandId(entry.manifest.id, command.name),
           title: command.title,
           category: entry.manifest.label,
@@ -190,7 +218,7 @@ export class PluginHost {
             await this.invoke(entry.manifest.id, command.name);
           },
         })),
-      );
+      ]);
 
       this.#loaded.set(entry.manifest.id, {
         plugin: entry,
@@ -217,6 +245,23 @@ export class PluginHost {
 
   stateOf(pluginId: string): PluginState | null {
     return this.#loaded.get(pluginId)?.state ?? null;
+  }
+
+  /**
+   * Every panel every loaded plugin declared.
+   *
+   * Read from manifests, so the rail can be drawn before anything has run —
+   * which is what keeps a plugin with a panel as lazy as one without.
+   */
+  panelContributions(): { pluginId: string; name: string; title: string; icon?: string }[] {
+    return [...this.#loaded.values()].flatMap((entry) =>
+      entry.plugin.manifest.panels.map((panel) => ({
+        pluginId: entry.plugin.manifest.id,
+        name: panel.name,
+        title: panel.title,
+        ...(panel.icon === undefined ? {} : { icon: panel.icon }),
+      })),
+    );
   }
 
   /** Every plugin and what it is doing, for a panel or a diagnostic. */
@@ -249,6 +294,36 @@ export class PluginHost {
     entry.failures = 0;
   }
 
+  /**
+   * Tell a plugin one of its panels is being looked at.
+   *
+   * Starts it if it is not running, which is what lets a panel stay lazy. A
+   * plugin that answers with nothing leaves an empty panel, which is the
+   * honest rendering of "it had nothing to say".
+   */
+  async showPanel(pluginId: string, name: string): Promise<void> {
+    const entry = this.#loaded.get(pluginId);
+    if (!entry || entry.state === 'disabled') return;
+
+    const connection = await this.#ensureRunning(entry);
+    if (!connection) return;
+
+    const response = await this.#request(entry, connection, {
+      method: 'panel.show',
+      params: { name },
+    });
+
+    if (!response.ok) {
+      this.#fail(
+        entry,
+        `${entry.plugin.manifest.label} could not fill that panel`,
+        response.error.message,
+      );
+      return;
+    }
+    entry.failures = 0;
+  }
+
   /** Stop everything and take every contributed command back. */
   async stopAll(): Promise<void> {
     const running = [...this.#loaded.values()];
@@ -259,6 +334,7 @@ export class PluginHost {
       running.map(async (entry) => {
         entry.dispose();
         this.status.clearFor(entry.plugin.manifest.id);
+        this.panels.clearFor(entry.plugin.manifest.id);
         this.#settleAll(entry, 'internal', 'Nox is shutting the plugin down');
         await entry.connection?.kill().catch(() => {});
       }),
@@ -298,6 +374,7 @@ export class PluginHost {
       // Its readouts stopped being true the moment it stopped. Nothing is left
       // running to correct them, so they go with it.
       this.status.clearFor(entry.plugin.manifest.id);
+      this.panels.clearFor(entry.plugin.manifest.id);
       // Every question still outstanding dies with it. Without this an invoke
       // waits out its whole timeout on a process that is already gone.
       this.#settleAll(entry, 'internal', 'the plugin stopped');
@@ -477,6 +554,14 @@ export class PluginHost {
           this.status.clear(entry.plugin.manifest.id, request.params.name);
           return await this.#reply(entry, { id: request.id, ok: true });
 
+        case 'panel.set':
+          this.panels.set(entry.plugin.manifest.id, request.params.name, request.params.rows);
+          return await this.#reply(entry, { id: request.id, ok: true });
+
+        case 'panel.clear':
+          this.panels.clear(entry.plugin.manifest.id, request.params.name);
+          return await this.#reply(entry, { id: request.id, ok: true });
+
         case 'hello':
           // Answered in `#receive`. A second one is a plugin restating itself.
           return;
@@ -525,6 +610,7 @@ export class PluginHost {
       entry.state = 'disabled';
       entry.dispose();
       this.status.clearFor(entry.plugin.manifest.id);
+      this.panels.clearFor(entry.plugin.manifest.id);
       void entry.connection?.kill().catch(() => {});
       entry.connection = null;
       this.#deps.notify(

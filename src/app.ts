@@ -96,7 +96,7 @@ import { SearchService, type MatchPosition } from '@services/search';
 import { MenuService } from '@services/menu';
 import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
-import { UIService } from '@services/ui';
+import { type SidebarView, UIService } from '@services/ui';
 import { UpdateService } from '@services/updates';
 import { FileWatcherService } from '@services/watcher';
 import { GitService } from '@services/git';
@@ -273,6 +273,10 @@ export class NoxApp {
       // the user clicks Apply in their own UI.
       stage: (spec) => this.review.stage(spec) !== null,
       notify: (title, detail) => this.notifications.error(title, detail),
+      // Injected rather than reached for, so the host stays free of the UI
+      // layer. The cast is the one place a plugin view id becomes a
+      // `SidebarView`; `panelViewId` is what guarantees the shape.
+      showPanel: (viewId) => this.ui.showView(viewId as SidebarView),
       connect: connectorFor(platform),
     });
     this.lsp = LspService.spawnedBy(

@@ -2,5 +2,6 @@
   "id": "header",
   "label": "Header",
   "worker": "main.js",
-  "commands": [{ "name": "insert", "title": "Insert File Header" }]
+  "commands": [{ "name": "insert", "title": "Insert File Header" }],
+  "panels": [{ "name": "buffers", "title": "Open Buffers", "icon": "file" }]
 }

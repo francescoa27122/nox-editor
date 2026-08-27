@@ -148,10 +148,40 @@ or on a timer it owns. A readout that tracks the editor live is not something
 this API can do, and `examples/plugins/counter/` says so rather than implying
 otherwise.
 
+## Panels *(added 2026-08-27)*
+
+**Declared, unlike status items** — and that difference is the whole design.
+The rail button comes from `plugin.json`, so it exists before the plugin does,
+and *opening it* is what starts the plugin. A plugin with a panel therefore
+keeps the lazy activation a plugin with only commands has; had panels been
+registered by running code, every plugin with one would start at launch, which
+is the trade status items had to make and this did not.
+
+That is also the one push Nox makes: `panel.show`. It is demand-driven — sent
+when someone opens the panel, never when anything in the editor changes — so it
+stays on the right side of the gate.
+
+**Rows, not markup.** A plugin is in another process and cannot ship a
+component; a way to describe arbitrary DOM would be a way to reach the render
+loop. Rows are also what Nox's own panels already are — Problems, References
+and Search are each a list of "here is a thing, click it to go there". A row
+carries text, an optional detail, and optionally a command and its argument.
+
+**`SidebarView` stayed a real type.** The obvious move was to widen it to
+`string`, which would have silently deleted every check it was doing. Instead
+``type PluginSidebarView = `plugin.${string}` `` — every plugin view id has that
+shape by construction, so the union still says what a view *is* and a typo in a
+core name is still a compile error.
+
+**One collision would have been fatal rather than confusing.** A panel's focus
+command is registered under the same `plugin.<id>.<name>` id a contributed
+command gets, and `CommandRegistry.register` *throws* on a duplicate — so a
+plugin declaring a panel and a command of one name would have taken the window
+down at load. `parseManifest` drops the panel and says so.
+
 ## Deliberately not in this pass
 
-Sidebar panels, declarative editor decorations, plugin settings,
-and any install flow. `SidebarView` is a closed union and `Sidebar.svelte`'s
+Declarative editor decorations, plugin settings, and any install flow. `SidebarView` is a closed union and `Sidebar.svelte`'s
 `VIEWS` is a hardcoded table; opening those up is its own work. Promising the
 whole roadmap row in one pass is exactly the compatibility promise 1.0 was
 warned about.

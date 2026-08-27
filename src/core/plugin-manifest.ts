@@ -34,6 +34,25 @@ export interface ContributedCommand {
 }
 
 /**
+ * One sidebar panel a plugin offers.
+ *
+ * Declared rather than created at runtime, and that is what lets a panel keep
+ * the lazy activation commands have: the rail button exists before the plugin
+ * does, and clicking it is what starts it. A panel that had to be registered
+ * by running code would mean every plugin with one starts at launch — which is
+ * the trade status items had to make and this does not.
+ *
+ * `icon` names one of Nox's own; a plugin cannot ship artwork. Anything
+ * unrecognised falls back rather than failing, because an icon is decoration
+ * and a panel that refused to load over one would be a poor trade.
+ */
+export interface ContributedPanel {
+  name: string;
+  title: string;
+  icon?: string;
+}
+
+/**
  * When a plugin should be started.
  *
  * `command` is the default and the one to want: the plugin stays unstarted
@@ -56,6 +75,7 @@ export interface PluginManifest {
   /** Every capability its commands may use. Validated whole; see above. */
   capabilities: string[];
   commands: ContributedCommand[];
+  panels: ContributedPanel[];
 }
 
 export type ParsedManifest =
@@ -149,6 +169,62 @@ function capabilitiesOf(record: Record<string, unknown>, known: ReadonlySet<stri
   return declared;
 }
 
+/**
+ * The usable contributed panels, appending a sentence for each dropped one.
+ *
+ * `taken` is every command name the plugin already claimed. A panel's focus
+ * command is registered under the same `plugin.<id>.<name>` id a contributed
+ * command gets, and `CommandRegistry.register` **throws** on a duplicate — so
+ * a plugin with a panel and a command of one name would not merely be
+ * confusing, it would take the window down at load. Dropped rather than
+ * refused whole, for the reason commands are: one lost panel beats a plugin
+ * that will not load.
+ */
+function panelsOf(
+  record: Record<string, unknown>,
+  taken: ReadonlySet<string>,
+  problems: string[],
+): ContributedPanel[] {
+  const raw = record.panels;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    problems.push('panels is not a list');
+    return [];
+  }
+
+  const panels: ContributedPanel[] = [];
+  const claimed = new Set(taken);
+
+  for (const [index, entry] of raw.entries()) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      problems.push(`panel ${index} is not an object`);
+      continue;
+    }
+
+    const panel = entry as Record<string, unknown>;
+    const name = stringField(panel, 'name');
+    const title = stringField(panel, 'title');
+
+    if (name === null || !NAME.test(name)) {
+      problems.push(`panel ${index} has no usable name`);
+      continue;
+    }
+    if (title === null) {
+      problems.push(`panel "${name}" has no title`);
+      continue;
+    }
+    if (claimed.has(name)) {
+      problems.push(`panel "${name}" collides with a command of the same name`);
+      continue;
+    }
+
+    claimed.add(name);
+    const icon = stringField(panel, 'icon');
+    panels.push({ name, title, ...(icon === null ? {} : { icon }) });
+  }
+  return panels;
+}
+
 /** The usable contributed commands, appending a sentence for each dropped one. */
 function commandsOf(record: Record<string, unknown>, problems: string[]): ContributedCommand[] {
   const raw = record.commands;
@@ -231,6 +307,11 @@ export function parseManifest(value: unknown, knownCapabilities: ReadonlySet<str
 
   const problems: string[] = [];
   const commands = commandsOf(record, problems);
+  const panels = panelsOf(record, new Set(commands.map((command) => command.name)), problems);
 
-  return { ok: true, manifest: { id, label, entry, activation, capabilities, commands }, problems };
+  return {
+    ok: true,
+    manifest: { id, label, entry, activation, capabilities, commands, panels },
+    problems,
+  };
 }

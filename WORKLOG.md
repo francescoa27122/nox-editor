@@ -8,6 +8,74 @@ are knowledge.**
 
 ---
 
+## 2026-08-27 (PC) — Plugin status items, then panels
+
+Two passes, shipped separately (#156, and the panels PR after it), because
+they turned out to be opposites and the contrast is the interesting part.
+
+**Status items are runtime; panels are declared.** An item's *content* is only
+known to running code, so a plugin showing one has to already be running — that
+forced the manifest's `"activation": "startup"` field, and it is the one place
+plugins give up lazy activation. Panels go the other way: the rail button is
+declared in `plugin.json`, so it exists before the plugin does and **opening it
+is what starts the plugin**. A plugin with a panel keeps the laziness a plugin
+with only commands has.
+
+**Every limit is about the surface, not about politeness.** The status bar is a
+row with no scrollbar, so three items per plugin and forty characters each,
+drawn after Nox's own so a plugin arriving mid-session cannot slide Save-all
+out from under the pointer. Panels scroll, so their caps are looser (500 rows,
+200 characters) and truncation is *counted* and shown rather than silent.
+
+**`SidebarView` stayed a real type.** The obvious move was `string`, which
+would have deleted every check it was doing. `` `plugin.${string}` `` as a
+template-literal member keeps the union meaningful — a typo in a core view name
+is still a compile error.
+
+**One collision would have been fatal.** A panel's focus command shares the
+`plugin.<id>.<name>` space with contributed commands, and
+`CommandRegistry.register` *throws* on a duplicate — so a plugin declaring a
+panel and a command of one name would have taken the window down at load, not
+merely confused. `parseManifest` drops the panel and names it.
+
+**The token-contrast suite caught a real mistake.** `PluginPanel`'s `.detail`
+and `.truncated` used `--nox-text-faint`, which that suite reserves for
+non-text UI. Both are text a person reads; they now use `--nox-text-muted` like
+every other panel's secondary text. Nothing about plugins — just a guard doing
+its job on new code.
+
+**Both surfaces are tested by mounting the real components**, not by trusting
+types: `plugin-status-bar.test.ts` clicks an item and watches its command run;
+`plugin-sidebar.test.ts` proves the rail button exists with nothing running,
+renders rows, runs a row's command, and falls back to the explorer when the
+selected view names a plugin that a reload removed.
+
+Shipped:    `src/services/plugin/{status,panels}.ts`; protocol `status.set`/
+            `status.clear`/`panel.set`/`panel.clear` and the `panel.show` push;
+            host wiring (eager activation, focus commands, clear-on-stop for
+            both stores); `activation` and `panels` in the manifest;
+            `CoreSidebarView`/`PluginSidebarView` in `services/ui.ts`;
+            `ui/PluginPanel.svelte`; `Sidebar.svelte`, `StatusBar.svelte`,
+            `Icon.svelte` (`isIconName`); `examples/plugins/counter/` and a
+            panel on `examples/plugins/header/`; five test files; spec,
+            ARCHITECTURE, ROADMAP, CHANGELOG.
+Verified:   `npm test` 158 files / 2234 tests passed (was 153 / 2181) ·
+            `npm run check` 1021 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 807 ms.
+            Mutation-checked five of five across the two passes: the
+            clear-on-exit, the eager start, the status-item ordering, the
+            panel/command collision guard, and the rail ordering.
+Next:       The declarative editor surface — the last of the four the roadmap
+            row named. It is also the one where the typing path is actually at
+            stake, so it wants the same design pass the host got rather than
+            being appended to this one.
+Blocked:    Nothing.
+Confidence: High on both surfaces; each is driven through the real component.
+            The CSP caveat from the host pass is unchanged and still wants a
+            desktop walk — nothing here touched it.
+
+---
+
 ## 2026-08-27 (PC) — The plugin API, deliberately one quarter of the roadmap row
 
 Planned before any code, because a plugin API is a permanent compatibility

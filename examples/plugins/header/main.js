@@ -37,6 +37,39 @@ function ask(method, params) {
   return new Promise((resolve) => waiting.set(id, resolve));
 }
 
+/**
+ * Fill the panel this plugin declared.
+ *
+ * Note what did *not* have to happen for the panel's button to exist: this
+ * plugin was not running. The button comes from `plugin.json`, and opening it
+ * is what started the plugin and produced this call — which is why a plugin
+ * with a panel stays as lazy as one with only commands.
+ *
+ * There is no subscription here and there cannot be. Nox pushes no editor
+ * events, so this list is accurate as of the moment the panel was opened and
+ * does not follow along afterwards.
+ */
+async function fillBuffers() {
+  const buffers = await ask('context.openBuffers');
+
+  nox.send({
+    id: 0,
+    method: 'panel.set',
+    params: {
+      name: 'buffers',
+      rows: (buffers.result ?? []).map((buffer) => ({
+        text: buffer.name,
+        detail: buffer.languageName,
+        // A row can carry a command and an argument. This one runs this
+        // plugin's own contributed command; it could name any command in Nox,
+        // and it would be checked against this plugin's permissions like
+        // everything else it can reach.
+        command: 'plugin.header.insert',
+      })),
+    },
+  });
+}
+
 nox.onRequest(async (message) => {
   // An answer to something this plugin asked.
   if ('ok' in message) {
@@ -45,6 +78,12 @@ nox.onRequest(async (message) => {
       waiting.delete(message.id);
       resolve(message);
     }
+    return;
+  }
+
+  if (message.method === 'panel.show') {
+    await fillBuffers();
+    nox.send({ id: message.id, ok: true });
     return;
   }
 

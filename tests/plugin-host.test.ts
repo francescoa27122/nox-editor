@@ -106,6 +106,7 @@ function setup(options: HarnessOptions = {}) {
   const commands = new CommandRegistry();
   const plugin = options.plugin ?? wellBehaved();
   const notifications: { title: string; detail?: string }[] = [];
+  const shown: string[] = [];
 
   if (options.deny) {
     commands.setGuard(async (_command, principal) => {
@@ -124,6 +125,7 @@ function setup(options: HarnessOptions = {}) {
     },
     stage: () => true,
     notify: (title, detail) => notifications.push({ title, detail }),
+    showPanel: (viewId) => shown.push(viewId),
     connect: async () => {
       // The greeting arrives unprompted, the way a real plugin's does: it is
       // the first thing written, before anything is asked of it.
@@ -138,7 +140,7 @@ function setup(options: HarnessOptions = {}) {
   });
 
   host.load([{ manifest: options.manifest ?? manifestFor(), directory: '/w/.nox/plugins/demo' }]);
-  return { host, commands, plugin, notifications };
+  return { host, commands, plugin, notifications, shown };
 }
 
 describe('contributed commands', () => {
@@ -363,6 +365,70 @@ describe('activation', () => {
     // A status item's content is only known to running code, so a plugin that
     // sets one can never be woken by a command the way a lazy one is.
     await vi.waitFor(() => expect(host.stateOf('demo')).toBe('running'));
+  });
+});
+
+describe('panels', () => {
+  const WITH_PANEL = { panels: [{ name: 'issues', title: 'Issues' }] };
+
+  /** A plugin that fills its panel when told it is being looked at. */
+  function filler() {
+    return fakePlugin((message, send) => {
+      const id = message.id as number;
+      if (message.method === 'panel.show') {
+        send({
+          id: 77,
+          method: 'panel.set',
+          params: { name: 'issues', rows: [{ text: 'One problem' }] },
+        });
+        send({ id, ok: true });
+      }
+    });
+  }
+
+  it('registers a focus command from the manifest, before anything runs', () => {
+    const { commands, plugin } = setup({ manifest: manifestFor(WITH_PANEL) });
+
+    expect(commands.get('plugin.demo.issues')?.title).toBe('Show Issues');
+    // The whole point of declaring panels: the rail button exists before the
+    // plugin does, so a plugin with a panel stays as lazy as one without.
+    expect(plugin.written).toHaveLength(0);
+  });
+
+  it('switches the sidebar and starts the plugin when that command runs', async () => {
+    const { commands, shown, plugin } = setup({ manifest: manifestFor(WITH_PANEL), plugin: filler() });
+
+    await commands.execute('plugin.demo.issues');
+
+    expect(shown).toEqual(['plugin.demo.issues']);
+    await vi.waitFor(() =>
+      expect(plugin.written.some((m) => m.method === 'panel.show')).toBe(true),
+    );
+  });
+
+  it('takes the rows the plugin answers with', async () => {
+    const { host, commands } = setup({ manifest: manifestFor(WITH_PANEL), plugin: filler() });
+
+    await commands.execute('plugin.demo.issues');
+
+    await vi.waitFor(() =>
+      expect(host.panels.contents.get().get('plugin.demo.issues')?.rows).toEqual([
+        { text: 'One problem' },
+      ]),
+    );
+  });
+
+  it('empties them when the plugin dies', async () => {
+    const plugin = filler();
+    const { host, commands } = setup({ manifest: manifestFor(WITH_PANEL), plugin });
+    await commands.execute('plugin.demo.issues');
+    await vi.waitFor(() => expect(host.panels.contents.get().size).toBe(1));
+
+    plugin.die(1);
+
+    // The rail button stays — it came from the manifest and the panel can be
+    // refilled. What goes is content that stopped being true.
+    expect(host.panels.contents.get().size).toBe(0);
   });
 });
 
