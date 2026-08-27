@@ -188,6 +188,63 @@ describe('contributed commands', () => {
   });
 });
 
+describe('contributed panels', () => {
+  it('reads a name, a title and an optional icon', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      panels: [{ name: 'issues', title: 'Issues', icon: 'warning' }],
+    });
+
+    expect(parsed.ok && parsed.manifest.panels).toEqual([
+      { name: 'issues', title: 'Issues', icon: 'warning' },
+    ]);
+  });
+
+  it('drops one whose name a command already claimed', () => {
+    /**
+     * The one that would otherwise take the window down.
+     *
+     * A panel's focus command is registered under the same
+     * `plugin.<id>.<name>` id a contributed command gets, and
+     * `CommandRegistry.register` throws on a duplicate — so this is not a
+     * cosmetic clash, it is a plugin that crashes the app at load.
+     */
+    const parsed = parse({
+      ...MINIMAL,
+      commands: [{ name: 'issues', title: 'Run' }],
+      panels: [{ name: 'issues', title: 'Issues' }],
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.commands).toHaveLength(1);
+    expect(parsed.manifest.panels).toEqual([]);
+    expect(parsed.problems[0]).toContain('collides');
+  });
+
+  it('drops a second panel of the same name too', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      panels: [{ name: 'a', title: 'One' }, { name: 'a', title: 'Two' }],
+    });
+
+    expect(parsed.ok && parsed.manifest.panels).toHaveLength(1);
+  });
+
+  it('keeps a panel whose icon is unknown, because an icon is decoration', () => {
+    const parsed = parse({ ...MINIMAL, panels: [{ name: 'a', title: 'A', icon: 'nonsense' }] });
+
+    expect(parsed.ok && parsed.manifest.panels).toHaveLength(1);
+  });
+
+  it('has none by default', () => {
+    const parsed = parse(MINIMAL);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.panels).toEqual([]);
+  });
+});
+
 describe('the command id a contribution becomes', () => {
   it('is namespaced under the plugin, so core ids cannot be shadowed', () => {
     expect(contributedCommandId('ruff', 'run')).toBe('plugin.ruff.run');

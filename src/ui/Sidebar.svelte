@@ -1,6 +1,8 @@
 <script lang="ts">
   import { runnableAgents } from '@services/agent/config';
-  import type { SidebarView } from '@services/ui';
+  import { isPluginView, type SidebarView } from '@services/ui';
+  import { panelViewId } from '@services/plugin/panels';
+  import PluginPanel from './PluginPanel.svelte';
   import { useApp } from './context';
   import ExplorerPanel from './ExplorerPanel.svelte';
   import SearchPanel from './SearchPanel.svelte';
@@ -9,7 +11,7 @@
   import ProblemsPanel from './ProblemsPanel.svelte';
   import ReferencesPanel from './ReferencesPanel.svelte';
   import GitPanel from './GitPanel.svelte';
-  import Icon, { type IconName } from './Icon.svelte';
+  import Icon, { isIconName, type IconName } from './Icon.svelte';
   import { problemTotals } from './problems';
 
   /**
@@ -75,7 +77,40 @@
     }).length > 0,
   );
 
-  const views = $derived(available ? VIEWS : VIEWS.filter((entry) => entry.id !== 'answers'));
+  /**
+   * The rail entries plugins contribute.
+   *
+   * Read from the manifests rather than from anything running, which is what
+   * keeps a plugin with a panel as lazy as one with only commands: the button
+   * exists before the plugin does, and clicking it is what starts it.
+   *
+   * `revision` is what this recomputes on — the host bumps it whenever a
+   * plugin is loaded, stopped or disabled.
+   */
+  const pluginRevision = app.plugins.revision;
+  const pluginViews: View[] = $derived.by(() => {
+    void $pluginRevision;
+    return app.plugins.panelContributions().map((panel) => ({
+      id: panelViewId(panel.pluginId, panel.name) as SidebarView,
+      // An unrecognised icon falls back rather than failing: an icon is
+      // decoration, and a panel that refused to appear over one would be a
+      // poor trade for whoever installed the plugin.
+      icon: (panel.icon && isIconName(panel.icon) ? panel.icon : 'command') satisfies IconName,
+      label: panel.title,
+      command: panelViewId(panel.pluginId, panel.name),
+    }));
+  });
+
+  const coreViews = $derived(available ? VIEWS : VIEWS.filter((entry) => entry.id !== 'answers'));
+  // Plugin buttons last, for the reason plugin status items are last: the rail
+  // is Nox's own chrome first, and a plugin appearing mid-session must not
+  // move a button someone is already reaching for.
+  const views = $derived([...coreViews, ...pluginViews]);
+
+  /** The one plugin panel showing, if the active view is one. */
+  const activePluginView = $derived(
+    isPluginView($view) ? pluginViews.find((entry) => entry.id === $view) : undefined,
+  );
 
   // The section exists only while an agent does. Without this, removing the
   // last agent leaves the panel showing with no button in the rail for it.
@@ -137,6 +172,12 @@
          below rather than rendering nothing at all. -->
   {:else if $view === 'answers' && available}
     <AnswersPanel />
+    <!-- Guarded on the entry existing, not just on the id shape: a plugin
+         removed by a reload can leave the view pointing at a panel that no
+         longer has a rail button, and falling through to the explorer is
+         better than rendering a header for something that is gone. -->
+  {:else if activePluginView}
+    <PluginPanel view={activePluginView.id} title={activePluginView.label} />
   {:else}
     <ExplorerPanel />
   {/if}

@@ -65,8 +65,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   events to plugins, so an item changes when the plugin does something rather
   than tracking the editor live.
 
-  Deliberately narrow for now: commands and status items. Panels and drawing in
-  the editor come next, and the reasoning is written down in
+  A plugin can also contribute a **sidebar panel**. It declares the panel in
+  its manifest, so the button appears in the rail before the plugin has run —
+  opening it is what starts the plugin, which is then asked to fill it. The
+  contents are rows: text, an optional detail, and optionally a command to run
+  when you pick one, which is what turns a list of findings into a list of
+  places to go. A plugin cannot send markup; Nox draws every pixel.
+
+  Deliberately narrow for now: commands, status items and panels. Drawing in
+  the editor comes next, and the reasoning is written down in
   `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
 
 - **Snippets.** Write your own in `snippets.json` — keyed by language, with a

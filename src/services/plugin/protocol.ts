@@ -42,11 +42,18 @@ export type PluginErrorCode =
  * not the namespaced id: the plugin declared `run`, and telling it
  * `plugin.ruff.run` would make every plugin strip a prefix it already knows.
  */
-export type HostRequest = {
-  id: number;
-  method: 'command.invoke';
-  params: { name: string; arg?: unknown };
-};
+export type HostRequest =
+  | { id: number; method: 'command.invoke'; params: { name: string; arg?: unknown } }
+  /**
+   * A panel of the plugin's became visible.
+   *
+   * The one push Nox makes, and it is demand-driven rather than ambient: it is
+   * sent when someone opens the panel, not when anything in the editor
+   * changes. That is what keeps it on the right side of the design gate while
+   * still letting a panel be filled lazily, so a plugin with a panel keeps the
+   * lazy activation a plugin with only commands has.
+   */
+  | { id: number; method: 'panel.show'; params: { name: string } };
 
 /**
  * plugin → Nox.
@@ -89,6 +96,20 @@ export type PluginRequest =
       };
     }
   | { id: number; method: 'status.clear'; params: { name: string } }
+  /**
+   * Fill a panel the manifest declared.
+   *
+   * Rows, not markup: a plugin is in another process and cannot ship a
+   * component, and a way to describe arbitrary DOM would be a way to reach the
+   * render loop. A row may carry a command and an argument, which is what
+   * makes a list of findings a list of places to go.
+   */
+  | {
+      id: number;
+      method: 'panel.set';
+      params: { name: string; rows: unknown };
+    }
+  | { id: number; method: 'panel.clear'; params: { name: string } }
   /**
    * The only route to a side effect, exactly as it is for agents. There is no
    * second verb for "just write this file" — every write a plugin can reach is

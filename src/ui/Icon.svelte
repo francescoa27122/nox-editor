@@ -8,6 +8,17 @@
    */
   export type IconName = keyof typeof PATHS;
 
+  /**
+   * Every icon name, as values.
+   *
+   * For the one caller that has a *string* to check rather than a name: a
+   * plugin manifest, which is written by someone who cannot see this list.
+   * Derived from `PATHS` rather than written out, so it cannot fall behind.
+   */
+  export function isIconName(value: string): value is IconName {
+    return Object.prototype.hasOwnProperty.call(PATHS, value);
+  }
+
   const PATHS = {
     'chevron-right': 'M6 3.5 10.5 8 6 12.5',
     'chevron-down': 'M3.5 6 8 10.5 12.5 6',

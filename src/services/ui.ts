@@ -38,8 +38,8 @@ export interface CodeActionChoice {
   reason: string | undefined;
 }
 
-/** Which panel the sidebar is showing. */
-export type SidebarView =
+/** The panels Nox itself ships. */
+export type CoreSidebarView =
   | 'explorer'
   | 'search'
   | 'notes'
@@ -47,6 +47,25 @@ export type SidebarView =
   | 'problems'
   | 'references'
   | 'git';
+
+/**
+ * A panel contributed by a plugin.
+ *
+ * A template literal rather than `string`, which is the whole reason this
+ * stayed a useful type after plugins arrived: every plugin view id is
+ * `plugin.<id>.<name>` by construction, so the union still says what a view
+ * *is* and a typo in a core name is still a compile error. Widening to
+ * `string` would have made every one of those checks vanish at once.
+ */
+export type PluginSidebarView = `plugin.${string}`;
+
+/** Which panel the sidebar is showing. */
+export type SidebarView = CoreSidebarView | PluginSidebarView;
+
+/** True when a view belongs to a plugin rather than to Nox. */
+export function isPluginView(view: SidebarView): view is PluginSidebarView {
+  return view.startsWith('plugin.');
+}
 
 export interface PromptRequest {
   title: string;
