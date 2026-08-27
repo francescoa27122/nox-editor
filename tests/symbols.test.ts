@@ -269,6 +269,7 @@ describe('what the symbol list has to say', () => {
       language: 'TypeScript',
       hasGrammar: true,
       grammarLoaded: true,
+      structuredGrammar: true,
       parsed: true,
       count: 3,
       ...over,
@@ -297,10 +298,40 @@ describe('what the symbol list has to say', () => {
   });
 
   it('names the language when no parser ships for it', () => {
-    expect(symbolListState(facts({ hasGrammar: false, language: 'Ruby', count: 0 }))).toEqual({
+    expect(symbolListState(facts({ hasGrammar: false, language: 'Zig', count: 0 }))).toEqual({
       kind: 'no-grammar',
-      language: 'Ruby',
+      language: 'Zig',
     });
+  });
+
+  /**
+   * A stream parser colours the file and builds no tree.
+   *
+   * Shell, TOML and Ruby load `@codemirror/legacy-modes` through
+   * `StreamLanguage`, which tokenises line by line. Symbols are read from a
+   * tree, so the scan honestly finds nothing — and "No functions or classes
+   * in this file" over a Ruby file full of classes is a lie the count alone
+   * cannot avoid telling. It is the grammar that cannot answer, not the file
+   * that has nothing to say, so this is decided with the other grammar facts
+   * and before the parse facts.
+   */
+  it('separates a grammar that builds no tree from a file with nothing in it', () => {
+    expect(
+      symbolListState(facts({ structuredGrammar: false, language: 'Ruby', count: 0 })),
+    ).toEqual({ kind: 'no-structure', language: 'Ruby' });
+  });
+
+  it('says so even when the parse has not finished, because it never will help', () => {
+    expect(
+      symbolListState(facts({ structuredGrammar: false, language: 'Shell', parsed: false, count: 0 }))
+        .kind,
+    ).toBe('no-structure');
+  });
+
+  it('still reports a missing grammar ahead of an unstructured one', () => {
+    expect(
+      symbolListState(facts({ hasGrammar: false, structuredGrammar: false, language: 'Zig' })).kind,
+    ).toBe('no-grammar');
   });
 
   /**
@@ -323,7 +354,7 @@ describe('what the symbol list has to say', () => {
    */
   it('reads the grammar facts before the parse facts', () => {
     const unparsed = { count: 0, parsed: false } as const;
-    expect(symbolListState(facts({ ...unparsed, hasGrammar: false, language: 'Ruby' })).kind).toBe(
+    expect(symbolListState(facts({ ...unparsed, hasGrammar: false, language: 'Zig' })).kind).toBe(
       'no-grammar',
     );
     expect(symbolListState(facts({ ...unparsed, grammarLoaded: false })).kind).toBe(

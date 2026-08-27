@@ -2258,6 +2258,13 @@ everywhere, so the overlap is small and the words are what fill the gap.
   was 20,000 until 2026-08-25 and came down on a measurement: scoring that many
   took 80-85% of a 16 ms frame per keystroke on the machine it was measured on,
   which leaves nothing for a slower one. `filetree.ts` carries the curve.
+- **Grammar chunks:** one output chunk per grammar, not one for all of them
+  (`scripts/chunks.mjs`). The rule returned a single `grammars` name until
+  2026-08-26, which collapsed every dynamic import in `editor/languages.ts`
+  onto one file — opening a .json buffer loaded every parser Nox ships, 327 kB
+  of it, and adding eleven languages would have made it 640 kB. Now .json
+  costs 2 kB and .go costs 31 kB. Rollup still shares a chunk between grammars
+  that genuinely embed each other: PHP and Vue really do contain HTML.
 - **Word completion:** the fallback declines above 1 MB
   (`WORD_COMPLETION_MAX_BYTES`). `completeAnyWord` caches per rope node, but
   above ~2000 distinct words the *merged* result is never cached, so every
@@ -2314,7 +2321,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Splits do not nest | The layout is a flat row or column, not a tree, so you cannot have a column split inside a row. |
 | macOS trash has no "Put Back" | Nox trashes via `NSFileManager` rather than Finder/AppleScript, because the AppleScript path blocks for two minutes and then fails when Finder is unavailable. A trashed file restores to the Trash folder, not its original location. Covered by `tests/fileops_integration.rs`. |
 | Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**; unsaved work does, because it is in the session. The reload also kills any running agent, which is the point — a renderer that no longer exists cannot talk to them. |
-| Grammar coverage | Parsers ship for TS/JS/JSX/TSX, JSON, HTML, CSS/SCSS, Markdown, Python, Rust. Other languages open and edit correctly but render unhighlighted; the status bar greys the language name to say so. |
+| Three grammars colour but do not parse | Shell, TOML and Ruby load `@codemirror/legacy-modes` through `StreamLanguage`, which tokenises line by line and builds no tree. They highlight correctly and **Go to Symbol, sticky scroll and syntax folding stay empty in them**, because all three read a parse tree. The palette says so in its own words rather than reporting the file as bare — `hasSymbolStructure` in `editor/languages.ts`, and `symbolListState`'s `no-structure`. No Lezer grammar exists for any of the three to upgrade to; `LOADERS` is the only place that would change. |
 | No *native* menu off macOS | Windows and Linux now draw an in-window menu bar instead (§4), so every platform has a menu; what is still missing is a **native** one off macOS. Windows cannot host one — `set_decorations(false)` removes the frame it lives in. A native GTK menu for Linux is possible but unbuilt: the accelerator argument in §4 is WKWebView's, never checked against WebKitGTK. `nox_set_menu` still returns `Ok(())` on both. |
 | Native menu items are always drawn enabled | macOS only: greying them means pushing every state change across the IPC boundary to keep ~130 items in step. Enablement is re-checked when the item is chosen (`CommandRegistry.execute` refuses a disabled command), so nothing runs that should not — but a disabled item looks live and does nothing when clicked. The in-window bar (§4) has no such problem: the predicates are already in the renderer, so it greys them correctly. |
 | The menu has no Close Window item | `PredefinedMenuItem::close_window` carries ⌘W and Nox binds ⌘W to `file.close`, so both in one menu would be two items claiming one accelerator. Nox has no `window.close` command to offer instead; the traffic light and ⌘Q are the ways out. |

@@ -240,7 +240,7 @@ defaults, so a new default key in a later Nox still reaches you. The list lives
 in the app and is always current. Every action in Nox is a command, so anything
 you can do is in the palette whether or not it has a shortcut.
 
-Also in the box: syntax highlighting for nine language families, multiple
+Also in the box: syntax highlighting for every language Nox names, multiple
 cursors, code folding, jumping to a function or class by name in the file
 you're in, sticky scroll to keep the enclosing declaration on screen, split
 panes, a terminal, your own notes, and project-wide search and replace that

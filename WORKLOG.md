@@ -8,6 +8,69 @@ are knowledge.**
 
 ---
 
+## 2026-08-26 (PC) — Eleven named languages that had never been highlighted
+
+`core/languages.ts` names 25 languages; `editor/languages.ts` had loaders for
+13 of them. The other eleven — Go, Java, C, C++, PHP, SQL, XML, YAML, shell,
+TOML, Ruby — matched by extension, appeared in the status bar and the language
+picker, and opened in flat grey, from v0.1. **Naming a language and parsing it
+were two tables with nothing holding them together**, which is why it lasted
+nine months. The last case in `tests/grammars.test.ts` is what holds them
+together now: anything named but unparsed has to be listed there, out loud.
+
+Eight took official Lezer grammars. **Shell, TOML and Ruby have none**, so they
+take `@codemirror/legacy-modes` through `StreamLanguage` — line-by-line
+tokenisers that colour correctly and build no tree. That is not free and it is
+not hidden: symbols, sticky scroll and folding all read a tree, so all three
+are empty in those languages.
+
+**That cost me a defect of my own, and it is the one worth remembering.**
+`symbolListState` reads the symbol count after the grammar facts, so a Ruby
+file full of classes came back `no-symbols` — *"No functions or classes in this
+file"*, over a file that is nothing but classes. A green test suite and a lie
+in the UI. Fixed with a fourth grammar fact (`hasSymbolStructure`) and a
+`no-structure` state that says what is actually true. The pre-existing test for
+`no-grammar` used **Ruby** as its example of a language with no parser, which
+was accurate when written and became wrong in the same commit — changed to Zig.
+
+**The chunking was the second thing this exposed, and it was already false.**
+`vite.config.ts` said *"Chunk the language grammars so startup only pays for
+what it uses"* and returned a single `grammars` name for all of them, which
+collapsed every dynamic import in `editor/languages.ts` onto one file: opening
+a .json buffer loaded every parser Nox ships. 327 kB before this change, 640 kB
+after — which is what made it impossible to ignore. Now one chunk per grammar:
+.json costs 2 kB, .go 31 kB. The rule moved to `scripts/chunks.mjs` so
+`tests/chunks.test.ts` can assert the invariant the old one broke — two
+languages never share a chunk. Rollup still merges grammars that genuinely
+embed each other, so a .ts file loads the html chunk that carries the
+JavaScript parser; that is 113 kB rather than 640, and worth naming rather
+than claiming perfection.
+
+Shipped:    `src/editor/languages.ts` (11 loaders, `STREAM_GRAMMARS`,
+            `hasSymbolStructure`); `src/core/symbols.ts` (`no-structure`);
+            `src/ui/CommandPalette.svelte`; `scripts/chunks.mjs` +
+            `vite.config.ts`; `tests/grammars.test.ts`, `tests/chunks.test.ts`,
+            `tests/symbols.test.ts`; 8 dependencies; README, ARCHITECTURE §6 +
+            debt table, ROADMAP, CHANGELOG.
+Verified:   `npm test` 147 files / 2111 tests passed (was 145 / 2076) ·
+            `npm run check` 1003 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 16 grammar
+            chunks, built in 1.31s · `npm run test:editor` 2 passed.
+            Each grammar is asserted to *paint* — the real parser over real
+            source, then `noxHighlightStyle` over the tree — not merely to
+            load, because a grammar can parse into tags the theme has no rule
+            for and render plain.
+Next:       Snippets, or the plugin API. With grammars and the completion floor
+            in, snippets are the largest everyday gap left that is not a
+            compatibility promise.
+Blocked:    Nothing.
+Confidence: High. The one thing not driven by hand is how these languages look
+            in the packaged app — the suite proves tokens get classes, not that
+            the palette reads well over a Ruby file. `nox-desktop-walk` is the
+            ritual for that and it is not run here.
+
+---
+
 ## 2026-08-26 (PC) — `override` was switching off completions that shipped in the bundle
 
 An audit of Nox against what an editor needs to be a daily driver turned up one
