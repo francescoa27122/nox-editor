@@ -53,7 +53,19 @@ export type HostRequest =
    * still letting a panel be filled lazily, so a plugin with a panel keeps the
    * lazy activation a plugin with only commands has.
    */
-  | { id: number; method: 'panel.show'; params: { name: string } };
+  | { id: number; method: 'panel.show'; params: { name: string } }
+  /**
+   * A buffer this plugin has decorated has changed, and has been quiet
+   * since.
+   *
+   * **Debounced, coarse, and only about buffers the plugin already
+   * decorated.** Nox does not say what changed and will not send this per
+   * keystroke: a plugin woken on every character is the thing being out of
+   * process exists to prevent, and a channel that could do it would hand
+   * that back. What it buys is the difference between decorations that
+   * follow the code and decorations that were true once.
+   */
+  | { id: number; method: 'document.changed'; params: { bufferId: string } };
 
 /**
  * plugin → Nox.
@@ -110,6 +122,20 @@ export type PluginRequest =
       params: { name: string; rows: unknown };
     }
   | { id: number; method: 'panel.clear'; params: { name: string } }
+  /**
+   * Draw marks in a buffer.
+   *
+   * A `kind` from a closed vocabulary rather than a class or a colour: the
+   * plugin names what it *means* and Nox decides how that is drawn, which
+   * is the same split that makes panels rows rather than markup.
+   *
+   * Sending an empty list is how a plugin takes its own marks back.
+   */
+  | {
+      id: number;
+      method: 'editor.decorate';
+      params: { bufferId: string; ranges: unknown };
+    }
   /**
    * The only route to a side effect, exactly as it is for agents. There is no
    * second verb for "just write this file" — every write a plugin can reach is

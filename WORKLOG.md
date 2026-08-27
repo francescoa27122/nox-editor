@@ -8,6 +8,72 @@ are knowledge.**
 
 ---
 
+## 2026-08-27 (PC) — Editor decorations, and the event channel they forced
+
+The last of the four surfaces the v0.6 plugin row named, and the only one where
+the typing path was actually at stake. **The row is now ✅.**
+
+**Marks are a `StateField`, mapped forward through every change.** Provenance's
+test decides it — is this derivable from the document? It is not. And mapping
+is not a nicety: a plugin is in another process and cannot re-decorate between
+one keystroke and the next, so without it every mark would vanish the moment
+anyone typed.
+
+**The mapping is the whole per-keystroke cost, and it is measured, not
+asserted.** With the full 2,000-mark cap in the document: **0.82x for 8x the
+document** — 0.387 ms at 2,000 lines against 0.320 ms at 16,000. So the marks
+cost ~0.08 ms over the 0.31 ms baseline and that cost does not move with the
+file. `tests/browser/typing-path.test.ts` gained a decorated case at the same
+3x budget, because the claim is exactly that decorations scale with their own
+count rather than with the document. Filling to the cap was the point — three
+decorations would have proved nothing about a linter that found two thousand.
+
+**Clamping is not defensive tidiness here.** CodeMirror throws on a range past
+the end of the document, *from inside a view update*, which is a dead editor
+rather than a missing mark. `core/plugin-decorations.ts` clamps, drops inverted
+and empty ranges, floors fractions, and sorts — `RangeSet.of` throws on
+unsorted input, and a linter reporting by rule emits out of order as a matter
+of course, which is not a mistake on its part.
+
+**This forced the push channel the status-item pass recorded as debt**, and it
+is the narrowest version that works: `document.changed`, debounced at 400 ms,
+coarse, and **only for buffers the plugin has already decorated**. That last
+clause is what keeps it from being an ambient feed, and it is the one the
+mutation check targets. Per edit it costs a map lookup and two timer calls, and
+nothing at all for anyone with no plugins.
+
+**A closed vocabulary, not a class.** Four kinds; the plugin names what it
+means and Nox decides how it looks. `highlight` sits below both the selection
+and a search match, so a plugin's opinion cannot outrank what the user is
+doing.
+
+Shipped:    `src/core/plugin-decorations.ts`; `src/editor/plugin-decorations.ts`
+            (field, hover, marks) wired into `extensions.ts` unconditionally;
+            `src/services/plugin/decorations.ts`; protocol `editor.decorate` and
+            the `document.changed` push; host store, debounce and interest
+            filter; `EditorPane` paint + the one-line change notification;
+            `theme.ts` + a `--nox-plugin-highlight` token;
+            `examples/plugins/todos/`; three test files plus a decorated case in
+            the browser typing-path suite; spec, ARCHITECTURE (two debt rows
+            rewritten), ROADMAP (row closed), CHANGELOG.
+Verified:   `npm test` 161 files / 2264 tests passed (was 158 / 2234) ·
+            `npm run check` 1027 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 786 ms ·
+            `npm run test:editor` 3 passed, including the new decorated case.
+            Mutation-checked two of two: removing the range sort and removing
+            the interest filter each turn the matching test red.
+Next:       Plugin settings — a plugin has no way to declare an option a user
+            can set, and it is the first thing anyone shipping a real plugin
+            will want. `config/schema.ts` is the right shape to extend; the
+            work is a per-plugin namespace and deciding where the values live.
+Blocked:    Nothing.
+Confidence: High. The typing-path claim is the one that mattered and it is
+            measured in a real browser at the cap rather than reasoned about.
+            The CSP caveat from the host pass is still open and still wants a
+            desktop walk; nothing in this pass touched it.
+
+---
+
 ## 2026-08-27 (PC) — Plugin status items, then panels
 
 Two passes, shipped separately (#156, and the panels PR after it), because

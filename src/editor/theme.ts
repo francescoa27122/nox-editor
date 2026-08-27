@@ -269,6 +269,33 @@ export function noxTheme(options: ThemeOptions): Extension {
       // types and none for `snippet`, which is Nox's. Without this the row
       // keeps the reserved icon column and draws nothing in it, so a snippet
       // reads as an item whose kind failed to load rather than as a snippet.
+      /*
+         Plugin decorations. Four kinds, and the plugin picks one rather than
+         a colour — it names what it means, Nox decides how that is drawn.
+
+         Underlines rather than backgrounds for the three that report
+         something: a background competes with the selection and with the
+         search highlight, and a plugin's opinion should not outrank either.
+         `highlight` is the one that does fill, because that is what asking
+         for a highlight means.
+      */
+      '.cm-nox-plugin-error': {
+        textDecoration: 'underline wavy var(--nox-danger)',
+        textUnderlineOffset: '3px',
+      },
+      '.cm-nox-plugin-warning': {
+        textDecoration: 'underline wavy var(--nox-warning)',
+        textUnderlineOffset: '3px',
+      },
+      '.cm-nox-plugin-info': {
+        textDecoration: 'underline dotted var(--nox-info)',
+        textUnderlineOffset: '3px',
+      },
+      '.cm-nox-plugin-highlight': {
+        background: 'var(--nox-plugin-highlight)',
+        borderRadius: 'var(--nox-r-sm)',
+      },
+
       '.cm-completionIcon-snippet:after': {
         content: "'⌗'",
         color: 'var(--nox-accent)',

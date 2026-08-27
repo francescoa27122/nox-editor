@@ -277,6 +277,9 @@ export class NoxApp {
       // layer. The cast is the one place a plugin view id becomes a
       // `SidebarView`; `panelViewId` is what guarantees the shape.
       showPanel: (viewId) => this.ui.showView(viewId as SidebarView),
+      // Read from the buffer's own `EditorState`, which is the only thing
+      // that knows the length a plugin's offsets have to be clamped against.
+      documentLength: (bufferId) => this.workspace.stateOf(bufferId)?.doc.length ?? null,
       connect: connectorFor(platform),
     });
     this.lsp = LspService.spawnedBy(

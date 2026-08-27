@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { document, fastestKeystroke, mountEditor, type Editor } from './support/keystroke';
+import { MAX_DECORATIONS } from '../../src/core/plugin-decorations';
+import { applyPluginDecorations } from '../../src/editor/plugin-decorations';
 
 /**
  * The rule that has never had a test.
@@ -95,5 +97,70 @@ describe('the typing path is flat in document size', () => {
   it('leaves most of the frame for everything else', () => {
     const ms = keystrokeAt(16_000);
     expect(ms, `keystroke at 16,000 lines took ${ms.toFixed(2)}ms`).toBeLessThan(8);
+  });
+});
+
+/**
+ * The same rule, asked of the one feature most able to break it.
+ *
+ * A plugin's decorations are a `RangeSet` in state, and every edit maps that
+ * set forward. That is real per-keystroke work, and it is the only work
+ * plugins put on this path — so the question is not whether it costs anything
+ * but whether it grows with the **document**. It must not: mapping is
+ * proportional to how many marks there are, which is capped, and the cap is
+ * `MAX_DECORATIONS`.
+ *
+ * Filled to the cap on purpose. A test with three decorations would prove
+ * nothing about a linter that found two thousand.
+ *
+ * **Measured: 0.82x for 8x the document** — 0.387 ms at 2,000 lines against
+ * 0.320 ms at 16,000, both carrying 2,000 marks. So the marks cost about
+ * 0.08 ms against the undecorated 0.31 ms baseline, and that cost does not
+ * move with the document, which is the whole claim.
+ */
+describe('a fully decorated buffer still types flat', () => {
+  let open: Editor | null = null;
+
+  afterEach(() => {
+    open?.destroy();
+    open = null;
+  });
+
+  /** A keystroke in a document carrying the maximum number of plugin marks. */
+  const decoratedKeystrokeAt = (lines: number): number => {
+    open?.destroy();
+    open = mountEditor(document(lines));
+
+    const length = open.view.state.doc.length;
+    // Spread across the whole document rather than bunched at the top, so the
+    // ones outside the viewport are mapped too — which is the cost being
+    // measured. Non-overlapping and ascending, as `RangeSet.of` requires.
+    const step = Math.floor(length / MAX_DECORATIONS);
+    const decorations = Array.from({ length: MAX_DECORATIONS }, (_, i) => ({
+      from: i * step,
+      to: i * step + Math.min(4, step - 1),
+      kind: 'warning' as const,
+    })).filter((d) => d.to > d.from && d.to <= length);
+
+    applyPluginDecorations(open.view, decorations);
+
+    const ms = fastestKeystroke(open.view);
+    open.destroy();
+    open = null;
+    return ms;
+  };
+
+  it('costs the same at 16,000 lines as at 2,000, with 2,000 marks in each', () => {
+    const small = decoratedKeystrokeAt(2_000);
+    const large = decoratedKeystrokeAt(16_000);
+    const ratio = large / small;
+
+    // Same budget as the undecorated case, and it has to be: the whole claim
+    // is that decorations cost by their own count and not by the document.
+    expect(
+      ratio,
+      `decorated keystroke: ${ratio.toFixed(2)}x for 8x the document ` +
+        `(budget 3x) [${small.toFixed(3)}ms -> ${large.toFixed(3)}ms]`,
+    ).toBeLessThan(3);
   });
 });

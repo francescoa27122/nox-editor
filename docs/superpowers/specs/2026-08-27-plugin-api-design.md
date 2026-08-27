@@ -179,9 +179,58 @@ command gets, and `CommandRegistry.register` *throws* on a duplicate — so a
 plugin declaring a panel and a command of one name would have taken the window
 down at load. `parseManifest` drops the panel and says so.
 
+## Editor decorations *(added 2026-08-27)*
+
+The last of the four, and the only one where the typing path was actually at
+stake.
+
+**Marks live in a `StateField`, mapped forward through every change.** The test
+`provenance.ts` applies decides it: is this *derivable* from the document? It
+is not — nothing in the text remembers that a plugin thought line 40 was
+suspicious. And carrying them forward is not a nicety: a plugin is in another
+process and cannot be asked to re-decorate between one keystroke and the next,
+so without mapping every mark would vanish the moment anyone typed.
+
+**That mapping is the entire per-keystroke cost, and it is measured.** With the
+cap of 2,000 marks in the document: **0.82x for 8x the document** — 0.387 ms at
+2,000 lines against 0.320 ms at 16,000. So the marks cost about 0.08 ms over
+the 0.31 ms baseline, and that cost does not move with the document.
+`tests/browser/typing-path.test.ts` pins it at the same 3x budget the
+undecorated case uses, because the claim is precisely that decorations cost by
+their own count and not by the file.
+
+**Ranges are clamped, not trusted.** CodeMirror throws on a range outside the
+document, *from inside a view update* — which is not a missing decoration, it
+is a dead editor. `core/plugin-decorations.ts` clamps, drops inverted and empty
+ranges, floors fractions, and sorts, because `RangeSet.of` throws on unsorted
+input and a linter reporting by rule emits out of order as a matter of course.
+`editor/lsp.ts` already learned this from language servers; a plugin has less
+excuse and no specification.
+
+**A closed vocabulary, not a class.** `error`, `warning`, `info`, `highlight` —
+the plugin names what it means, Nox decides how that is drawn. The three that
+report something underline; `highlight` fills, because that is what asking for
+a highlight means, and it is weaker than both the selection and a search match
+so a plugin's opinion cannot outrank what the user is doing.
+
+### The one event a plugin gets
+
+Decorations forced the push channel the status-item pass recorded as debt, and
+it is deliberately the narrowest version that works:
+
+- **Debounced** (400 ms), so a burst of typing is one wake-up after it stops.
+- **Coarse** — "this buffer changed", never what changed.
+- **Only for buffers the plugin has already decorated.** A plugin that never
+  showed an interest in a file is not woken by someone typing in it, which is
+  what stops this becoming an ambient event feed.
+
+Per edit it costs one map lookup, one `clearTimeout` and one `setTimeout`, and
+nothing at all for anyone with no plugins installed.
+
 ## Deliberately not in this pass
 
-Declarative editor decorations, plugin settings, and any install flow. `SidebarView` is a closed union and `Sidebar.svelte`'s
+Plugin settings and any install flow. **All four surfaces the roadmap row
+named are now built.** `SidebarView` is a closed union and `Sidebar.svelte`'s
 `VIEWS` is a hardcoded table; opening those up is its own work. Promising the
 whole roadmap row in one pass is exactly the compatibility promise 1.0 was
 warned about.

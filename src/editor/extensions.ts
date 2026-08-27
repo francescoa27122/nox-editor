@@ -40,6 +40,7 @@ import { lspDiagnosticsExtension } from './lsp';
  */
 export const lspCompartment = new Compartment();
 import { languageCompartment } from './languages';
+import { pluginDecorationExtension } from './plugin-decorations';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
 import { searchHighlighter } from './search-highlight';
 import { stickyScrollExtension } from './sticky';
@@ -228,6 +229,11 @@ function staticExtensions(): Extension[] {
     provenanceField,
     // Same split, same reason: the hunks survive a settings toggle.
     gitGutterField,
+    // Unconditional for the same reason as the two above, and there is no
+    // setting to gate it on anyway: a plugin's marks are its output, not a
+    // preference. The whole per-keystroke cost is mapping the set through the
+    // change, which is what `core/plugin-decorations.ts` caps the count for.
+    pluginDecorationExtension(),
   ];
 }
 
