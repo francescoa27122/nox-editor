@@ -32,7 +32,7 @@
     reconfigureAllEffects,
     reconfigureEffects,
   } from '@editor/extensions';
-  import { lspCompletionExtension } from '@editor/completion';
+  import { completionExtension } from '@editor/completion';
   import { lspHoverExtension } from '@editor/hover';
   import { cachedLanguage, hasGrammar, languageCompartment, loadLanguage } from '@editor/languages';
   import { onGitGutterClick, setGitGutter } from '@editor/git-gutter';
@@ -88,7 +88,7 @@
     },
   };
   const lspExtensions = [
-    lspCompletionExtension(lspDeps),
+    completionExtension(lspDeps),
     lspHoverExtension(lspDeps),
     // Not LSP, but the same lifecycle: pane-scoped because it needs the app.
     // A mousedown on the git gutter opens the diff view — the click that

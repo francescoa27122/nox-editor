@@ -6,6 +6,29 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Completion now works in files with no language server, and in the three
+  languages that ship their own suggestions.** The completion extension was installed with
+  CodeMirror's `override` option, which *replaces* the suggestion sources a
+  language contributes rather than adding to them. Nox bundles
+  `@codemirror/lang-html`, `lang-css` and `lang-javascript`, each of which
+  registers its own — HTML tags and attributes, CSS properties and values,
+  JavaScript locals — and all three were switched off from the day the LSP
+  client landed. In any other language, with no server configured, there were
+  no suggestions at all. Both are fixed: the server's suggestions are now
+  registered alongside a language's own rather than in place of them.
+
+### Added
+
+- **Suggestions from the words already in the file**, as the floor under
+  everything else. A language with no server — Go, YAML, shell, a plain text
+  file, an untitled buffer — now completes from what you have already typed
+  in it. It stands down where something better is answering: a language server
+  that offers completion takes the question outright, and in a file over 1 MB
+  the fallback declines rather than scan it, because at that size the scan
+  costs more per keystroke than the list is worth.
+
 ## [0.10.0] — 2026-08-26
 
 Language servers stop guessing. This release is mostly about the three things

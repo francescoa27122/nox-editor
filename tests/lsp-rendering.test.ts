@@ -28,7 +28,7 @@ import { installRangeRects } from './support/jsdom-layout';
  * Mutation-checked on 2026-08-19, each by breaking `EditorPane.svelte` and
  * watching the test go red before restoring it:
  * - hover: dropping `lspHoverExtension(lspDeps)` from `lspExtensions`;
- * - completion: dropping `lspCompletionExtension(lspDeps)`;
+ * - completion: dropping `completionExtension(lspDeps)`;
  * - diagnostics: replacing the `applyDiagnostics(view, …)` call with a
  *   no-op.
  */

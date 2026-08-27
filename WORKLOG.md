@@ -8,6 +8,73 @@ are knowledge.**
 
 ---
 
+## 2026-08-26 (PC) — `override` was switching off completions that shipped in the bundle
+
+An audit of Nox against what an editor needs to be a daily driver turned up one
+item that was a defect rather than an absence, and this closes it.
+`EditorPane` installed `autocompletion({ override: [lspSource] })`.
+**`override` replaces the sources CodeMirror gathers from language data rather
+than adding to them** (`@codemirror/autocomplete`, `CompletionState.update`),
+so the three grammar packages Nox bundles that register their own —
+`lang-html`, `lang-css`, `lang-javascript` — had theirs switched off from the
+day the LSP client landed. Verified against the installed dists rather than
+assumed: all three carry an `autocomplete:` entry. And in any language with no
+server, which is most of them, there were no suggestions at all.
+
+Fixed by registering both sources on the bare `EditorState.languageData`
+facet, which merges with whatever the language contributes.
+
+**The word fallback is `completeAnyWord`, not a hand-rolled scan**, and it
+stands down twice: when a language server offers completion for the document's
+language, and above 1 MB. Both bounds are argued in ARCHITECTURE §6 and the
+new decision-log section.
+
+**The 1 MB cap is measured, not chosen.** Per query, after the first: 0.25 MB
+2-3 ms, 0.5 MB 3-4 ms, 1 MB ~8 ms, 2 MB ~23 ms, 10 MB ~112 ms — stable across
+two runs. `completeAnyWord` caches per rope node, but above ~2000 distinct
+words the *merged* result is never cached, so every query re-merges the child
+lists and the cost tracks distinct words rather than keystrokes. 1 MB is where
+a query still leaves half a frame; the same rule that brought quick-open's
+index cap down to 14,000.
+
+**The bug I wrote on the way is the one worth remembering.** Registering the
+sources as `() => [{ autocomplete: createLspCompletionSource(deps) }, …]`
+builds a *new pair of functions on every transaction*, and CodeMirror finds a
+running query by identity of the source function. No in-flight query was ever
+recognised as its own, each was reset to pending by the transaction that would
+have delivered its result, and the picker stayed pending forever — a hang, not
+a wrong list. Three of the four new tests went red on it, which is the only
+reason it did not ship.
+
+**Mutation-checked, three of three**: removing the size cap, removing the
+server stand-down gate, and both together each turn the matching test red.
+The fourth case — the html source surviving — failed before the
+implementation existed. A structural test would have caught none of them:
+`override` is a config facet and leaves language data untouched, so asserting
+the html source is *registered* passes with the defect fully in place. Every
+case drives the real picker.
+
+Shipped:    `src/editor/completion.ts` (sources via language data, `completeAnyWord`
+            floor, `WORD_COMPLETION_MAX_BYTES`, `lspCompletionExtension` →
+            `completionExtension`); `src/ui/EditorPane.svelte`;
+            `tests/completion-sources.test.ts` (4 new); ARCHITECTURE §6 +
+            decision log + one debt row; CHANGELOG Unreleased.
+Verified:   `npm test` 145 files / 2076 tests passed · `npm run check` 991 files,
+            0 errors 0 warnings · `npm run lint` 0 errors, 9 pre-existing
+            warnings (the documented nine defensive initialisers) ·
+            `npm run build` built in 1.00s · `npm run test:editor` 2 passed —
+            the typing path is unchanged.
+Next:       Language coverage. 11 of the 25 languages Nox names by extension have
+            no parser — shell, yaml, toml, xml, sql, go, c, cpp, java, ruby, php —
+            and that, not the plugin API, is what stops someone adopting it.
+Blocked:    Nothing.
+Confidence: High on the fix and the measurement, both driven through the real
+            picker and repeated. Medium on the 1 MB number travelling: it was
+            measured on this PC over synthetic source text, and a slower
+            machine or a file of denser vocabulary moves the curve.
+
+---
+
 ## 2026-08-26 (PC) — The release page says what changed in it
 
 The gap 0.10.0 exposed, closed (#150) — **and the gap is not the one the last

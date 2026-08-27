@@ -1,11 +1,12 @@
 import {
   autocompletion,
+  completeAnyWord,
   insertCompletionText,
   type Completion,
   type CompletionResult,
   type CompletionSource,
 } from '@codemirror/autocomplete';
-import type { ChangeSpec, Extension } from '@codemirror/state';
+import { EditorState, type ChangeSpec, type Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import {
   documentationOf,
@@ -16,11 +17,14 @@ import { positionAt } from '@core/lsp-position';
 import { changesOf, textEditsOf, type Change } from '@core/lsp-text-edit';
 
 /**
- * Completions from the language server.
+ * Completions: the language server first, the words in the file underneath.
  *
- * Takes the two service methods it needs rather than the service, which is
- * what lets the cases worth testing be written down: no server, a server that
- * errors, and a result that arrives after the keystroke that asked for it.
+ * The server source takes the two service methods it needs rather than the
+ * service, which is what lets the cases worth testing be written down: no
+ * server, a server that errors, and a result that arrives after the keystroke
+ * that asked for it. Both sources are registered through language data so the
+ * grammar packages keep theirs — see `completionExtension` for why that is
+ * not `override`.
  *
  * This layer owns the DOM. `core/lsp-completion.ts` converts the items and
  * stays runnable under Node; CodeMirror's lazy `info` callback has to return
@@ -272,7 +276,85 @@ export function createLspCompletionSource(deps: CompletionDeps): CompletionSourc
   };
 }
 
-/** The extension, for `buildExtensions`. */
-export function lspCompletionExtension(deps: CompletionDeps): Extension {
-  return autocompletion({ override: [createLspCompletionSource(deps)] });
+/**
+ * How much document the word fallback will read.
+ *
+ * `completeAnyWord` scans the whole document, caching per rope node, so an
+ * edit rescans one chunk and reuses the rest. What it cannot cache is the
+ * merge: above ~2000 distinct words the top-level result is never stored
+ * (`@codemirror/autocomplete`, `collectWords`), so every query re-merges the
+ * cached child lists, and that cost tracks distinct words rather than
+ * keystrokes.
+ *
+ * Measured on this machine over synthetic source text, per query, after the
+ * first: 0.25 MB 2-3 ms, 0.5 MB 3-4 ms, 1 MB ~8 ms, 2 MB ~23 ms, 10 MB
+ * ~112 ms. The cap is where the query still leaves most of a frame for
+ * everything else — the same rule quick-open's index cap was set by, which
+ * rejected a scan taking 80-85% of one. Above it the fallback declines
+ * rather than slows: a file this size is generated or data, and a list of
+ * every word in it is noise even when it is free.
+ */
+export const WORD_COMPLETION_MAX_BYTES = 1024 * 1024;
+
+/**
+ * The words already in the document — the floor under everything else.
+ *
+ * Two conditions turn it off. **A language server that offers completion**
+ * takes the question: its items carry `detail`, so CodeMirror's own
+ * cross-source dedupe (`sortOptions`) would not collapse a bare word against
+ * the same symbol described properly, and the list would carry both. **A
+ * document past the cap** costs more per query than it returns.
+ *
+ * A language that brings its own source — html, css, javascript — keeps this
+ * one as well. Those sources answer in syntactic positions rather than
+ * everywhere (`lang-javascript` completes locally-bound names only), so the
+ * overlap is small and the words are what fill the gap. They arrive typed
+ * `text`, which is CodeMirror's own signal for "this is only a word that
+ * appears in your file".
+ */
+export function createWordCompletionSource(deps: CompletionDeps): CompletionSource {
+  return (context) => {
+    if (context.state.doc.length > WORD_COMPLETION_MAX_BYTES) return null;
+
+    const document_ = deps.documentOf();
+    if (document_ && deps.lsp.capabilitiesFor(document_.languageId)?.completionProvider) {
+      return null;
+    }
+
+    return completeAnyWord(context);
+  };
+}
+
+/**
+ * The extension, for `EditorPane`.
+ *
+ * The sources go in through **language data, not `override`**. `override`
+ * replaces the list CodeMirror gathers from language data rather than adding
+ * to it, so the previous shape silently switched off every completion source
+ * the grammar packages register — html tags, css properties, javascript
+ * locals were all in the bundle and unreachable, and a file whose language had
+ * no server got nothing at all. Registering on the bare `languageData` facet
+ * adds these two to whatever the language already contributes;
+ * `languageDataAt` collects from every provider that has the key.
+ */
+export function completionExtension(deps: CompletionDeps): Extension {
+  /**
+   * Built once, deliberately.
+   *
+   * CodeMirror tracks a running query per source and finds it by **identity**
+   * of the source function (`CompletionState.update`: `active.find(s =>
+   * s.source == source)`). The language-data provider is called on every
+   * transaction, so constructing the sources inside it hands back a new pair
+   * each time, no running query is ever recognised as its own, and every
+   * source is reset to pending on the transaction that would have delivered
+   * its result. The picker then stays pending forever rather than opening —
+   * which is a hang, not a wrong list, and it is what
+   * `tests/completion-sources.test.ts` catches.
+   */
+  const languageData = [
+    { autocomplete: createLspCompletionSource(deps) },
+    { autocomplete: createWordCompletionSource(deps) },
+  ];
+
+  return [autocompletion(), EditorState.languageData.of(() => languageData)];
 }
