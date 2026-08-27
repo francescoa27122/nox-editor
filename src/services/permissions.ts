@@ -43,6 +43,35 @@ export type Capability =
    */
   | 'permissions.revoke';
 
+/**
+ * Every capability, as values.
+ *
+ * The union above is the type; this is the vocabulary, for the one caller that
+ * has to check a *string* against it — `core/plugin-manifest.ts`, reading a
+ * capability a third party wrote down. `core/` does not import from
+ * `services/`, so the list is handed to it rather than known by it.
+ *
+ * Built from a `Record<Capability, true>` rather than written as an array,
+ * because that is exhaustive in **both** directions: a capability added to the
+ * union and not here fails to compile, and so does one here that is not in the
+ * union. An array with a `satisfies` only catches the second, and the first is
+ * the one that matters — a capability the manifest parser does not know is a
+ * capability no plugin can declare.
+ */
+const EVERY_CAPABILITY: Record<Capability, true> = {
+  'fs.read': true,
+  'fs.write': true,
+  'fs.create': true,
+  'fs.delete': true,
+  'shell.exec': true,
+  'net.request': true,
+  'buffer.edit': true,
+  'workspace.open': true,
+  'permissions.revoke': true,
+};
+
+export const CAPABILITIES = Object.keys(EVERY_CAPABILITY) as readonly Capability[];
+
 export type Decision = 'allow' | 'deny' | 'prompt';
 
 /**

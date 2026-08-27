@@ -6,6 +6,7 @@ import {
   type AgentProcess,
   type EncodedText,
   type AgentProcessSpec,
+  type PluginWorkerSpec,
   type DirEntry,
   type FileStat,
   type JsonLinesSpec,
@@ -45,6 +46,7 @@ export class MemoryPlatform implements Platform {
     revealInFileManager: false,
     externalFileDrop: false,
     agentProcesses: false,
+    pluginWorkers: false,
     projectSearch: true,
     terminals: false,
     localModels: false,
@@ -909,6 +911,13 @@ export class MemoryPlatform implements Platform {
    * `never`, so a subclass can override this with a process of its own — how
    * `tests/agent-spawn-cwd.test.ts` observes what the app asked to spawn.
    */
+  async startPluginWorker(_spec: PluginWorkerSpec): Promise<AgentProcess> {
+    // Refused loudly for the reason `spawnAgent` gives below: a worker that
+    // silently produced nothing would be indistinguishable from a plugin
+    // that started and did nothing.
+    throw new PlatformError('this build cannot run plugin workers', 'unsupported');
+  }
+
   async spawnAgent(_spec: AgentProcessSpec): Promise<AgentProcess> {
     throw new PlatformError(
       'this build cannot start external processes',

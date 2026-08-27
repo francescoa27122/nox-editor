@@ -52,6 +52,8 @@ export interface PlatformCapabilities {
   projectSearch: boolean;
   /** True when `spawnAgent` can start an external process. */
   agentProcesses: boolean;
+  /** True when `startPluginWorker` can run a plugin in a worker. */
+  pluginWorkers: boolean;
   /** True when `openTerminal` can give a shell a real pty. */
   terminals: boolean;
   /** True when `streamJsonLines` can reach a local model server. */
@@ -99,6 +101,14 @@ export interface PlatformCapabilities {
 }
 
 /** What to start, for `Platform.spawnAgent`. */
+/** What to run, for `Platform.startPluginWorker`. */
+export interface PluginWorkerSpec {
+  /** The plugin's JavaScript, already read from disk. */
+  source: string;
+  /** Shown in errors. */
+  label: string;
+}
+
 export interface AgentProcessSpec {
   command: string;
   args?: string[];
@@ -505,6 +515,22 @@ export interface Platform {
    * agent cannot spawn another agent. Only the user, through configuration.
    */
   spawnAgent(spec: AgentProcessSpec): Promise<AgentProcess>;
+
+  /**
+   * Run a plugin's JavaScript in a worker, as line-delimited messages.
+   *
+   * The second way to be a plugin, beside `spawnAgent`. It exists because
+   * shipping an executable is a high bar for "add a command that runs
+   * prettier", and because a worker is already a crash boundary and already
+   * off the main thread — the two properties the design gate asks for.
+   *
+   * Returns an `AgentProcess` deliberately: that interface is documented as
+   * having no protocol knowledge, so one host serves both transports rather
+   * than branching on which kind of plugin it is talking to.
+   *
+   * Check `capabilities.pluginWorkers` first.
+   */
+  startPluginWorker(spec: PluginWorkerSpec): Promise<AgentProcess>;
 
   /**
    * Stop every running agent.

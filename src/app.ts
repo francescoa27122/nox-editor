@@ -64,6 +64,8 @@ import {
 } from '@services/agent/config';
 import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
 import { SnippetService, SNIPPETS_FILE } from '@services/snippets';
+import { PluginHost } from '@services/plugin/host';
+import { connectorFor, discoverPlugins, PLUGINS_DIRECTORY } from '@services/plugin/discover';
 import { OllamaProvider } from '@services/agent/ollama';
 import type { AgentTransport } from '@services/agent/protocol';
 import type { AnswerExpectation, ModelProvider } from '@services/agent/provider';
@@ -155,6 +157,7 @@ export class NoxApp {
   /** Language servers the user has configured in `servers.json`. */
   readonly serverRegistry: ServerRegistry;
   readonly snippets: SnippetService;
+  readonly plugins: PluginHost;
   /** Failures already announced, so a republished status does not repeat one. */
   #reportedFailures = new Set<string>();
   /** The running servers, and the diagnostics they publish. */
@@ -262,6 +265,16 @@ export class NoxApp {
     this.agentConfig = new AgentConfigService(platform);
     this.serverRegistry = new ServerRegistry(platform);
     this.snippets = new SnippetService(platform);
+    this.plugins = new PluginHost({
+      commands: this.commands,
+      context: this.context,
+      // Staging, not writing. A plugin's proposal lands in the review
+      // panel exactly as an agent's does, and becomes a write only when
+      // the user clicks Apply in their own UI.
+      stage: (spec) => this.review.stage(spec) !== null,
+      notify: (title, detail) => this.notifications.error(title, detail),
+      connect: connectorFor(platform),
+    });
     this.lsp = LspService.spawnedBy(
       platform,
       this.workspace,
@@ -346,6 +359,7 @@ export class NoxApp {
     await this.agentConfig.load();
     await this.serverRegistry.load();
     await this.snippets.load();
+    await this.loadPlugins();
     await this.notes.load();
     this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
 
@@ -1271,6 +1285,10 @@ export class NoxApp {
    */
   async #restartLanguageServers(root: string | null): Promise<void> {
     await this.lsp.stop();
+    // Beside the servers, and for the identical reason: a reload does not
+    // kill what the renderer started, so a plugin worker or process would
+    // outlive the window that was talking to it.
+    await this.plugins.stopAll();
     if (!root) return;
     if (!this.platform.capabilities.languageServers) return;
     await this.lsp.start();
@@ -1368,6 +1386,56 @@ export class NoxApp {
     }
 
     await this.openPaths([join(directory, SNIPPETS_FILE)]);
+  }
+
+  /**
+   * Find every plugin and register what it contributes.
+   *
+   * Registering is the whole of loading: nothing is started here, because a
+   * manifest already said what the commands are. A plugin runs the first time
+   * one of its commands is invoked, so a plugin nobody uses costs a directory
+   * read and nothing else.
+   */
+  async loadPlugins(): Promise<void> {
+    const { plugins, problems } = await discoverPlugins(this.platform);
+    this.plugins.load(plugins);
+
+    if (problems.length > 0) {
+      // Said out loud. A plugin that silently does not appear is
+      // indistinguishable from one that appeared and does nothing, and the
+      // second is much the harder to debug.
+      this.notifications.warn(
+        problems.length === 1 ? 'A plugin could not be loaded' : `${problems.length} plugins could not be loaded`,
+        problems.join('; '),
+      );
+    }
+  }
+
+  /** Open the plugins folder, creating it if it is not there yet. */
+  async openPluginsFolder(): Promise<void> {
+    const directory = await this.platform.configDir().catch(() => null);
+    if (!directory) {
+      this.notifications.info(
+        'Plugins live in the plugins folder',
+        'The browser build keeps settings in the browser, so there is no folder to open here.',
+      );
+      return;
+    }
+
+    const root = join(directory, PLUGINS_DIRECTORY);
+    try {
+      if (!(await this.platform.exists(root))) await this.platform.createDir(root);
+    } catch (error) {
+      this.notifications.error(
+        'Could not create the plugins folder',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    await this.platform.reveal(root).catch(() => {
+      this.notifications.info('Plugins live in', root);
+    });
   }
 
   /** Open `agents.json` for editing, creating it with an example if absent. */
@@ -3013,6 +3081,32 @@ export class NoxApp {
           if (!this.workspace.setLanguage(active.id, arg)) return;
           this.notifications.info(`Editing as ${languageById(arg).name}`);
         },
+      },
+      {
+        id: 'plugins.reload',
+        title: 'Reload Plugins',
+        category: 'Plugins',
+        keywords: ['plugin', 'extension', 'restart'],
+        run: async () => {
+          // Stop first, then re-discover. `CommandRegistry.register` throws on
+          // a duplicate id, so a reload that kept the old registrations would
+          // take the app down rather than replace a plugin.
+          await this.plugins.stopAll();
+          await this.loadPlugins();
+
+          const count = this.plugins.list().length;
+          this.notifications.info(
+            count === 1 ? '1 plugin loaded' : `${count} plugins loaded`,
+          );
+        },
+      },
+      {
+        id: 'plugins.openFolder',
+        title: 'Open Plugins Folder',
+        category: 'Plugins',
+        keywords: ['plugin', 'extension', 'install'],
+        capabilities: ['fs.create'],
+        run: () => this.openPluginsFolder(),
       },
       {
         id: 'snippets.configure',

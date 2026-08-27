@@ -8,6 +8,77 @@ are knowledge.**
 
 ---
 
+## 2026-08-27 (PC) — The plugin API, deliberately one quarter of the roadmap row
+
+Planned before any code, because a plugin API is a permanent compatibility
+promise and 1.0 explicitly excluded it for that reason. Three questions went to
+the operator; all three took the recommendation. Full design in
+`docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
+
+**Most of it already existed.** `commands.register()` has returned a disposer
+since it was written, `Principal`/`Author` have carried `{ kind: 'plugin' }`
+since M4, and `AgentProcess` was documented as protocol-agnostic — "this moves
+lines". So the work was mostly *choosing what to promise*, and the promise is
+one quarter of the roadmap row: commands, not panels or status items or the
+editor.
+
+**Out of process, and the reason is better than the one I inherited.**
+`AGENT-PLATFORM.md` §6 already rejected in-process JS plugins for agents on
+crash-boundary and language-independence grounds. The argument this pass adds:
+the roadmap's "must not block the typing path" gate is **only enforceable**
+out of process. In process it is a request. That row now says so.
+
+**Contributions live in `plugin.json`, not a handshake** — so commands are
+registered before anything runs and a plugin starts on first invoke. Lazy
+activation fell out of writing them down; a handshake would have meant starting
+every installed plugin at launch.
+
+**Two bugs, both the same shape, both found by tests.** A plugin greets in the
+tick it starts, earlier than anyone can listen. First the *fake* connection
+dropped pre-subscription lines — which `AgentProcess.onLine` explicitly forbids
+of a real one, so the fake was wrong about the contract and five handshakes
+failed. Then the *host* had the same hole one layer up: the buffered greeting
+replays the instant a handler attaches, one statement before `#awaitHello`
+installs its waiter. `helloVersion` records it on arrival instead.
+
+**A third was a misreading of the code, not a bug.** A denial test passed when
+it should not have: `commands.ts` runs the guard only `if
+(command.capabilities?.length)`, so a target command declaring nothing is
+correctly ungated. The test was wrong, not the dispatcher.
+
+**No Rust change, on purpose** — `spawnAgent` is reused verbatim for the
+process transport, which matters because cargo is not installed here. The one
+line that cannot be verified locally is the CSP.
+
+Shipped:    `src/core/plugin-manifest.ts`; `src/services/plugin/{protocol,host,
+            discover}.ts`; `startPluginWorker` on `Platform` + tauri/memory/web;
+            `worker-src 'self' blob:` in `tauri.conf.json`; `CAPABILITIES` in
+            `permissions.ts`; `app.ts` (host, `loadPlugins`, two commands, stop
+            on dispose); `menu.ts`; `examples/plugins/header/`;
+            `tests/plugin-{manifest,host,integration}.test.ts`; spec,
+            ARCHITECTURE (decision + 3 debt rows), ROADMAP, AGENT-PLATFORM,
+            CHANGELOG.
+Verified:   `npm test` 153 files / 2181 tests passed (was 150 / 2145) ·
+            `npm run check` 1015 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 998 ms.
+            Mutation-checked three of three: removing the namespacing, the
+            manifest capability declaration, and the disable teardown each turn
+            the matching test red.
+Next:       Status items, then panels. Both need `SidebarView` to stop being a
+            closed union and `Sidebar.svelte`'s `VIEWS` to stop being a
+            hardcoded table — that refactor is the real work, and the plugin
+            surface is small once it is done.
+Blocked:    Nothing, but see the risk.
+Confidence: High on everything with a test. **Low on the worker transport in
+            the packaged app**: it needs the new CSP line, cargo is not
+            installed here, and the tests inject a connection rather than
+            construct a real `Worker`. If a blob worker is refused in the
+            WebView, the process transport is unaffected and only the worker
+            convenience is lost. This wants a desktop walk before the
+            release notes claim it works.
+
+---
+
 ## 2026-08-26 (PC) — Snippets, both kinds, and the cursor bug under them
 
 Asked for snippets; the word has two readings and the answer was both, because
