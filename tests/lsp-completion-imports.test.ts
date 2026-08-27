@@ -3,7 +3,7 @@ import { CompletionContext } from '@codemirror/autocomplete';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createLspCompletionSource, type CompletionDeps } from '../src/editor/completion';
+import { createLspCompletionSource, type LspDeps } from '../src/editor/completion';
 import type { LspCompletionItem } from '../src/core/lsp-completion';
 import { installRangeRects } from './support/jsdom-layout';
 
@@ -42,7 +42,7 @@ interface Options {
   resolveGate?: Promise<void>;
 }
 
-function deps(options: Options = {}): { deps: CompletionDeps; count: { resolves: number } } {
+function deps(options: Options = {}): { deps: LspDeps; count: { resolves: number } } {
   const state = { resolves: 0 };
   const item: LspCompletionItem = {
     label: 'readFileSync',
@@ -52,7 +52,7 @@ function deps(options: Options = {}): { deps: CompletionDeps; count: { resolves:
       : {}),
   };
 
-  const d: CompletionDeps = {
+  const d: LspDeps = {
     lsp: {
       capabilitiesFor: () => ({
         completionProvider: {
@@ -90,7 +90,7 @@ afterEach(() => {
 
 /** Run the source, then accept the first option through a live view. */
 async function accept(
-  d: CompletionDeps,
+  d: LspDeps,
   doc = DOC,
   cursor = CURSOR,
   edit?: (v: EditorView) => void,

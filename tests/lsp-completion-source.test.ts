@@ -2,7 +2,7 @@
 import { CompletionContext } from '@codemirror/autocomplete';
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
-import { createLspCompletionSource, type CompletionDeps } from '../src/editor/completion';
+import { createLspCompletionSource, type LspDeps } from '../src/editor/completion';
 import type { LspCompletionItem } from '../src/core/lsp-completion';
 
 /**
@@ -26,7 +26,7 @@ function deps(
     capabilities?: Record<string, unknown> | null;
     respond?: (method: string, params: unknown) => Promise<unknown>;
   } = {},
-): { deps: CompletionDeps; asked: Asked[] } {
+): { deps: LspDeps; asked: Asked[] } {
   const asked: Asked[] = [];
   const capabilities =
     options.capabilities === undefined

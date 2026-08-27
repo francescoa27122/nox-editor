@@ -55,7 +55,20 @@ export interface LspCompletionItem {
  * by default. `to` is read because reading the protocol honestly is what this
  * module is for, and because the feature that wants it will want it here.
  */
-export type ConvertedCompletion = Completion & { from?: number; to?: number };
+export type ConvertedCompletion = Completion & {
+  from?: number;
+  to?: number;
+  /**
+   * The server's template, when it sent one (`insertTextFormat: 2`).
+   *
+   * Carried rather than expanded, because expanding needs CodeMirror's
+   * snippet lifecycle and this module has to keep running under Node.
+   * `apply` still holds the flattened text beside it, so a caller that does
+   * not know about snippets inserts something sensible rather than the
+   * label.
+   */
+  snippet?: string;
+};
 
 /**
  * The protocol's 25 kinds, to the strings CodeMirror renders icons from.
@@ -103,10 +116,12 @@ export function completionKind(kind: number | undefined): string {
 /**
  * Reduce snippet syntax to the text it would insert.
  *
- * `${1:arg}` becomes `arg`; `$1` and `$0` vanish. This is not snippet
- * *support* — that needs CodeMirror's own snippet lifecycle and its own
- * design. It exists to keep `${1:arg}` out of the user's buffer, which is the
- * failure they would notice and have to undo.
+ * `${1:arg}` becomes `arg`; `$1` and `$0` vanish. This was once the whole of
+ * Nox's answer to snippets. It is now the **fallback beside the template**:
+ * `editor/completion.ts` expands the real thing, and this is what a caller
+ * that cannot — anything without a view — inserts instead. Keeping it means
+ * a path that misses the snippet writes `console.log(value)` rather than
+ * `${1:value}` or the bare label.
  */
 export function stripSnippet(text: string): string {
   return text
@@ -136,12 +151,15 @@ export function toCodeMirrorCompletions(
     const isSnippet = item.insertTextFormat === 2;
 
     let apply: string | undefined;
+    /** The unflattened template, when this item is a snippet. */
+    let template: string | undefined;
     let range: { from: number; to: number } | undefined;
 
     if (item.textEdit) {
       // The server naming the exact range it wants replaced. Believed over
       // any range the client would guess.
       apply = isSnippet ? stripSnippet(item.textEdit.newText) : item.textEdit.newText;
+      if (isSnippet) template = item.textEdit.newText;
       // Checked, not assumed. The 3.16 `InsertReplaceEdit` shape is
       // `{ newText, insert, replace }` with **no `range` at all**, and
       // reaching into it threw a `TypeError` out of the whole completion
@@ -157,6 +175,7 @@ export function toCodeMirrorCompletions(
       }
     } else if (item.insertText !== undefined) {
       apply = isSnippet ? stripSnippet(item.insertText) : item.insertText;
+      if (isSnippet) template = item.insertText;
     }
 
     // CodeMirror matches typed input against `label`, so a server that
@@ -171,6 +190,7 @@ export function toCodeMirrorCompletions(
       ...(item.detail ? { detail: item.detail } : {}),
       ...(item.sortText ? { sortText: item.sortText } : {}),
       ...(apply !== undefined ? { apply } : {}),
+      ...(isSnippet && template !== undefined ? { snippet: template } : {}),
       ...(range ?? {}),
     };
 

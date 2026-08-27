@@ -120,7 +120,7 @@ export const LAYOUT: readonly MenuGroup[] = [
     categories: ['View'],
     trailing: [separator, predefined('fullscreen')],
   },
-  { label: 'Code', categories: ['Language', 'Change Marks', 'Review'] },
+  { label: 'Code', categories: ['Language', 'Snippets', 'Change Marks', 'Review'] },
   { label: 'Tools', categories: ['Terminal', 'Git', 'Agents', 'Answers', 'Notes'] },
   {
     // The role is what makes macOS list the open windows in it and add its

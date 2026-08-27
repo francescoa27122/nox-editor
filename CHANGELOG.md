@@ -8,6 +8,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Accepting a completion that adds an import no longer leaves the cursor in
+  the import.** When a language server sends the import alongside the
+  suggestion — rust-analyzer, gopls and pyright do; tsserver sends it a moment
+  later and was never affected — both landed in one undoable step, correctly,
+  but the caret was placed as though the import were not there. It ended up
+  part-way through the new line at the top of the file, and the next thing
+  typed went in there.
 - **Opening any file no longer loads every grammar Nox ships.** The build put
   all the parsers in one chunk, so opening a .json buffer downloaded and
   parsed the JavaScript, HTML, CSS, Markdown, Python and Rust grammars too —
@@ -25,6 +32,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   registered alongside a language's own rather than in place of them.
 
 ### Added
+
+- **Snippets.** Write your own in `snippets.json` — keyed by language, with a
+  `*` bucket that applies everywhere — and they appear in the same picker as
+  everything else. `Tab` and `Shift+Tab` move between the fields, `Escape`
+  leaves. A body can be one string or an array of lines, so multi-line snippets
+  need no escaping, and a `//` key is a comment. **Edit Snippets** opens the
+  file with examples in it; saving it in Nox applies it immediately.
+- **Language servers can send snippets now, and they expand.** Nox claims
+  `snippetSupport` in the handshake, so tsserver, rust-analyzer and gopls
+  answer with `console.log($1)` rather than flat text. Until now their
+  placeholders were stripped to the default text on arrival — `${1:value}`
+  became `value`, with nothing to tab between.
 
 - **Syntax highlighting for the eleven languages Nox named and rendered flat.**
   Go, Java, C, C++, PHP, SQL, XML, YAML, shell, TOML and Ruby have been in the

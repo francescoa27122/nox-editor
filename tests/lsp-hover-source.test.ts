@@ -3,7 +3,7 @@ import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
 import { createLspHoverSource, renderHover } from '../src/editor/hover';
-import type { CompletionDeps } from '../src/editor/completion';
+import type { LspDeps } from '../src/editor/completion';
 
 /**
  * Asking the server what a symbol is, and putting the answer on screen.
@@ -29,7 +29,7 @@ function deps(
     respond?: () => Promise<unknown>;
     document?: { uri: string; languageId: string } | null;
   } = {},
-): { deps: CompletionDeps; asked: Asked[] } {
+): { deps: LspDeps; asked: Asked[] } {
   const asked: Asked[] = [];
   const capabilities =
     options.capabilities === undefined ? { hoverProvider: true } : options.capabilities;

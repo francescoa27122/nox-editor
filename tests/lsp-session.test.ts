@@ -127,6 +127,13 @@ describe('starting', () => {
         codeAction: { codeActionLiteralSupport: { codeActionKind: { valueSet: [] } } },
       },
     });
+    // Claimed because it is implemented. `snippetSupport` invites a server to
+    // answer with `${1:arg}` templates instead of flat text, and Nox expands
+    // them through CodeMirror's snippet lifecycle — the claim and the handler
+    // land together, which is the rule the block below states.
+    expect(initialize?.params?.capabilities).toMatchObject({
+      textDocument: { completion: { completionItem: { snippetSupport: true } } },
+    });
     // Not claimed, deliberately: Nox does not resolve a stub action, so a
     // server must send complete ones.
     const codeAction = (
