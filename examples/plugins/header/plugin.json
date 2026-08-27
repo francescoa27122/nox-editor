@@ -1,0 +1,6 @@
+{
+  "id": "header",
+  "label": "Header",
+  "worker": "main.js",
+  "commands": [{ "name": "insert", "title": "Insert File Header" }]
+}

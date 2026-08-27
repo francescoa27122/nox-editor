@@ -140,6 +140,7 @@ src/
 │  ├─ lsp/               Language servers: JSON-RPC, lifecycle, document
 │  │                     sync, servers.json, the diagnostics store
 │  ├─ agent/protocol.ts  The agent wire contract and transport seam
+│  ├─ plugin/           Third-party code: manifest, host, discovery, wire
 │  ├─ agent/provider.ts  Vendor-neutral model interface
 │  ├─ agent/ollama.ts    A local model: prompt, parser, edit resolution
 │  ├─ agent/runtime.ts   Sessions, audit trail, session-level undo
@@ -2250,6 +2251,49 @@ association puts the completion *before* the import it was meant to accompany.
 
 ---
 
+### Plugins are out of process, and that is what makes the gate real
+
+The roadmap's design gate for plugins is that they **must not be able to block
+the typing path**. In process, that is a request: a plugin handed a CodeMirror
+extension runs on the user's keystrokes and no documentation prevents it. Out
+of process there is no seam through which a plugin *could* run per keystroke,
+so the gate is a property instead. `AGENT-PLATFORM.md` §6 had already made the
+same call for agents, on the grounds that a crash boundary, real capability
+enforcement and language independence are "none of which are retrofittable".
+
+The cost is paid rather than hidden: **a plugin cannot hand Nox a CodeMirror
+object**, so the roadmap's "editor extensions" becomes a declarative surface —
+the plugin names ranges, Nox owns the render loop — and it is not built yet.
+
+**Contributions live in `plugin.json`, not in a handshake.** So a plugin's
+commands are registered before it has run, and it starts on the first invoke of
+one. A handshake would mean starting every installed plugin at launch to find
+out what it offers, on an editor whose thesis is starting fast.
+
+**The manifest is read stricter than any other config Nox parses**, and the two
+halves differ on purpose. Capabilities are all-or-nothing — one unrecognised
+word refuses the manifest, because a trimmed list is a plugin whose declaration
+the user read and whose behaviour does not match it. Commands are lenient — a
+malformed one grants nothing, so dropping it beats refusing a plugin whose
+others are fine.
+
+**Namespacing makes collisions unrepresentable.** A contribution registers as
+`plugin.<id>.<name>`: three segments, a fixed first one, and no dots allowed in
+either of the others. A contributed id can never equal a core id and two
+plugins can never collide, which is why the palette needs no conflict
+resolution.
+
+**Both transports are the same interface.** `AgentProcess` was already
+documented as knowing nothing about any protocol — "this moves lines" — so a
+child process satisfies it as-is and a worker satisfies it behind
+`startPluginWorker`. The host branches on neither. That is also why this
+landed with **no Rust change**.
+
+Full reasoning, including the two bugs about greetings arriving before anyone
+listens, in `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
+
+---
+
 ### Completion sources are registered, never overridden
 
 `autocompletion()` takes an `override` option, and using it was a defect that
@@ -2360,6 +2404,9 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
 | The word fallback is capped by size, not by work | It declines above 1 MB (§6) rather than scanning an interruptible slice, so a large file gets no word completions at all instead of the ones near the caret. Bounded in the harmless direction — the fallback is a convenience and a language server, where there is one, is unaffected — but the honest fix is a bounded scan around the viewport rather than a cliff. `completeAnyWord` offers no way to ask for one; it would mean Nox owning the scan. |
+| Plugins contribute commands and nothing else yet | Status items, sidebar panels and the declarative editor surface are unbuilt. `SidebarView` is a closed union and `Sidebar.svelte`'s `VIEWS` is a hardcoded table, so a plugin panel is a real change to both rather than a registration. Deliberate: the roadmap row asked for four surfaces and this is one, because a plugin API is a permanent compatibility promise and the narrow half is the half worth living with first. |
+| The worker transport is unverified in the packaged app | It needs `worker-src 'self' blob:`, added to `tauri.conf.json` with it — the default `default-src 'self'` blocks a blob worker outright. `cargo` is not installed on the machine this was written on, so the CSP was never exercised in a real WebView; the tests use an injected connection and `npm run dev` has no CSP at all. **If it fails there, the process transport is unaffected** and only the worker convenience is lost. Wants a desktop walk. |
+| A plugin process is not sandboxed | The same line `agents` already carries: the permission model governs what a plugin may ask *Nox* to do, not what its own process can reach. A plugin is trusted code you chose to install, like a shell plugin — the difference from an agent is only that more people will install one. |
 | A snippet's choice syntax keeps only its first option | `${1|const,let|}` becomes `${1:const}`. CodeMirror's snippet fields have no picker attached, so the alternatives have nowhere to be shown, and a field the user can type over beats a literal `|const,let|` in their code. Offering the real thing means a completion source that fires on entering the field — buildable, and a bigger feature than the conversion it would sit inside. |
 | Snippet variables are not substituted | `$TM_FILENAME`, `$CURRENT_YEAR` and the rest are left exactly as written. Resolving them is a table of a dozen names and a clock; deleting them silently is worse than leaving them, so leaving them is what happens. Visible, and fixable by the person who wrote it. |
 | `snippets.json` is only reloaded when Nox saves it | The file lives in the config directory, which no watcher covers — `FileWatcherService` has one root and it is the workspace. Saving the file *in Nox* reloads it, because `workspace`'s `saved` event names the path; editing it in another program needs **Reload Snippets**. Watching a second root for one small file is the fix, and it is the same machinery `keybindings.json` and `servers.json` would want. |

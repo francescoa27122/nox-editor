@@ -33,6 +33,29 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Plugins.** Nox can now be extended by code you did not write. A folder in
+  the plugins directory with a `plugin.json` gets its commands into the
+  palette, the menus and the keybinding editor — **Open Plugins Folder** and
+  **Reload Plugins** are the two commands that manage it, and a reference
+  plugin ships in `examples/plugins/`.
+
+  A plugin is either a `.js` file run in a worker, or a program in any language
+  speaking one JSON object per line over stdio. Either way it runs **outside
+  the editor's thread**, which is not a detail: it is what makes "a plugin
+  cannot block your typing" a property of the design rather than a promise in a
+  document. It is also a crash boundary — a plugin that dies takes nothing with
+  it, and one that keeps dying is disabled rather than retried forever.
+
+  What a plugin may do is what its `plugin.json` declares, checked in the same
+  place every menu item and keystroke is checked. It has no way to write a file
+  directly: it can run a command, which is permission-checked, or offer an edit
+  to the review panel, which you apply yourself. Its commands are namespaced,
+  so a plugin cannot replace **Save**.
+
+  Deliberately narrow for now: commands only. Status items, panels and drawing
+  in the editor come next, and the reasoning is written down in
+  `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
+
 - **Snippets.** Write your own in `snippets.json` — keyed by language, with a
   `*` bucket that applies everywhere — and they appear in the same picker as
   everything else. `Tab` and `Shift+Tab` move between the fields, `Escape`

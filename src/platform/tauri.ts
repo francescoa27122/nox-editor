@@ -15,6 +15,7 @@ import {
   type PlatformCapabilities,
   type AgentProcess,
   type AgentProcessSpec,
+  type PluginWorkerSpec,
   type ExternalDropEvent,
   type JsonLinesSpec,
   type JsonLinesStream,
@@ -81,6 +82,7 @@ export class TauriPlatform implements Platform {
     externalFileDrop: true,
     projectSearch: true,
     agentProcesses: true,
+    pluginWorkers: true,
     terminals: true,
     localModels: true,
     languageServers: true,
@@ -489,6 +491,100 @@ export class TauriPlatform implements Platform {
     });
 
     return () => unlisten();
+  }
+
+  /**
+   * A plugin in a worker.
+   *
+   * The source is wrapped in a tiny shim rather than run bare, so a plugin
+   * author writes `onRequest`/`send` instead of `postMessage` and a message
+   * shape. One line in, one line out, which is exactly what the child-process
+   * transport already gives the host — so the host branches on nothing.
+   *
+   * **This needs `worker-src blob:` in the CSP.** Without it the packaged app
+   * refuses to construct the worker at all: the default is `default-src
+   * 'self'`, which a blob URL is not. The line was added to
+   * `tauri.conf.json` with this method, and it permits same-origin-derived
+   * blobs only — never a remote script.
+   *
+   * Buffering is not optional. A plugin greets in the tick it starts, long
+   * before the host has this object back to subscribe to, and
+   * `AgentProcess.onLine` requires those lines to survive.
+   */
+  async startPluginWorker(spec: PluginWorkerSpec): Promise<AgentProcess> {
+    const shim = [
+      '(function () {',
+      '  const handlers = [];',
+      '  globalThis.nox = {',
+      '    onRequest(handler) { handlers.push(handler); },',
+      '    send(message) { postMessage(JSON.stringify(message)); },',
+      '  };',
+      '  self.onmessage = async (event) => {',
+      '    let message;',
+      '    try { message = JSON.parse(event.data); } catch { return; }',
+      '    for (const handler of handlers) {',
+      '      try { await handler(message); } catch (error) {',
+      '        globalThis.nox.send({',
+      '          id: message.id,',
+      '          ok: false,',
+      '          error: { code: "internal", message: String(error) },',
+      '        });',
+      '      }',
+      '    }',
+      '  };',
+      '})();',
+      spec.source,
+    ].join('\n');
+
+    const url = URL.createObjectURL(new Blob([shim], { type: 'text/javascript' }));
+    let worker: Worker;
+    try {
+      worker = new Worker(url, { type: 'module' });
+    } finally {
+      // Safe immediately: the worker holds its own reference to the blob once
+      // constructed, and leaving it would leak for the life of the window.
+      URL.revokeObjectURL(url);
+    }
+
+    const buffered: string[] = [];
+    let onLine: ((line: string) => void) | null = null;
+    let onExit: ((code: number | null) => void) | null = null;
+    let exited = false;
+
+    worker.onmessage = (event: MessageEvent<string>) => {
+      if (onLine) onLine(event.data);
+      else buffered.push(event.data);
+    };
+    worker.onerror = (event) => {
+      // A worker that throws at load never runs, and would otherwise leave the
+      // host waiting out the whole handshake deadline on something already
+      // dead.
+      console.error(`[nox] plugin worker "${spec.label}" failed:`, event.message);
+      exited = true;
+      onExit?.(1);
+    };
+
+    return {
+      send: async (line: string) => {
+        worker.postMessage(line);
+      },
+      onLine: (handler) => {
+        onLine = handler;
+        for (const line of buffered.splice(0)) handler(line);
+      },
+      onStderr: () => {
+        // A worker has no second stream. Its diagnostics reach the devtools
+        // console directly, which is where a plugin author is already looking.
+      },
+      onExit: (handler) => {
+        onExit = handler;
+        if (exited) handler(1);
+      },
+      kill: async () => {
+        exited = true;
+        worker.terminate();
+      },
+    };
   }
 
   async spawnAgent(spec: AgentProcessSpec): Promise<AgentProcess> {
