@@ -52,8 +52,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to the review panel, which you apply yourself. Its commands are namespaced,
   so a plugin cannot replace **Save**.
 
-  Deliberately narrow for now: commands only. Status items, panels and drawing
-  in the editor come next, and the reasoning is written down in
+  A plugin can also put a readout on the **status bar** — a linter's last
+  result, a toolchain version, a toggle — and make it clickable to run one of
+  its own commands. Three per plugin, capped in length, and always drawn after
+  Nox's own items, so a plugin arriving mid-session cannot slide a control out
+  from under your pointer. They disappear with the plugin, including when it
+  crashes: a readout nothing is left to correct is worse than none.
+
+  A plugin that shows one declares `"activation": "startup"`, because a status
+  item needs the plugin running to have any content. Everything else stays
+  lazy — a plugin whose commands you never run is never started. Nox pushes no
+  events to plugins, so an item changes when the plugin does something rather
+  than tracking the editor live.
+
+  Deliberately narrow for now: commands and status items. Panels and drawing in
+  the editor come next, and the reasoning is written down in
   `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
 
 - **Snippets.** Write your own in `snippets.json` — keyed by language, with a

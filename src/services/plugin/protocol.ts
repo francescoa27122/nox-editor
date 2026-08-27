@@ -69,6 +69,27 @@ export type PluginRequest =
     }
   | { id: number; method: 'context.selection'; params: { bufferId: BufferId } }
   /**
+   * Put something on the status bar, or change what is there.
+   *
+   * Runtime rather than declared, because an item's *content* is only known to
+   * running code — which is exactly why a plugin that uses this declares
+   * `"activation": "startup"` and gets started at launch. `command` names a
+   * command to run when it is clicked, and that goes through the dispatcher
+   * under this plugin's principal like everything else it can reach.
+   */
+  | {
+      id: number;
+      method: 'status.set';
+      params: {
+        name: string;
+        text: string;
+        tooltip?: string;
+        command?: string;
+        priority?: number;
+      };
+    }
+  | { id: number; method: 'status.clear'; params: { name: string } }
+  /**
    * The only route to a side effect, exactly as it is for agents. There is no
    * second verb for "just write this file" — every write a plugin can reach is
    * a command, and a command is checked in the dispatcher.

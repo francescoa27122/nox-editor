@@ -4,6 +4,7 @@ import type { CommandRegistry } from '../commands';
 import type { Capability, Principal } from '../permissions';
 import type { Edit } from '../transactions';
 import type { BufferId } from '../workspace';
+import { PluginStatusStore } from './status';
 import {
   failure,
   isResponse,
@@ -147,6 +148,15 @@ export class PluginHost {
   /** Bumped whenever a plugin's state changes, so a panel could watch it. */
   readonly revision = new Signal(0);
 
+  /**
+   * What plugins have put on the status bar.
+   *
+   * Owned here rather than passed in, because its lifetime is exactly a
+   * plugin's: every path that stops one has to take its items back, and a
+   * store held somewhere else would be a second place to remember that.
+   */
+  readonly status = new PluginStatusStore();
+
   #deps: PluginHostDeps;
   #loaded = new Map<string, Loaded>();
 
@@ -194,6 +204,15 @@ export class PluginHost {
       });
     }
     this.revision.update((n) => n + 1);
+
+    // Eager plugins start now. Deliberately after every registration above, so
+    // one that starts and immediately invokes a sibling's command finds it —
+    // and deliberately not awaited, because loading must not wait on a plugin
+    // that is slow to greet.
+    for (const entry of this.#loaded.values()) {
+      if (entry.plugin.manifest.activation !== 'startup' || entry.state !== 'idle') continue;
+      void this.#ensureRunning(entry);
+    }
   }
 
   stateOf(pluginId: string): PluginState | null {
@@ -239,6 +258,7 @@ export class PluginHost {
     await Promise.all(
       running.map(async (entry) => {
         entry.dispose();
+        this.status.clearFor(entry.plugin.manifest.id);
         this.#settleAll(entry, 'internal', 'Nox is shutting the plugin down');
         await entry.connection?.kill().catch(() => {});
       }),
@@ -275,6 +295,9 @@ export class PluginHost {
     });
     connection.onExit(() => {
       entry.connection = null;
+      // Its readouts stopped being true the moment it stopped. Nothing is left
+      // running to correct them, so they go with it.
+      this.status.clearFor(entry.plugin.manifest.id);
       // Every question still outstanding dies with it. Without this an invoke
       // waits out its whole timeout on a process that is already gone.
       this.#settleAll(entry, 'internal', 'the plugin stopped');
@@ -446,6 +469,14 @@ export class PluginHost {
           );
         }
 
+        case 'status.set':
+          this.status.set(entry.plugin.manifest.id, request.params);
+          return await this.#reply(entry, { id: request.id, ok: true });
+
+        case 'status.clear':
+          this.status.clear(entry.plugin.manifest.id, request.params.name);
+          return await this.#reply(entry, { id: request.id, ok: true });
+
         case 'hello':
           // Answered in `#receive`. A second one is a plugin restating itself.
           return;
@@ -493,6 +524,7 @@ export class PluginHost {
     if (entry.failures >= MAX_FAILURES) {
       entry.state = 'disabled';
       entry.dispose();
+      this.status.clearFor(entry.plugin.manifest.id);
       void entry.connection?.kill().catch(() => {});
       entry.connection = null;
       this.#deps.notify(

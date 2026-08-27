@@ -1,0 +1,7 @@
+{
+  "id": "counter",
+  "label": "Counter",
+  "worker": "main.js",
+  "activation": "startup",
+  "commands": [{ "name": "bump", "title": "Bump the Counter" }]
+}
