@@ -2,5 +2,32 @@
   "id": "todos",
   "label": "TODOs",
   "worker": "main.js",
-  "commands": [{ "name": "mark", "title": "Mark TODOs in This File" }]
+  "commands": [{ "name": "mark", "title": "Mark TODOs in This File" }],
+  "settings": [
+    {
+      "key": "markers",
+      "kind": "string",
+      "default": "TODO, FIXME, XXX",
+      "label": "Markers",
+      "description": "Comma-separated words to mark.",
+      "placeholder": "TODO, FIXME"
+    },
+    {
+      "key": "kind",
+      "kind": "enum",
+      "default": "warning",
+      "options": ["error", "warning", "info", "highlight"],
+      "label": "Severity",
+      "description": "How Nox draws each mark."
+    },
+    {
+      "key": "limit",
+      "kind": "number",
+      "default": 200,
+      "min": 1,
+      "max": 2000,
+      "label": "Maximum Marks",
+      "description": "Stop after this many in one file."
+    }
+  ]
 }

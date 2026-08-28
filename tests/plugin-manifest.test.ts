@@ -260,3 +260,141 @@ describe('the command id a contribution becomes', () => {
     expect(contributedCommandId('file', 'save')).toBe('plugin.file.save');
   });
 });
+
+/**
+ * Settings a plugin declares.
+ *
+ * Lenient, like commands and panels and unlike capabilities: the worst a
+ * malformed setting does is fail to appear, so losing one beats refusing a
+ * plugin whose others are fine. See
+ * `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §1.
+ */
+describe('declared settings', () => {
+  it('takes the four kinds the settings panel can draw', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      settings: [
+        { key: 'enabled', kind: 'boolean', default: true, label: 'Enabled' },
+        { key: 'limit', kind: 'number', default: 10, min: 1, max: 99, label: 'Limit' },
+        { key: 'markers', kind: 'string', default: 'TODO', label: 'Markers' },
+        {
+          key: 'level',
+          kind: 'enum',
+          default: 'warn',
+          options: ['off', 'warn', 'error'],
+          label: 'Level',
+        },
+      ],
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.settings.map((setting) => setting.kind)).toEqual([
+      'boolean',
+      'number',
+      'string',
+      'enum',
+    ]);
+  });
+
+  it('has none by default', () => {
+    const parsed = parse(MINIMAL);
+    expect(parsed.ok && parsed.manifest.settings).toEqual([]);
+  });
+
+  it('falls back to the key when no label is given', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      settings: [{ key: 'lineLength', kind: 'number', default: 88, min: 1, max: 200 }],
+    });
+
+    expect(parsed.ok && parsed.manifest.settings[0]?.label).toBe('lineLength');
+  });
+
+  it('drops one whose default does not match its own kind', () => {
+    // The default is what a user who never touches the row gets, so a
+    // mistyped one is a setting that is wrong for everybody.
+    const parsed = parse({
+      ...MINIMAL,
+      settings: [{ key: 'limit', kind: 'number', default: 'ten', min: 1, max: 99 }],
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.settings).toEqual([]);
+    expect(parsed.problems.join(' ')).toMatch(/limit/);
+  });
+
+  it('drops an enum whose default is not one of its options', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      settings: [{ key: 'level', kind: 'enum', default: 'loud', options: ['off', 'warn'] }],
+    });
+
+    expect(parsed.ok && parsed.manifest.settings).toEqual([]);
+  });
+
+  it('drops an enum with no options, which could draw nothing', () => {
+    const parsed = parse({ ...MINIMAL, settings: [{ key: 'level', kind: 'enum', default: 'a', options: [] }] });
+
+    expect(parsed.ok && parsed.manifest.settings).toEqual([]);
+  });
+
+  it('drops a number whose bounds exclude its own default', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      settings: [{ key: 'limit', kind: 'number', default: 500, min: 1, max: 99 }],
+    });
+
+    expect(parsed.ok && parsed.manifest.settings).toEqual([]);
+  });
+
+  it('drops a kind the panel has no control for', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      settings: [{ key: 'colour', kind: 'color', default: '#fff' }],
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.settings).toEqual([]);
+    expect(parsed.problems.join(' ')).toMatch(/colour/);
+  });
+
+  it('drops a duplicate key rather than letting the second shadow the first', () => {
+    const parsed = parse({
+      ...MINIMAL,
+      settings: [
+        { key: 'limit', kind: 'number', default: 10, min: 1, max: 99 },
+        { key: 'limit', kind: 'string', default: 'x' },
+      ],
+    });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.settings).toHaveLength(1);
+    expect(parsed.manifest.settings[0]?.kind).toBe('number');
+  });
+
+  it('refuses nothing: a settings list that is not a list costs the list, not the plugin', () => {
+    const parsed = parse({ ...MINIMAL, settings: 'lots' });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.manifest.settings).toEqual([]);
+    expect(parsed.problems.join(' ')).toMatch(/settings/);
+  });
+
+  it('allows a key a command already uses, because the namespaces are separate', () => {
+    // A command becomes `plugin.<id>.<name>`; a setting is a key inside the
+    // plugin's own object in `plugin-settings.json`. Nothing collides.
+    const parsed = parse({
+      ...MINIMAL,
+      commands: [{ name: 'run', title: 'Run' }],
+      settings: [{ key: 'run', kind: 'boolean', default: false }],
+    });
+
+    expect(parsed.ok && parsed.manifest.settings).toHaveLength(1);
+    expect(parsed.ok && parsed.manifest.commands).toHaveLength(1);
+  });
+});

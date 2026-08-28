@@ -85,8 +85,24 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   already marked up. There is deliberately no way for a plugin to watch you
   type.
 
+  A plugin can also declare **settings** you can change. They appear in
+  Settings under a **Plugins** tab, in a section named after the plugin, with
+  the same switches, number boxes and dropdowns Nox's own preferences get —
+  and the same reset arrow beside anything you have moved. A plugin is told
+  when you change one, but only if it is already running: touching a control
+  never starts a plugin that was idle.
+
+  They are kept in `plugin-settings.json`, separately from `settings.json`, and
+  they are **yours alone** — a project's `.nox/settings.json` cannot set one.
+  That is deliberate and it is the one thing this refuses: Nox knows what its
+  own eight project-settable keys mean, and it cannot know whether a plugin's
+  `path` setting names a margin or a program to run. Settings belonging to a
+  plugin that is not installed right now are left alone rather than deleted, so
+  removing a plugin for an afternoon does not lose how you had it configured.
+
   The reasoning behind all of it is written down in
-  `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
+  `docs/superpowers/specs/2026-08-27-plugin-api-design.md` and
+  `docs/superpowers/specs/2026-08-28-plugin-settings-design.md`.
 
 - **Snippets.** Write your own in `snippets.json` — keyed by language, with a
   `*` bucket that applies everywhere — and they appear in the same picker as

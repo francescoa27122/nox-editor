@@ -65,7 +65,26 @@ export type HostRequest =
    * that back. What it buys is the difference between decorations that
    * follow the code and decorations that were true once.
    */
-  | { id: number; method: 'document.changed'; params: { bufferId: string } };
+  | { id: number; method: 'document.changed'; params: { bufferId: string } }
+  /**
+   * This plugin's settings changed, and here they are.
+   *
+   * **Carrying the values departs from `document.changed` deliberately.** That
+   * one is coarse because a document is large and the standing rule is that a
+   * plugin is never woken per keystroke, so it says only *that* something
+   * moved. A settings object is a handful of scalars changing at human speed;
+   * a bare notification would buy nothing but a round trip.
+   *
+   * Sent only to a plugin that is already running. Changing a setting must not
+   * *start* one, or opening the Settings panel and touching a row would spawn
+   * every plugin that declares an option — which is the lazy activation
+   * declared contributions exist to protect.
+   */
+  | {
+      id: number;
+      method: 'settings.changed';
+      params: { values: Record<string, boolean | number | string> };
+    };
 
 /**
  * plugin → Nox.
@@ -87,6 +106,16 @@ export type PluginRequest =
       params: { bufferId: BufferId; lines?: { from: number; to: number } };
     }
   | { id: number; method: 'context.selection'; params: { bufferId: BufferId } }
+  /**
+   * This plugin's own settings, every default filled in.
+   *
+   * **It takes no parameters, and that is the scoping.** The host answers from
+   * the id of the connection the request arrived on, so there is no spelling
+   * of this request that reads another plugin's namespace — or Nox's own
+   * preferences, which are not a plugin's business. A `pluginId` param would
+   * be a check to get wrong; having no param is a check that cannot exist.
+   */
+  | { id: number; method: 'settings.get' }
   /**
    * Put something on the status bar, or change what is there.
    *

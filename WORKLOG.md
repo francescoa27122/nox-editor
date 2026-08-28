@@ -8,6 +8,86 @@ are knowledge.**
 
 ---
 
+## 2026-08-28 (PC) — Plugin settings, and the layer they are not allowed to have
+
+The row the four-surface pass deliberately left out. A plugin could do things
+and still had nowhere to put an option.
+
+**The interesting decision is a refusal.** `.nox/settings.json` arrives with a
+cloned repository, and the schema's `workspace: true` allowlist works only
+because Nox knows what each of its eight keys means — `terminal.shell` is why
+that list exists. Nox cannot know what a plugin's keys mean: `formatter.path`
+and `margin.width` are both a string with a label. A `workspace: true` an
+*author* could set would hand the allowlist's decision to the party it exists
+to constrain. So `PluginSettingsService` has **one layer by construction**,
+with nowhere to put a second. The cost is real and named: a repository cannot
+ship its linter plugin's configuration with itself.
+
+**They could not join `SETTINGS_SCHEMA`, and the reason is the type, not
+tidiness.** `SettingKey` is `keyof typeof` it and `Settings` is derived from
+that — which is the whole basis of `config.get('editor.fontSize')` being typed.
+One runtime key widens `Settings` to `Record<string, unknown>` and untypes
+every core setting. Hence a separate file. What *is* shared is the validation:
+`coerce` split into a schema lookup in front of a pure `coerceTo(shape, value)`,
+and a plugin's descriptor satisfies `SettingShape` structurally — lint proved
+the three casts I wrote were unnecessary and they are gone.
+
+**A namespace whose plugin is not loaded is written back untouched.**
+`ConfigService` drops unknown keys and is right to; its schema is complete. Here
+"known" is whatever discovery found *this launch*, so dropping would let a
+manifest that failed to parse this morning erase that plugin's configuration on
+the next unrelated write — a transient failure made destructive.
+
+**Two things the tests caught that reasoning had not.** The reset arrow on a
+plugin row never appeared: its condition called `isDefault()`, a plain method
+reading no signal, so nothing re-rendered it. It is now derived from the value
+the row already displays — same predicate, and reactive. And the panel suite
+was loading plugins into a host that `NoxApp`'s constructor was about to clear:
+subscribing to `workspace.rootPath` fires immediately, reaches
+`#restartLanguageServers(null)`, which calls `plugins.stopAll()`.
+
+Shipped:    `core/plugin-manifest.ts` (`PluginSetting`, `settingsOf`, a
+            `SETTING_KEY` pattern that rules out `__proto__` by construction);
+            `services/plugin/settings.ts`; `coerceTo`/`SettingShape` split out
+            of `config/schema.ts`; protocol `settings.get` (no params — that is
+            the scoping) and the `settings.changed` push; host dep, dispatcher
+            case and `noteSettingsChanged`; `app.ts` wiring, boot order, quit
+            flush, damaged report and **Edit Plugin Settings File**;
+            `SettingsPanel.svelte` — a shared `control` snippet replacing the
+            duplicated core markup, a Plugins tab that hides itself, one
+            section per plugin; `examples/plugins/todos/` now declares three
+            settings and re-decorates on change; spec, ARCHITECTURE (decision
+            log + three debt rows replacing one), ROADMAP, CHANGELOG.
+Verified:   `npm test` 161 files / 2312 tests passed (was 159 / 2264) ·
+            `npm run check` 1030 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 1.53 s ·
+            `npm run test:editor` 3 passed. Mutation-checked six; **two
+            survived first and both are recorded in the test files**: a fuzzy
+            search for "Markers" also matches core settings, so it could not
+            prove the empty state accounts for plugin rows (fixture is now
+            `Zqjx`); and the undeclared-key guard needed asserting on
+            `serialize` with a *string*, because `valuesFor` reads the
+            declarations and a boolean coerces back to the default either way.
+Next:       README §Status. Line 291 ends "Not there yet: plugins, and blame."
+            and line 258 says "2,060 tests" — both true of released 0.10 and
+            both false the moment 0.11 ships, and nothing in the repo would
+            catch it: there is no release checklist anywhere, and `CONTRIBUTING`
+            never mentions the README. The checklist is the fix, not the patch.
+Blocked:    Nothing here. Still open from the host pass and still needing a
+            desktop walk: the worker transport's CSP is unexercised in a real
+            WebView (`cargo` is not installed on this machine). Reading the
+            failure path lowered it — `new Worker` throwing under CSP
+            propagates out of `startPluginWorker` into `#ensureRunning`'s catch
+            and is notified, so the worst case is a visible "could not be
+            started" rather than a hang, and the process transport is
+            unaffected.
+Confidence: High on the pure and service layers, which are mutation-checked.
+            Medium on the panel: jsdom has no layout, so what is verified is
+            that the right controls exist, are wired, and re-render — not how
+            the Plugins tab looks beside the other five.
+
+---
+
 ## 2026-08-27 (PC) — Editor decorations, and the event channel they forced
 
 The last of the four surfaces the v0.6 plugin row named, and the only one where

@@ -67,6 +67,49 @@ export interface ContributedPanel {
  */
 export type Activation = 'command' | 'startup';
 
+/**
+ * One option a plugin lets the user set.
+ *
+ * **Declared rather than registered at runtime**, for the reason panels are:
+ * a setting has to be listable before the plugin runs, or seeing what a plugin
+ * can be configured to do would mean starting it — and every plugin would
+ * start at launch to fill a panel nobody opened.
+ *
+ * The four kinds are `SettingDescriptor`'s own, minus its `category` (a
+ * plugin's category is the plugin) and minus `workspace`. That last omission
+ * is the security decision: `.nox/settings.json` arrives with a cloned
+ * repository, and Nox cannot tell a plugin's "margin width" from its "program
+ * to run", so no plugin setting is ever workspace-scoped. See
+ * `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §0.
+ */
+export type PluginSetting =
+  | { key: string; kind: 'boolean'; default: boolean; label: string; description?: string }
+  | {
+      key: string;
+      kind: 'number';
+      default: number;
+      min: number;
+      max: number;
+      label: string;
+      description?: string;
+    }
+  | {
+      key: string;
+      kind: 'string';
+      default: string;
+      label: string;
+      description?: string;
+      placeholder?: string;
+    }
+  | {
+      key: string;
+      kind: 'enum';
+      default: string;
+      options: string[];
+      label: string;
+      description?: string;
+    };
+
 export interface PluginManifest {
   id: string;
   label: string;
@@ -76,6 +119,7 @@ export interface PluginManifest {
   capabilities: string[];
   commands: ContributedCommand[];
   panels: ContributedPanel[];
+  settings: PluginSetting[];
 }
 
 export type ParsedManifest =
@@ -99,6 +143,21 @@ export const PLUGIN_COMMAND_PREFIX = 'plugin';
  * file somewhere other than the plugin's own directory.
  */
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * A settings key: a plain identifier, camelCase allowed.
+ *
+ * Wider than `NAME` because this one never becomes a command id — it is a key
+ * inside the plugin's own object in `plugin-settings.json`, so uppercase costs
+ * nothing and `lineLength` is how everyone writes these.
+ *
+ * Still restricted rather than "any string", and the reason is that the values
+ * are assembled into an object by key: `__proto__` and `constructor` reaching
+ * `out[key] = …` is prototype pollution from a third-party manifest. Requiring
+ * a leading letter and forbidding punctuation rules both out by construction
+ * rather than by a deny-list someone has to keep current.
+ */
+const SETTING_KEY = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
 /**
  * The command id a contribution is registered under.
@@ -225,6 +284,136 @@ function panelsOf(
   return panels;
 }
 
+/**
+ * The usable declared settings, appending a sentence for each dropped one.
+ *
+ * Lenient like commands and panels, and for the same reason: a setting is not
+ * a permission, so the worst a malformed one does is fail to appear. Refusing
+ * the manifest over it would cost the user every other thing the plugin does.
+ *
+ * **Every drop is about the default.** A default that is not of the declared
+ * kind, outside its own bounds, or absent from its own options is not a
+ * cosmetic error — it is the value every user who never touches the row gets,
+ * so the setting is wrong for everyone rather than for whoever mistyped it.
+ */
+function settingsOf(record: Record<string, unknown>, problems: string[]): PluginSetting[] {
+  const raw = record.settings;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    problems.push('settings is not a list');
+    return [];
+  }
+
+  const settings: PluginSetting[] = [];
+  const claimed = new Set<string>();
+
+  for (const [index, entry] of raw.entries()) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      problems.push(`setting ${index} is not an object`);
+      continue;
+    }
+
+    const setting = entry as Record<string, unknown>;
+    const key = stringField(setting, 'key');
+    if (key === null || !SETTING_KEY.test(key)) {
+      problems.push(`setting ${index} has no usable key`);
+      continue;
+    }
+    if (claimed.has(key)) {
+      // First wins, rather than last. A later duplicate silently shadowing an
+      // earlier one would make the panel disagree with the file it writes.
+      problems.push(`setting "${key}" is declared twice`);
+      continue;
+    }
+    // Claimed as soon as the key is well-formed, not on a successful push, so
+    // "declared twice" means the same thing whether or not the first one was
+    // usable. A manifest with two of a key is a mistake either way.
+    claimed.add(key);
+
+    // The label is what the panel shows, and a plugin author who left it out
+    // meant the key — which is a usable label and better than an empty row.
+    const label = stringField(setting, 'label') ?? key;
+    const description = stringField(setting, 'description');
+    const common = { key, label, ...(description === null ? {} : { description }) };
+    const fallback = setting.default;
+
+    switch (setting.kind) {
+      case 'boolean': {
+        if (typeof fallback !== 'boolean') {
+          problems.push(`setting "${key}" has a default that is not a boolean`);
+          continue;
+        }
+        settings.push({ ...common, kind: 'boolean', default: fallback });
+        break;
+      }
+
+      case 'number': {
+        const min = setting.min;
+        const max = setting.max;
+        if (typeof fallback !== 'number' || !Number.isFinite(fallback)) {
+          problems.push(`setting "${key}" has a default that is not a number`);
+          continue;
+        }
+        if (typeof min !== 'number' || typeof max !== 'number' || !(min <= max)) {
+          // Required rather than defaulted to an open range: the panel draws a
+          // number input with bounds, and a plugin that has not thought about
+          // its range is the one most likely to be handed a hostile value.
+          problems.push(`setting "${key}" has no usable min and max`);
+          continue;
+        }
+        if (fallback < min || fallback > max) {
+          problems.push(`setting "${key}" has a default outside its own bounds`);
+          continue;
+        }
+        settings.push({ ...common, kind: 'number', default: fallback, min, max });
+        break;
+      }
+
+      case 'string': {
+        if (typeof fallback !== 'string') {
+          problems.push(`setting "${key}" has a default that is not a string`);
+          continue;
+        }
+        const placeholder = stringField(setting, 'placeholder');
+        settings.push({
+          ...common,
+          kind: 'string',
+          default: fallback,
+          ...(placeholder === null ? {} : { placeholder }),
+        });
+        break;
+      }
+
+      case 'enum': {
+        const declared = setting.options;
+        const options = Array.isArray(declared)
+          ? declared.filter((option): option is string => typeof option === 'string')
+          : [];
+        if (options.length === 0) {
+          problems.push(`setting "${key}" is an enum with no options`);
+          continue;
+        }
+        if (typeof fallback !== 'string' || !options.includes(fallback)) {
+          problems.push(`setting "${key}" has a default that is not one of its options`);
+          continue;
+        }
+        settings.push({ ...common, kind: 'enum', default: fallback, options });
+        break;
+      }
+
+      default: {
+        // Named back, so an author who wrote `"color"` learns that Nox draws
+        // four kinds rather than that their setting vanished.
+        const named = typeof setting.kind === 'string' ? `"${setting.kind}"` : 'no kind';
+        problems.push(`setting "${key}" has ${named}, which is not one of boolean, number, string, enum`);
+        continue;
+      }
+    }
+  }
+
+  return settings;
+}
+
 /** The usable contributed commands, appending a sentence for each dropped one. */
 function commandsOf(record: Record<string, unknown>, problems: string[]): ContributedCommand[] {
   const raw = record.commands;
@@ -308,10 +497,14 @@ export function parseManifest(value: unknown, knownCapabilities: ReadonlySet<str
   const problems: string[] = [];
   const commands = commandsOf(record, problems);
   const panels = panelsOf(record, new Set(commands.map((command) => command.name)), problems);
+  // Not passed the claimed names: a setting key lives in the plugin's own
+  // settings object, never in the `plugin.<id>.<name>` command space, so there
+  // is nothing for it to collide with.
+  const settings = settingsOf(record, problems);
 
   return {
     ok: true,
-    manifest: { id, label, entry, activation, capabilities, commands, panels },
+    manifest: { id, label, entry, activation, capabilities, commands, panels, settings },
     problems,
   };
 }
