@@ -2294,6 +2294,61 @@ listens, in `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
 
 ---
 
+### A theme file is downloaded, so it is read like a manifest
+
+Added 2026-08-28, closing the last open row in the v0.6 table. `DESIGN.md` §9
+had said since v0.1 that a theme is a token override rather than a fork; this
+is the consequence.
+
+**The threat model is the decision.** Nobody writes a theme from nothing — they
+fetch one someone posted and drop it in a folder, exactly as they would a
+plugin. So a theme file is content from a stranger that Nox turns into CSS, and
+it gets `plugin.json`'s discipline rather than `settings.json`'s. Two
+structural consequences, neither a blocklist:
+
+- **The file names a token, never a CSS property.** It says `"bg-editor"` and
+  Nox writes the `--nox-` prefix, so no spelling of a theme file reaches a
+  property Nox did not choose. `THEME_TOKENS` is 60 names; a key outside it is
+  dropped and reported.
+- **Nox never builds a CSS rule out of the file.** Values go through
+  `CSSStyleDeclaration.setProperty`, so the browser's own parser reads them —
+  the same code that reads every other stylesheet — rather than a selector and
+  a declaration assembled out of a stranger's JSON. Generating
+  `[data-nox-theme='<id>'] { … }` as text would have invented two injection
+  points for no gain.
+
+**What is excluded is excluded for a reason, not for tidiness.** Geometry would
+let a theme resize the tab bar; stacking would put the palette behind the
+editor; typography is already the user's own setting and must not lose to a
+file; and `--nox-dur-*` is zeroed under `prefers-reduced-motion`, so a theme
+that could set it could quietly defeat an accessibility preference chosen in
+the OS.
+
+**`data-nox-theme` carries the base, not the theme.** That is what makes a
+three-line theme work: the cascade fills in everything the file did not
+mention, and the file's own tokens go on as inline properties, which outrank a
+`[data-nox-theme]` rule. It also makes switching back "remove the properties"
+rather than "reload a stylesheet" — and the removal needs the *previous*
+theme's key list, which is unreachable once the setting has changed, so
+`#themeProperties` is tracked rather than recomputed.
+
+**`workbench.theme` stopped being an enum because it stopped being closed.**
+`pick(['eclipse', 'umbra'])` made the type `'eclipse' | 'umbra'`, which was
+true while both themes shipped with the build. `coerce` would now enforce that
+falsehood — an enum rewrites an unrecognised value to its default, so a custom
+theme's id would be silently reset to `eclipse` on every load. The setting is a
+string, and `Common.optionsFrom` (a *closed* union naming a runtime source) is
+what keeps the Settings panel drawing a dropdown without hand-writing a control
+for one key.
+
+**An unknown id resolves rather than resetting.** A theme id outlives its file
+whenever someone deletes it or opens their settings on another machine; falling
+back to the base means putting the file back brings the choice back.
+
+`docs/superpowers/specs/2026-08-28-custom-themes-design.md`.
+
+---
+
 ### A plugin's settings are the user's layer, and only ever that
 
 Added 2026-08-28. A plugin declares its options in `plugin.json` — declared
@@ -2457,6 +2512,9 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | Plugins get two events, not a feed | `document.changed` (2026-08-27) is debounced at 400 ms, coarse ("this buffer changed", never what changed), and sent **only to plugins that have already decorated that buffer** — that last clause is what stops it being an ambient feed. `settings.changed` (2026-08-28) joins it and is not comparable: it fires when a human moves a control, carries the new values, and reaches only a plugin that is *already running*. There is still no selection or focus event, and a status item still cannot track the editor live; `examples/plugins/counter/` says so rather than implying otherwise. |
 | A plugin setting cannot hold a secret | Built 2026-08-28 as four scalar kinds in a plaintext `plugin-settings.json`, so a plugin wanting an API key gets a string setting in a file anyone can read — exactly as `servers.json` and `agents.json` already do. Nox has no keychain seam and adding one would be its own feature, not a kind. Recorded rather than implied, because a `"kind": "string"` labelled *Token* looks like somewhere safe to put one. |
 | A project cannot configure a plugin | Deliberate, and the one thing plugin settings refuse. `.nox/settings.json` arrives with a cloned repository, and the schema's `workspace: true` allowlist works only because Nox knows what each of its eight keys means. It cannot know what a plugin's keys mean — `formatter.path` and `margin.width` are both a string with a label — so no plugin setting is ever workspace-scoped and there is no flag an author could set to make one. The cost is real: a repository cannot ship its linter plugin's configuration with itself. See `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §0. |
+| A custom theme is not held to any contrast floor | `tests/token-contrast.test.ts` holds Nox's own tokens to WCAG 4.5:1 and keeps doing so; a theme a user writes is checked for *shape* and never for legibility. Deliberate — refusing to load someone's theme because a comment colour measures 4.2:1 would be Nox overruling a person about their own screen — but it means the guarantee that suite provides covers the built-in themes only, which is worth saying rather than leaving implied. |
+| A theme cannot set a shadow or the focus ring's geometry | `--nox-shadow-md`, `--nox-shadow-lg` and `--nox-focus-ring` are composite `box-shadow` values, so they would need a grammar of their own rather than the colour check every other token gets. `--nox-focus-ring-color` *is* themeable, which covers the case anyone actually wants. A theme on a light ground would want the shadows and cannot have them. |
+| A theme file is not watched | Editing one needs **Reload Themes**. The third row to say this — `snippets.json` and `plugin-settings.json` are the others — and the cause is shared: `FileWatcherService` has one root and it is the workspace, so nothing covers the config directory. Three features now want that watcher, which makes it a feature rather than a fix. |
 | A plugin's settings are not watched | Editing `plugin-settings.json` by hand needs **Reload Plugins**. The same gap `snippets.json` records and the same fix — `FileWatcherService` has one root and it is the workspace, so nothing covers the config directory. Changes made in the Settings panel apply immediately; only hand edits wait. |
 | The worker transport is unverified in the packaged app | It needs `worker-src 'self' blob:`, added to `tauri.conf.json` with it — the default `default-src 'self'` blocks a blob worker outright. `cargo` is not installed on the machine this was written on, so the CSP was never exercised in a real WebView; the tests use an injected connection and `npm run dev` has no CSP at all. **If it fails there, the process transport is unaffected** and only the worker convenience is lost. Wants a desktop walk. |
 | A plugin process is not sandboxed | The same line `agents` already carries: the permission model governs what a plugin may ask *Nox* to do, not what its own process can reach. A plugin is trusted code you chose to install, like a shell plugin — the difference from an agent is only that more people will install one. |

@@ -64,6 +64,8 @@ import {
 } from '@services/agent/config';
 import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
 import { SnippetService, SNIPPETS_FILE } from '@services/snippets';
+import { ThemeService } from '@services/themes';
+import { tokenProperty } from '@core/theme';
 import { PluginHost } from '@services/plugin/host';
 import { PLUGIN_SETTINGS_FILE, PluginSettingsService } from '@services/plugin/settings';
 import { connectorFor, discoverPlugins, PLUGINS_DIRECTORY } from '@services/plugin/discover';
@@ -160,6 +162,15 @@ export class NoxApp {
   readonly snippets: SnippetService;
   readonly plugins: PluginHost;
   readonly pluginSettings: PluginSettingsService;
+  readonly themes: ThemeService;
+  /**
+   * The custom properties the active theme set, so they can be taken back.
+   *
+   * Tracked rather than recomputed from the theme being replaced: the setting
+   * changes before `#applyTheme` runs, so by then the *old* theme's token list
+   * is no longer reachable through `resolve`.
+   */
+  #themeProperties: string[] = [];
   /** Failures already announced, so a republished status does not repeat one. */
   #reportedFailures = new Set<string>();
   /** The running servers, and the diagnostics they publish. */
@@ -268,6 +279,7 @@ export class NoxApp {
     this.serverRegistry = new ServerRegistry(platform);
     this.snippets = new SnippetService(platform);
     this.pluginSettings = new PluginSettingsService(platform);
+    this.themes = new ThemeService(platform);
     this.plugins = new PluginHost({
       commands: this.commands,
       context: this.context,
@@ -378,6 +390,7 @@ export class NoxApp {
     // Before discovery, so `describe` in `loadPlugins` adopts each stored
     // namespace rather than parking it as belonging to nobody.
     await this.pluginSettings.load();
+    await this.loadThemes();
     await this.loadPlugins();
     await this.notes.load();
     this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
@@ -754,9 +767,58 @@ export class NoxApp {
     });
   }
 
+  /**
+   * Put the chosen theme on the document.
+   *
+   * Two halves, and the split is what makes a twelve-line theme file work.
+   * `data-nox-theme` gets the **base**, so `tokens.css`'s cascade fills in
+   * everything the file did not mention; the file's own tokens then go on as
+   * inline custom properties, which outrank a `[data-nox-theme]` rule.
+   *
+   * **Nox never builds a CSS rule out of the file.** Values go through
+   * `setProperty`, so the browser's own parser reads them — the same code that
+   * reads every other stylesheet — rather than a selector and a declaration
+   * assembled here out of a stranger's JSON. The property name is Nox's, from
+   * the allowlist, and never the file's.
+   *
+   * Previously-set properties are removed first, so switching from a custom
+   * theme back to a built-in one does not leave its colours behind.
+   */
   #applyTheme(): void {
     if (typeof document === 'undefined') return;
-    document.documentElement.setAttribute('data-nox-theme', this.config.get('workbench.theme'));
+
+    const { base, tokens } = this.themes.resolve(this.config.get('workbench.theme'));
+    const root = document.documentElement;
+    root.setAttribute('data-nox-theme', base);
+
+    for (const property of this.#themeProperties) root.style.removeProperty(property);
+    this.#themeProperties = [];
+
+    for (const [token, value] of Object.entries(tokens)) {
+      const property = tokenProperty(token);
+      root.style.setProperty(property, value);
+      this.#themeProperties.push(property);
+    }
+  }
+
+  /**
+   * Find the user's themes and re-apply, in case the chosen one just arrived
+   * or just went away.
+   */
+  async loadThemes(): Promise<void> {
+    await this.themes.load();
+    this.#applyTheme();
+
+    const problems = this.themes.problems();
+    if (problems.length > 0) {
+      // Said out loud for the reason a plugin's problems are: a theme that
+      // silently does not appear is indistinguishable from one that appeared
+      // and looks wrong.
+      this.notifications.warn(
+        problems.length === 1 ? 'A theme could not be loaded' : `${problems.length} theme problems`,
+        problems.join('; '),
+      );
+    }
   }
 
   #updateWindowTitle(): void {
@@ -1495,6 +1557,42 @@ export class NoxApp {
   }
 
   /** Open the plugins folder, creating it if it is not there yet. */
+  /**
+   * Open the themes folder, creating it with a worked example if it is absent.
+   *
+   * The example rather than an empty folder, because "write a theme" is a
+   * blank page otherwise: `DESIGN.md` §9 says a theme is a token override, and
+   * a file that already overrides four tokens says it better.
+   */
+  async openThemesFolder(): Promise<void> {
+    let directory: string | null = null;
+    try {
+      directory = await this.themes.ensureFolder();
+    } catch (error) {
+      this.notifications.error(
+        'Could not create the themes folder',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    if (!directory) {
+      this.notifications.info(
+        'Themes live in the themes folder',
+        'The browser build keeps settings in the browser, so there is no folder to open here.',
+      );
+      return;
+    }
+
+    await this.platform.reveal(directory).catch(() => {
+      this.notifications.info('Themes live in', directory);
+    });
+    this.notifications.info(
+      'Add a .json file, then run "Reload Themes"',
+      'The file name is the theme’s id, and it appears in Settings under Theme.',
+    );
+  }
+
   async openPluginsFolder(): Promise<void> {
     const directory = await this.platform.configDir().catch(() => null);
     if (!directory) {
@@ -3184,6 +3282,27 @@ export class NoxApp {
         },
       },
       {
+        id: 'themes.openFolder',
+        title: 'Edit Themes',
+        category: 'View',
+        keywords: ['theme', 'colour', 'color', 'custom', 'scheme'],
+        capabilities: ['fs.create'],
+        run: () => this.openThemesFolder(),
+      },
+      {
+        id: 'themes.reload',
+        title: 'Reload Themes',
+        category: 'View',
+        keywords: ['theme', 'colour', 'color', 'refresh'],
+        run: async () => {
+          await this.loadThemes();
+          if (this.themes.problems().length > 0) return;
+
+          const count = this.themes.list().length;
+          this.notifications.info(count === 1 ? '1 theme' : `${count} themes available`);
+        },
+      },
+      {
         id: 'plugins.openSettingsFile',
         title: 'Edit Plugin Settings File',
         category: 'Plugins',
@@ -3986,12 +4105,21 @@ export class NoxApp {
         id: 'view.toggleTheme',
         title: 'Switch Theme',
         category: 'View',
-        keywords: ['dark', 'eclipse', 'umbra', 'oled'],
-        run: () =>
-          this.config.set(
-            'workbench.theme',
-            this.config.get('workbench.theme') === 'eclipse' ? 'umbra' : 'eclipse',
-          ),
+        keywords: ['dark', 'eclipse', 'umbra', 'oled', 'custom'],
+        // Cycles rather than toggling between the two built-ins, which is what
+        // this did while two was all there were. A theme the user wrote is a
+        // theme this command has to be able to reach, or "Switch Theme" would
+        // mean "switch between the two you did not choose".
+        run: () => {
+          const available = this.themes.list();
+          const current = available.findIndex(
+            (theme) => theme.id === this.config.get('workbench.theme'),
+          );
+          const next = available[(current + 1) % available.length];
+          if (!next) return;
+          this.config.set('workbench.theme', next.id);
+          this.notifications.info(next.name);
+        },
       },
       {
         id: 'view.increaseFontSize',

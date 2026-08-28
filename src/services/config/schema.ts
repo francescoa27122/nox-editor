@@ -28,6 +28,19 @@ interface Common {
    * `docs/superpowers/specs/2026-08-20-workspace-settings-design.md` §0.
    */
   workspace?: true;
+  /**
+   * Draw a picker whose options are only known at run time.
+   *
+   * A **closed** union naming a source rather than an open string, so adding a
+   * second is a compile-time decision someone makes on purpose. The Settings
+   * panel maps the name to a service; a descriptor without it is unaffected.
+   *
+   * It exists because `workbench.theme` stopped being a closed set. The
+   * alternative was the panel special-casing that one key, which would have
+   * been the first hand-written control in a panel whose whole claim is that
+   * it has none.
+   */
+  optionsFrom?: 'themes';
 }
 
 export interface BooleanSetting extends Common {
@@ -78,11 +91,22 @@ const pick = <const T extends readonly string[]>(
 
 export const SETTINGS_SCHEMA = {
   // --- Workbench ---------------------------------------------------------
-  'workbench.theme': pick(['eclipse', 'umbra'], 'eclipse', {
+  /**
+   * A string rather than a `pick`, because the set of themes stopped being
+   * closed when themes became user files.
+   *
+   * `pick(['eclipse', 'umbra'])` made this `'eclipse' | 'umbra'`, which was
+   * *true* while both themes shipped with the build — and `coerce` would now
+   * enforce that falsehood, rewriting a custom theme's id back to `eclipse`
+   * every time the file was read. The union bought an attribute value and a
+   * two-way toggle; both survive as a string, and the type is honest.
+   */
+  'workbench.theme': str('eclipse', {
     label: 'Theme',
-    description: 'Eclipse is the default blue-black night. Umbra is a deeper OLED variant.',
+    description:
+      'Eclipse is the default blue-black night. Umbra is a deeper OLED variant. Your own themes appear here once they are in the themes folder.',
     category: 'Workbench',
-    optionLabels: { eclipse: 'Eclipse', umbra: 'Umbra (OLED)' },
+    optionsFrom: 'themes',
   }),
   'workbench.showExplorer': bool(true, {
     label: 'Show Sidebar',

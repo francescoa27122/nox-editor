@@ -15,8 +15,23 @@ describe('schema coercion', () => {
   });
 
   it('rejects values outside an enum', () => {
-    expect(coerce('workbench.theme', 'neon')).toBe('eclipse');
+    // Moved off `workbench.theme` on 2026-08-28, when themes became user
+    // files and that key became a string: an enum is exactly what it can no
+    // longer be. `files.autoSave` is a real enum and keeps this covered.
+    expect(coerce('files.autoSave', 'sometimes')).toBe('off');
+    expect(coerce('files.autoSave', 'onFocusChange')).toBe('onFocusChange');
+  });
+
+  /**
+   * The other half of that change, and the reason it had to happen. A theme id
+   * naming a file Nox has not read yet — or one on a machine where the file is
+   * absent — must survive a load. An enum would rewrite it to the default and
+   * the user's choice would be gone rather than merely unavailable.
+   */
+  it('keeps a theme id it does not recognise, because themes are user files', () => {
+    expect(coerce('workbench.theme', 'solar')).toBe('solar');
     expect(coerce('workbench.theme', 'umbra')).toBe('umbra');
+    expect(coerce('workbench.theme', 42)).toBe('eclipse');
   });
 
   it('drops unknown keys', () => {

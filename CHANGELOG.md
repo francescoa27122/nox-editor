@@ -33,6 +33,27 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Custom themes.** Drop a `.json` file into the `themes` folder in your Nox
+  config directory and it appears in Settings under Theme. **Edit Themes**
+  creates the folder with a worked example to start from; **Reload Themes**
+  picks up your edits, and **Switch Theme** now cycles through everything you
+  have rather than flipping between the two Nox ships.
+
+  A theme names a `base` — Eclipse or Umbra — and overrides colours on top of
+  it, so a real theme can be three lines: everything you leave out comes from
+  the base. Sixty tokens are settable, and they are the colours — the surfaces,
+  text, borders, accents, the editor and all sixteen syntax colours. Sizes,
+  animation timings and fonts are not themeable on purpose: a colour scheme
+  should not be able to resize the tab bar, and animation timings are switched
+  off entirely when your system asks for reduced motion, which a theme must not
+  be able to undo.
+
+  Themes are files people share, so a theme file is read as carefully as a
+  plugin: it names Nox's own tokens rather than raw CSS, values have to be a
+  hex or `rgb()` colour, and anything else is skipped and named rather than
+  applied. A theme whose file is missing leaves your choice alone rather than
+  resetting it, so putting the file back brings it back.
+
 - **Plugins.** Nox can now be extended by code you did not write. A folder in
   the plugins directory with a `plugin.json` gets its commands into the
   palette, the menus and the keybinding editor — **Open Plugins Folder** and
