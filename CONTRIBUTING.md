@@ -185,3 +185,44 @@ need to silence an a11y lint, write down why in the ignore comment.
 
 **Commits** — imperative and specific. `Fix session overwrite on boot` rather
 than `fix bug`.
+
+---
+
+## Cutting a release
+
+A tag is a promise, and `release.yml`'s gate refuses one it does not believe
+in — but a gate can only check what is machine-readable. This is the rest, and
+it exists because the version files once agreed with each other and with the
+tag while the README still said *"Not there yet: plugins"* and undercounted the
+suite by two hundred.
+
+**What the gate already refuses**, so you do not need to check it by hand:
+
+- `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`
+  disagreeing with each other or with the tag.
+- A `CHANGELOG.md` with no `## [<version>]` section, or an empty one. That
+  section *is* the release body.
+- A README whose Status section still opens with the previous series
+  (`scripts/readme-series.mjs`). This is a proxy: it cannot read the prose, it
+  can only make sure you opened the paragraph the prose is in.
+
+**What only you can do:**
+
+1. **Rewrite README §Status, all of it.** Move anything under "Landed since
+   X, not yet in a release" into the history above it, and re-read the
+   "Not there yet:" line — that is the sentence that goes quietly false. The
+   test count in the first paragraph is held to a floor by
+   `tests/release-readme.test.ts`, not to the exact number; raise both when it
+   drifts far enough to look silly.
+2. **Move `## [Unreleased]` to `## [<version>]`** and leave a fresh empty
+   `Unreleased` above it. Write it for the person downloading the binary, not
+   for the person who wrote the commit.
+3. **Check ROADMAP.md's shipped tables say which release each row landed in.**
+   The milestones and the releases have never lined up and the file says so;
+   what makes that survivable is each row naming its own release.
+4. **Run the desktop walk** for anything the browser target cannot exercise —
+   see the `nox-desktop-walk` skill. The 1.0 bar says no release note may say
+   "unverified", and the browser build cannot tell you about the terminal,
+   the native dialogs, the title bar or a real repository.
+
+Then bump the three version files in one commit, merge it, and tag.
