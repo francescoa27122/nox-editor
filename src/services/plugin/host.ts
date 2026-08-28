@@ -96,6 +96,15 @@ export interface PluginHostDeps {
     edits: Edit[];
     baseRevisions?: ReadonlyMap<BufferId, number>;
   }): boolean;
+  /**
+   * A plugin's effective settings, defaults filled in.
+   *
+   * Narrowed to a reader rather than the whole `PluginSettingsService`: the
+   * host answers questions about settings and never writes one. A write comes
+   * from the user in the Settings panel, and reaches the host afterwards as
+   * `noteSettingsChanged`.
+   */
+  settings: { valuesFor(pluginId: string): Record<string, boolean | number | string> };
   notify(title: string, detail?: string): void;
   /** Switch the sidebar to a view id. Injected so the host stays UI-free. */
   showPanel(viewId: string): void;
@@ -383,6 +392,29 @@ export class PluginHost {
     }
   }
 
+  /**
+   * Tell one plugin its settings moved.
+   *
+   * **Only if it is already running.** An idle plugin is not started by this:
+   * it will read the current values with `settings.get` when something else
+   * starts it, which is the same answer by a route that costs nothing.
+   * Starting one here would mean touching a row in the Settings panel spawns
+   * every plugin that declares an option.
+   *
+   * Undebounced, unlike `noteDocumentChanged`. The source is a human moving a
+   * control, not a keystroke, and the service already stays quiet when a write
+   * does not change the effective value.
+   */
+  noteSettingsChanged(pluginId: string): void {
+    const entry = this.#loaded.get(pluginId);
+    if (!entry || entry.state !== 'running' || !entry.connection) return;
+
+    void this.#request(entry, entry.connection, {
+      method: 'settings.changed',
+      params: { values: this.#deps.settings.valuesFor(pluginId) },
+    });
+  }
+
   /** Stop everything and take every contributed command back. */
   async stopAll(): Promise<void> {
     const running = [...this.#loaded.values()];
@@ -606,6 +638,16 @@ export class PluginHost {
               : failure(request.id, 'stale', 'the edits did not apply to the buffers as they are'),
           );
         }
+
+        case 'settings.get':
+          // Answered from `entry`, which is the connection this line arrived
+          // on — never from anything the request said. That is the whole of
+          // the scoping, and it is why the request has no parameters.
+          return await this.#reply(entry, {
+            id: request.id,
+            ok: true,
+            result: this.#deps.settings.valuesFor(entry.plugin.manifest.id),
+          });
 
         case 'status.set':
           this.status.set(entry.plugin.manifest.id, request.params);

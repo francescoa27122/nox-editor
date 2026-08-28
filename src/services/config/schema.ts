@@ -329,31 +329,54 @@ export function defaultSettings(): Settings {
 }
 
 /**
- * Coerce one persisted value into a valid setting. Returns the default when
- * the stored value is the wrong type or out of range — a corrupt settings
- * file must never prevent the editor from starting.
+ * The parts of a descriptor that decide whether a value is valid.
+ *
+ * Narrower than `SettingDescriptor` on purpose: it omits `label`, `category`
+ * and the rest, which is what lets a **plugin's** declared setting satisfy it
+ * too. A plugin's descriptor has no category — its category is the plugin —
+ * so it could never be a `SettingDescriptor`, and without this the rule for
+ * "what is a valid number setting" would exist twice and drift.
+ */
+export type SettingShape =
+  | { kind: 'boolean'; default: boolean }
+  | { kind: 'number'; default: number; min: number; max: number }
+  | { kind: 'string'; default: string }
+  | { kind: 'enum'; default: string; options: readonly string[] };
+
+/**
+ * Coerce one persisted value against a descriptor's shape.
+ *
+ * Returns the default when the stored value is the wrong type, and clamps a
+ * number into its bounds — a corrupt settings file must never prevent the
+ * editor from starting, and that rule is the same whether the file is the
+ * user's `settings.json` or a plugin's namespace in `plugin-settings.json`.
+ */
+export function coerceTo(shape: SettingShape, value: unknown): boolean | number | string {
+  switch (shape.kind) {
+    case 'boolean':
+      return typeof value === 'boolean' ? value : shape.default;
+    case 'number': {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        return shape.default;
+      }
+      return Math.min(shape.max, Math.max(shape.min, value));
+    }
+    case 'string':
+      return typeof value === 'string' ? value : shape.default;
+    case 'enum':
+      return typeof value === 'string' && shape.options.includes(value) ? value : shape.default;
+  }
+}
+
+/**
+ * Coerce one persisted value into a valid setting.
+ *
+ * The schema lookup in front of `coerceTo`. Kept as its own function because
+ * every caller here has a key rather than a descriptor.
  */
 export function coerce(key: SettingKey, value: unknown): Settings[SettingKey] {
   const descriptor: SettingDescriptor = SETTINGS_SCHEMA[key];
-  switch (descriptor.kind) {
-    case 'boolean':
-      return typeof value === 'boolean' ? value : descriptor.default;
-    case 'number': {
-      if (typeof value !== 'number' || !Number.isFinite(value)) {
-        return descriptor.default;
-      }
-      const clamped = Math.min(descriptor.max, Math.max(descriptor.min, value));
-      return clamped;
-    }
-    case 'string':
-      return typeof value === 'string' ? value : descriptor.default;
-    case 'enum':
-      return (
-        typeof value === 'string' && descriptor.options.includes(value)
-          ? value
-          : descriptor.default
-      );
-  }
+  return coerceTo(descriptor, value);
 }
 
 /**

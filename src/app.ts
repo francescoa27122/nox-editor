@@ -65,6 +65,7 @@ import {
 import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
 import { SnippetService, SNIPPETS_FILE } from '@services/snippets';
 import { PluginHost } from '@services/plugin/host';
+import { PLUGIN_SETTINGS_FILE, PluginSettingsService } from '@services/plugin/settings';
 import { connectorFor, discoverPlugins, PLUGINS_DIRECTORY } from '@services/plugin/discover';
 import { OllamaProvider } from '@services/agent/ollama';
 import type { AgentTransport } from '@services/agent/protocol';
@@ -158,6 +159,7 @@ export class NoxApp {
   readonly serverRegistry: ServerRegistry;
   readonly snippets: SnippetService;
   readonly plugins: PluginHost;
+  readonly pluginSettings: PluginSettingsService;
   /** Failures already announced, so a republished status does not repeat one. */
   #reportedFailures = new Set<string>();
   /** The running servers, and the diagnostics they publish. */
@@ -265,9 +267,15 @@ export class NoxApp {
     this.agentConfig = new AgentConfigService(platform);
     this.serverRegistry = new ServerRegistry(platform);
     this.snippets = new SnippetService(platform);
+    this.pluginSettings = new PluginSettingsService(platform);
     this.plugins = new PluginHost({
       commands: this.commands,
       context: this.context,
+      // A reader, not the service. The host answers a plugin's question
+      // about its own settings and never writes one — a write comes from
+      // the user in the Settings panel and arrives here afterwards, as
+      // `noteSettingsChanged`.
+      settings: { valuesFor: (pluginId) => this.pluginSettings.valuesFor(pluginId) },
       // Staging, not writing. A plugin's proposal lands in the review
       // panel exactly as an agent's does, and becomes a write only when
       // the user clicks Apply in their own UI.
@@ -323,6 +331,7 @@ export class NoxApp {
       async () => {
         await this.notes.flush();
         await this.config.flush();
+        await this.pluginSettings.flush();
         await this.session.save();
       },
     );
@@ -366,6 +375,9 @@ export class NoxApp {
     await this.agentConfig.load();
     await this.serverRegistry.load();
     await this.snippets.load();
+    // Before discovery, so `describe` in `loadPlugins` adopts each stored
+    // namespace rather than parking it as belonging to nobody.
+    await this.pluginSettings.load();
     await this.loadPlugins();
     await this.notes.load();
     this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
@@ -707,6 +719,26 @@ export class NoxApp {
           ),
         );
       }
+    });
+
+    this.pluginSettings.damaged.subscribe((damage) => {
+      if (damage) {
+        this.notifications.error(
+          'Could not read your plugin settings',
+          damagedDetail(
+            damage.copy,
+            'Every plugin is running on its own defaults, and the next setting you change will overwrite plugin-settings.json.',
+          ),
+        );
+      }
+    });
+
+    // The one push a plugin gets about its own configuration. Only a plugin
+    // that is already running hears it — `noteSettingsChanged` refuses to
+    // start one, so touching a row in the Settings panel cannot spawn every
+    // plugin that declares an option.
+    this.pluginSettings.changed.on('changed', (pluginId) => {
+      this.plugins.noteSettingsChanged(pluginId);
     });
 
     // Each configured local model becomes a provider the agent panel can start
@@ -1365,6 +1397,45 @@ export class NoxApp {
   }
 
   /**
+   * Open `plugin-settings.json` for editing, creating it if absent.
+   *
+   * The panel is the ordinary way in and this is the escape hatch: a plugin
+   * that declares nothing still has a namespace here, and an author debugging
+   * one wants to see the file the panel writes.
+   *
+   * Unlike `snippets.json`, saving it in Nox does **not** reload it — nothing
+   * watches the config directory (`FileWatcherService` has one root and it is
+   * the workspace), and the honest thing is to say so rather than to imply a
+   * reload that does not happen.
+   */
+  async openPluginSettingsFile(): Promise<void> {
+    try {
+      await this.pluginSettings.ensureFile();
+    } catch (error) {
+      this.notifications.error(
+        'Could not create plugin-settings.json',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const directory = await this.platform.configDir().catch(() => null);
+    if (!directory) {
+      this.notifications.info(
+        'Plugin settings live in plugin-settings.json',
+        'The browser build keeps settings in the browser, so there is no file to open here.',
+      );
+      return;
+    }
+
+    await this.openPaths([join(directory, PLUGIN_SETTINGS_FILE)]);
+    this.notifications.info(
+      'Edit plugin-settings.json, then run "Reload Plugins"',
+      'Settings changed in the Settings panel apply immediately; edits made here need the reload.',
+    );
+  }
+
+  /**
    * Open `snippets.json` for editing, creating it with examples if absent.
    *
    * No "then reload" instruction, unlike `servers.json`: saving this file in
@@ -1405,6 +1476,11 @@ export class NoxApp {
    */
   async loadPlugins(): Promise<void> {
     const { plugins, problems } = await discoverPlugins(this.platform);
+    // Before `load`, so a plugin started eagerly by `activation: "startup"`
+    // can ask for its settings in the tick it greets.
+    this.pluginSettings.describe(
+      plugins.map((plugin) => ({ id: plugin.manifest.id, settings: plugin.manifest.settings })),
+    );
     this.plugins.load(plugins);
 
     if (problems.length > 0) {
@@ -3106,6 +3182,14 @@ export class NoxApp {
             count === 1 ? '1 plugin loaded' : `${count} plugins loaded`,
           );
         },
+      },
+      {
+        id: 'plugins.openSettingsFile',
+        title: 'Edit Plugin Settings File',
+        category: 'Plugins',
+        keywords: ['plugin-settings.json', 'extension', 'configure', 'option'],
+        capabilities: ['fs.create'],
+        run: () => this.openPluginSettingsFile(),
       },
       {
         id: 'plugins.openFolder',
@@ -5013,6 +5097,7 @@ export class NoxApp {
     try {
       await this.notes.flush();
       await this.config.flush();
+      await this.pluginSettings.flush();
       await this.session.save();
     } finally {
       // Last, and in a `finally`, because this is the flush that records why

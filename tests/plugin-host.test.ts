@@ -100,6 +100,8 @@ interface HarnessOptions {
   plugin?: ReturnType<typeof fakePlugin>;
   greeting?: number | 'silent';
   deny?: boolean;
+  /** Effective plugin settings, by plugin id. */
+  settings?: Record<string, Record<string, boolean | number | string>>;
 }
 
 function setup(options: HarnessOptions = {}) {
@@ -124,6 +126,11 @@ function setup(options: HarnessOptions = {}) {
       }),
     },
     stage: () => true,
+    settings: {
+      // Keyed by plugin id, the way the real service is — so a test can prove
+      // a plugin is told its own values and never another's.
+      valuesFor: (pluginId: string) => options.settings?.[pluginId] ?? {},
+    },
     notify: (title, detail) => notifications.push({ title, detail }),
     showPanel: (viewId) => shown.push(viewId),
     documentLength: () => 100,
@@ -534,5 +541,99 @@ describe('stopping', () => {
     // would take the whole app down rather than replace a plugin.
     host.load([{ manifest: manifestFor(), directory: '/w/.nox/plugins/demo' }]);
     expect(commands.get('plugin.demo.run')).toBeDefined();
+  });
+});
+
+/**
+ * A plugin's own options, over the wire.
+ *
+ * Two properties, and the second is the one worth writing down: a plugin reads
+ * only its own namespace, and a settings change never *starts* a plugin. The
+ * second is what keeps lazy activation intact — a user changing a setting in
+ * the panel must not spawn every plugin that declares one. See
+ * `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §4.
+ */
+describe('plugin settings', () => {
+  it('answers `settings.get` with this plugin’s values', async () => {
+    const plugin = fakePlugin((message, send) => {
+      const id = message.id as number;
+      if (message.method === 'command.invoke') {
+        send({ id: 900, method: 'settings.get' });
+        send({ id, ok: true });
+      }
+    });
+    const { commands } = setup({
+      plugin,
+      settings: { demo: { markers: 'TODO' }, other: { secret: 'not yours' } },
+    });
+
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(plugin.written.some((m) => m.id === 900)).toBe(true));
+
+    const reply = plugin.written.find((m) => m.id === 900);
+    expect(reply?.ok).toBe(true);
+    expect(reply?.result).toEqual({ markers: 'TODO' });
+  });
+
+  it('has no spelling that reads another plugin’s settings', async () => {
+    // The request carries no plugin argument at all, so scoping is structural
+    // rather than checked: one is sent and the caller's own id is the only
+    // thing the host can look up. A param would be a thing to get wrong.
+    const plugin = fakePlugin((message, send) => {
+      const id = message.id as number;
+      if (message.method === 'command.invoke') {
+        send({ id: 901, method: 'settings.get', params: { pluginId: 'other' } } as never);
+        send({ id, ok: true });
+      }
+    });
+    const { commands } = setup({
+      plugin,
+      settings: { demo: { mine: true }, other: { secret: 'not yours' } },
+    });
+
+    await commands.execute('plugin.demo.run');
+    await vi.waitFor(() => expect(plugin.written.some((m) => m.id === 901)).toBe(true));
+
+    expect(plugin.written.find((m) => m.id === 901)?.result).toEqual({ mine: true });
+  });
+
+  it('pushes the new values to a running plugin', async () => {
+    const { commands, host, plugin } = setup({ settings: { demo: { markers: 'TODO' } } });
+    await commands.execute('plugin.demo.run');
+
+    host.noteSettingsChanged('demo');
+
+    await vi.waitFor(() =>
+      expect(plugin.written.some((m) => m.method === 'settings.changed')).toBe(true),
+    );
+    // Carried with the notification rather than fetched. `document.changed` is
+    // coarse because a document is large and the rule is that a plugin is
+    // never woken per keystroke; a settings object is four scalars that move
+    // at human speed, so a bare "they changed" would buy only a round trip.
+    expect(plugin.written.find((m) => m.method === 'settings.changed')?.params).toEqual({
+      values: { markers: 'TODO' },
+    });
+  });
+
+  it('does not start a plugin that is only idle', () => {
+    const { host, plugin } = setup({ settings: { demo: { markers: 'TODO' } } });
+
+    host.noteSettingsChanged('demo');
+
+    // Nothing was written, which means nothing was connected: changing a
+    // setting in the panel must not spawn every plugin that declares one.
+    expect(plugin.written).toHaveLength(0);
+    expect(host.stateOf('demo')).toBe('idle');
+  });
+
+  it('tells only the plugin whose settings moved', async () => {
+    const { commands, host, plugin } = setup({ settings: { demo: {} } });
+    await commands.execute('plugin.demo.run');
+    const before = plugin.written.length;
+
+    host.noteSettingsChanged('someone-else');
+
+    await Promise.resolve();
+    expect(plugin.written).toHaveLength(before);
   });
 });

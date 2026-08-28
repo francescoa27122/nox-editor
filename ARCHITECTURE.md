@@ -2294,6 +2294,55 @@ listens, in `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
 
 ---
 
+### A plugin's settings are the user's layer, and only ever that
+
+Added 2026-08-28. A plugin declares its options in `plugin.json` — declared
+rather than registered, for the reason panels are: they have to be listable
+before the plugin runs, or seeing what a plugin can be configured to do would
+mean starting it, and every plugin would start at launch to fill a panel nobody
+opened.
+
+**They cannot join `SETTINGS_SCHEMA`, and the reason is the type.** `SettingKey`
+is `keyof typeof SETTINGS_SCHEMA` and `Settings` is derived from that, which is
+the entire basis of `config.get('editor.fontSize')` being typed rather than
+`unknown`. A key discovered at runtime would widen `Settings` to
+`Record<string, unknown>` and take every core setting's type down with it. So
+the values live in their own `plugin-settings.json`, namespaced by plugin id,
+owned by `PluginSettingsService` — the house pattern of one file per subsystem
+that `snippets.json`, `servers.json` and `keybindings.json` already follow. The
+*validation* is shared rather than copied: `coerce` was split into a schema
+lookup in front of a pure `coerceTo(shape, value)`, and a plugin's descriptor
+satisfies `SettingShape` structurally, with no cast.
+
+**There is no workspace layer, and no way for an author to ask for one.**
+`.nox/settings.json` arrives with a cloned repository, and the schema's
+`workspace: true` allowlist works because Nox knows what each of its eight keys
+means — `terminal.shell` is why the list exists. Nox cannot know what a
+plugin's keys mean: `formatter.path` and `margin.width` are both a string with
+a label. A `workspace: true` a plugin could set would hand the allowlist's
+decision to the party it exists to constrain, so the service has one layer by
+construction rather than by a check.
+
+**A namespace whose plugin is not loaded is written back untouched.**
+`ConfigService` drops unknown keys and is right to — its schema is complete, so
+unknown means stale. Here "known" is whatever discovery found *this launch*, so
+dropping would let a manifest that failed to parse this morning, or a folder
+renamed mid-upgrade, erase a plugin's configuration on the next unrelated
+write. That is a transient failure made destructive, and it is the property
+`tests/plugin-settings.test.ts` is built around.
+
+**`settings.changed` carries its values, unlike `document.changed`.** The
+document event is coarse because a document is large and the standing rule is
+that a plugin is never woken per keystroke. A settings object is a handful of
+scalars moving at human speed, so a bare notification would buy only a round
+trip. It also never *starts* a plugin — otherwise touching a row in the
+Settings panel would spawn every plugin that declares an option, which is the
+lazy activation declared contributions exist to protect.
+
+`docs/superpowers/specs/2026-08-28-plugin-settings-design.md`.
+
+---
+
 ### Completion sources are registered, never overridden
 
 `autocompletion()` takes an `override` option, and using it was a defect that
@@ -2405,8 +2454,10 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
 | The word fallback is capped by size, not by work | It declines above 1 MB (§6) rather than scanning an interruptible slice, so a large file gets no word completions at all instead of the ones near the caret. Bounded in the harmless direction — the fallback is a convenience and a language server, where there is one, is unaffected — but the honest fix is a bounded scan around the viewport rather than a cliff. `completeAnyWord` offers no way to ask for one; it would mean Nox owning the scan. |
 | A plugin's decorations are carried forward, not recomputed | Between one keystroke and the next Nox maps a plugin's `RangeSet` through the change rather than asking the plugin again — it is in another process and cannot answer that fast. So a mark stays over its text while you type and is corrected on the next `document.changed`, which means there is a window where a mark is *positioned* correctly and no longer *true*. The alternative is marks that vanish on the first keystroke, which is worse. |
-| Plugins get one event, not a feed | `document.changed` is the only push, added with decorations on 2026-08-27: debounced at 400 ms, coarse ("this buffer changed", never what changed), and sent **only to plugins that have already decorated that buffer**. That last clause is what stops it being an ambient feed — a plugin that never showed an interest in a file is not woken by typing in it. There is still no selection or focus event, and a status item still cannot track the editor live; `examples/plugins/counter/` says so rather than implying otherwise. |
-| Plugin settings are unbuilt | A plugin has no way to declare options a user can set, so anything configurable has to be baked in or read from a file the plugin owns. `config/schema.ts` generates the settings UI from a schema of scalars, which is the right shape to extend; doing it means a per-plugin namespace and a decision about where a plugin's settings live. Not a surface the roadmap row named, and the first thing anyone shipping a real plugin will want. |
+| Plugins get two events, not a feed | `document.changed` (2026-08-27) is debounced at 400 ms, coarse ("this buffer changed", never what changed), and sent **only to plugins that have already decorated that buffer** — that last clause is what stops it being an ambient feed. `settings.changed` (2026-08-28) joins it and is not comparable: it fires when a human moves a control, carries the new values, and reaches only a plugin that is *already running*. There is still no selection or focus event, and a status item still cannot track the editor live; `examples/plugins/counter/` says so rather than implying otherwise. |
+| A plugin setting cannot hold a secret | Built 2026-08-28 as four scalar kinds in a plaintext `plugin-settings.json`, so a plugin wanting an API key gets a string setting in a file anyone can read — exactly as `servers.json` and `agents.json` already do. Nox has no keychain seam and adding one would be its own feature, not a kind. Recorded rather than implied, because a `"kind": "string"` labelled *Token* looks like somewhere safe to put one. |
+| A project cannot configure a plugin | Deliberate, and the one thing plugin settings refuse. `.nox/settings.json` arrives with a cloned repository, and the schema's `workspace: true` allowlist works only because Nox knows what each of its eight keys means. It cannot know what a plugin's keys mean — `formatter.path` and `margin.width` are both a string with a label — so no plugin setting is ever workspace-scoped and there is no flag an author could set to make one. The cost is real: a repository cannot ship its linter plugin's configuration with itself. See `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §0. |
+| A plugin's settings are not watched | Editing `plugin-settings.json` by hand needs **Reload Plugins**. The same gap `snippets.json` records and the same fix — `FileWatcherService` has one root and it is the workspace, so nothing covers the config directory. Changes made in the Settings panel apply immediately; only hand edits wait. |
 | The worker transport is unverified in the packaged app | It needs `worker-src 'self' blob:`, added to `tauri.conf.json` with it — the default `default-src 'self'` blocks a blob worker outright. `cargo` is not installed on the machine this was written on, so the CSP was never exercised in a real WebView; the tests use an injected connection and `npm run dev` has no CSP at all. **If it fails there, the process transport is unaffected** and only the worker convenience is lost. Wants a desktop walk. |
 | A plugin process is not sandboxed | The same line `agents` already carries: the permission model governs what a plugin may ask *Nox* to do, not what its own process can reach. A plugin is trusted code you chose to install, like a shell plugin — the difference from an agent is only that more people will install one. |
 | A snippet's choice syntax keeps only its first option | `${1|const,let|}` becomes `${1:const}`. CodeMirror's snippet fields have no picker attached, so the alternatives have nowhere to be shown, and a field the user can type over beats a literal `|const,let|` in their code. Offering the real thing means a completion source that fires on entering the field — buildable, and a bigger feature than the conversion it would sit inside. |

@@ -18,9 +18,41 @@
    */
 
   const app = useApp();
-  const { config, ui, workspace } = app;
+  const { config, ui, workspace, plugins, pluginSettings } = app;
   const settings = config.settings;
   const rootPath = workspace.rootPath;
+
+  /**
+   * One control, whatever declared it.
+   *
+   * Core preferences and a plugin's own options draw the same four widgets,
+   * and they were written twice for exactly one release before this. The
+   * shapes differ — a core descriptor has a `category` and a plugin's has a
+   * `key` — so the snippet takes neither, only what a control needs.
+   */
+  interface ControlSpec {
+    id: string;
+    label: string;
+    kind: 'boolean' | 'number' | 'string' | 'enum';
+    value: boolean | number | string;
+    min?: number;
+    max?: number;
+    step?: number;
+    options?: readonly string[];
+    optionLabels?: Readonly<Record<string, string>> | undefined;
+    placeholder?: string | undefined;
+    onChange: (value: unknown) => void;
+  }
+
+  /**
+   * What plugins declare, and what they are currently set to.
+   *
+   * Two signals because two things move independently: `plugins.revision`
+   * changes when a plugin is loaded or reloaded, `pluginSettings.revision`
+   * when a value does.
+   */
+  const hostRevision = plugins.revision;
+  const pluginRevision = pluginSettings.revision;
 
   /**
    * Which keys the open project sets.
@@ -34,8 +66,18 @@
 
   const CATEGORIES: SettingCategory[] = ['Editor', 'Text', 'Files', 'Workbench', 'Terminal'];
 
+  /**
+   * Plugins are a tab, not a sixth `SettingCategory`.
+   *
+   * That union is closed and this file restates it as a value, so a runtime
+   * category could not join it — but the better reason is that it would be
+   * the wrong word. "Editor" and "Terminal" say what a setting is *about*;
+   * a plugin's name says who owns it.
+   */
+  type Tab = SettingCategory | 'All' | 'Plugins';
+
   let filter = $state('');
-  let activeCategory = $state<SettingCategory | 'All'>('All');
+  let activeCategory = $state<Tab>('All');
   let searchInput = $state<HTMLInputElement | null>(null);
   /**
    * Whether the `advanced` settings are listed while browsing.
@@ -84,6 +126,55 @@
     return [...groups.entries()];
   });
 
+  /**
+   * Every loaded plugin that declares a setting, filtered by the same search.
+   *
+   * Read through `plugins.list()` for the label, because the declaration knows
+   * the key and not who owns it. A plugin with no settings never appears —
+   * which is every plugin until someone ships one that has them, and is why
+   * the tab hides itself.
+   */
+  const pluginGroups = $derived.by(() => {
+    void $hostRevision;
+    const query = filter.trim();
+
+    return plugins
+      .list()
+      .map((plugin) => ({
+        id: plugin.id,
+        label: plugin.label,
+        settings: pluginSettings.declarationsFor(plugin.id).filter((setting) => {
+          if (query.length === 0) return true;
+          return Boolean(
+            fuzzyMatch(query, setting.label) ??
+              fuzzyMatch(query, setting.key) ??
+              fuzzyMatch(query, plugin.label) ??
+              (setting.description === undefined
+                ? null
+                : fuzzyMatch(query, setting.description)),
+          );
+        }),
+      }))
+      .filter((group) => group.settings.length > 0);
+  });
+
+  /** Whether any loaded plugin declares anything, search aside. */
+  const anyPluginSettings = $derived.by(() => {
+    void $hostRevision;
+    return plugins.list().some((plugin) => pluginSettings.declarationsFor(plugin.id).length > 0);
+  });
+
+  const pluginValues = $derived.by(() => {
+    void $pluginRevision;
+    return new Map(pluginGroups.map((group) => [group.id, pluginSettings.valuesFor(group.id)]));
+  });
+
+  const showCore = $derived(activeCategory !== 'Plugins');
+  const showPlugins = $derived(activeCategory === 'All' || activeCategory === 'Plugins');
+  const nothingMatches = $derived(
+    (!showCore || grouped.length === 0) && (!showPlugins || pluginGroups.length === 0),
+  );
+
   function update(key: SettingKey, value: unknown) {
     // `inert` on the control is the visible half; this is the load-bearing
     // half. A write that lands in the user layer while the workspace shadows
@@ -93,6 +184,54 @@
     config.set(key, value as never);
   }
 </script>
+
+{#snippet control(spec: ControlSpec)}
+  {#if spec.kind === 'boolean'}
+    <button
+      id={spec.id}
+      class="switch"
+      class:on={spec.value}
+      role="switch"
+      aria-checked={Boolean(spec.value)}
+      aria-label={spec.label}
+      onclick={() => spec.onChange(!spec.value)}
+    >
+      <span class="knob"></span>
+    </button>
+  {:else if spec.kind === 'number'}
+    <input
+      id={spec.id}
+      class="number nox-input"
+      type="number"
+      min={spec.min}
+      max={spec.max}
+      step={spec.step ?? 1}
+      value={spec.value}
+      onchange={(event) => spec.onChange(Number(event.currentTarget.value))}
+    />
+  {:else if spec.kind === 'enum'}
+    <select
+      id={spec.id}
+      class="nox-input"
+      value={spec.value}
+      onchange={(event) => spec.onChange(event.currentTarget.value)}
+    >
+      {#each spec.options ?? [] as option (option)}
+        <option value={option}>{spec.optionLabels?.[option] ?? option}</option>
+      {/each}
+    </select>
+  {:else}
+    <input
+      id={spec.id}
+      class="text nox-input mono"
+      type="text"
+      placeholder={spec.placeholder ?? ''}
+      value={spec.value}
+      spellcheck="false"
+      onchange={(event) => spec.onChange(event.currentTarget.value)}
+    />
+  {/if}
+{/snippet}
 
 <div class="settings" role="dialog" aria-modal="true" aria-label="Settings">
   <header>
@@ -127,13 +266,13 @@
       />
     </div>
     <div class="tabs" role="tablist" aria-label="Setting categories">
-      {#each ['All', ...CATEGORIES] as category (category)}
+      {#each ['All', ...CATEGORIES, ...(anyPluginSettings ? ['Plugins'] : [])] as category (category)}
         <button
           class="tab"
           class:active={activeCategory === category}
           role="tab"
           aria-selected={activeCategory === category}
-          onclick={() => (activeCategory = category as SettingCategory | 'All')}
+          onclick={() => (activeCategory = category as Tab)}
         >
           {category}
         </button>
@@ -142,6 +281,7 @@
   </div>
 
   <div class="body nox-scroll">
+    {#if showCore}
     {#each grouped as [category, keys] (category)}
       <section>
         <h3>{category}</h3>
@@ -174,60 +314,84 @@
                  no control: the workspace layer wins, so the row is disabled
                  and the footer points at the file instead. -->
             <div class="control" inert={fromWorkspace}>
-              {#if descriptor.kind === 'boolean'}
-                <button
-                  id="setting-{key}"
-                  class="switch"
-                  class:on={$settings[key]}
-                  role="switch"
-                  aria-checked={Boolean($settings[key])}
-                  aria-label={descriptor.label}
-                  onclick={() => update(key, !$settings[key])}
-                >
-                  <span class="knob"></span>
-                </button>
-              {:else if descriptor.kind === 'number'}
-                <input
-                  id="setting-{key}"
-                  class="number nox-input"
-                  type="number"
-                  min={descriptor.min}
-                  max={descriptor.max}
-                  step={descriptor.step ?? 1}
-                  value={$settings[key]}
-                  onchange={(event) => update(key, Number(event.currentTarget.value))}
-                />
-              {:else if descriptor.kind === 'enum'}
-                <select
-                  id="setting-{key}"
-                  class="nox-input"
-                  value={$settings[key]}
-                  onchange={(event) => update(key, event.currentTarget.value)}
-                >
-                  {#each descriptor.options as option (option)}
-                    <option value={option}>
-                      {descriptor.optionLabels?.[option] ?? option}
-                    </option>
-                  {/each}
-                </select>
-              {:else}
-                <input
-                  id="setting-{key}"
-                  class="text nox-input mono"
-                  type="text"
-                  placeholder={descriptor.placeholder ?? ''}
-                  value={$settings[key]}
-                  spellcheck="false"
-                  onchange={(event) => update(key, event.currentTarget.value)}
-                />
-              {/if}
+              {@render control({
+                id: `setting-${key}`,
+                label: descriptor.label,
+                kind: descriptor.kind,
+                value: $settings[key],
+                ...(descriptor.kind === 'number'
+                  ? { min: descriptor.min, max: descriptor.max, step: descriptor.step ?? 1 }
+                  : {}),
+                ...(descriptor.kind === 'enum'
+                  ? { options: descriptor.options, optionLabels: descriptor.optionLabels }
+                  : {}),
+                ...(descriptor.kind === 'string' ? { placeholder: descriptor.placeholder } : {}),
+                onChange: (value) => update(key, value),
+              })}
             </div>
           </div>
         {/each}
       </section>
-    {:else}
-      <p class="nox-empty">No settings match “{filter}”.</p>
     {/each}
+    {/if}
+
+    <!-- One section per plugin, named after the plugin. There is no workspace
+         badge here and nothing to put one on: a plugin setting has a single
+         layer by construction, because a cloned repository must never be able
+         to set a key whose meaning Nox does not know. -->
+    {#if showPlugins}
+      {#each pluginGroups as group (group.id)}
+        <section>
+          <h3>{group.label}</h3>
+          {#each group.settings as setting (setting.key)}
+            {@const id = `plugin-setting-${group.id}-${setting.key}`}
+            <!-- Derived from the value on screen rather than asked of the
+                 service: `isDefault` is a plain call that reads no signal, so
+                 the reset button never appeared when a value moved. The two
+                 are the same predicate — the service stores non-defaults
+                 only — and this one is reactive. -->
+            {@const value = pluginValues.get(group.id)?.[setting.key] ?? setting.default}
+            <div class="setting" data-plugin-setting="{group.id}.{setting.key}">
+              <div class="meta">
+                <label for={id}>
+                  {setting.label}
+                  {#if value !== setting.default}
+                    <button
+                      class="reset"
+                      title="Reset to default"
+                      aria-label="Reset {setting.label} to default"
+                      onclick={() => pluginSettings.reset(group.id, setting.key)}
+                    >
+                      <Icon name="refresh" size={11} />
+                    </button>
+                  {/if}
+                </label>
+                {#if setting.description}
+                  <p>{setting.description}</p>
+                {/if}
+              </div>
+
+              <div class="control">
+                {@render control({
+                  id,
+                  label: setting.label,
+                  kind: setting.kind,
+                  value,
+                  ...(setting.kind === 'number' ? { min: setting.min, max: setting.max } : {}),
+                  ...(setting.kind === 'enum' ? { options: setting.options } : {}),
+                  ...(setting.kind === 'string' ? { placeholder: setting.placeholder } : {}),
+                  onChange: (value) => pluginSettings.set(group.id, setting.key, value),
+                })}
+              </div>
+            </div>
+          {/each}
+        </section>
+      {/each}
+    {/if}
+
+    {#if nothingMatches}
+      <p class="nox-empty">No settings match “{filter}”.</p>
+    {/if}
   </div>
 
   <footer>
