@@ -1039,8 +1039,16 @@ export class NoxApp {
        * it said "loop completed with undelivered notifications" — and only
        * when there is no `error` object, so a real exception *thrown inside*
        * an observer callback still reports.
+       *
+       * **"No `error` object" is `null`, not `undefined`, and this read
+       * `=== undefined` until 2026-08-28** — so the fix above shipped in
+       * 0.9.0 and never once worked. A real `ErrorEvent` has `error` as an
+       * own property initialised to `null` when there is no exception; only
+       * the *synthetic* event `tests/failure-reporting.test.ts` was building
+       * left it absent, which is why the test passed while the toast kept
+       * appearing. The test now dispatches a real `ErrorEvent`.
        */
-      if (error === undefined && message?.startsWith('ResizeObserver loop')) return;
+      if (error == null && message?.startsWith('ResizeObserver loop')) return;
 
       // `error` is absent for a cross-origin script error, where the spec
       // gives only the sanitised "Script error." string. Reporting that is

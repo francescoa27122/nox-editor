@@ -8,6 +8,51 @@ are knowledge.**
 
 ---
 
+## 2026-08-28 (PC) — A fix that shipped and never worked
+
+Found while verifying custom themes in the browser, which is the only place it
+was ever visible.
+
+**`null` is not `undefined`, and one line assumed it was.** The guard added in
+0.9.0 to stop `ResizeObserver loop …` becoming a red toast reads
+`error === undefined && message?.startsWith('ResizeObserver loop')`. A real
+`ErrorEvent` has `error` as an **own property initialised to `null`** when
+there is no exception object, so the first half was false every time and the
+toast the fix was written to remove has been appearing ever since.
+
+**The test passed the whole time, and that is the more interesting half.**
+`tests/failure-reporting.test.ts` built its events with `new Event('error')`
+plus `Object.assign`, so an unnamed `error` was *absent* — `undefined` — which
+is the one shape the guard did handle. The fake was wrong in exactly the way
+that made the bug invisible. Fixed by dispatching a real `ErrorEvent`, which
+fails before the change and passes after; the synthetic helper stays, because
+plain `Event`s are a genuine shape too (a failed image raises one).
+
+Verified in Chromium both ways rather than only in the suite: forcing a
+ResizeObserver loop produced two toasts before and none after, and a
+`Script error.`-shaped event — also `error: null` — still reports, so the
+suppression stayed narrow rather than becoming "ignore anything with a null
+error".
+
+Shipped:    `src/app.ts` — `error == null` in the ResizeObserver guard, with
+            the reason recorded where the wrong assumption was;
+            `tests/failure-reporting.test.ts` — a `dispatchErrorEvent` helper
+            building a real `ErrorEvent`, two tests over it.
+Verified:   `npm test` 165 files / 2377 tests passed (was 165 / 2375) ·
+            `npm run check` 1036 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings. The new test is red before the
+            one-line change and green after — checked in that order.
+Next:       A watcher on the config directory. Three debt rows now name it
+            (`snippets.json`, `plugin-settings.json`, theme files) and all
+            three have the same cause: `FileWatcherService` has one root and it
+            is the workspace. Retiring three rows at once beats a fourth
+            feature that adds a fourth.
+Blocked:    Nothing new. The worker-transport CSP still wants a desktop walk.
+Confidence: High. The claim is small, the test was written to fail first, and
+            the browser confirmed both directions.
+
+---
+
 ## 2026-08-28 (PC) — Custom themes, and the enum that stopped being true
 
 The last open row in the v0.6 table. `DESIGN.md` §9 has said since v0.1 that a

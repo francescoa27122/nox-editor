@@ -179,6 +179,42 @@ describe('the uncaught-error backstop', () => {
   });
 
   /**
+   * The same thing again, through a **real `ErrorEvent`** rather than a plain
+   * `Event` with fields assigned onto it.
+   *
+   * This is the test that was missing, and its absence is why the filter above
+   * passed for a release while the toast kept appearing. `dispatchError` builds
+   * an `Event` and `Object.assign`s what the caller names, so an unnamed
+   * `error` is *absent* — `undefined`. A real `ErrorEvent` has `error` as an
+   * own property, initialised to **null** when there is no exception object.
+   *
+   * `null !== undefined`, so the guard that read `error === undefined` never
+   * fired in a browser. Found by forcing a ResizeObserver loop in the dev
+   * server on 2026-08-28 and watching the red toast appear anyway.
+   */
+  it('says nothing about a ResizeObserver loop delivered as a real ErrorEvent', () => {
+    app = new NoxApp(new MemoryPlatform());
+
+    dispatchErrorEvent('ResizeObserver loop completed with undelivered notifications.');
+    dispatchErrorEvent('ResizeObserver loop limit exceeded');
+
+    expect(messages(app)).toEqual([]);
+  });
+
+  /**
+   * The other half, also through a real event: a cross-origin script error is
+   * sanitised to a bare message and `error: null` too, and must still report.
+   * Without this, "ignore anything whose error is null" would look correct.
+   */
+  it('still reports a real ErrorEvent that is not a ResizeObserver loop', () => {
+    app = new NoxApp(new MemoryPlatform());
+
+    dispatchErrorEvent('Script error.');
+
+    expect(app.notifications.items.get()[0]?.detail).toBe('Script error.');
+  });
+
+  /**
    * The narrow half of that filter. Code inside an observer callback can fail
    * like any other code, and that arrives *with* an `error` object — so
    * matching on the message alone would have silenced a real exception for
@@ -227,6 +263,30 @@ function dispatchRejection(reason: unknown): void {
  * event in production, where the default action is a console line nobody can
  * read anyway.
  */
+/**
+ * A real `ErrorEvent`, which is what a browser actually delivers.
+ *
+ * Separate from `dispatchError` rather than replacing it: the synthetic shape
+ * that helper builds is a genuine one too — Nox's own `globalThis` listener
+ * sees plain `Event`s for resource failures — so both are worth covering. What
+ * was missing was this one, where `error` is `null` rather than absent.
+ */
+function dispatchErrorEvent(message: string, error?: unknown): void {
+  const event = new ErrorEvent('error', {
+    message,
+    cancelable: true,
+    ...(error === undefined ? {} : { error }),
+  });
+
+  const cancel = (fired: Event) => fired.preventDefault();
+  globalThis.addEventListener('error', cancel);
+  try {
+    globalThis.dispatchEvent(event);
+  } finally {
+    globalThis.removeEventListener('error', cancel);
+  }
+}
+
 function dispatchError(fields: { error?: unknown; message?: string }): void {
   const event = new Event('error', { cancelable: true });
   Object.assign(event, fields);
