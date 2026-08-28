@@ -8,6 +8,67 @@ are knowledge.**
 
 ---
 
+## 2026-08-28 (PC) — The flaky test was a harness that faked a state the app never reaches
+
+`tests/search-virtualisation.test.ts` failed intermittently in full parallel
+runs and passed in isolation. The tempting fix is a longer timeout; it would
+have hidden the actual finding.
+
+**Measured before touching anything.** In isolation each test was ~430 ms;
+under a loaded full run the same two hit 5988 ms and 5231 ms against the 5 s
+default — a 12x starvation factor, not a slow test. So the question became why
+a jsdom test costs 430 ms at all.
+
+**Instrumented the phases: `search.run()` was 466 ms of 490 ms.** Then the
+decisive split — the same search with *no component mounted* took **1.8 ms**.
+It was never the search. Varying the fixture showed the shape: 150 → 300 → 600
+→ 1200 rows cost 100 → 152 → 417 → 1515 ms, ratios of 1.5, 2.7, 3.6 climbing
+toward 4. **Quadratic**: results stream in batches and each batch re-renders
+the whole unwindowed list.
+
+**The harness was reproducing a state the product never reaches.** Every test
+called `giveHeight(list)` *after* `setup`, so results streamed into a list
+jsdom reported as zero-height and therefore unwindowed. A browser has measured
+the viewport long before the first batch. Stubbing the height on
+`HTMLElement.prototype` **before mounting** makes streaming windowed: 496 ms →
+54 ms, 600 rendered rows per batch → 36.
+
+**Unreachable in production, and checked rather than assumed.** `SearchPanel`
+sits behind `{#if $view === 'search'}`, so it is unmounted unless the search
+view is showing — and when it is showing the viewport is measured. So this was
+a test-harness defect, not a product one, and nothing in `src/` changed.
+
+**The suite got stronger, not weaker.** Five mutation checks re-run against the
+new harness; all still bite, and two bite *more* tests than before, because
+more of them now exercise the windowed path.
+
+Shipped:    `tests/search-virtualisation.test.ts` — `measureViewport()` on the
+            prototype applied before mount, `setup(count, { measured })`,
+            `giveHeight` deleted, and the one deliberately-unmeasured test
+            given a 240-row fixture sized to clear `MIN_ROWS_TO_WINDOW` with
+            an assertion that it still does. Header rewritten: it described
+            the old arrangement and the measurements that justify the new one.
+Verified:   Worst test **528 ms under full parallel load**, against the 5 s
+            timeout — 9.5x headroom where the same tests were at 5988 ms and
+            5231 ms. Three consecutive full runs clean, 2403 tests each; it
+            had failed in most full runs earlier today. `npm run check` 1038
+            files 0/0 · `npm run lint` 0 errors, 9 pre-existing warnings.
+            Mutation-checked five of five against the new harness.
+Next:       A desktop walk. Three things now wait on one — the plugin worker's
+            CSP, custom themes end-to-end (the browser target has no config
+            directory), and the config watcher's joined path — and it needs a
+            machine with `cargo`. After that, cutting 0.11: `## [Unreleased]`
+            now holds plugins with settings, custom themes, the config
+            watcher, the ResizeObserver fix and the release gate.
+Blocked:    Nothing new.
+Confidence: High, and it is measurement rather than argument: the root cause
+            was isolated to 1.8 ms vs 472 ms by removing one variable, and the
+            quadratic shape was confirmed across four fixture sizes. The
+            residual risk is that flakiness is probabilistic — three clean runs
+            is evidence, and the 9.5x headroom is the reason to believe it.
+
+---
+
 ## 2026-08-28 (PC) — The config watcher, and three debt rows with a wrong premise
 
 Three rows said the same thing — `snippets.json`, `plugin-settings.json` and a
