@@ -241,6 +241,30 @@ export class TauriPlatform implements Platform {
     };
   }
 
+  async watchConfig(path: string, onEvent: (event: WatchEvent) => void): Promise<Unwatch> {
+    // Its own channel, so a config event and a workspace event cannot be
+    // mistaken for one another — the two watches have different subscribers
+    // and different consequences.
+    const unlisten = await listen<WatchEvent>('nox://config-change', (event) => {
+      onEvent(event.payload);
+    });
+
+    try {
+      await call<void>('nox_config_watch', { path });
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
+
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      unlisten();
+      void call<void>('nox_config_unwatch', {}).catch(() => undefined);
+    };
+  }
+
   async pickFolder(title = 'Open Folder'): Promise<string | null> {
     const picked = await openDialog({ directory: true, multiple: false, title });
     return typeof picked === 'string' ? picked : null;

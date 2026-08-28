@@ -64,6 +64,7 @@ import {
 } from '@services/agent/config';
 import { LspService, ServerRegistry, SERVERS_FILE, type SessionStatusRow } from '@services/lsp';
 import { SnippetService, SNIPPETS_FILE } from '@services/snippets';
+import { classifyConfigChange, ConfigWatcherService } from '@services/config-watcher';
 import { ThemeService } from '@services/themes';
 import { tokenProperty } from '@core/theme';
 import { PluginHost } from '@services/plugin/host';
@@ -163,6 +164,7 @@ export class NoxApp {
   readonly plugins: PluginHost;
   readonly pluginSettings: PluginSettingsService;
   readonly themes: ThemeService;
+  readonly configWatcher: ConfigWatcherService;
   /**
    * The custom properties the active theme set, so they can be taken back.
    *
@@ -280,6 +282,7 @@ export class NoxApp {
     this.snippets = new SnippetService(platform);
     this.pluginSettings = new PluginSettingsService(platform);
     this.themes = new ThemeService(platform);
+    this.configWatcher = new ConfigWatcherService(platform);
     this.plugins = new PluginHost({
       commands: this.commands,
       context: this.context,
@@ -392,6 +395,9 @@ export class NoxApp {
     await this.pluginSettings.load();
     await this.loadThemes();
     await this.loadPlugins();
+    // After the three services that own files in there have read them, so the
+    // first event cannot race an initial load.
+    await this.configWatcher.start();
     await this.notes.load();
     this.files.setExcludes(this.config.get('files.excludeFromExplorer'));
 
@@ -732,6 +738,37 @@ export class NoxApp {
           ),
         );
       }
+    });
+
+    /**
+     * Config files edited outside Nox.
+     *
+     * Three files, and the omissions are deliberate — see
+     * `classifyConfigChange`. Each reload is idempotent and decides for itself
+     * whether anything moved, which is what makes this safe for
+     * `plugin-settings.json`, the one of the three Nox writes itself: a
+     * content comparison there beats a time window, because a window drops a
+     * real external edit that lands inside it.
+     */
+    this.configWatcher.onChanged((paths) => {
+      const change = classifyConfigChange(paths);
+
+      if (change.snippets) {
+        void this.snippets.load().then(() => {
+          const error = this.snippets.error.get();
+          // The last good set stays live either way — `SnippetService` says so
+          // — but a file being edited elsewhere is exactly when a silent
+          // failure looks like the edit not having worked.
+          if (error) this.notifications.error('snippets.json could not be read', error);
+        });
+      }
+
+      // Re-reads and re-applies. If the edited theme is the one in use, the
+      // change is on screen without anyone asking for it, which is the whole
+      // point of watching a theme file.
+      if (change.themes) void this.loadThemes();
+
+      if (change.pluginSettings) void this.pluginSettings.reload();
     });
 
     this.pluginSettings.damaged.subscribe((damage) => {
@@ -5222,6 +5259,7 @@ export class NoxApp {
     this.keymap.detach();
     this.menu.dispose();
     this.watcher.stop();
+    this.configWatcher.stop();
     this.updates.stop();
     // Notes first: settings and session each have an on-disk original to
     // fall back on if their flush is lost, but a note does not.

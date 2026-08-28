@@ -121,6 +121,7 @@ pub fn run() {
         .manage(agent::AgentState::default())
         .manage(watcher::WatcherState::default())
         .manage(watcher::GitMetaWatcherState::default())
+        .manage(watcher::ConfigWatcherState::default())
         .manage(search::SearchState::default())
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
@@ -156,6 +157,8 @@ pub fn run() {
             watcher::nox_unwatch,
             watcher::nox_git_meta_watch,
             watcher::nox_git_meta_unwatch,
+            watcher::nox_config_watch,
+            watcher::nox_config_unwatch,
             search::nox_search_start,
             search::nox_search_cancel,
             agent::nox_agent_spawn,

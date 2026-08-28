@@ -351,3 +351,153 @@ describe('a file that cannot be read', () => {
     expect(service.valuesFor('todos').markers).toBe('TODO');
   });
 });
+
+/**
+ * Re-reading after someone else edited the file.
+ *
+ * The config watcher makes this reachable, and it is the one consumer where a
+ * naive reload is unsafe: **Nox writes this file itself**, on a 250 ms
+ * debounce, so a reload that could not tell its own write from a stranger's
+ * would be at best wasted work and at worst a loop — reload, recompute, save,
+ * event, reload.
+ *
+ * The guard is a **content comparison, not a time window**. A window is a race
+ * written down as a constant, and it fails in exactly the case that matters: a
+ * real external edit landing inside it is silently dropped. Comparing bytes is
+ * deterministic and stays correct under that edit, because such an edit changes
+ * the bytes. See `docs/superpowers/specs/2026-08-28-config-watcher-design.md`
+ * §2.
+ *
+ * Mutation checks, one of which corrected the claim rather than the code:
+ * - `load` no longer clearing `#values` first → "forgets a namespace deleted
+ *   from the file" goes red.
+ * - removing the *value* comparison in `reload` → "tells the host which plugin
+ *   moved" and "says nothing when a reformatted file holds the same values".
+ * - removing the `raw === this.serialize()` byte guard **survived**, and that
+ *   is worth knowing: it is a fast path, not the correctness. Reloading Nox's
+ *   own file re-derives the same values, so the comparison above catches it
+ *   anyway. The byte check earns its place by skipping a parse and a re-adopt
+ *   on every 250 ms save while a control is being dragged — not by being the
+ *   thing that stops the loop.
+ */
+describe('reloading after an outside edit', () => {
+  let platform: MemoryPlatform;
+
+  beforeEach(() => {
+    platform = new MemoryPlatform();
+  });
+
+  it('picks up a value someone else wrote', async () => {
+    const service = serviceWith(platform);
+    await service.load();
+
+    await platform.writeConfigFile(
+      PLUGIN_SETTINGS_FILE,
+      JSON.stringify({ todos: { markers: 'FIXME' } }),
+    );
+    await service.reload();
+
+    expect(service.valuesFor('todos').markers).toBe('FIXME');
+  });
+
+  it('tells the host which plugin moved, so only that one is woken', async () => {
+    const service = serviceWith(platform);
+    service.describe([
+      { id: 'todos', settings: DECLARED },
+      { id: 'other', settings: DECLARED },
+    ]);
+    await service.load();
+
+    const seen: string[] = [];
+    service.changed.on('changed', (pluginId) => seen.push(pluginId));
+
+    await platform.writeConfigFile(
+      PLUGIN_SETTINGS_FILE,
+      JSON.stringify({ todos: { markers: 'FIXME' } }),
+    );
+    await service.reload();
+
+    expect(seen).toEqual(['todos']);
+  });
+
+  it('says nothing when the file is what Nox itself just wrote', async () => {
+    const service = serviceWith(platform);
+    await service.load();
+    service.set('todos', 'markers', 'FIXME');
+    await service.flush();
+
+    const seen: string[] = [];
+    service.changed.on('changed', (pluginId) => seen.push(pluginId));
+    await service.reload();
+
+    // The event a save of Nox's own making produces. Nothing moved, so nothing
+    // is announced and no plugin is woken.
+    expect(seen).toEqual([]);
+  });
+
+  it('says nothing when a reformatted file holds the same values', async () => {
+    // Byte comparison is the cheap first pass, not the only one: someone can
+    // reformat the file without changing what it means.
+    const service = serviceWith(platform);
+    await service.load();
+    service.set('todos', 'markers', 'FIXME');
+    await service.flush();
+
+    const seen: string[] = [];
+    service.changed.on('changed', (pluginId) => seen.push(pluginId));
+
+    await platform.writeConfigFile(
+      PLUGIN_SETTINGS_FILE,
+      '{"todos":{"markers":"FIXME"}}',
+    );
+    await service.reload();
+
+    expect(seen).toEqual([]);
+    expect(service.valuesFor('todos').markers).toBe('FIXME');
+  });
+
+  it('forgets a namespace deleted from the file', async () => {
+    const service = serviceWith(platform);
+    await service.load();
+    service.set('todos', 'markers', 'FIXME');
+    await service.flush();
+
+    await platform.writeConfigFile(PLUGIN_SETTINGS_FILE, '{}');
+    await service.reload();
+
+    expect(service.valuesFor('todos').markers).toBe('TODO');
+    expect(service.isDefault('todos', 'markers')).toBe(true);
+  });
+
+  it('still keeps a namespace whose plugin is not loaded', async () => {
+    await platform.writeConfigFile(
+      PLUGIN_SETTINGS_FILE,
+      JSON.stringify({ ruff: { lineLength: 100 } }),
+    );
+    const service = serviceWith(platform);
+    await service.load();
+
+    await platform.writeConfigFile(
+      PLUGIN_SETTINGS_FILE,
+      JSON.stringify({ ruff: { lineLength: 120 }, todos: { markers: 'X' } }),
+    );
+    await service.reload();
+
+    expect(JSON.parse(service.serialize()).ruff).toEqual({ lineLength: 120 });
+  });
+
+  it('leaves the values alone when the file becomes unreadable', async () => {
+    const service = serviceWith(platform);
+    await service.load();
+    service.set('todos', 'markers', 'FIXME');
+    await service.flush();
+
+    await platform.writeConfigFile(PLUGIN_SETTINGS_FILE, '{ "todos": ');
+    await service.reload();
+
+    // A half-written file is the ordinary state while someone is typing in
+    // another editor. Dropping the working set over it would be the worst
+    // moment to do so.
+    expect(service.valuesFor('todos').markers).toBe('FIXME');
+  });
+});

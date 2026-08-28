@@ -2294,6 +2294,47 @@ listens, in `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
 
 ---
 
+### The config directory gets its own watcher, because it had to
+
+Added 2026-08-28, retiring three debt rows that all said the same thing:
+`snippets.json`, `plugin-settings.json` and a theme file each needed a Reload
+command after a hand edit, and each named `FileWatcherService`'s single root as
+the cause.
+
+**Every one of those rows implied a renderer-side fix, and every one was
+wrong.** `nox_watch` holds `Mutex<Option<RecommendedWatcher>>` — one watcher —
+and its own comment says *"replacing any previous watcher"*. Calling it for the
+config directory would have silently stopped watching the workspace: no
+external-change detection, no tree refresh, and no save-overwrite dialog. The
+feature would have traded three small gaps for one large one, on the path where
+being wrong costs unsaved work.
+
+So it is a third Rust watcher, and the shape was already in the file:
+`watchGitMeta` is a second concurrent watch and it did not extend `nox_watch`
+into a registry — it added its own state, command pair and event channel. This
+follows that rather than refactoring the workspace watcher.
+
+**A separate service, too.** `FileWatcherService`'s whole body is workspace
+policy — reload clean buffers, protect dirty ones, refresh the tree, re-index,
+warn once per buffer — and none of it applies to a config file.
+`ConfigWatcherService` watches, coalesces, and hands out a set of paths;
+every decision about what a change *means* stays with the service that owns the
+file.
+
+**Self-writes are excluded by content, never by a timer.** Nox writes
+`plugin-settings.json` itself on a 250 ms debounce, so a reload that could not
+tell its own write from a stranger's would be a loop. The obvious fix is a time
+window — "ignore events for a second after we write" — and it is the wrong one:
+it is a race written down as a constant, and it drops a real external edit that
+lands inside it. Instead `reload()` compares the resolved values before and
+after and announces only what moved. A byte comparison against `serialize()`
+sits in front of it as a fast path; a mutation check confirmed it is *only*
+that, since the value comparison catches the same case on its own.
+
+`docs/superpowers/specs/2026-08-28-config-watcher-design.md`.
+
+---
+
 ### A theme file is downloaded, so it is read like a manifest
 
 Added 2026-08-28, closing the last open row in the v0.6 table. `DESIGN.md` §9
@@ -2514,13 +2555,11 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | A project cannot configure a plugin | Deliberate, and the one thing plugin settings refuse. `.nox/settings.json` arrives with a cloned repository, and the schema's `workspace: true` allowlist works only because Nox knows what each of its eight keys means. It cannot know what a plugin's keys mean — `formatter.path` and `margin.width` are both a string with a label — so no plugin setting is ever workspace-scoped and there is no flag an author could set to make one. The cost is real: a repository cannot ship its linter plugin's configuration with itself. See `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §0. |
 | A custom theme is not held to any contrast floor | `tests/token-contrast.test.ts` holds Nox's own tokens to WCAG 4.5:1 and keeps doing so; a theme a user writes is checked for *shape* and never for legibility. Deliberate — refusing to load someone's theme because a comment colour measures 4.2:1 would be Nox overruling a person about their own screen — but it means the guarantee that suite provides covers the built-in themes only, which is worth saying rather than leaving implied. |
 | A theme cannot set a shadow or the focus ring's geometry | `--nox-shadow-md`, `--nox-shadow-lg` and `--nox-focus-ring` are composite `box-shadow` values, so they would need a grammar of their own rather than the colour check every other token gets. `--nox-focus-ring-color` *is* themeable, which covers the case anyone actually wants. A theme on a light ground would want the shadows and cannot have them. |
-| A theme file is not watched | Editing one needs **Reload Themes**. The third row to say this — `snippets.json` and `plugin-settings.json` are the others — and the cause is shared: `FileWatcherService` has one root and it is the workspace, so nothing covers the config directory. Three features now want that watcher, which makes it a feature rather than a fix. |
-| A plugin's settings are not watched | Editing `plugin-settings.json` by hand needs **Reload Plugins**. The same gap `snippets.json` records and the same fix — `FileWatcherService` has one root and it is the workspace, so nothing covers the config directory. Changes made in the Settings panel apply immediately; only hand edits wait. |
+| Four config files still need a Reload command | The config directory is watched since 2026-08-28, and `snippets.json`, `plugin-settings.json` and a theme file all reload on an outside edit. `settings.json` and `keybindings.json` are **deliberately** absent: Nox writes both constantly, and live-reloading the layer that owns every preference wants its own envelope read rather than riding in on this one. `servers.json` and `agents.json` are absent because reloading them *restarts processes*, which is a decision a user makes — that is what **Reload Language Servers** is. `classifyConfigChange` is where that list lives, and a test pins the omissions so adding a file to the folder cannot silently start reloading it. |
 | The worker transport is unverified in the packaged app | It needs `worker-src 'self' blob:`, added to `tauri.conf.json` with it — the default `default-src 'self'` blocks a blob worker outright. `cargo` is not installed on the machine this was written on, so the CSP was never exercised in a real WebView; the tests use an injected connection and `npm run dev` has no CSP at all. **If it fails there, the process transport is unaffected** and only the worker convenience is lost. Wants a desktop walk. |
 | A plugin process is not sandboxed | The same line `agents` already carries: the permission model governs what a plugin may ask *Nox* to do, not what its own process can reach. A plugin is trusted code you chose to install, like a shell plugin — the difference from an agent is only that more people will install one. |
 | A snippet's choice syntax keeps only its first option | `${1|const,let|}` becomes `${1:const}`. CodeMirror's snippet fields have no picker attached, so the alternatives have nowhere to be shown, and a field the user can type over beats a literal `|const,let|` in their code. Offering the real thing means a completion source that fires on entering the field — buildable, and a bigger feature than the conversion it would sit inside. |
 | Snippet variables are not substituted | `$TM_FILENAME`, `$CURRENT_YEAR` and the rest are left exactly as written. Resolving them is a table of a dozen names and a clock; deleting them silently is worse than leaving them, so leaving them is what happens. Visible, and fixable by the person who wrote it. |
-| `snippets.json` is only reloaded when Nox saves it | The file lives in the config directory, which no watcher covers — `FileWatcherService` has one root and it is the workspace. Saving the file *in Nox* reloads it, because `workspace`'s `saved` event names the path; editing it in another program needs **Reload Snippets**. Watching a second root for one small file is the fix, and it is the same machinery `keybindings.json` and `servers.json` would want. |
 | Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default — so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
 | Servers run their own file watchers | Nox advertises no dynamic registration at all — not `workspace.didChangeWatchedFiles.dynamicRegistration`, and `synchronization.dynamicRegistration` is explicitly `false` — so a conforming server never sends `client/registerCapability` and falls back to watching files itself, which rust-analyzer and gopls both do. **That makes this conforming rather than broken**, and the mildest of the four items that waited on the server-request seam; the production-readiness plan's "they never get to" overstated it. What is lost is efficiency and consistency: N servers each running a watcher over the same tree, with their own ignore rules, rather than one `FileWatcherService` fanning out. Building it is a feature and not a handler — accept a registration, match its globs (`onPathsChanged` is already the right seam and `globToRegExp` already exists), derive created/changed/deleted, send `workspace/didChangeWatchedFiles`, honour `client/unregisterCapability` — and accepting a registration Nox would not honour is worse than never inviting one. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |

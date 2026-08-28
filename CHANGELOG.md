@@ -33,6 +33,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Config files edited outside Nox now apply on their own.** Change
+  `snippets.json`, `plugin-settings.json` or a theme file in another editor and
+  Nox picks it up — no **Reload** command, and for a theme you are already
+  using, the colours change as you save.
+
+  Four files deliberately still wait for their command. `settings.json` and
+  `keybindings.json` are ones Nox writes constantly itself, and `servers.json`
+  and `agents.json` start *processes*, which is a decision worth making on
+  purpose — **Reload Language Servers** is still how you make it.
+
 - **Custom themes.** Drop a `.json` file into the `themes` folder in your Nox
   config directory and it appears in Settings under Theme. **Edit Themes**
   creates the folder with a worked example to start from; **Reload Themes**

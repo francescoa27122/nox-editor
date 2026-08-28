@@ -8,6 +8,79 @@ are knowledge.**
 
 ---
 
+## 2026-08-28 (PC) — The config watcher, and three debt rows with a wrong premise
+
+Three rows said the same thing — `snippets.json`, `plugin-settings.json` and a
+theme file each needed a Reload command after a hand edit — and all three
+blamed `FileWatcherService` having one root. All three are now closed.
+
+**Every one of them implied a renderer-side fix, and every one was wrong.**
+`nox_watch` holds `Mutex<Option<RecommendedWatcher>>` — *one* watcher — and its
+own comment says "replacing any previous watcher". Calling it for the config
+directory would have silently stopped watching the workspace: no
+external-change detection, no tree refresh, no save-overwrite dialog. Three
+small gaps traded for one large one, on the path where being wrong costs
+unsaved work. Re-deriving the premise before building on it is the only reason
+that did not ship.
+
+**So it is Rust, and the shape was already in the file.** `watchGitMeta` is a
+second concurrent watch that did not extend `nox_watch` into a registry — it
+added its own state, command pair and channel. `ConfigWatcherState` /
+`nox_config_watch` / `nox://config-change` follows it exactly.
+
+**Self-writes are excluded by content, never by a timer.** Nox writes
+`plugin-settings.json` on a 250 ms debounce, so a naive reload is a loop. A
+time window is the obvious answer and the wrong one — a race written down as a
+constant, which drops a real external edit that lands inside it. `reload()`
+compares resolved values before and after and announces only what moved.
+
+**Three mutation checks corrected a claim rather than the code**, and that is
+the useful part of the pass:
+- Removing the byte-comparison guard *survived*: it is a fast path, not the
+  correctness — the value comparison catches the same case alone.
+- Removing `stop()`'s `#pending.clear()` *survived*: `stop` kills the timer
+  too, so the stale batch can only surface on the *next* watch's first batch.
+  That is now its own test.
+- Removing `start`'s early return *survived*, and so did removing its
+  `this.stop()` — the two guard one property independently, and only removing
+  both turns the test red.
+
+Shipped:    `src-tauri/src/watcher.rs` — `ConfigWatcherState`,
+            `nox_config_watch`, `nox_config_unwatch`, two tests;
+            registration in `lib.rs`; `Platform.watchConfig` across
+            `types.ts`, `tauri.ts` and `memory.ts`;
+            `src/services/config-watcher.ts` (service plus the pure
+            `classifyConfigChange`); `PluginSettingsService.reload()` and
+            `load()` now starting from the file; `app.ts` construction, boot
+            start, dispose stop and the routing subscriber;
+            `tests/config-watcher.test.ts` (19), seven reload tests; spec,
+            ARCHITECTURE (decision log, three debt rows replaced by one),
+            CHANGELOG.
+Verified:   `npm test` 166 files / 2402 tests passed (was 165 / 2377) ·
+            `npm run check` 1038 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 1.43 s ·
+            `npm run test:editor` 3 passed. **The Rust tests are unrun
+            locally** — `cargo` is not installed on this machine — and CI
+            runs them on Linux, macOS and Windows.
+Next:       `tests/search-virtualisation.test.ts` is flaky under load. Two of
+            its tests take ~5–6 s against the 5 s default timeout, so they fail
+            in a full parallel run and pass in isolation — measured on this
+            branch *and* on main, so it predates this work. A suite that
+            intermittently fails teaches people to re-run instead of read,
+            which is the habit that hides a real failure.
+Blocked:    The joined path — an outside edit actually reaching a reload — is
+            not exercisable in the browser target: `MemoryPlatform` keeps
+            config files in a name-keyed map while `readDir` reads a separate
+            filesystem, so a `writeConfigFile` produces no path an event could
+            name. Covered in halves (watcher against real paths, each reload
+            directly) plus the Rust test. Wants a desktop walk, which is now
+            the third thing waiting on one.
+Confidence: High on the TypeScript, which is mutation-checked and where three
+            checks corrected my own claims. Medium on the Rust: it follows a
+            pattern that works two lines above it, and I have not run it.
+
+---
+
 ## 2026-08-28 (PC) — A fix that shipped and never worked
 
 Found while verifying custom themes in the browser, which is the only place it

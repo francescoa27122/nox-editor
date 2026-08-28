@@ -933,6 +933,23 @@ export class MemoryPlatform implements Platform {
     };
   }
 
+  /**
+   * The same registry as `watch`, which is the honest fake here: the thing
+   * the two methods do *not* share on the desktop side is Rust state, and a
+   * set of callbacks keyed by root has none. Registering both means
+   * `externalWrite` under either root reaches the right subscriber, and
+   * `watcherCount` counts both, so a test can still assert a watch was
+   * released.
+   *
+   * **The divergence worth knowing is elsewhere:** config files written
+   * through `writeConfigFile` go into a name-keyed map, not this filesystem,
+   * so they produce no path an event could name. Seed a real path to exercise
+   * a config watch. See the design doc's §5.
+   */
+  async watchConfig(path: string, onEvent: (event: WatchEvent) => void): Promise<Unwatch> {
+    return await this.watch(path, onEvent);
+  }
+
   async killAllAgents(): Promise<void> {
     /* No processes in memory; nothing to stop. */
   }
