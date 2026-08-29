@@ -112,6 +112,10 @@ export class TauriPlatform implements Platform {
     return call<string | null>('nox_git_file_base', { path });
   }
 
+  async gitBlame(path: string, contents: string): Promise<string | null> {
+    return call<string | null>('nox_git_blame', { path, contents });
+  }
+
   async gitStatus(root: string): Promise<string> {
     return call<string>('nox_git_status', { root });
   }

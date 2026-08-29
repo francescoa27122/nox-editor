@@ -26,6 +26,7 @@ import {
 import type { Settings } from '@services/config/schema';
 import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
+import { gitBlameField } from './git-blame';
 import { gitGutter, gitGutterField } from './git-gutter';
 import { lspDiagnosticsExtension } from './lsp';
 
@@ -39,6 +40,21 @@ import { lspDiagnosticsExtension } from './lsp';
  * array rather than another wiring path.
  */
 export const lspCompartment = new Compartment();
+
+/**
+ * Holds the blame gutter, or nothing.
+ *
+ * Reconfigured by `EditorPane` rather than driven from `Settings`, and so
+ * deliberately absent from `compartments` and `SETTING_TO_COMPARTMENTS`:
+ * blame is switched on per *buffer*, at the user's request, and that is
+ * runtime state rather than a preference. `lspCompartment` above is the same
+ * arrangement for the same reason: a pane-level fact a settings-level
+ * factory cannot know.
+ *
+ * The field it renders is unconditional (see `staticExtensions`); only this
+ * rendering half comes and goes.
+ */
+export const blameCompartment = new Compartment();
 import { languageCompartment } from './languages';
 import { pluginDecorationExtension } from './plugin-decorations';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
@@ -229,6 +245,11 @@ function staticExtensions(): Extension[] {
     provenanceField,
     // Same split, same reason: the hunks survive a settings toggle.
     gitGutterField,
+    // And again, for the reason the header of `git-blame.ts` gives: the
+    // marks must survive the gutter being switched off and on, and removing
+    // a StateField destroys what it holds. There is no setting to gate this
+    // one on in any case: blame is a per-buffer request, not a preference.
+    gitBlameField,
     // Unconditional for the same reason as the two above, and there is no
     // setting to gate it on anyway: a plugin's marks are its output, not a
     // preference. The whole per-keystroke cost is mapping the set through the
@@ -246,6 +267,16 @@ export function buildExtensions(settings: Settings): Extension[] {
     compartments[name].of(compartmentContent(name, settings)),
   );
   return [
+    // **First in the array, so leftmost on screen**, outside the line
+    // numbers. Gutters are laid out in the order their extensions resolve
+    // (`activeGutters` is an ordered facet), and blame is the widest column
+    // in the editor. Inserted between the git gutter and the code, as it was
+    // when it went last, it pushed the change bars twenty characters away
+    // from the lines they mark and the line numbers further still. Outside
+    // everything, switching blame on *adds* a column rather than moving the
+    // apparatus the reader already knows. Found by looking at a screenshot of
+    // it; `tests/browser/blame-gutter.test.ts` is where that looking happens.
+    blameCompartment.of([]),
     ...staticExtensions(),
     ...configured,
     // The gutter marks. Squiggles arrive per batch through `setDiagnostics`,
