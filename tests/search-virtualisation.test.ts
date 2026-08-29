@@ -21,10 +21,21 @@ import { flush, mountComponent, type Mounted } from './support/component';
  * ceiling for that viewport however many results arrive.
  *
  * jsdom has no layout, so `clientHeight` is 0 and the panel deliberately
- * renders everything — that is the first case below, and what keeps every
- * other jsdom suite over this component honest. The windowed cases stub
- * `clientHeight` on the container and dispatch a real `scroll` event, which is
- * the same door the component's own listeners use.
+ * renders everything. One case below is about exactly that; every other one
+ * stubs the height on `HTMLElement.prototype` **before mounting** and
+ * dispatches a real `scroll` event, which is the same door the component's own
+ * listeners use.
+ *
+ * **Before mounting is the load-bearing word**, and it was `giveHeight(list)`
+ * *after* `setup` until 2026-08-28. That arrangement let every result stream
+ * into an unwindowed list, which is quadratic — each batch re-renders the whole
+ * list — and it reproduced a state the product never reaches, since a browser
+ * has measured the viewport long before the first batch lands. Measured on the
+ * 100-file fixture: 496 ms unwindowed against 54 ms windowed, 600 rendered
+ * rows per batch against 36. Two tests in this file were timing out in loaded
+ * parallel runs at ~5.2 s and ~6.0 s against the 5 s default; the whole suite
+ * is now under 140 ms a test. The five mutation checks below were re-run
+ * against the new harness, and two of them bite *more* tests than before.
  *
  * Mutation checks (each made the named test red, then reverted):
  * - `windowed` dropping its `viewportHeight > 0` guard → "an unmeasured
@@ -58,13 +69,58 @@ const MATCHES_PER_FILE = 5;
 /** One header plus its matches. */
 const ROWS_PER_FILE = MATCHES_PER_FILE + 1;
 const TOTAL_ROWS = FILES * ROWS_PER_FILE;
+/** Mirrors `MIN_ROWS_TO_WINDOW` in `SearchPanel.svelte`, as the constants above do. */
+const MIN_ROWS_TO_WINDOW = 200;
+/**
+ * The fixture for the one test that must stay *unwindowed*.
+ *
+ * Smaller than `FILES` on purpose. Unwindowed streaming is quadratic — every
+ * batch re-renders the whole list — so 600 rows cost ~500 ms where 240 cost
+ * ~80 ms, and that test was one of the two that timed out under a loaded
+ * parallel run. All it needs is to clear `MIN_ROWS_TO_WINDOW`, so that a
+ * window *would* apply if the viewport were measured; the assertion below
+ * checks it still does.
+ */
+const UNWINDOWED_FILES = 40;
+const UNWINDOWED_ROWS = UNWINDOWED_FILES * ROWS_PER_FILE;
 
 let mounted: Mounted | null = null;
+let restoreViewport: (() => void) | null = null;
 
 afterEach(() => {
   mounted?.unmount();
   mounted = null;
+  restoreViewport?.();
+  restoreViewport = null;
 });
+
+/**
+ * Make any `.results` container report a real height, as a browser does.
+ *
+ * On the prototype and applied **before mounting**, which is the whole point:
+ * the panel is then windowed *while results stream in*, not merely after they
+ * have all arrived. Measured, because that difference was worth 9x — a real
+ * search over the 100-file fixture cost 496 ms unwindowed against 54 ms
+ * windowed, rendering 600 rows per streamed batch instead of 36.
+ *
+ * It is also the more faithful arrangement. A browser has measured the
+ * viewport long before the first batch lands; only jsdom reports 0, and
+ * `giveHeight`-after-`setup` reproduced a state the product never reaches.
+ */
+function measureViewport(height = VIEWPORT): () => void {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.classList?.contains('results') ? height : 0;
+    },
+  });
+
+  return () => {
+    if (original) Object.defineProperty(HTMLElement.prototype, 'clientHeight', original);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
+  };
+}
 
 async function settle() {
   for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -80,7 +136,10 @@ const pad = (n: number) => String(n).padStart(3, '0');
  * the same streaming batch path the desktop build takes, which is the
  * condition the panel is slow under.
  */
-async function setup(count: number) {
+async function setup(count: number, { measured = true } = {}) {
+  // Before the mount, so streaming is windowed from the first batch.
+  if (measured) restoreViewport = measureViewport();
+
   mounted = mountComponent(SearchPanel);
   const { app, platform, container } = mounted;
 
@@ -98,11 +157,6 @@ async function setup(count: number) {
   await settle();
 
   return { app, container, list: container.querySelector('.results') as HTMLElement };
-}
-
-/** jsdom reports 0 for every measurement; give the container a real one. */
-function giveHeight(list: HTMLElement, height = VIEWPORT) {
-  Object.defineProperty(list, 'clientHeight', { value: height, configurable: true });
 }
 
 function scrollTo(list: HTMLElement, top: number) {
@@ -133,7 +187,6 @@ function press(list: HTMLElement, key: string) {
 describe('the search results window', () => {
   it('a small result set renders every row, windowing or not', async () => {
     const { list } = await setup(10);
-    giveHeight(list);
     scrollTo(list, 0);
 
     expect(list.querySelectorAll('.row')).toHaveLength(10 * ROWS_PER_FILE);
@@ -141,17 +194,22 @@ describe('the search results window', () => {
   });
 
   it('an unmeasured viewport renders every row', async () => {
-    // No `giveHeight`: this is jsdom as every other suite sees it, and the
-    // result set is well over the windowing threshold.
-    const { list } = await setup(FILES);
+    // Unmeasured on purpose: this is jsdom as every other suite over this
+    // component sees it, and the result set is well over the windowing
+    // threshold. It is also the slow arrangement — see `measureViewport` —
+    // which is affordable once, for the case that is actually about it.
+    // Or the test proves nothing: below the threshold the panel renders
+    // everything anyway, for a reason that has nothing to do with the viewport.
+    expect(UNWINDOWED_ROWS).toBeGreaterThan(MIN_ROWS_TO_WINDOW);
+
+    const { list } = await setup(UNWINDOWED_FILES, { measured: false });
     await settle();
 
-    expect(list.querySelectorAll('.row')).toHaveLength(TOTAL_ROWS);
+    expect(list.querySelectorAll('.row')).toHaveLength(UNWINDOWED_ROWS);
   });
 
   it('a large result set with a measured viewport renders a window, not the list', async () => {
     const { list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 0);
 
     const rows = list.querySelectorAll('.row');
@@ -162,7 +220,6 @@ describe('the search results window', () => {
 
   it('the spacers place the window at the right offset', async () => {
     const { list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 100 * ROW_HEIGHT);
 
     const spacers = [...list.querySelectorAll<HTMLElement>('.spacer')];
@@ -178,7 +235,6 @@ describe('the search results window', () => {
 
   it('scrolling renders the rows at that offset', async () => {
     const { list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 0);
     expect(labels(list)).toContain(labelAt(0));
 
@@ -193,7 +249,6 @@ describe('the search results window', () => {
 
   it('every rendered row knows its place in the whole list', async () => {
     const { list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 300 * ROW_HEIGHT);
 
     const rows = [...list.querySelectorAll('.row')];
@@ -213,7 +268,6 @@ describe('the search results window', () => {
 
   it('arrowing past the bottom edge scrolls, and the focused row is rendered', async () => {
     const { app, list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 0);
 
     // Land the focus well below the window, the way holding ↓ would.
@@ -228,7 +282,6 @@ describe('the search results window', () => {
 
   it('arrowing above the top edge scrolls back up', async () => {
     const { app, list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 300 * ROW_HEIGHT);
 
     app.search.focused.set(100);
@@ -241,7 +294,6 @@ describe('the search results window', () => {
 
   it('collapsing a file from the keyboard works with the row off the window', async () => {
     const { app, list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 0);
 
     // Index 300 is a file header — six rows per file, so every multiple is.
@@ -262,7 +314,6 @@ describe('the search results window', () => {
 
   it('arrowing up off the first row returns focus to the query input', async () => {
     const { app, container, list } = await setup(FILES);
-    giveHeight(list);
     scrollTo(list, 300 * ROW_HEIGHT);
 
     app.search.focused.set(0);
