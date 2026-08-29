@@ -235,6 +235,85 @@ pub fn nox_git_meta_unwatch(state: State<'_, GitMetaWatcherState>) -> Result<(),
     Ok(())
 }
 
+/// A second concurrent watch, on Nox's own configuration directory.
+///
+/// Its own state rather than an entry in `WatcherState`, following
+/// `GitMetaWatcherState`: `nox_watch` holds exactly one watcher and replaces
+/// it on every call, so reusing it for the config folder would silently stop
+/// watching the workspace — no external-change detection, no tree refresh, and
+/// no save-overwrite dialog, which is the one that costs unsaved work.
+///
+/// Recursive, unlike the git meta watch, because `themes/` and `plugins/` are
+/// subdirectories and a theme file is the point. That is affordable here in a
+/// way it would not be for a project root: this folder is small, it is Nox's
+/// own, and nothing in it churns.
+pub struct ConfigWatcherState(pub Mutex<Option<RecommendedWatcher>>);
+
+impl Default for ConfigWatcherState {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+/// Watch the config directory, replacing any previous config watch.
+///
+/// The payload carries paths, unlike `nox://git-meta-change` which carries
+/// nothing: the git watcher has one subject and any event means "refetch",
+/// while this folder holds several files whose changes mean different things.
+/// A subscriber that had to re-read all of them on any event would reload the
+/// snippets every time a theme was edited.
+#[tauri::command]
+pub fn nox_config_watch(
+    app: AppHandle,
+    state: State<'_, ConfigWatcherState>,
+    path: String,
+) -> Result<(), String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "io: config watcher lock poisoned".to_string())?;
+    // Dropping the old watcher stops its thread before the new one starts.
+    *guard = None;
+
+    let emitter = app.clone();
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else { return };
+        let Some(kind) = classify(&event.kind) else { return };
+
+        let paths: Vec<String> = event
+            .paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+
+        if paths.is_empty() {
+            return;
+        }
+
+        // A failed emit means the window is gone; there is nothing to recover.
+        let _ = emitter.emit("nox://config-change", ChangePayload { kind, paths });
+    })
+    .map_err(|e| format!("io: could not create config watcher ({e})"))?;
+
+    watcher
+        .watch(Path::new(&path), RecursiveMode::Recursive)
+        .map_err(|e| format!("io: could not watch {path} ({e})"))?;
+
+    *guard = Some(watcher);
+    Ok(())
+}
+
+/// Stop the config watch. Safe when nothing is being watched.
+#[tauri::command]
+pub fn nox_config_unwatch(state: State<'_, ConfigWatcherState>) -> Result<(), String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "io: config watcher lock poisoned".to_string())?;
+    *guard = None;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,6 +447,88 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         assert!(saw_change, "expected a watch event for the nested file write");
+    }
+
+    /// The config watch is recursive and does **not** inherit the workspace
+    /// DENY list, which matters for a folder holding `themes/` and
+    /// `plugins/`: a theme file two levels down has to arrive, and a plugin
+    /// folder called `dist` or `target` — both denied under a project root —
+    /// is an ordinary plugin here.
+    ///
+    /// Exercises the real `notify` backend rather than only our classification
+    /// of its output, the way the workspace test above does.
+    #[test]
+    fn detects_a_nested_config_write_without_the_workspace_deny_list() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = std::env::temp_dir().join(format!("nox-configwatch-test-{}", std::process::id()));
+        // `target` is on the workspace watcher's DENY list. Under the config
+        // folder it is just a folder someone named, and events from it count.
+        let nested = dir.join("themes").join("target");
+        std::fs::create_dir_all(&nested).expect("create temp dir");
+
+        let (tx, rx) = mpsc::channel::<(&'static str, Vec<String>)>();
+        let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            let Ok(event) = result else { return };
+            let Some(kind) = classify(&event.kind) else { return };
+            let paths: Vec<String> = event
+                .paths
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect();
+            if !paths.is_empty() {
+                let _ = tx.send((kind, paths));
+            }
+        })
+        .expect("create watcher");
+
+        watcher
+            .watch(&dir, RecursiveMode::Recursive)
+            .expect("watch temp config dir");
+
+        let target = nested.join("solar.json");
+        std::fs::write(&target, "{}").expect("write theme file");
+
+        let mut saw_change = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok((_, paths)) => {
+                    if paths.iter().any(|p| p.ends_with("solar.json")) {
+                        saw_change = true;
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        drop(watcher);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(saw_change, "expected a watch event for the nested theme file");
+    }
+
+    /// The two watches are independent states, which is the whole reason this
+    /// exists rather than a second call to `nox_watch`. That command holds one
+    /// watcher and replaces it, so sharing it would stop watching the
+    /// workspace — and losing that costs the save-overwrite dialog.
+    #[test]
+    fn config_and_workspace_watchers_are_separate_states() {
+        let workspace = WatcherState::default();
+        let config = ConfigWatcherState::default();
+
+        assert!(workspace.0.lock().expect("workspace lock").is_none());
+        assert!(config.0.lock().expect("config lock").is_none());
+
+        // Distinct `Mutex`es: taking one does not take the other. Written as a
+        // held guard rather than two sequential locks, because sequential
+        // locks would pass even if both fields named one state.
+        let held = workspace.0.lock().expect("hold workspace lock");
+        assert!(config.0.try_lock().is_ok(), "config lock must not be the workspace lock");
+        drop(held);
     }
 
     #[test]

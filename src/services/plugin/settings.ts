@@ -218,6 +218,13 @@ export class PluginSettingsService {
     }
     if (!raw || raw.trim().length === 0) return;
 
+    // The file is the truth for stored values, so a re-read starts from
+    // nothing. On the first call both maps are already empty; on a reload this
+    // is what makes a namespace *deleted* from the file actually go away
+    // rather than linger from the previous read.
+    this.#values.clear();
+    this.#unknown.clear();
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -276,6 +283,69 @@ export class PluginSettingsService {
       out[pluginId] = Object.fromEntries(bucket);
     }
     return `${JSON.stringify(out, null, 2)}\n`;
+  }
+
+  /**
+   * Re-read the file after something outside Nox changed it.
+   *
+   * **Nox writes this file itself**, on a 250 ms debounce, so the hard part is
+   * telling its own write from a stranger's. The guard is a *content*
+   * comparison and never a time window: a window is a race written down as a
+   * constant, and it fails in the one case that matters — a real external edit
+   * landing inside it is silently dropped. Bytes are deterministic, and an
+   * external edit changes them by definition.
+   *
+   * The byte check is only the cheap first pass. Someone can reformat the file
+   * without changing what it means, so what is announced is decided by
+   * comparing the *resolved values* before and after, per plugin. A plugin is
+   * woken only if its own settings moved.
+   */
+  async reload(): Promise<void> {
+    let raw: string | null;
+    try {
+      raw = await this.#platform.readConfigFile(PLUGIN_SETTINGS_FILE);
+    } catch {
+      return;
+    }
+
+    // Byte for byte what we would have written: our own save coming back as an
+    // event. A **fast path, not the correctness** — the value comparison below
+    // catches this case too, since re-reading our own file re-derives the same
+    // values. What this earns is skipping a parse and a re-adopt on every
+    // 250 ms save while someone drags a control.
+    if (raw !== null && raw === this.serialize()) return;
+
+    const before = this.#resolvedAll();
+    const restore = { values: new Map(this.#values), unknown: new Map(this.#unknown) };
+
+    await this.load();
+
+    if (this.damaged.get() !== null && this.error.get() !== null) {
+      // A half-written file is the ordinary state while someone is typing in
+      // another editor, and dropping the working set over it would be the
+      // worst possible moment. `load` already preserved a copy and said so.
+      this.#values = restore.values;
+      this.#unknown = restore.unknown;
+      return;
+    }
+
+    const after = this.#resolvedAll();
+    let moved = false;
+    for (const [pluginId, serialized] of after) {
+      if (before.get(pluginId) === serialized) continue;
+      moved = true;
+      this.changed.emit('changed', pluginId);
+    }
+    if (moved) this.revision.update((n) => n + 1);
+  }
+
+  /** Every declared plugin's effective values, as text, for comparison. */
+  #resolvedAll(): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const pluginId of this.#declared.keys()) {
+      out.set(pluginId, JSON.stringify(this.valuesFor(pluginId)));
+    }
+    return out;
   }
 
   /** Create the file with a commented example if it does not exist yet. */

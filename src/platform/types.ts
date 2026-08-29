@@ -617,6 +617,27 @@ export interface Platform {
   watch(path: string, onEvent: (event: WatchEvent) => void): Promise<Unwatch>;
 
   /**
+   * Watch the config directory recursively, **without disturbing `watch`**.
+   *
+   * A second method rather than a second `watch` call, because on the desktop
+   * side `nox_watch` holds one watcher and replaces it on every call — so
+   * reusing it here would silently stop watching the workspace, taking
+   * external-change detection, tree refresh and the save-overwrite dialog with
+   * it. `watchGitMeta` is the precedent: another thing to watch gets its own
+   * state, command pair and channel.
+   *
+   * Recursive, because `themes/` and `plugins/` are subdirectories. Affordable
+   * where a project root would not be: this folder is Nox's own, it is small,
+   * and nothing in it churns — so it carries no deny list either, which
+   * matters for a plugin folder someone named `dist`.
+   *
+   * Coalescing is the caller's job, as it is for `watch`. Gated on
+   * `capabilities.fileWatching`: a platform that cannot watch files cannot
+   * watch these either.
+   */
+  watchConfig(path: string, onEvent: (event: WatchEvent) => void): Promise<Unwatch>;
+
+  /**
    * Ask for a directory. `title` captions the dialog — it is the only thing
    * that says *why* a folder is being asked for, and the caller is the only
    * one that knows. Defaults to opening a workspace, which is what it was
