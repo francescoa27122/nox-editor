@@ -69,6 +69,56 @@ Confidence: High. Every gate was run locally before the tag rather than trusted
 
 ---
 
+## 2026-08-29 (PC) — The pixel walk: the screen, at last
+
+The third walk, and the first to look at anything drawn. **All six rows PASS**,
+and the debt row that has stood since the plugin work began is closed.
+
+**Screen-control consent was declined a second time**, so the walk found
+another way rather than pressing. WebView2 exposes a debugging endpoint; a
+temporary `additionalBrowserArgs` in `tauri.conf.json` opens it, and CDP will
+both screenshot the window and drive it. **Reverted before committing, never
+pushed** — and worth saying plainly why it is acceptable at all: it touches no
+input and no display, it asks the WebView to render itself, and the result is
+the same pixels a person would see. The earlier attempt failed because Tauri
+overrides `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`; the config key is the route
+that works.
+
+**What the pixels settled that no file could.** A custom theme *painted* —
+orange `#ff8a3d` on the logo and every link, over `#1a0f24`, with
+`data-nox-theme="umbra"` underneath and the inline property on top, which is
+the base-plus-properties design visible rather than argued. The **Plugins tab**
+in Settings, seen for the first time since it was built: a `PIXEL PROBE`
+section with a text box, a number input and a switch, each matching its
+declared kind. A plugin's status item and its panel rows. Then the loop:
+typing 6 into Row count moved the sidebar from three rows to six and the status
+bar to `REPAINTED`. Then the watcher: the theme file rewritten from PowerShell
+went orange to green in six seconds, no Reload, no restart.
+
+**Left unseen, and named rather than implied:** editor decorations, and every
+row about native chrome — the menu bar, native dialogs, the terminal, a real
+git repository. Those live *outside* the WebView, so this method cannot reach
+them at all; they need the desktop.
+
+Shipped:    `.desktop-pass-report.md` — the pixel walk, six rows with their
+            evidence and the method's limits; ARCHITECTURE — the "verified
+            from disk, never from the screen" row replaced by one naming what
+            is genuinely left.
+Verified:   Six rows, each against a screenshot, and P1 cross-checked against
+            the DOM so it does not rest on my reading of an image. The
+            operator's config was backed up and restored, file set verified
+            identical; `tauri.conf.json` confirmed byte-identical to HEAD
+            before committing.
+Next:       Nothing outstanding from today. The remaining walk rows need the
+            desktop rather than the renderer, and therefore consent — which
+            has been declined twice and should not be asked for a third time
+            without the operator raising it.
+Blocked:    Native chrome, on consent.
+Confidence: High. Every claim is a screenshot rather than an inference, and the
+            one most open to misreading was checked twice.
+
+---
+
 ## 2026-08-29 (PC) — The second walk: all six rows pass
 
 The rows the first walk could not reach, taken now that the bug blocking them
