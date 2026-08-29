@@ -73,9 +73,9 @@ $effect(() => {
 
 ## Commands
 
-Every user action is a command, and **`capabilities` is the whole basis of permission enforcement** — a command with a side effect that omits it is a hole. Enforcement happens in exactly one place, the guard installed at `app.ts:201-210`; the user principal skips it.
+Every user action is a command, and **`capabilities` is the whole basis of permission enforcement** — a command with a side effect that omits it is a hole. Enforcement happens in exactly one place, the guard installed at `app.ts:248-257`; the user principal skips it.
 
-Register in the one array in `app.ts#registerCommands` (`app.ts:1617-3038`), under its banner comment:
+Register in the one array in `app.ts#registerCommands` (`app.ts:2719-4506`), under its banner comment:
 
 ```ts
 {
@@ -89,9 +89,11 @@ Register in the one array in `app.ts#registerCommands` (`app.ts:1617-3038`), und
 },
 ```
 
-Use `keyHint: 'Mod+Z'` when CodeMirror owns the chord rather than `services/keymap.ts`. `register` throws on a duplicate id (`commands.ts:95-97`). `execute` is async (`commands.ts:158`) — call it as `void commands.execute('…')`.
+Use `keyHint: 'Mod+Z'` when CodeMirror owns the chord rather than `services/keymap.ts`. `register` throws on a duplicate id (`commands.ts:120`). `execute` is async (`commands.ts:187`) — call it as `void commands.execute('…')`.
 
-Keybindings go in the `bindAll` table in `#registerKeybindings` (`app.ts:3044`). Only three bindings sit outside it, and each earns it: platform-conditional (`Ctrl+G`/`Alt+G`), argument-carrying (`nav.goToTab` with `{ arg: index }`), and `when`-guarded (`Escape`).
+`enabled` gates on **service state, not a platform capability flag**, wherever a service owns the capability — `() => this.git.started`, `() => this.updates.started`. The service only starts where the capability holds, and jsdom tests start it directly over `MemoryPlatform`, where a `platform.capabilities.*` gate reads false and the command becomes untestable. This repo learned it twice, on the LSP commands and then on `git.showDiff`. The exception is a capability with no service behind it: exactly three commands read `platform.capabilities` directly (`applicationMenu`, and `nativeDialogs` twice), because there is nothing else to ask.
+
+Keybindings go in the `bindAll` table in `#registerKeybindings` (`app.ts:4512`). Only three bindings sit outside it, and each earns it: platform-conditional (`Ctrl+G`/`Alt+G`), argument-carrying (`nav.goToTab` with `{ arg: index }`), and `when`-guarded (`Escape`).
 
 ## Settings
 

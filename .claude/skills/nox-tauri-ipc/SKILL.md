@@ -42,7 +42,7 @@ pub fn nox_thing_start(
 
 ## Errors the renderer can branch on
 
-Rust returns `"<code>: <message>"`; `platform/tauri.ts:714-728` splits on the first `": "` and matches against six codes: `not-found`, `permission`, `exists`, `not-text`, `unsupported`, `io`.
+Rust returns `"<code>: <message>"`; `platform/tauri.ts:883-888` splits on the first `": "` and matches against six codes: `not-found`, `permission`, `exists`, `not-text`, `unsupported`, `io`.
 
 Reuse `fs.rs:37-47`'s `describe()` for anything touching `std::fs`; write the code by hand otherwise (`format!("exists: a terminal with id {id} is already open")`).
 
@@ -52,7 +52,7 @@ Three traps:
 - **An unrecognised prefix silently degrades.** `spawn:`, `pty:`, `lsp:`, `refused:` all become `code: 'io'` **and the prefix is stripped from the message**. Accepted behaviour — but if the renderer must branch on it, use one of the six.
 - **Name your path argument `path`** — `PlatformError.path` is populated from `args.path`.
 
-Git is deliberately different: git's own words come back verbatim under `io:`, with a stdout fallback because git prints "nothing to commit" on stdout (`git.rs:129-140`).
+Git is deliberately different: git's own words come back verbatim under `io:`, with a stdout fallback because git prints "nothing to commit" on stdout (`git.rs:132-141`).
 
 ## Streaming
 
@@ -85,7 +85,7 @@ pub struct ThingState(Mutex<HashMap<String, Running>>);   // access via state.0.
 
 Named-field structs when there is more than one thing to hold. A type that is not `Default` (like `RecommendedWatcher`) needs a hand-written `impl Default`.
 
-Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.map_err(poisoned)?` — that is the pattern in `agent.rs:245`, `lsp.rs:394` and `pty.rs:357`. Modules with one lock site inline it instead (`search.rs:233`).
+Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.map_err(poisoned)?` — that is the pattern in `agent.rs:384`, `lsp.rs:397` and `pty.rs:364`. Modules with one lock site inline it instead (`search.rs:233`).
 
 `*_all` teardown **drains into a `Vec` first, then acts** — that releases the lock before the killing.
 
@@ -98,14 +98,14 @@ Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.m
 | No shell — argv only | `fs.rs`, `git.rs`, `lsp.rs` | `cmd /C` re-splits on spaces; only `lsp.rs` falls back, and only after a direct spawn fails |
 | Six fixed git *writes and reads*, plus the read-only `nox_git_file_base` | `git.rs:19-27` | Nothing that leaves the machine, rewrites history, or destroys working-tree work |
 | `--literal-pathspecs` + `--` on every pathspec | `git.rs:216`, `:241` | A `*` in a filename is a filename |
-| Commit message on **stdin**, never argv | `git.rs:250-252` | Messages contain quotes, dashes, anything |
-| Branch name validated by `check-ref-format` first | `git.rs:304` | Only strings git blessed reach the write |
+| Commit message on **stdin**, never argv | `git.rs:252-273` | Messages contain quotes, dashes, anything |
+| Branch name validated by `check-ref-format` first | `git.rs:310-317` | Only strings git blessed reach the write |
 | Empty unstage list returns early | `git.rs:237-239` | Bare `git reset --` resets the whole index |
 | Every path forced inside the repo | `git.rs:167-178` | |
 | `Content-Length` framing lives in Rust | `lsp.rs:8-13`, `:142-146` | Header counts bytes; the IPC string is UTF-16 |
-| Lost framing is an error, not a resync | `lsp.rs:106-111` | Guessing where the next message starts cannot recover |
+| Lost framing is an error, not a resync | `lsp.rs:109-113` | Guessing where the next message starts cannot recover |
 | Config names reject separators and `..` | `fs.rs:365-368` | Path traversal |
-| Rename/copy refuse to clobber | `fs.rs:248-250`, `:306-308` | `fs::rename` silently replaces on unix |
+| Rename/copy refuse to clobber | `fs.rs:301-306`, `:362-364` | `fs::rename` silently replaces on unix |
 | Writes go to a sibling temp, fsync, rename | `fs.rs:122-139` | Cross-filesystem temp reintroduces the truncation window |
 | Agents cannot spawn agents | `agent.rs:13-15` | Only the user, through configuration |
 

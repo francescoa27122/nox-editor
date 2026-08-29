@@ -15,7 +15,7 @@ CodeMirror *extensions* live in `src/editor/`. The layer rule is narrower than "
 
 Nothing enforces this with a lint rule — it holds by review.
 
-Composition happens in one place: `src/editor/extensions.ts#buildExtensions`. `WorkspaceService` receives it wrapped in a closure that discards the factory args (`app.ts:179-181`), so `buildExtensions` takes `Settings`, not `StateFactoryArgs`.
+Composition happens in one place: `src/editor/extensions.ts#buildExtensions`. `WorkspaceService` receives it wrapped in a closure that discards the factory args (`app.ts:226-228`), so `buildExtensions` takes `Settings`, not `StateFactoryArgs`.
 
 ## Quick reference
 
