@@ -8,6 +8,75 @@ are knowledge.**
 
 ---
 
+## 2026-08-29 (PC) — The first walk with a toolchain, and plugins never ran
+
+The operator mentioned they were on their Windows machine. The blocker was
+never the OS — it was that Rust was not installed, which no session had
+checked past `cargo: command not found` in git-bash. Installed rustup 1.29.0 /
+cargo 1.98.0 and VS 2022 Build Tools 17.14.39 (winget, elevated), and
+`cargo test` ran locally for the first time: 115 passed, including the two
+watcher tests written blind the day before.
+
+**Then the walk found that the plugin feature had never worked in the packaged
+app.** A `startup` plugin is spawned, writes its greeting, and is killed inside
+two seconds; the handshake times out ten seconds later. With no folder open the
+same plugin is answered **6 ms** after greeting and lives indefinitely. That
+contrast is the whole diagnosis: `#restartLanguageServers` called
+`plugins.stopAll()`, it runs on **every root change**, `stopAll()` clears the
+registry rather than restarting it, and the session restores a folder at boot.
+For anyone with a folder open — everyone — no plugin ran at all. Four surfaces
+plus the settings shipped the day before, all dead, all green in 2400 tests.
+
+**The worst part is that this session had already met it and misfiled it.** The
+2026-08-28 settings-panel test needed an `await settle()` before loading
+plugins; the mechanism was traced correctly and written into a comment as a
+*harness quirk*. Explaining why a test needs a workaround felt like rigour and
+stopped the next question. Recorded as a memory, because the lesson generalises
+past this bug.
+
+**Method, forced by a denial.** Screen-control consent was requested and
+refused, so nothing was driven through the UI. The walk used a probe plugin as
+its instrument and `settings.json` as its readout — a plugin cannot write
+files but it can run a command, and `view.toggleTheme` writes a setting. The
+denial was itself informative: the allowlist resolved "Nox" to the *installed*
+0.10.0 rather than the build under test, which is the Windows form of the
+walk skill's `open -a Nox` trap.
+
+**Two attempts at CDP failed and were abandoned rather than pursued.** Tauri
+overrides `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, so no debugging port. Third
+approach worked.
+
+Shipped:    `src/app.ts` — `plugins.stopAll()` moved from
+            `#restartLanguageServers` to `dispose()`; three tests in
+            `tests/plugin-integration.test.ts`; the stale comment in
+            `tests/settings-panel-plugins.test.ts` corrected to say it was the
+            product bug; `.desktop-pass-report.md` gained the walk, with the
+            operator's username scrubbed to `<admin-user>`.
+Verified:   Three tests red before the change, green after. Rebuilt the release
+            bundle and relaunched with the operator's real session restored —
+            the same folder open that produced the failure — plugin answered in
+            **63 ms**, survived, `diagnostics.log` gained nothing. `npm test`
+            2406 · `check` 1038/0/0 · `lint` 0 errors · `cargo test` 115 · all
+            11 CI jobs green on #165. Config restored to a pre-walk backup and
+            the file set verified identical.
+Next:       The 10-second stall, now the only *confirmed* open defect from the
+            walk: `#awaitHello` is settled by a greeting or its timeout and by
+            nothing else, so a plugin that dies at load — a syntax error, most
+            likely — costs the user ten seconds of silence. Timed at 9.97 s.
+            The fix is to settle it on exit too, and it wants the test that
+            would have caught it.
+Blocked:    Nothing on the toolchain any more. W1 (worker under the real CSP)
+            and W3–W6 stayed UNSEEN behind the plugin bug and want a fresh
+            walk; their readout now works, so a later one can take them
+            properly. `Cargo.lock` was deliberately left unstaged — the local
+            build rewrote it with 343 lines, which is a dependency bump and not
+            part of a bug fix.
+Confidence: High. The diagnosis rests on a single-variable contrast (folder
+            open vs not) reproduced in the packaged app, and the fix was
+            re-verified there rather than only in the suite.
+
+---
+
 ## 2026-08-28 (PC) — The flaky test was a harness that faked a state the app never reaches
 
 `tests/search-virtualisation.test.ts` failed intermittently in full parallel
