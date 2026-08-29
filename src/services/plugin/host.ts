@@ -156,8 +156,14 @@ interface Loaded {
   failures: number;
   nextId: number;
   pending: Map<number, { resolve: (r: Response) => void; timer: ReturnType<typeof setTimeout> }>;
-  /** Set only while a handshake is outstanding. */
-  helloWaiter?: (version: number) => void;
+  /**
+   * Set only while a handshake is outstanding.
+   *
+   * Takes the *verdict* rather than the version, so that something which knows
+   * the handshake can never finish — the connection exiting — can settle it
+   * too. While this took a version, only a greeting or the deadline could.
+   */
+  helloWaiter?: (verdict: string | null) => void;
   /**
    * The version a greeting carried, if one has arrived.
    *
@@ -168,6 +174,17 @@ interface Loaded {
    * same shape as `AgentProcess.onLine`'s buffering rule, one layer up.
    */
   helloVersion?: number;
+  /**
+   * Why the handshake can no longer succeed, if the connection has gone.
+   *
+   * The exact counterpart of `helloVersion`, and needed for the same reason:
+   * an exit routinely lands *before* anyone is waiting on the handshake. A
+   * worker refused at construction fires `onerror` in the tick it is made, and
+   * the host subscribes to `onExit` one statement before it calls
+   * `#awaitHello` — so settling the waiter alone was not enough, because there
+   * was not one yet. Recorded here, and read by `#awaitHello` on the way in.
+   */
+  exitVerdict?: string;
 }
 
 export class PluginHost {
@@ -438,8 +455,10 @@ export class PluginHost {
     if (entry.state === 'running' && entry.connection) return entry.connection;
 
     entry.state = 'starting';
-    // A previous connection's greeting says nothing about this one's.
+    // A previous connection's greeting says nothing about this one's, and
+    // neither does its death.
     entry.helloVersion = undefined;
+    entry.exitVerdict = undefined;
     this.revision.update((n) => n + 1);
 
     let connection: PluginConnection;
@@ -471,6 +490,13 @@ export class PluginHost {
       // Every question still outstanding dies with it. Without this an invoke
       // waits out its whole timeout on a process that is already gone.
       this.#settleAll(entry, 'internal', 'the plugin stopped');
+      // The handshake is a question too, and it was the one left out. A plugin
+      // that dies at load — a syntax error, most likely — otherwise cost the
+      // user the whole ten-second deadline in silence, measured at 9.97 s
+      // while walking the packaged build on 2026-08-29. Its own sentence,
+      // because "it stopped" and "it was too slow" want different fixes.
+      entry.exitVerdict = 'it stopped before it introduced itself';
+      entry.helloWaiter?.(entry.exitVerdict);
       if (entry.state !== 'disabled') {
         entry.state = 'failed';
         this.revision.update((n) => n + 1);
@@ -499,15 +525,22 @@ export class PluginHost {
         return;
       }
 
+      // Already dead, before this promise existed — the case a waiter cannot
+      // catch, because the exit arrives one statement earlier than this call.
+      if (entry.exitVerdict !== undefined) {
+        resolve(entry.exitVerdict);
+        return;
+      }
+
       const timer = setTimeout(() => {
         entry.helloWaiter = undefined;
         resolve('it did not introduce itself in time');
       }, this.#deps.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS);
 
-      entry.helloWaiter = (version: number) => {
+      entry.helloWaiter = (verdict: string | null) => {
         clearTimeout(timer);
         entry.helloWaiter = undefined;
-        resolve(this.#versionVerdict(version));
+        resolve(verdict);
       };
     });
   }
@@ -563,7 +596,7 @@ export class PluginHost {
     if (message.method === 'hello') {
       const version = (message.params as { version?: unknown } | undefined)?.version;
       entry.helloVersion = typeof version === 'number' ? version : -1;
-      entry.helloWaiter?.(entry.helloVersion);
+      entry.helloWaiter?.(this.#versionVerdict(entry.helloVersion));
       void this.#reply(entry, { id: message.id, ok: true });
       return;
     }

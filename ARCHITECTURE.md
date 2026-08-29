@@ -2294,6 +2294,37 @@ listens, in `docs/superpowers/specs/2026-08-27-plugin-api-design.md`.
 
 ---
 
+### A plugin that dies at load is a different failure from a slow one
+
+Added 2026-08-29, after the packaged-build walk measured it at **9.97 s**.
+
+`onExit` settled every outstanding *request* through `#settleAll` and left the
+handshake alone, so `#awaitHello` ran to its ten-second deadline even though
+the thing it was waiting for had already gone. The most likely cause is also
+the most ordinary — a syntax error in a plugin someone is writing — so the
+first thing a plugin author met was ten seconds of silence followed by a
+sentence blaming them for being slow.
+
+**The fix is in two halves because the exit arrives at two different times,**
+and either half alone leaves the other case hanging:
+
+- A worker refused at construction fires `onerror` in the tick it is made, and
+  the host subscribes to `onExit` one statement *before* it calls
+  `#awaitHello`. There is no waiter yet, so the verdict is **recorded** on the
+  entry and read on the way in — the exact counterpart of `helloVersion`,
+  which exists because greetings arrive early for the same reason.
+- A plugin that dies part-way through the handshake *does* have a waiter, and
+  only settling it will do.
+
+`helloWaiter` therefore takes a **verdict** rather than a version, so anything
+that knows the handshake can no longer succeed is able to settle it. And the
+two failures get different sentences — *"it stopped before it introduced
+itself"* against *"it did not introduce itself in time"* — because they want
+different fixes, and a plugin that crashed is not a plugin that is taking its
+time.
+
+---
+
 ### The config directory gets its own watcher, because it had to
 
 Added 2026-08-28, retiring three debt rows that all said the same thing:
