@@ -1431,10 +1431,16 @@ export class NoxApp {
    */
   async #restartLanguageServers(root: string | null): Promise<void> {
     await this.lsp.stop();
-    // Beside the servers, and for the identical reason: a reload does not
-    // kill what the renderer started, so a plugin worker or process would
-    // outlive the window that was talking to it.
-    await this.plugins.stopAll();
+    // Plugins are deliberately **not** stopped here, and the reason is a bug
+    // this used to have. Stopping them beside the servers looks symmetrical —
+    // both are processes the renderer started — but a language server is tied
+    // to a project root and a plugin is not. This method runs on every root
+    // change, `stopAll()` *clears* the registry rather than restarting it, and
+    // the session restores a folder at boot: so every launch started the
+    // startup plugins and killed them a moment later, and nothing brought them
+    // back short of Reload Plugins. Found by walking the packaged build on
+    // 2026-08-29; the teardown it was reaching for is a *reload* concern and
+    // now lives in `dispose()`, which is what a reload actually runs.
     if (!root) return;
     if (!this.platform.capabilities.languageServers) return;
     await this.lsp.start();
@@ -5268,6 +5274,12 @@ export class NoxApp {
     // nothing left to talk to it.
     await this.lsp.stop();
     await this.platform.stopAllLanguageServers().catch(() => undefined);
+    // The plugins' half of the same sentence: a reload does not kill what the
+    // renderer started, so a worker or child process would outlive the window
+    // that was talking to it. Here rather than on every root change — see
+    // `#restartLanguageServers`, which is where it used to be and where it
+    // killed every plugin at boot.
+    await this.plugins.stopAll();
     try {
       await this.notes.flush();
       await this.config.flush();
