@@ -8,6 +8,56 @@ are knowledge.**
 
 ---
 
+## 2026-08-29 (PC) — The ten-second silence, and why one fix was not enough
+
+The last confirmed defect from the walk. `onExit` settled every outstanding
+*request* through `#settleAll` and left the handshake alone, so `#awaitHello`
+ran to its full deadline on a plugin that was already gone — measured at
+**9.97 s**, and the likeliest trigger is the most ordinary one: a syntax error
+in a plugin someone is writing.
+
+**The first fix was wrong and the tests said so.** Settling `helloWaiter` on
+exit looked complete and the tests kept hanging. The reason is a timing the
+code had already met once: a worker refused at construction fires `onerror` in
+the tick it is made, and the host subscribes to `onExit` one statement *before*
+it calls `#awaitHello` — so there is no waiter to settle. The verdict has to be
+**recorded on the entry** and read on the way in, which is exactly what
+`helloVersion` does for greetings that arrive early. The second half is still
+needed for a plugin that dies *during* the handshake.
+
+Both halves are mutation-checked and **each is caught by a different test**,
+which is the evidence that neither is decoration.
+
+**The tests hang rather than fail without the fix**, so their deadline is 30 s
+against Vitest's 5 s — the harness default of 50 ms would have hidden the bug
+behind a fast pass, which is the same trap as measuring a flake by its timeout.
+
+Shipped:    `src/services/plugin/host.ts` — `helloWaiter` takes a verdict
+            rather than a version, `exitVerdict` recorded on the entry and read
+            by `#awaitHello`, both reset per connection; four tests in
+            `tests/plugin-host.test.ts` plus a fake that now holds an exit
+            arriving before anyone subscribed, the way `startPluginWorker`
+            really does; an ARCHITECTURE decision section.
+Verified:   `npm test` 2410 · `check` 1038/0/0 · `lint` 0 errors · `build`
+            760 ms · 11/11 CI on #167. In the rebuilt release bundle with a
+            plugin whose source does not parse: reported **1.61 s** after
+            launch, most of that startup, against 9.97 s before. The operator's
+            config was restored and the file set verified identical.
+Next:       A fresh walk for W1 and W3–W6. They are marked UNSEEN in
+            `.desktop-pass-report.md` rather than passed, because they were
+            blocked behind the plugin bug rather than checked — and their
+            readout (a plugin running a command) only started working today.
+            W1 is the one with real doubt left: the CSP was shown to permit a
+            blob worker in Chromium under the exact header, but at
+            `http://localhost`, and the packaged app's origin is Tauri's custom
+            protocol, so `'self'` resolves differently.
+Blocked:    Nothing.
+Confidence: High. Both halves were found by a test that hung rather than by
+            reasoning, and the packaged-app measurement is a before-and-after
+            on the same machine.
+
+---
+
 ## 2026-08-29 (PC) — The first walk with a toolchain, and plugins never ran
 
 The operator mentioned they were on their Windows machine. The blocker was
