@@ -231,7 +231,42 @@ about twelve declarations:
 }
 ```
 
-Add the theme name to the `workbench.theme` enum in `config/schema.ts` and it
-appears in Settings. The editor picks it up with no CodeMirror reconfiguration
+A theme that ships with Nox is added to `tokens.css` and to `BUILT_IN_THEMES`
+in `core/theme.ts`. The editor picks it up with no CodeMirror reconfiguration
 because the CM theme references the same CSS custom properties the chrome does
 — the editor surface and the app chrome physically cannot drift apart.
+
+### Your own, without building Nox
+
+Since 2026-08-28 the same override is a file. Drop a `.json` into the `themes`
+folder in your Nox config directory — **Edit Themes** creates it with a worked
+example — and run **Reload Themes**. The file name is the theme's id.
+
+```json
+{
+  "name": "Solar",
+  "base": "umbra",
+  "tokens": { "bg-editor": "#101214", "accent": "#e0a458", "syn-string": "#98c379" }
+}
+```
+
+`base` is `eclipse` or `umbra` and is what makes a three-line theme work:
+everything the file does not mention comes from it, so you override only what
+you want to change. Nox sets the base on `data-nox-theme` and applies your
+tokens over it as custom properties.
+
+Two limits, and both are deliberate:
+
+- **Colours only.** The 60 tokens a theme may set are the surfaces, states,
+  borders, text, accents, editor colours and the `--nox-syn-*`. Geometry,
+  motion, stacking and typography are not themeable — a colour scheme has no
+  business resizing the tab bar, and `--nox-dur-*` is zeroed under
+  `prefers-reduced-motion`, which a theme must not be able to undo.
+- **Hex or `rgb()`.** A theme file is something people download, and Nox turns
+  it into CSS. Values are checked before they reach the DOM, and a key outside
+  the allowlist is dropped and named rather than applied.
+
+Nox's own contrast guarantees (`tests/token-contrast.test.ts`) cover the
+built-in themes. A theme you write is yours, including its legibility.
+
+See `docs/superpowers/specs/2026-08-28-custom-themes-design.md`.

@@ -4,6 +4,7 @@
     SETTINGS_SCHEMA,
     SETTING_KEYS,
     type SettingCategory,
+    type SettingDescriptor,
     type SettingKey,
   } from '@services/config/schema';
   import { useApp } from './context';
@@ -18,7 +19,7 @@
    */
 
   const app = useApp();
-  const { config, ui, workspace, plugins, pluginSettings } = app;
+  const { config, ui, workspace, plugins, pluginSettings, themes } = app;
   const settings = config.settings;
   const rootPath = workspace.rootPath;
 
@@ -30,6 +31,11 @@
    * shapes differ — a core descriptor has a `category` and a plugin's has a
    * `key` — so the snippet takes neither, only what a control needs.
    */
+  interface RuntimeOption {
+    value: string;
+    label: string;
+  }
+
   interface ControlSpec {
     id: string;
     label: string;
@@ -53,6 +59,22 @@
    */
   const hostRevision = plugins.revision;
   const pluginRevision = pluginSettings.revision;
+  const themeRevision = themes.revision;
+
+  /**
+   * Options for a descriptor whose set is only known at run time.
+   *
+   * One entry today, and the table is the point: the alternative was the panel
+   * branching on the key `workbench.theme`, which would have been the first
+   * hand-written control in a panel whose whole claim is that it has none. A
+   * second source adds a line here and a member to the union in `schema.ts`.
+   */
+  const runtimeOptions = $derived.by(() => {
+    void $themeRevision;
+    return {
+      themes: themes.list().map((theme) => ({ value: theme.id, label: theme.name })),
+    } satisfies Record<NonNullable<SettingDescriptor['optionsFrom']>, RuntimeOption[]>;
+  });
 
   /**
    * Which keys the open project sets.
@@ -288,6 +310,7 @@
         {#each keys as key (key)}
           {@const descriptor = SETTINGS_SCHEMA[key]}
           {@const fromWorkspace = workspaceKeys.has(key)}
+          {@const runtime = descriptor.optionsFrom ? runtimeOptions[descriptor.optionsFrom] : null}
           <div class="setting" class:locked={fromWorkspace} data-setting={key}>
             <div class="meta">
               <label for="setting-{key}">
@@ -317,15 +340,28 @@
               {@render control({
                 id: `setting-${key}`,
                 label: descriptor.label,
-                kind: descriptor.kind,
+                // A descriptor whose options arrive at run time draws a
+                // dropdown whatever its stored kind is. `workbench.theme` is a
+                // string because the set of themes is open, and a text box for
+                // it would be a worse control than the enum it replaced.
+                kind: runtime ? 'enum' : descriptor.kind,
                 value: $settings[key],
                 ...(descriptor.kind === 'number'
                   ? { min: descriptor.min, max: descriptor.max, step: descriptor.step ?? 1 }
                   : {}),
-                ...(descriptor.kind === 'enum'
-                  ? { options: descriptor.options, optionLabels: descriptor.optionLabels }
+                ...(runtime
+                  ? {
+                      options: runtime.map((option) => option.value),
+                      optionLabels: Object.fromEntries(
+                        runtime.map((option) => [option.value, option.label]),
+                      ),
+                    }
+                  : descriptor.kind === 'enum'
+                    ? { options: descriptor.options, optionLabels: descriptor.optionLabels }
+                    : {}),
+                ...(descriptor.kind === 'string' && !runtime
+                  ? { placeholder: descriptor.placeholder }
                   : {}),
-                ...(descriptor.kind === 'string' ? { placeholder: descriptor.placeholder } : {}),
                 onChange: (value) => update(key, value),
               })}
             </div>

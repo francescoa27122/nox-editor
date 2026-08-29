@@ -8,6 +8,81 @@ are knowledge.**
 
 ---
 
+## 2026-08-28 (PC) — Custom themes, and the enum that stopped being true
+
+The last open row in the v0.6 table. `DESIGN.md` §9 has said since v0.1 that a
+theme is a token override rather than a fork; this is the consequence.
+
+**The threat model is the design.** Nobody writes a theme from nothing — they
+download one and drop it in a folder, exactly as they would a plugin. So the
+file is read as strictly as `plugin.json`, and the two properties that matter
+are structural rather than blocklists: the file names a **token** and Nox writes
+the `--nox-` prefix, so nothing it can say reaches a property Nox did not
+choose; and values go in through `setProperty` rather than by building a CSS
+rule out of a stranger's JSON, so the browser's own parser is what reads them.
+
+**Sixty tokens, and the exclusions are the interesting half.** Geometry would
+let a theme resize the tab bar; stacking would put the palette behind the
+editor; typography is already the user's own setting and must not lose to a
+file; and `--nox-dur-*` is zeroed under `prefers-reduced-motion`, so a theme
+that could set it could quietly defeat an accessibility preference set in the
+OS. `tests/theme.test.ts` holds the list to `tokens.css` — without that, a
+renamed token leaves a theme key that parses, validates, applies and sets a
+property nothing reads.
+
+**`workbench.theme` stopped being an enum, and that is a correction rather than
+a loss.** `pick(['eclipse', 'umbra'])` made the type `'eclipse' | 'umbra'`,
+which was *true* while both shipped with the build — and `coerce` would now
+enforce the falsehood, rewriting a custom theme's id back to `eclipse` on every
+load. The union bought an attribute value and a two-way toggle; both survive as
+a string. `Common.optionsFrom` (a closed union naming a runtime source) keeps
+the panel drawing a dropdown without hand-writing a control for one key.
+
+**Two things the tests found that the design had not.** `list()` was returning
+whatever `readDir` gave it — caught by a cycle test whose expectation had been
+written in file-creation order — so the picker's rows, and **Switch Theme**,
+would have moved between launches; it sorts now. And verifying in the browser
+turned up a defect that is **not mine**: the ResizeObserver suppression at
+`app.ts:1043` tests `error === undefined`, but an `ErrorEvent` for a
+ResizeObserver loop carries `error: null`. `null !== undefined`, so the guard
+never fires and the fix written for 0.9.0 has never worked. Reproduced by
+forcing a loop; a red "Something went wrong" toast appears. Left for its own
+commit rather than mixed into a feature.
+
+Shipped:    `src/core/theme.ts` (allowlist, colour grammar, `parseTheme`);
+            `src/services/themes.ts`; `Common.optionsFrom` and
+            `workbench.theme` as a `str` in `config/schema.ts`; `app.ts`
+            — `ThemeService`, `#applyTheme` rewritten to base-plus-properties
+            with `#themeProperties` tracked for removal, `loadThemes`,
+            **Edit Themes**, **Reload Themes**, and **Switch Theme** cycling;
+            `SettingsPanel.svelte` renders a runtime-options descriptor as a
+            dropdown; `tests/theme.test.ts`, `theme-service.test.ts`,
+            `theme-apply.test.ts`; spec, DESIGN §9, ARCHITECTURE (decision log
+            + three debt rows), ROADMAP row closed, CHANGELOG.
+Verified:   `npm test` 165 files / 2375 tests passed (was 162 / 2319) ·
+            `npm run check` 1035 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 1.40 s ·
+            `npm run test:editor` 3 passed. Driven in Chromium: the Theme row
+            still renders a `<select>` fed by `ThemeService` rather than the
+            schema, and choosing Umbra moves `data-nox-theme` and
+            `--nox-bg-editor` from `#0b0e14` to `#000000` with no inline style
+            left behind. Mutation-checked eight of eight.
+Next:       The ResizeObserver guard above — a one-line fix (`error == null`)
+            plus the test that would have caught it. It is a live, user-visible
+            toast on a path someone deliberately fixed, which outranks the next
+            feature.
+Blocked:    Custom themes cannot be exercised in the browser target at all:
+            `MemoryPlatform.configDir()` returns null, so there is no themes
+            folder there. The DOM half is covered under jsdom instead, and the
+            folder half only by the service tests. The worker-transport CSP
+            still wants a desktop walk; `cargo` is still not installed here.
+Confidence: High on parsing, discovery and the apply path, all mutation-checked.
+            Medium on the picker: jsdom has no layout and the browser check
+            could only exercise the two built-ins, because the browser build
+            has nowhere to put a theme file.
+
+---
+
 ## 2026-08-28 (PC) — The README that would have lied at the next tag
 
 Not a feature. The previous session's `Next`, and it was priority 1 rather
