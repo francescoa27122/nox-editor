@@ -44,7 +44,7 @@ pub fn nox_thing_start(
 
 ## Errors the renderer can branch on
 
-Rust returns `"<code>: <message>"`; `platform/tauri.ts:714-728` splits on the first `": "` and matches against six codes: `not-found`, `permission`, `exists`, `not-text`, `unsupported`, `io`.
+Rust returns `"<code>: <message>"`; `platform/tauri.ts:888-891` splits on the first `": "` and matches against six codes: `not-found`, `permission`, `exists`, `not-text`, `unsupported`, `io`.
 
 Reuse `fs.rs:37-47`'s `describe()` for anything touching `std::fs`; write the code by hand otherwise (`format!("exists: a terminal with id {id} is already open")`).
 
@@ -54,7 +54,7 @@ Three traps:
 - **An unrecognised prefix silently degrades.** `spawn:`, `pty:`, `lsp:`, `refused:` all become `code: 'io'` **and the prefix is stripped from the message**. Accepted behaviour, but if the renderer must branch on it, use one of the six.
 - **Name your path argument `path`.** `PlatformError.path` is populated from `args.path`.
 
-Git is deliberately different: git's own words come back verbatim under `io:`, with a stdout fallback because git prints "nothing to commit" on stdout (`git.rs:129-140`).
+Git is deliberately different: git's own words come back verbatim under `io:`, with a stdout fallback because git prints "nothing to commit" on stdout (`git.rs:139-148`).
 
 ## Streaming
 
@@ -74,7 +74,7 @@ if let Some(state) = app.try_state::<AgentState>() {
 
 Emit failure means the window is gone: `let _ = app.emit(...)` for fire-and-forget, or check and `break` out of a hot loop.
 
-On the TS side, attach the listener **before** calling the start command, and release it if the command throws (`platform/tauri.ts:376-408`).
+On the TS side, attach the listener **before** calling the start command, and release it if the command throws (`platform/tauri.ts:448-478`).
 
 ## State
 
@@ -87,7 +87,7 @@ pub struct ThingState(Mutex<HashMap<String, Running>>);   // access via state.0.
 
 Named-field structs when there is more than one thing to hold. A type that is not `Default` (like `RecommendedWatcher`) needs a hand-written `impl Default`.
 
-Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.map_err(poisoned)?`. That is the pattern in `agent.rs:245`, `lsp.rs:394` and `pty.rs:357`. Modules with one lock site inline it instead (`search.rs:233`).
+Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.map_err(poisoned)?`. That is the pattern in `agent.rs:384`, `lsp.rs:397` and `pty.rs:364`. Modules with one lock site inline it instead (`search.rs:233`).
 
 `*_all` teardown **drains into a `Vec` first, then acts**, which releases the lock before the killing.
 
@@ -99,16 +99,16 @@ Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.m
 | Redirects `Policy::none()`, `.no_proxy()` | `http.rs:70-80` | `is_loopback` only proves the first hop |
 | No shell, argv only | `fs.rs`, `git.rs`, `lsp.rs` | `cmd /C` re-splits on spaces. Only `lsp.rs` falls back, and only after a direct spawn fails |
 | Six fixed git *writes and reads*, plus the read-only `nox_git_file_base` and `nox_git_blame` | `git.rs` module docs | Nothing that leaves the machine, rewrites history, or destroys working-tree work. `nox_git_blame` is the one `#[tauri::command(async)]`, because a sync body runs on the thread that draws the window and blame's cost follows a file's history |
-| `--literal-pathspecs` + `--` on every pathspec | `git.rs:216`, `:241` | A `*` in a filename is a filename |
-| Commit message on **stdin**, never argv | `git.rs:250-252` | Messages contain quotes, dashes, anything |
-| Branch name validated by `check-ref-format` first | `git.rs:304` | Only strings git blessed reach the write |
-| Empty unstage list returns early | `git.rs:237-239` | Bare `git reset --` resets the whole index |
-| Every path forced inside the repo | `git.rs:167-178` | |
+| `--literal-pathspecs` + `--` on every pathspec | `git.rs:225`, `:250` | A `*` in a filename is a filename |
+| Commit message on **stdin**, never argv | `git.rs:259-271` | Messages contain quotes, dashes, anything |
+| Branch name validated by `check-ref-format` first | `git.rs:317-324` | Only strings git blessed reach the write |
+| Empty unstage list returns early | `git.rs:246-248` | Bare `git reset --` resets the whole index |
+| Every path forced inside the repo | `git.rs:166-186` | |
 | `Content-Length` framing lives in Rust | `lsp.rs:8-13`, `:142-146` | Header counts bytes; the IPC string is UTF-16 |
-| Lost framing is an error, not a resync | `lsp.rs:106-111` | Guessing where the next message starts cannot recover |
-| Config names reject separators and `..` | `fs.rs:365-368` | Path traversal |
-| Rename/copy refuse to clobber | `fs.rs:248-250`, `:306-308` | `fs::rename` silently replaces on unix |
-| Writes go to a sibling temp, fsync, rename | `fs.rs:122-139` | Cross-filesystem temp reintroduces the truncation window |
+| Lost framing is an error, not a resync | `lsp.rs:109-113` | Guessing where the next message starts cannot recover |
+| Config names reject separators and `..` | `fs.rs:419-423` | Path traversal |
+| Rename/copy refuse to clobber | `fs.rs:301-306`, `:362-364` | `fs::rename` silently replaces on unix |
+| Writes go to a sibling temp, fsync, rename | `fs.rs:145-175` | Cross-filesystem temp reintroduces the truncation window |
 | Agents cannot spawn agents | `agent.rs:13-15` | Only the user, through configuration |
 
 ## Capabilities
@@ -119,9 +119,9 @@ You only edit it when the TS caller reaches for a plugin API or an unlisted core
 
 ## Testing
 
-**Design rule: if a command takes `State` or `AppHandle`, put the testable logic in a free function beside it.** That is why `write_config_atomically` (`fs.rs:408-410`) and `pty::open` (`pty.rs:121-125`) exist. Tests drive those directly, with no Tauri application around them.
+**Design rule: if a command takes `State` or `AppHandle`, put the testable logic in a free function beside it.** That is why `write_config_atomically` (`fs.rs:466`) and `pty::open` (`pty.rs:121-125`) exist. Tests drive those directly, with no Tauri application around them.
 
-Unit tests are `#[cfg(test)] mod tests` at the bottom of the module, in 7 of the 8 command modules (`agent.rs` has none, being covered by the renderer's fake-process tests in `services/agent/`). Where a test needs a temp directory, `fs.rs:439` and `git.rs:370` each hand-roll a `Scratch(PathBuf)` RAII helper rather than adding a `tempfile` dependency. Copy one of those instead of reaching for a crate.
+Unit tests are `#[cfg(test)] mod tests` at the bottom of the module, in 7 of the 8 command modules (`agent.rs` has none, being covered by the renderer's fake-process tests in `services/agent/`). Where a test needs a temp directory, `fs.rs:491` and `git.rs:551` each hand-roll a `Scratch(PathBuf)` RAII helper rather than adding a `tempfile` dependency. Copy one of those instead of reaching for a crate.
 
 Pure helpers are made `pub` purely so tests can reach them (`MessageStream`, `frame`, `Utf8Stream`, `is_loopback`).
 
