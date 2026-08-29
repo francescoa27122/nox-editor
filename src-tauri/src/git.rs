@@ -13,8 +13,8 @@
 //! for what the fs.rs convention reserves it for and is not expected in
 //! practice.
 //!
-//! `nox_git_blame` shares that contract and that opening — both reach a file
-//! through `repo_and_relpath` — and differs in one way that matters: it is
+//! `nox_git_blame` shares that contract and that opening, since both reach a
+//! file through `repo_and_relpath`, and differs in one way that matters: it is
 //! the crate's only `#[tauri::command(async)]`, because it is the only git
 //! read here whose cost scales with a file's *history* rather than with one
 //! blob, and a sync command body runs on the thread that must also draw the
@@ -391,7 +391,7 @@ pub fn nox_git_file_base(path: String) -> Result<Option<String>> {
     Ok(None)
 }
 
-/// The repository root for `path`, and `path` relative to it — the shared
+/// The repository root for `path`, and `path` relative to it: the shared
 /// opening of every per-file read here. `None` for everything that is not a
 /// tracked place: no git, no repository, an unresolvable path.
 ///
@@ -424,7 +424,7 @@ fn repo_and_relpath(path: &str) -> Option<(String, String)> {
 ///
 /// **The buffer's text is blamed, not the file on disk, and that is the
 /// whole design.** `git blame <path>` describes what is saved; the gutter
-/// draws beside what is *open*. Whenever those differ — any unsaved edit —
+/// draws beside what is *open*. Whenever those differ, on any unsaved edit,
 /// blaming the saved file misaligns every annotation after the first
 /// inserted or deleted line, and a blame gutter that attributes a line to
 /// someone who did not write it is worse than no gutter at all. `--contents`
@@ -436,7 +436,8 @@ fn repo_and_relpath(path: &str) -> Option<(String, String)> {
 ///
 /// **The one `#[tauri::command(async)]` in the crate, and it is deliberate.**
 /// A sync command body runs inline on the thread that handles the IPC
-/// message — the main thread — so its duration is the window's duration. For
+/// message, which is the main thread, so its duration is the window's
+/// duration. For
 /// every other git read here that is a non-issue: `git show :0:<path>` and
 /// `git status` cost one blob and one index scan. Blame is the first git read
 /// in this codebase whose cost scales with a file's *history* rather than
@@ -445,14 +446,15 @@ fn repo_and_relpath(path: &str) -> Option<(String, String)> {
 /// `(async)` on a sync function makes Tauri run the body on the async runtime
 /// instead (`sync_threadpool`, in the macro's own vocabulary), which is what
 /// keeps a slow blame from freezing the window it was invoked from. The
-/// function itself stays `pub fn` — there is nothing to await and nothing to
+/// function itself stays `pub fn`, because there is nothing to await and
+/// nothing to
 /// cancel, so the reason the rest of the crate avoids `async fn` does not
 /// apply.
 ///
 /// `--porcelain`, not `--line-porcelain`: the line variant repeats a commit's
 /// whole header block for every line it owns, which multiplies the payload
 /// crossing the boundary by the size of each group for no extra fact. Parsing
-/// lives in `core/git-blame.ts`, where it is testable without a repo — the
+/// lives in `core/git-blame.ts`, where it is testable without a repo: the
 /// same split `nox_git_status` makes.
 ///
 /// `None` is the answer to everything that is not blame output: no
@@ -462,13 +464,13 @@ fn repo_and_relpath(path: &str) -> Option<(String, String)> {
 ///
 /// `from_utf8_lossy` rather than a strict decode, and the choice is load
 /// bearing in the opposite direction from `nox_git_file_base`'s. Porcelain
-/// output interleaves the *file's own content* — one tab-prefixed line per
-/// blamed line — with the headers, so one line of Latin-1 in an otherwise
+/// output interleaves the *file's own content*, one tab-prefixed line per
+/// blamed line, with the headers, so one line of Latin-1 in an otherwise
 /// ordinary source file would fail a strict decode and blank the blame for
 /// the whole file. The parser reads only the header fields and drops every
 /// content line, so a replacement character can only ever land somewhere
-/// nothing reads. Where a strict decode would be right — a blob that *is*
-/// the answer — `nox_git_file_base` still uses one.
+/// nothing reads. Where a strict decode would be right, on a blob that *is*
+/// the answer, `nox_git_file_base` still uses one.
 #[tauri::command(async)]
 pub fn nox_git_blame(path: String, contents: String) -> Result<Option<String>> {
     use std::process::Stdio;
@@ -506,7 +508,7 @@ pub fn nox_git_blame(path: String, contents: String) -> Result<Option<String>> {
 
     // **The write runs on its own thread.** Unlike `nox_git_commit`, whose
     // message always fits in a pipe buffer, the text here is a whole
-    // document and the output is larger still — so a sequential
+    // document and the output is larger still, so a sequential
     // write-everything-then-read would deadlock the moment git's stdout
     // buffer filled: git blocked writing output nobody is draining, this
     // thread blocked writing input git has stopped reading.
@@ -520,9 +522,9 @@ pub fn nox_git_blame(path: String, contents: String) -> Result<Option<String>> {
     // wrong is a hung thread in the runtime pool and a blame that never
     // arrives; the cost of the thread is one spawn per invocation.
     //
-    // A broken pipe is not a failure worth reporting — it means git exited
+    // A broken pipe is not a failure worth reporting. It means git exited
     // before reading the text, which is what it does when it refuses the
-    // path — so the writer swallows its error and lets git's own exit status
+    // path, so the writer swallows its error and lets git's own exit status
     // below decide.
     let writer = std::thread::spawn(move || {
         let _ = stdin.write_all(contents.as_bytes());
@@ -1049,7 +1051,7 @@ mod tests {
     /// `GIT_OPTIONAL_LOCKS=0` earns its place here. Without it even a read
     /// takes and releases `.git/index.lock`, the meta watch sees the
     /// create-and-rename, and the debounced refresh it triggers runs the
-    /// read again — a loop that never settles.
+    /// read again: a loop that never settles.
     #[test]
     fn status_alone_does_not_touch_the_meta_watch() {
         let scratch = Scratch::new("git-status-quiet");
@@ -1074,7 +1076,7 @@ mod tests {
 
     /// The same promise for blame, and it matters more here. A meta-watch
     /// event makes `GitService` run `refreshAll`, which re-blames every
-    /// buffer blame is on for — so a blame that disturbed the index would
+    /// buffer blame is on for, so a blame that disturbed the index would
     /// feed the watch that triggered it, and each turn of that loop spawns a
     /// process per open file.
     ///
@@ -1082,9 +1084,9 @@ mod tests {
     /// and it is worth knowing that before assuming otherwise.** Probed by
     /// deleting the env var from `nox_git_blame`: the test still passes, so
     /// `git blame --contents -` simply does not take `index.lock` the way
-    /// `git status` does. The env var stays — it is the module's rule for
+    /// `git status` does. The env var stays, because it is the module's rule for
     /// every git invocation, and "today's git does not happen to need it" is
-    /// not a reason to be the one command without it — but what this test
+    /// not a reason to be the one command without it, but what this test
     /// defends is the *property*, not that line.
     #[test]
     fn blame_does_not_touch_the_meta_watch_either() {
@@ -1159,7 +1161,7 @@ mod tests {
     /// emits a commit's metadata block **once**, and every later group from
     /// that same commit carries only the short per-line header. A parser that
     /// expected the block on every group would read those lines as having a
-    /// blank author — and nothing in the TypeScript suite could catch it,
+    /// blank author, and nothing in the TypeScript suite could catch it,
     /// because its fixtures are written to whatever shape the parser expects.
     /// This is the only place the real format is asserted.
     #[test]
@@ -1190,7 +1192,7 @@ mod tests {
 
     /// A line edited but not committed is attributed to the all-zero object
     /// name. That sentinel is the whole basis of `BlameCommit.uncommitted`,
-    /// and it is git's, not ours — asserted here against real git so the
+    /// and it is git's, not ours. Asserted here against real git so the
     /// memory platform's fake cannot quietly invent a different one.
     #[test]
     fn an_uncommitted_line_gets_the_all_zero_hash() {
@@ -1213,7 +1215,7 @@ mod tests {
         );
     }
 
-    /// Absence, not an error — the same degraded state `nox_git_file_base`
+    /// Absence, not an error: the same degraded state `nox_git_file_base`
     /// promises. A dialog here would fire on every file opened outside a
     /// repository.
     #[test]
@@ -1231,7 +1233,7 @@ mod tests {
     }
 
     /// The refactor that gave blame and the gutter a shared opening has to
-    /// keep working for a workspace opened *below* the repository root — the
+    /// keep working for a workspace opened *below* the repository root: the
     /// case where the file's parent is not the toplevel and the relpath has
     /// more than one segment.
     #[test]
@@ -1253,7 +1255,7 @@ mod tests {
     /// line carries the all-zero object name at the position it actually
     /// occupies, and every line after it keeps its own commit at its shifted
     /// number. Blaming the saved file instead would attribute each of those
-    /// lines to whoever wrote the one above it — an annotation naming the
+    /// lines to whoever wrote the one above it. An annotation naming the
     /// wrong person, which is worse than no annotation.
     #[test]
     fn an_unsaved_insertion_shifts_blame_instead_of_misattributing_it() {
@@ -1275,7 +1277,7 @@ mod tests {
             "the inserted line is in no commit, got {}",
             hashes[0]
         );
-        // Lines 2 and 4 are the first commit's, line 3 the second's — the
+        // Lines 2 and 4 are the first commit's, line 3 the second's: the
         // same attribution as before the insertion, one line further down.
         assert_eq!(hashes[1], hashes[3], "alpha and charlie share a commit");
         assert_ne!(hashes[1], hashes[2], "BRAVO belongs to the second commit");

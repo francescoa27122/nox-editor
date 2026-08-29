@@ -136,8 +136,8 @@ export class MemoryPlatform implements Platform {
   }
 
   /**
-   * Give the fake git a per-line attribution for `path` — one entry per
-   * line, line 1 first.
+   * Give the fake git a per-line attribution for `path`: one entry per line,
+   * line 1 first.
    *
    * Seeded rather than derived, for the reason every seed here is: there is
    * no commit graph to walk, and a fake that invented one would be modelling
@@ -146,8 +146,8 @@ export class MemoryPlatform implements Platform {
    * count on a group's first line and nowhere else, a commit's metadata
    * block exactly once however many groups it owns, and the blamed text
    * tab-prefixed under each header. That is deliberate. A fake that emitted
-   * a convenient shape — one tidy block per line, say — would let a parser
-   * that mishandles the real thing pass the entire suite.
+   * a convenient shape, one tidy block per line say, would let a parser that
+   * mishandles the real thing pass the entire suite.
    */
   seedGitBlame(path: string, lines: readonly BlameSeedLine[]): void {
     const p = normalize(path);
@@ -367,8 +367,8 @@ export class MemoryPlatform implements Platform {
    * `git blame --porcelain --contents -` for `path`, rendered from what a
    * test seeded, or null when nothing was.
    *
-   * Null is what the real platform returns for a file with no blame — no
-   * repository, untracked, no git — and unseeded means exactly that here.
+   * Null is what the real platform returns for a file with no blame: no
+   * repository, untracked, no git. Unseeded means exactly that here.
    *
    * `contents` supplies the tab-prefixed text and nothing else. The fake
    * does not re-derive attribution from it: there is no history here to diff
@@ -377,8 +377,8 @@ export class MemoryPlatform implements Platform {
    * answer real git computes from `--contents`.
    *
    * The one thing a fake cannot check is the format itself, so
-   * `src-tauri/src/git.rs` asserts the real one against real git — that a
-   * commit is stated once and that repeats carry only the short header — and
+   * `src-tauri/src/git.rs` asserts the real one against real git, that a
+   * commit is stated once and that repeats carry only the short header, and
    * the rendering below mirrors it.
    */
   async gitBlame(path: string, contents: string): Promise<string | null> {
@@ -1269,7 +1269,7 @@ export interface BlameSeedLine {
   email?: string;
   /** Author time, epoch seconds. */
   time?: number;
-  /** git's `author-tz` shape — `+0530`, `-0800`. */
+  /** git's `author-tz` shape: `+0530`, `-0800`. */
   tz?: string;
   summary?: string;
 }

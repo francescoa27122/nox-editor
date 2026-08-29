@@ -192,6 +192,13 @@ unions.
 **Naming.** Services are `XService`, commands are `category.verbNoun`
 (`file.saveAs`, `view.toggleExplorer`), tokens are `--nox-*`.
 
+**No em dashes.** Full stops, colons, commas and parentheses do the same work
+and read like a person wrote them. Prose, comments, commit messages and
+documentation. It applies to what you write and what you edit rather than as a
+licence to sweep: the prose docs were cleaned on 2026-08-29 and the source
+comments were not, so a few thousand predate the rule and should be left where
+you are not otherwise touching the line.
+
 **Comments.** Explain *why*, never *what*. A comment restating the code is
 noise. A comment recording a constraint, a trade-off or a non-obvious ordering
 is the most valuable thing in the file. If you take a shortcut, say so and add

@@ -284,8 +284,8 @@ describe('the .git meta watch', () => {
  * Blame, over the same seeded platform.
  *
  * `seedGitBlame` names one commit per line and the fake renders real
- * `--porcelain` from it — a commit stated once, repeats reduced to a bare
- * header — so these tests exercise the parser through the same shape the
+ * `--porcelain` from it, a commit stated once and repeats reduced to a bare
+ * header, so these tests exercise the parser through the same shape the
  * Rust command produces rather than through a convenient one. The seed below
  * puts the same commit on lines 1 and 3 with another between them, which is
  * exactly the arrangement that produces a bare repeat.
@@ -316,7 +316,7 @@ describe('the blame gutter´s service half', () => {
 
   /**
    * The whole of "on demand, not always on" (ROADMAP v0.5). Opening a file,
-   * editing it and saving it must not cost a `git blame` — that walk is the
+   * editing it and saving it must not cost a `git blame`. That walk is the
    * most expensive read in the service, and nothing but the toggle may start
    * one.
    */
@@ -347,7 +347,7 @@ describe('the blame gutter´s service half', () => {
 
   /**
    * The `--contents` contract, asserted at the seam that would break it. The
-   * gutter draws beside the buffer, so git must be given the buffer — hand
+   * gutter draws beside the buffer, so git must be given the buffer. Hand
    * it the saved file instead and every annotation below an unsaved
    * insertion names the wrong person.
    */
@@ -367,7 +367,7 @@ describe('the blame gutter´s service half', () => {
   /**
    * Saving is where a blame taken mid-edit stops being an approximation, so
    * it is the one edit that refetches. A buffer blame is *off* for still
-   * costs nothing — the switch is the user's, and a refresh must not flip it.
+   * costs nothing: the switch is the user's, and a refresh must not flip it.
    */
   it('refetches on save, and only for the buffers it is on for', async () => {
     const id = await openBlamed();
@@ -440,7 +440,7 @@ describe('the blame gutter´s service half', () => {
    * The race the retry exists for. git's answer describes the text the
    * request carried, so a *line* typed while it was working leaves every
    * annotation below it one row out until the next save. One re-request,
-   * only when the revision actually moved, closes that — and it cannot loop,
+   * only when the revision actually moved, closes that, and it cannot loop,
    * because no edit ever triggers a fetch in the first place.
    *
    * Mutation check: disabling the `revisionOf(id) !== requestedAt` branch in
@@ -477,8 +477,8 @@ describe('the blame gutter´s service half', () => {
    * must not put it back.
    *
    * Mutation check: deleting the post-await `blameShown` guard in
-   * `#refreshBlame` turned this red — the entry is written straight back
-   * into the map and the column reappears on its own — and left the other 26
+   * `#refreshBlame` turned this red, since the entry is written straight back
+   * into the map and the column reappears on its own, and left the other 26
    * green; restored, suite green.
    */
   it('does not paint an answer that arrived after it was switched off', async () => {

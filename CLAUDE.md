@@ -59,6 +59,7 @@ Five project skills cover the subsystems in depth. Use them rather than re-deriv
 ## House style
 
 - **No em dashes.** Full stops, colons, commas and parentheses do the same work and read like a person wrote them. This applies to prose, comments, commit messages and documentation.
+  Applies to what you write and what you edit, not as a licence to sweep. The prose docs were cleaned on 2026-08-29; the source comments were not, so there are still a few thousand in `src/` and `tests/` that predate the rule. Leave them where you are not otherwise touching the line.
 - **Comments explain *why*, never *what*.** A comment restating the code is noise. One recording a constraint, a trade-off or a non-obvious ordering is the most valuable thing in the file. This codebase comments heavily, in full sentences. Match the file you are editing.
 - **Do not run prettier.** There is no prettier config here, so it rewrites files to double quotes against house style. `eslint.config.js` says so at the top. Single quotes, two-space indent and semicolons are matched by hand.
 - Strict TypeScript with `noUncheckedIndexedAccess`. No `any`. Use `unknown` and narrow.

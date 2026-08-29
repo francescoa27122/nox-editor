@@ -284,7 +284,7 @@
    * gone are drawn by nothing.
    *
    * An absent entry is blame switched *off*, which is why this clears rather
-   * than returns — a view that has just swapped buffers would otherwise keep
+   * than returns. A view that has just swapped buffers would otherwise keep
    * the column, and the names, of the file it was showing a moment ago.
    */
   function paintBlame() {

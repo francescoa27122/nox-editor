@@ -75,19 +75,19 @@ describe('the pure layers still scale', () => {
 
   /**
    * Blame output is the largest single string that crosses the IPC boundary
-   * in this codebase — every line of a file, plus a header line each, plus a
-   * metadata block per commit — and it is parsed in one pass in the
+   * in this codebase (every line of a file, plus a header line each, plus a
+   * metadata block per commit) and it is parsed in one pass in the
    * renderer. Nothing on the typing path calls it, so wall-clock is not the
    * worry; the exponent is.
    *
    * Verified: replacing the `commits` map lookup with a full scan of the
    * lines parsed so far (`lines.filter(...)`) reports **63.6x** and fails
-   * this — almost exactly the ~64x a quadratic implementation predicts.
+   * this, almost exactly the ~64x a quadratic implementation predicts.
    *
    * **It does not catch a `lines.find(...)` scan, and that is worth knowing
    * before assuming otherwise.** `find` short-circuits, and the corpus
    * cycles 20 commits, so every hash is located within the first 20 entries
-   * however long the file — linear with a constant of 20. Making the corpus
+   * however long the file: linear with a constant of 20. Making the corpus
    * catch that would mean one commit per line, which is not a repository
    * anyone has. The map is still the right implementation; this test simply
    * does not defend that particular route to the wrong one.

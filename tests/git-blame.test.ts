@@ -12,11 +12,11 @@ import {
  *
  * `PORCELAIN` below is `git blame --porcelain` from git 2.43 over a
  * three-line file committed twice, with a fourth line added and not
- * committed — captured verbatim and pasted, not composed. That matters more
+ * committed, captured verbatim and pasted, not composed. That matters more
  * here than in most fixtures: the parser's whole difficulty is a format with
  * two asymmetries nobody would invent when writing an example by hand. A
- * commit's metadata block appears **once**, so the third record — the first
- * commit's second group — is a bare header and a content line with no author
+ * commit's metadata block appears **once**, so the third record, the first
+ * commit's second group, is a bare header and a content line with no author
  * anywhere near it; and the group count is on a group's first line only.
  * `src-tauri/src/git.rs` holds the tripwire that asserts both against real
  * git on every CI platform, so this fixture cannot quietly drift into a
@@ -51,7 +51,7 @@ const PORCELAIN = [
   'previous 2a9700fa588828e1244ce40dea66f9b6e77753b9 app.ts',
   'filename app.ts',
   '\tBRAVO',
-  // The first commit again — header and content, nothing else. This record
+  // The first commit again: header and content, nothing else. This record
   // is the one that decides whether the parser remembers commits.
   '2a9700fa588828e1244ce40dea66f9b6e77753b9 3 3 1',
   '\tcharlie',
@@ -103,7 +103,7 @@ describe('parsing git blame porcelain', () => {
 
   /**
    * The sentinel is the hash, never the author. git names that author
-   * differently depending on how it was asked — "Not Committed Yet" when it
+   * differently depending on how it was asked: "Not Committed Yet" when it
    * blames a dirty worktree, "External file (--contents)" when it blames
    * supplied text, which is how Nox always asks. Keying on the name would
    * have worked in this fixture and failed in the product.
@@ -152,7 +152,7 @@ describe('presenting a blamed commit', () => {
   /**
    * The date is the author's, not the reader's. 1700000000 is
    * 2023-11-14T22:13:20Z, so an author in +0530 wrote it on the 15th and one
-   * in -0800 on the 14th — and both see that same answer wherever they read
+   * in -0800 on the 14th, and both see that same answer wherever they read
    * it later. Reading the timestamp in the *reader's* zone instead would
    * make one line show two dates on two machines, which is the failure this
    * pins.

@@ -11,15 +11,15 @@ import {
 /**
  * The blame gutter: who wrote each line, beside the line.
  *
- * The git gutter's shape — an effect-fed `StateField` of per-line marks, and
- * a `gutter` that paints whatever the field holds — and a sibling rather than
- * an extension of it. That one answers "what does git not have yet" from a
+ * The git gutter's shape: an effect-fed `StateField` of per-line marks and a
+ * `gutter` that paints whatever the field holds. A sibling rather than an
+ * extension of it. That one answers "what does git not have yet" from a
  * diff Nox computes; this one answers "who wrote this" from a walk only git
  * can do, and the two are switched on by different things.
  *
  * **Marks are per line, not per group, and that is the honest choice.** Blame
- * arrives run-length encoded — a commit owns a contiguous run — and one wide
- * range per run would be a fraction of the marks. But a range grows when text
+ * arrives run-length encoded, since a commit owns a contiguous run, and one
+ * wide range per run would be a fraction of the marks. But a range grows when text
  * is inserted inside it, so a line typed in the middle of a run would inherit
  * the run's commit: the gutter would name a person who did not write that
  * line. A point mark at each line start cannot do that. An inserted line
@@ -33,7 +33,7 @@ import {
  * itself.
  *
  * The field is installed unconditionally, so its `update` does run on every
- * transaction even for the buffers nobody has asked about — but with blame
+ * transaction even for the buffers nobody has asked about. But with blame
  * off the set is `RangeSet.empty` and mapping it is a no-op, which is the
  * same bargain `gitGutterField` already makes. What the compartment saves is
  * the *rendering*: no gutter column, and so no DOM element per visible line,
@@ -64,7 +64,7 @@ export const gitBlameField = StateField.define<RangeSet<BlameValue>>({
       if (effect.is(setGitBlame)) return marksOf(effect.value, tr.state.doc);
     }
     if (!tr.docChanged) return set;
-    // Mapped, never recomputed — see the header. A mark over deleted text
+    // Mapped, never recomputed: see the header. A mark over deleted text
     // collapses to zero width and is kept, the same way the git gutter keeps
     // one: the line that is now there still has a last author.
     return set.map(tr.changes);
@@ -125,8 +125,8 @@ function markerFor(commit: BlameCommit): GutterMarker {
  * installed.
  *
  * Without it the gutter is zero-wide until the first marks arrive and then
- * jumps to full width, shoving the code sideways — on a large repository,
- * seconds after the toggle. Every label is padded to the same length, so one
+ * jumps to full width, shoving the code sideways, and on a large repository
+ * that is seconds after the toggle. Every label is padded to the same length, so one
  * spacer of that length is exactly the final width.
  */
 const SPACER = new (class extends GutterMarker {
@@ -140,8 +140,8 @@ const SPACER = new (class extends GutterMarker {
 
 /**
  * The rendering half. Installed by the pane while blame is on for the buffer
- * it is showing, and removed when it is not — runtime state, not a setting,
- * so it has no entry in `SETTING_TO_COMPARTMENTS`.
+ * it is showing, and removed when it is not. Runtime state, not a setting, so
+ * it has no entry in `SETTING_TO_COMPARTMENTS`.
  */
 export function blameGutter(): Extension {
   return gutter({
@@ -163,7 +163,7 @@ export function blameGutter(): Extension {
       return hits.length > 0 ? markerFor(hits[0]!) : null;
     },
     // Effect-only transactions change no document and would otherwise never
-    // repaint — the trap `provenance.ts` documents at its own gutter.
+    // repaint: the trap `provenance.ts` documents at its own gutter.
     lineMarkerChange: (update) =>
       update.startState.field(gitBlameField) !== update.state.field(gitBlameField),
   });

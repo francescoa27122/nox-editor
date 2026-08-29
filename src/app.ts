@@ -3548,7 +3548,7 @@ export class NoxApp {
         // the two git reads either side of it, and the capability model
         // gates side effects rather than cost.
         //
-        // Returned, not voided, so `execute()` awaits the fetch — a test that
+        // Returned, not voided, so `execute()` awaits the fetch. A test that
         // awaits the command should see the answer, not the request.
         run: () => {
           const active = this.workspace.activeSnapshot();
@@ -4588,7 +4588,7 @@ export class NoxApp {
       'Mod+Shift+G': 'git.focus',
       // `Mod+B` is the explorer, so blame takes the Alt form of the same
       // letter. Free on every platform, and unclaimed by CodeMirror's keymap
-      // — which owns `Ctrl+B` on macOS for cursor-left, a chord this does not
+      // which owns `Ctrl+B` on macOS for cursor-left, a chord this does not
       // touch.
       'Mod+Alt+B': 'git.toggleBlame',
 

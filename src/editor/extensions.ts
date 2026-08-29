@@ -48,7 +48,7 @@ export const lspCompartment = new Compartment();
  * deliberately absent from `compartments` and `SETTING_TO_COMPARTMENTS`:
  * blame is switched on per *buffer*, at the user's request, and that is
  * runtime state rather than a preference. `lspCompartment` above is the same
- * arrangement for the same reason — a pane-level fact a settings-level
+ * arrangement for the same reason: a pane-level fact a settings-level
  * factory cannot know.
  *
  * The field it renders is unconditional (see `staticExtensions`); only this
@@ -248,7 +248,7 @@ function staticExtensions(): Extension[] {
     // And again, for the reason the header of `git-blame.ts` gives: the
     // marks must survive the gutter being switched off and on, and removing
     // a StateField destroys what it holds. There is no setting to gate this
-    // one on in any case — blame is a per-buffer request, not a preference.
+    // one on in any case: blame is a per-buffer request, not a preference.
     gitBlameField,
     // Unconditional for the same reason as the two above, and there is no
     // setting to gate it on anyway: a plugin's marks are its output, not a
@@ -270,7 +270,7 @@ export function buildExtensions(settings: Settings): Extension[] {
     // **First in the array, so leftmost on screen**, outside the line
     // numbers. Gutters are laid out in the order their extensions resolve
     // (`activeGutters` is an ordered facet), and blame is the widest column
-    // in the editor — inserted between the git gutter and the code, as it was
+    // in the editor. Inserted between the git gutter and the code, as it was
     // when it went last, it pushed the change bars twenty characters away
     // from the lines they mark and the line numbers further still. Outside
     // everything, switching blame on *adds* a column rather than moving the

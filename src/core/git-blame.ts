@@ -1,6 +1,6 @@
 /**
  * `git blame --porcelain` parsing, in TypeScript where it is testable
- * without a repo — the same split `core/git-status.ts` makes, and for the
+ * without a repo. The same split `core/git-status.ts` makes, and for the
  * same reason: the Rust side owns spawning git and nothing else.
  *
  * **Why `--porcelain` and not `--line-porcelain`.** The line variant repeats
@@ -15,8 +15,8 @@
  * holds a reference to the same `BlameCommit` as its neighbours from the
  * same commit, so a file with 200,000 lines and 80 commits in its history
  * costs 80 objects and 200,000 references rather than 200,000 objects. It
- * also means metadata that arrives late — git states a commit once, at its
- * first group — is visible to the lines parsed before it, because they hold
+ * also means metadata that arrives late, since git states a commit once at
+ * its first group, is visible to the lines parsed before it, because they hold
  * the object rather than a copy of it.
  *
  * See `docs/superpowers/specs/2026-08-29-git-blame-design.md`.
@@ -25,8 +25,8 @@
 /**
  * One commit, as blame describes it.
  *
- * `hash` is whatever width git printed — 40 hex characters for SHA-1, 64 for
- * a SHA-256 repository — and is never assumed to be 40 anywhere here.
+ * `hash` is whatever width git printed: 40 hex characters for SHA-1, 64 for
+ * a SHA-256 repository. It is never assumed to be 40 anywhere here.
  */
 export interface BlameCommit {
   readonly hash: string;
@@ -39,7 +39,7 @@ export interface BlameCommit {
   readonly authorTime: number | null;
   /** `author-tz` as minutes east of UTC. Zero when git gave none. */
   readonly authorTzMinutes: number;
-  /** The commit subject — git's `summary` header. */
+  /** The commit subject, from git's `summary` header. */
   readonly summary: string;
   /**
    * True for the all-zero object name git gives a line that is in the text
@@ -64,7 +64,7 @@ export interface BlameLine {
 /**
  * The per-line header every porcelain record opens with: the object name,
  * the line number in the original file, the line number in the final file,
- * and — only on the line that starts a group — how many lines the group runs
+ * and, only on the line that starts a group, how many lines the group runs
  * for.
  *
  * The group count is matched and then ignored. Every line gets its own
@@ -88,7 +88,7 @@ export const BLAME_HASH_WIDTH = 7;
  * **Twelve, and the number came from looking at it.** Sixteen was the first
  * guess and it is wrong in a way no test could report: a fixed column is
  * sized for the longest name it will ever hold, so every character of it is
- * dead space beside every name shorter than that — and the dead space sits
+ * dead space beside every name shorter than that, and the dead space sits
  * between the name and the code, which is where it is most visible. At
  * sixteen the gap was wider than the label. Twelve still holds `Jane Doe`,
  * `bmarshall` and `Alex Chen` whole, and cuts the rest where a name is
@@ -96,7 +96,7 @@ export const BLAME_HASH_WIDTH = 7;
  */
 export const BLAME_AUTHOR_WIDTH = 12;
 
-/** The width every label is padded to — hash, a space, author. */
+/** The width every label is padded to: hash, a space, author. */
 export const BLAME_LABEL_WIDTH = BLAME_HASH_WIDTH + 1 + BLAME_AUTHOR_WIDTH;
 
 /** What the gutter shows for a line no commit holds. */
@@ -120,7 +120,7 @@ interface MutableCommit {
  * Anything unrecognised is skipped rather than thrown on: blame is a read,
  * and a parser that refused a stream it half-understood would lose the lines
  * it *did* understand. A stream that is not blame output at all yields an
- * empty list, which the service reads as "no blame for this file" — the same
+ * empty list, which the service reads as "no blame for this file": the same
  * degraded state as no repository.
  */
 export function parseGitBlame(raw: string): BlameLine[] {
@@ -175,10 +175,10 @@ export function parseGitBlame(raw: string): BlameLine[] {
  * time.
  *
  * Shifted by `author-tz` and then read in UTC, which is what makes the date
- * the author's own rather than the reader's — a commit made at 23:30 in
+ * the author's own rather than the reader's. A commit made at 23:30 in
  * Berlin is dated the day it was made, not the day before it was in London.
- * That is `git blame`'s own default, and the alternative — the reader's local
- * timezone — would make one line show two different dates on two machines
+ * That is `git blame`'s own default. The alternative, the reader's local
+ * timezone, would make one line show two different dates on two machines
  * looking at the same repository.
  */
 export function blameDate(commit: BlameCommit): string {
@@ -192,7 +192,7 @@ export function blameDate(commit: BlameCommit): string {
  * The gutter's text: short hash, then author, padded to a stable width.
  *
  * The date is deliberately not here. Every character of this column is taken
- * from the code beside it, and the row this answers is *blame* — who wrote
+ * from the code beside it, and the row this answers is *blame*: who wrote
  * this line. The date, the email and the subject are one hover away in
  * `blameTitle`.
  */
@@ -246,7 +246,7 @@ function applyHeader(commit: MutableCommit, key: string, value: string): void {
       commit.summary = value;
       break;
     default:
-      // `committer*`, `previous`, `filename`, `boundary` — read and dropped.
+      // `committer*`, `previous`, `filename`, `boundary`: read and dropped.
       // None of them changes who wrote the line.
       break;
   }

@@ -10,13 +10,13 @@ import { flush, mountComponent, type Mounted } from './support/component';
  *
  * The service parses what the memory platform renders as porcelain; the pane
  * installs the gutter and dispatches the marks; the gutter draws labels. What
- * jsdom can prove is the DOM and the field — not pixel geometry, so nothing
+ * jsdom can prove is the DOM and the field, not pixel geometry, so nothing
  * here asserts where a column sits.
  *
  * The one thing this file exists for that no headless test can reach: the
  * gutter is installed by *runtime state* rather than by a setting, through a
- * compartment the pane reconfigures. That wiring — install on toggle, remove
- * on toggle, re-apply after a `setState` that resets every compartment — has
+ * compartment the pane reconfigures. That wiring (install on toggle, remove
+ * on toggle, re-apply after a `setState` that resets every compartment) has
  * no other coverage.
  */
 
@@ -65,7 +65,7 @@ async function setup() {
 /**
  * The gutter's real entries, in order.
  *
- * The first `.nox-blame-entry` in the column is CodeMirror's width spacer —
+ * The first `.nox-blame-entry` in the column is CodeMirror's width spacer,
  * `initialSpacer`, which it renders with `visibility: hidden` so the column
  * holds its width before any marks arrive. Its label is all spaces, which is
  * what separates it from a real one here.
@@ -128,7 +128,7 @@ describe('the blame gutter', () => {
 
   /**
    * Between fetches the marks map through edits rather than being recomputed
-   * — recomputing means spawning `git blame`. An inserted line pushes every
+   * because recomputing means spawning `git blame`. An inserted line pushes every
    * mark down and takes none for itself, which is the honest answer: nobody
    * has committed that line, and the gutter must not lend it the name of the
    * line it displaced.
@@ -145,13 +145,13 @@ describe('the blame gutter', () => {
     flush();
 
     expect(view.state.doc.lineAt(firstMarkPos(view)).number).toBe(2);
-    // Still three names for three blamed lines — the new line took none.
+    // Still three names for three blamed lines: the new line took none.
     expect(labels(container)).toHaveLength(3);
   });
 
   /**
    * `setState` resets every compartment to the state's own configuration, so
-   * the gutter has to be re-applied on each swap — the trap `lspCompartment`
+   * the gutter has to be re-applied on each swap: the trap `lspCompartment`
    * documents. Swapping to a buffer blame is off for must take the column
    * away, and swapping back must bring it and the names with it.
    */

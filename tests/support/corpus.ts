@@ -132,7 +132,7 @@ export function modelReply(braces: number, seed = 11): string {
 
 /**
  * `git blame --porcelain` output for a file of `lines` lines whose history
- * has 20 commits in it, cycling — which puts a fresh group on every line and
+ * has 20 commits in it, cycling, which puts a fresh group on every line and
  * so states each commit once and reduces the other 19 appearances of it to a
  * bare header. That asymmetry is the shape the parser has to survive, so a
  * corpus without it would measure the easy half.

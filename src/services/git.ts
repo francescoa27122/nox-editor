@@ -50,8 +50,8 @@ export const MAX_DIFF_BYTES = 2 * 1024 * 1024;
  *
  * A proxy, and knowingly so: blame's real cost is the file's *history*, not
  * its size, and nothing cheap here can measure that ahead of the walk. Size
- * is what correlates with it — a two-megabyte source file is not a file
- * anyone blames — and it also bounds the two things that are certainly
+ * is what correlates with it, since a two-megabyte source file is not a file
+ * anyone blames, and it also bounds the two things that are certainly
  * proportional to it: the text sent to git's stdin, and the porcelain
  * stream, larger still, that comes back.
  */
@@ -82,7 +82,7 @@ export class GitService {
    * Blamed lines for the buffers blame is switched *on* for.
    *
    * **An entry is the switch.** Present means the gutter is showing for that
-   * buffer, absent means it is not — there is no second flag to disagree
+   * buffer, absent means it is not, and there is no second flag to disagree
    * with this one. The array is empty between the toggle and git's first
    * answer, and stays empty when git had none, so a file outside a
    * repository turns the gutter on and shows nothing rather than refusing:
@@ -148,7 +148,7 @@ export class GitService {
         // touching `.git`: the lines that were "uncommitted" a moment ago
         // are still uncommitted, but every line's *position* is now what git
         // will see, so this is where a blame taken mid-edit stops being an
-        // approximation. Only for a buffer blame is already on for — the
+        // approximation. Only for a buffer blame is already on for: the
         // switch stays where the user put it.
         void this.#refreshBlame(id);
       }),
@@ -188,7 +188,7 @@ export class GitService {
    * Blame goes with it, for the buffers it is on for: this runs after a
    * stage or commit and on a `.git` change, and a commit is precisely the
    * event that turns a run of "uncommitted" lines into somebody's. Buffers
-   * blame is *off* for are still not asked about — the switch is the user's,
+   * blame is *off* for are still not asked about. The switch is the user's,
    * and a refresh must not turn it on.
    */
   async refreshAll(): Promise<void> {
@@ -214,7 +214,7 @@ export class GitService {
    * always on".
    *
    * The empty array goes in before the fetch so the gutter appears with the
-   * keystroke rather than after git answers — on a large repository that is
+   * keystroke rather than after git answers. On a large repository that is
    * the difference between a toggle and a toggle that seems not to have
    * worked.
    */

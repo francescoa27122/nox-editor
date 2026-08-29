@@ -410,14 +410,14 @@ export interface Platform {
    * **`contents` is the buffer's text, not the file's**, and passing it is
    * not an optimisation. The gutter draws beside what is *open*, so blaming
    * what is *saved* misaligns every annotation after the first unsaved
-   * insertion or deletion — and an annotation naming the wrong person is
+   * insertion or deletion, and an annotation naming the wrong person is
    * worse than none at all. git's `--contents` blames the text it is given
    * against the path's history and attributes lines that are in no commit to
    * the all-zero object name, so alignment is exact by construction and "not
    * committed yet" is a fact git computed rather than one a caller inferred.
    *
-   * Null carries the same meaning it does for `gitFileBase` — no repository,
-   * an untracked file, git not installed — and for the same reason: blame is
+   * Null carries the same meaning it does for `gitFileBase` (no repository,
+   * an untracked file, git not installed) and for the same reason: blame is
    * asked for on demand, and a file with no answer must produce no gutter
    * rather than an error. Parsing lives in `core/git-blame.ts`, where it is
    * testable without a repo.

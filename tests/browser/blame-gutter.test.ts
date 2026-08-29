@@ -15,7 +15,7 @@ import '../../src/styles/tokens.css';
  * change.** `tests/support/jsdom-layout.ts` records that jsdom returns zeros
  * from every measurement, so a jsdom test asserting a width would be
  * asserting against an invention. The claim matters because the gutter sits
- * to the left of the code — a column that resized as different names
+ * to the left of the code, and a column that resized as different names
  * scrolled into view would shove every line of the file sideways while you
  * read it.
  *
@@ -46,8 +46,9 @@ function blameFor(lines: number): string {
       stated.add(hash);
       rows.push(
         // git's own author for a line supplied through `--contents`, which is
-        // how Nox always asks. The renderer never shows it — the zero hash is
-        // what makes the line read Uncommitted — so it is here to prove that.
+        // how Nox always asks. The renderer never shows it, because the zero
+        // hash is what makes the line read Uncommitted, so it is here to prove
+        // that.
         `author ${AUTHORS[which] || 'External file (--contents)'}`,
         `author-mail <${which}@example.com>`,
         'author-time 1700000000',
@@ -99,8 +100,8 @@ describe('the blame gutter holds one width', () => {
    * names to the long, truncated ones must not move the code.
    *
    * Verified by planting the alternative: dropping the `fit()` padding from
-   * `blameLabel` — labels sized to their content, as CSS elision would leave
-   * them — makes this fail, because the column follows its widest *visible*
+   * `blameLabel`, leaving labels sized to their content as CSS elision would,
+   * makes this fail, because the column follows its widest *visible*
    * marker.
    */
   it('is the same width wherever the file is scrolled', () => {
@@ -121,7 +122,7 @@ describe('the blame gutter holds one width', () => {
 
   /**
    * The claim `initialSpacer` exists for. Between switching blame on and
-   * git answering — seconds, on a large repository — the column must already
+   * git answering, which is seconds on a large repository, the column must already
    * be its final width, or the code jumps sideways when the answer lands.
    */
   it('is already its final width before any marks arrive', () => {
@@ -153,7 +154,7 @@ describe('the blame gutter holds one width', () => {
   });
 
   /**
-   * Three pictures, for a human. Not an assertion — the three tests above
+   * Three pictures, for a human. Not an assertion: the three tests above
    * are, and this one cannot fail in a useful way.
    *
    * It is here because of the failure it answers. Everything else about
@@ -163,7 +164,7 @@ describe('the blame gutter holds one width', () => {
    * code; and it was going in to the *right* of the git gutter, pushing the
    * change bars away from the lines they mark. Both are recorded where they
    * were fixed. `npm run test:editor` writes these into `__screenshots__/`,
-   * which is gitignored — run it and open them.
+   * which is gitignored. Run it and open them.
    */
   it('renders', async () => {
     open = mountEditor(sourceDocument(LINES));
