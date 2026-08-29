@@ -56,6 +56,17 @@ function fakePlugin(
     else pending.push(line);
   };
 
+  /**
+   * An exit that happened before anyone subscribed, held for delivery.
+   *
+   * The same rule `onLine` documents above, and `startPluginWorker` really
+   * implements it: a worker refused at construction fires `onerror` in the
+   * tick it is made, well before the host has the connection back. A fake that
+   * dropped that exit would make a plugin dying at load untestable — which is
+   * exactly the case this file needed on 2026-08-29.
+   */
+  let exitedWith: number | null | undefined;
+
   const connection: PluginConnection = {
     send: async (line) => {
       const message = JSON.parse(line) as Record<string, unknown>;
@@ -69,6 +80,7 @@ function fakePlugin(
     onStderr: () => {},
     onExit: (handler) => {
       onExit = handler;
+      if (exitedWith !== undefined) handler(exitedWith);
     },
     kill: async () => {
       killed = true;
@@ -82,7 +94,10 @@ function fakePlugin(
       return killed;
     },
     /** Make the plugin die, as a crash or a clean exit would. */
-    die: (code: number | null = 1) => onExit?.(code),
+    die: (code: number | null = 1) => {
+      exitedWith = code;
+      onExit?.(code);
+    },
     push: (m: Inbound) => emit(JSON.stringify(m)),
   };
 }
@@ -100,6 +115,8 @@ interface HarnessOptions {
   plugin?: ReturnType<typeof fakePlugin>;
   greeting?: number | 'silent';
   deny?: boolean;
+  /** Overrides the harness default, for tests about the handshake deadline. */
+  handshakeTimeoutMs?: number;
   /** Effective plugin settings, by plugin id. */
   settings?: Record<string, Record<string, boolean | number | string>>;
 }
@@ -143,7 +160,7 @@ function setup(options: HarnessOptions = {}) {
       }
       return plugin.connection;
     },
-    handshakeTimeoutMs: 50,
+    handshakeTimeoutMs: options.handshakeTimeoutMs ?? 50,
     invokeTimeoutMs: 50,
     changeDebounceMs: 10,
   });
@@ -635,5 +652,90 @@ describe('plugin settings', () => {
 
     await Promise.resolve();
     expect(plugin.written).toHaveLength(before);
+  });
+});
+
+/**
+ * A plugin that dies before greeting must be reported at once.
+ *
+ * `onExit` settles every outstanding *request* through `#settleAll`, and left
+ * the handshake alone — so `#awaitHello` ran to its deadline even though the
+ * thing it was waiting for was already gone. In the packaged app that is ten
+ * seconds of silence, timed at **9.97 s** while walking the Windows build on
+ * 2026-08-29, and the most likely cause is the most ordinary one: a syntax
+ * error in a plugin someone is writing.
+ *
+ * The deadline here is deliberately **thirty seconds**, far past Vitest's own
+ * five. Without the fix these tests do not fail on an assertion, they hang —
+ * which is the honest shape of the bug, and a 50 ms deadline would have hidden
+ * it by arriving before anyone noticed the difference.
+ */
+describe('a plugin that dies before it greets', () => {
+  it('is reported without waiting out the handshake deadline', async () => {
+    const plugin = fakePlugin(() => {});
+    const { commands, notifications } = setup({
+      plugin,
+      greeting: 'silent',
+      handshakeTimeoutMs: 30_000,
+    });
+
+    // Dies immediately — before the host has even subscribed, which is what a
+    // worker refused at construction does.
+    plugin.die(1);
+    await commands.execute('plugin.demo.run');
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]?.title).toBe('Demo was not started');
+  });
+
+  it('says it stopped, rather than blaming it for being slow', async () => {
+    // The two failures want different fixes — a plugin that crashed is not a
+    // plugin that is taking its time — so they must not share a sentence.
+    const plugin = fakePlugin(() => {});
+    const { commands, notifications } = setup({
+      plugin,
+      greeting: 'silent',
+      handshakeTimeoutMs: 30_000,
+    });
+
+    plugin.die(1);
+    await commands.execute('plugin.demo.run');
+
+    expect(notifications[0]?.detail).toMatch(/stopped/);
+    expect(notifications[0]?.detail).not.toMatch(/in time/);
+  });
+
+  /**
+   * The other timing, and it needs the other half of the fix. Above, the exit
+   * lands *before* `#awaitHello` is called and is caught by the recorded
+   * verdict; here the handshake is already waiting, and only settling the
+   * waiter itself will do. Two paths, and a fix for either alone leaves the
+   * other hanging.
+   */
+  it('is reported when it dies part-way through the handshake', async () => {
+    const plugin = fakePlugin(() => {});
+    const { commands, notifications } = setup({
+      plugin,
+      greeting: 'silent',
+      handshakeTimeoutMs: 30_000,
+    });
+
+    const invoked = commands.execute('plugin.demo.run');
+    // Long enough for `connect` to resolve and the handshake to be waiting.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    plugin.die(1);
+    await invoked;
+
+    expect(notifications[0]?.detail).toMatch(/stopped/);
+  });
+
+  it('still blames the clock when the plugin is merely silent', async () => {
+    // The other half: a plugin that is alive and saying nothing must still
+    // time out, or the deadline would have stopped meaning anything.
+    const { commands, notifications } = setup({ greeting: 'silent' });
+
+    await commands.execute('plugin.demo.run');
+
+    expect(notifications[0]?.detail).toMatch(/in time/);
   });
 });
