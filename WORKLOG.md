@@ -2,19 +2,78 @@
 
 State between sessions. Newest entry on top, roughly ten kept.
 
-Durable knowledge — decisions, gotchas, the reasons behind a design — belongs
-in `docs/superpowers/specs/` and in commit messages. **This file is state; those
+Durable knowledge (decisions, gotchas, the reasons behind a design) belongs in
+`docs/superpowers/specs/` and in commit messages. **This file is state. Those
 are knowledge.**
 
 ---
 
-## 2026-08-29 (cloud) — Blame, the last v0.5 row
+## 2026-08-29 (cloud) - The docs, rewritten in a voice a person would use
+
+The operator read the docs back and said they read like a machine wrote them,
+which they did. Long multi-clause sentences hung together on em dashes, the
+same appositive construction over and over, and about 3,000 em dashes across
+11,000 lines. Same content, plainer voice, shorter sentences, none left.
+
+**Done: everything that describes the system as it is now.** README,
+CONTRIBUTING, DESIGN, ROADMAP, CLAUDE.md, ARCHITECTURE, AGENT-PLATFORM and the
+five project skills. Roughly 650 rewrites by hand rather than a substitution,
+because the replacement for an em dash is a full stop, a colon, a comma or a
+pair of brackets depending on the sentence, and a script picking one would
+produce exactly the prose the complaint was about.
+
+**Left alone, on the operator's call: the records of the past.** CHANGELOG
+bodies, the older WORKLOG entries, and the dated specs under
+`docs/superpowers/`. About 2,340 em dashes remain there. The 0.11.0 changelog
+body is the text GitHub already published as that release's notes, so editing
+it would make the repo disagree with what shipped.
+
+**Seven stale things fell out of reading every line.** The README claimed
+blame had shipped when it is in `[Unreleased]`; it now sits under "landed
+since 0.11.0 and not in a release yet", which is the shape the release
+checklist folds into history at the next tag. CLAUDE.md's line references were
+all wrong (`CONTRIBUTING.md:23-82` for a section now at 33-103, Known debt at
+1548 when it is at 2625). Two files still said cargo "may not be installed",
+the exact false fact that cost five sessions. The `nox-tauri-ipc` skill's git
+invariant did not know about `nox_git_blame`. And ARCHITECTURE's debt table
+said a geometric claim was waiting for "when vitest browser mode earns its
+browser download in CI", which it earned earlier the same day.
+
+**One thing I got wrong and then fixed.** I ran `npx prettier` early on, which
+reformatted three whole files to double quotes. `eslint.config.js` says not to,
+at the top, in as many words. Reverted and redone by hand. Then I wrote "no em
+dashes, including comments" into CLAUDE.md while 103 of my own, in the blame
+feature written hours earlier, sat there contradicting it. Those are gone too,
+and the rule is now qualified honestly: it applies to what you write and what
+you edit, and the few thousand that predate it in `src/` and `tests/` stay
+where they are.
+
+Shipped:    README, CONTRIBUTING, DESIGN, ROADMAP, CLAUDE.md, ARCHITECTURE,
+            AGENT-PLATFORM, five SKILL.md, CHANGELOG release headings (to a
+            hyphen, which `release-notes.mjs` already accepted), the em-dash
+            rule in CLAUDE.md and CONTRIBUTING, DESIGN gained a Gutters
+            section, and 103 em dashes out of this session's own code.
+Verified:   `npm test` 2438 - `check` 1054/0/0 - `lint` 0 errors -
+            `build` - `test:editor` 7 - `cargo test` 131+2+4.
+            `release-notes.mjs 0.11.0` and `readme-series.mjs` both run, which
+            is what the release gate reads.
+Next:       Unchanged. Tasks is the last unshipped v0.6 row. The
+            native-chrome walk still wants the PC and consent.
+Blocked:    Nothing.
+Confidence: High on the mechanical part, since nothing in 2,438 tests reads
+            prose and the two release scripts were run rather than assumed.
+            The judgement part is the voice, and that is the operator's to
+            read back.
+
+---
+
+## 2026-08-29 (cloud) - Blame, the last v0.5 row
 
 **Read the machine facts before the work: this session was not the PC.** A
 Linux container, not Windows; `cargo` was already on `PATH` at
 `/root/.cargo/bin/cargo`, and the `%APPDATA%` config directory, PowerShell and
-the WebView2 debugging route do not exist here. The handoff's top priority —
-the native-chrome walk — is not reachable from this machine at all, and needs
+the WebView2 debugging route do not exist here. The handoff's top priority,
+the native-chrome walk, is not reachable from this machine at all, and needs
 consent besides, so the next row that *was* reachable is what got built.
 
 `cargo test` does not work in a fresh container until GTK is installed: the
@@ -23,13 +82,13 @@ which reads like a broken toolchain and is a missing apt package.
 `apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
 libjavascriptcoregtk-4.1-dev` fixes it, and every Rust test then runs here.
 Worth recording next to the PC's cargo/PATH note: same lesson, different
-disguise — "cargo does not work on this machine" was false both times.
+disguise: "cargo does not work on this machine" was false both times.
 
 `npm run test:editor` is the other one that looks broken and is not. The
 container ships Chromium build **1194** and this project's Playwright wants
 **1234**, so it fails with "Executable doesn't exist" and an invitation to run
 `npx playwright install`, which the environment forbids. The layout changed
-between the two as well — 1194 has `chrome-linux/headless_shell`, 1234 expects
+between the two as well: 1194 has `chrome-linux/headless_shell` and 1234 expects
 `chrome-headless-shell-linux64/chrome-headless-shell`. Symlinking a `-1234`
 directory into that shape against the 1194 binary makes the suite run, and it
 passes. Environment only; nothing in the repo was changed for it.
@@ -41,14 +100,14 @@ opposite of what the comment beside them implied.**
 `tauri-macros` 2.6.3 rather than assumed: `ExecutionContext::Blocking` emits
 `let result = $path(…)` straight into the IPC handler, while `(async)` routes
 it through `respond_async_serialized`, which spawns. `git.rs`'s module comment
-argued no caller could be blocked "because every caller is async" — true of the
+argued no caller could be blocked "because every caller is async". True of the
 renderer, and beside the point for the thread that draws the window. Blame is
 the first git read here whose cost follows a file's *history*, so it is the
 crate's only `#[tauri::command(async)]`. The two older reads still block; that
 is now a Known debt row rather than a silent change to shipped commands.
 
 *Writing a whole document to git's stdin before reading its stdout deadlocks.*
-It does not — measured, 440 KB through `git blame --contents -` with nothing
+It does not. Measured: 440 KB through `git blame --contents -` with nothing
 draining stdout, because git 2.43 consumes all of `--contents` before emitting.
 The writer thread stayed anyway, and the doc comment now says which of those
 two things is a measurement and which is a guard.
@@ -61,7 +120,7 @@ stayed, the test stayed, and the test now carries what it does not prove.
 **The design decision that matters most is `--contents`.** The gutter draws
 beside what is *open*; `git blame <path>` describes what is *saved*. Blaming
 the file would misalign every annotation below an unsaved insertion, so git is
-handed the buffer's text on stdin and computes the alignment itself — which
+handed the buffer's text on stdin and computes the alignment itself, which
 also makes "Uncommitted" git's answer rather than an inference. Verified
 against real git before any of it was written. The second is that marks are
 one point per line and never one range per commit-run: a range grows when text
@@ -72,8 +131,8 @@ that run's author.
 ended by naming one: everything was green and nobody had looked at the
 column. The `editor` vitest project is real chromium with real layout, so
 `tests/browser/blame-gutter.test.ts` now pins the two claims jsdom cannot
-reach — the width does not change as you scroll, and it is already final
-before any marks arrive — and writes three screenshots of a passing run into
+reach, that the width does not change as you scroll and that it is already
+final before any marks arrive, and writes three screenshots of a passing run into
 the gitignored `__screenshots__/` for a person to open.
 
 Opening the first one found two things no test had a symptom for.
@@ -81,7 +140,7 @@ Opening the first one found two things no test had a symptom for.
 **The column was going in on the wrong side.** Gutters lay out in the order
 their extensions resolve, and `blameCompartment` was last in
 `buildExtensions`, so the widest column in the editor landed between the git
-gutter and the code — pushing the change bars twenty characters from the
+gutter and the code, pushing the change bars twenty characters from the
 lines they mark. Moved to first, so it is leftmost and switching blame on
 *adds* a column rather than rearranging the apparatus the reader knows.
 
@@ -116,11 +175,11 @@ Verified:   `npm test` 2438 (was 2410) · `check` 1054/0/0 · `lint` 0 errors,
             and recorded: the
             stale-revision retry, the post-await switched-off guard, the
             complexity budget (a full re-scan reports 63.6x against a 24x
-            budget), and the meta-watch guard — that last one *failed* to
+            budget), and the meta-watch guard. That last one *failed* to
             catch its own removal, and says so.
 Next:       Tasks, the last unshipped v0.6 row. The native-chrome walk still
-            wants the PC and consent, and neither is available from here —
-            but note that the `editor` project turned out to reach further
+            wants the PC and consent, and neither is available from here.
+            But note that the `editor` project turned out to reach further
             than "the typing path": it is a real browser with real layout,
             and anything drawn *inside* the WebView can be checked there
             without a desktop at all. Only the native chrome genuinely needs
@@ -129,6 +188,7 @@ Blocked:    Nothing.
 Confidence: High, and higher than it was an hour before the entry was
             finished: the gap it originally ended on is the section above,
             and closing it changed the feature twice.
+
 ---
 
 ## 2026-08-29 (PC) — 0.11.0 prepared, then tagged on the operator's word
