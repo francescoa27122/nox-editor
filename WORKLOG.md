@@ -8,6 +8,70 @@ are knowledge.**
 
 ---
 
+## 2026-08-28 (PC) — The README that would have lied at the next tag
+
+Not a feature. The previous session's `Next`, and it was priority 1 rather
+than 4: a claim about the product that was about to become false.
+
+**The gap was structural, not a typo.** `release.yml`'s gate held the three
+version files to each other and to the tag, and every one of them could agree
+while README §Status still ended *"Not there yet: plugins"* — four merged pull
+requests after plugins landed — and undercounted the suite by 240.
+`CONTRIBUTING.md` did not mention the README at all and no release checklist
+existed anywhere, so nothing would have caught either at the tag.
+
+**Prose cannot be gated, so gate the paragraph it lives in.** The Status
+section opens with `**v0.10.**`, which is machine-readable and sits three lines
+from the sentence that goes stale. `scripts/readme-series.mjs` reads it and the
+gate compares it to the configured series. Getting past that step means someone
+*opened* the paragraph, and the failure message says so rather than telling
+them to bump a number. Series-level (`0.10`, not `0.10.0`) on purpose: a patch
+release changes nothing worth rewriting, and demanding an edit for one teaches
+exactly the reflex this is meant to prevent — verified across 0.10.0, 0.10.1,
+0.11.0 and 1.0.0 before writing the step.
+
+**The regex is in a script because the first attempt put it in YAML.** A `sed`
+backreference that had to survive YAML, then the shell, then Python's own
+escaping turned `` into a literal `` byte, and `yaml.safe_load` refused
+the file. The memory note about checking workflow YAML with Python is what
+caught it, before it reached a tag where nothing runs until it is too late.
+
+**The test count is a floor, not a pin.** Pinning it would make every pull
+request that adds a test edit the README — a tax on the wrong people. A floor
+still catches what actually happened, a number left behind for months while the
+suite grew by hundreds, and the test name says exactly that.
+
+Shipped:    `scripts/readme-series.mjs`; a gate step in `release.yml` between
+            the version check and the changelog read; `tests/release-readme.test.ts`
+            (7 tests — five on the script as a child process, two on this
+            repository's own README); `CONTRIBUTING.md` gained **Cutting a
+            release**, splitting what the gate refuses from what only a human
+            can do; README §Status corrected — 2,060 → 2,300 tests, "Not there
+            yet: plugins" removed, and a "Landed since 0.10, not yet in a
+            release" paragraph so a reader of `main` is not told the plugin API
+            does not exist.
+Verified:   `npm test` 162 files / 2319 tests passed (was 161 / 2312) ·
+            `npm run check` 1031 files, 0 errors 0 warnings · `npm run lint`
+            0 errors, 9 pre-existing warnings · `npm run build` 1.07 s.
+            The gate step's own shell body was extracted from the parsed YAML
+            and run both ways: passes at 0.10.0, refuses 0.11.0 with the
+            message that sends you to the paragraph. Mutation-checked two of
+            two: README reverted to `**v0.9.**` and to "2,060 tests" each turn
+            the matching test red.
+Next:       Custom themes from JSON (ROADMAP v0.6). Themes are already token
+            overrides, so this is exposing them as user files — the same shape
+            `keybindings.json` and `snippets.json` took, and the third file
+            that would want a watcher on the config directory. That watcher is
+            now named in three debt rows and is arguably the better next task.
+Blocked:    Unchanged. The worker transport's CSP still wants a desktop walk;
+            `cargo` is not installed on this machine.
+Confidence: High. The one thing worth doubting is the proxy itself — the gate
+            proves the paragraph was opened, never that the prose was fixed.
+            That is the honest ceiling for a check on prose, and the checklist
+            carries the rest.
+
+---
+
 ## 2026-08-28 (PC) — Plugin settings, and the layer they are not allowed to have
 
 The row the four-surface pass deliberately left out. A plugin could do things

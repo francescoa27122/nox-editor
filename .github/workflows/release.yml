@@ -63,6 +63,35 @@ jobs:
           # which is the same rule the case statement above just applied.
           echo "version=$configured" >> "$GITHUB_OUTPUT"
 
+      # The three version files can agree with each other and with the tag
+      # while the README still describes the release before it. That happened:
+      # plugins landed on main while the Status section still ended "Not there
+      # yet: plugins", and nothing here would have caught it.
+      #
+      # Prose cannot be checked, so this checks the one machine-readable thing
+      # in the same paragraph as the prose. Series-level on purpose: a patch
+      # release changes nothing worth rewriting, and demanding an edit for one
+      # would teach whoever cuts it to bump the number without reading the rest.
+      - name: Check the README describes this release
+        env:
+          CONFIGURED: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          series=${CONFIGURED%.*}
+          readme=$(node scripts/readme-series.mjs)
+
+          if [ "$readme" != "$series" ]; then
+            echo "README.md still describes v$readme; this tag releases $series."
+            echo
+            echo "Read the whole Status section rather than only its version: the"
+            echo "test count and the 'Not there yet:' line are in the same"
+            echo "paragraphs and go stale the same way. There is a checklist under"
+            echo "'Cutting a release' in CONTRIBUTING.md."
+            exit 1
+          fi
+
+          echo "README describes v$readme, which is this release."
+
       # Every release from v0.1.0 to v0.10.0 shipped the same hardcoded Install
       # blurb and nothing else, so no release page has ever said what changed
       # in it. The changelog always did. This is the join, and it is a gate
