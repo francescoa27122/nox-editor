@@ -6,6 +6,26 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Blame.** <kbd>Mod ⌥ B</kbd> — or **Toggle Blame** from the palette or the
+  editor's right-click menu — puts a column beside your code naming the commit
+  and the author of every line. Hover one for the full identity, the date the
+  author wrote it, and the commit's subject.
+
+  It is **on demand**, not always on, and per file rather than everywhere: Nox
+  never runs `git blame` for a file you have not asked about, because that walk
+  is the most expensive thing it can ask git for.
+
+  It annotates **what you have open**, not what is saved. Type a new line and it
+  reads *Uncommitted* rather than borrowing the name from the line above it, and
+  everything below it stays with its own author instead of sliding out of step.
+  Lines you go on to type after that show nothing at all until you save, which
+  is the honest answer — Nox does not re-run blame while you type.
+
+  A file outside a repository, or one git has never seen, turns the column on
+  and shows nothing rather than raising an error.
+
 ## [0.11.0] — 2026-08-29
 
 Nox can be extended now. A folder with a `plugin.json` adds commands, a

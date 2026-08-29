@@ -1,4 +1,5 @@
 import { diffText, type Hunk } from '@core/diff';
+import { parseGitBlame, type BlameLine } from '@core/git-blame';
 import { normalizeGitBase } from '@core/git-gutter';
 import { parseGitBranches, parseGitStatus, type GitStatus } from '@core/git-status';
 import { Signal } from '@core/signal';
@@ -44,6 +45,18 @@ export interface BufferHunks {
 /** Above this, the diff is skipped: Myers' trace is O(D·(N+M)) memory. */
 export const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
+/**
+ * Above this, blame is not asked for.
+ *
+ * A proxy, and knowingly so: blame's real cost is the file's *history*, not
+ * its size, and nothing cheap here can measure that ahead of the walk. Size
+ * is what correlates with it — a two-megabyte source file is not a file
+ * anyone blames — and it also bounds the two things that are certainly
+ * proportional to it: the text sent to git's stdin, and the porcelain
+ * stream, larger still, that comes back.
+ */
+export const MAX_BLAME_BYTES = 2 * 1024 * 1024;
+
 const DEBOUNCE_MS = 300;
 const ACTIVATION_REFETCH_MS = 2000;
 
@@ -64,6 +77,23 @@ export class GitService {
    * panel words each of those from its own context.
    */
   readonly status = new Signal<GitStatus | null>(null);
+
+  /**
+   * Blamed lines for the buffers blame is switched *on* for.
+   *
+   * **An entry is the switch.** Present means the gutter is showing for that
+   * buffer, absent means it is not — there is no second flag to disagree
+   * with this one. The array is empty between the toggle and git's first
+   * answer, and stays empty when git had none, so a file outside a
+   * repository turns the gutter on and shows nothing rather than refusing:
+   * absence is this service's degraded state everywhere else too.
+   *
+   * Per buffer, never global. "On demand, not always on" is the row's whole
+   * constraint (ROADMAP v0.5), and a global switch would spawn a `git blame`
+   * for every file the user opened afterwards, including the ones they only
+   * tabbed through.
+   */
+  readonly blame = new Signal<ReadonlyMap<BufferId, readonly BlameLine[]>>(new Map());
 
   #platform: Platform;
   #workspace: WorkspaceService;
@@ -114,11 +144,19 @@ export class GitService {
       workspace.events.on('saved', ({ id }) => {
         void this.#refresh(id);
         void this.refreshStatus();
+        // Saving is the one edit that can change blame's answer without
+        // touching `.git`: the lines that were "uncommitted" a moment ago
+        // are still uncommitted, but every line's *position* is now what git
+        // will see, so this is where a blame taken mid-edit stops being an
+        // approximation. Only for a buffer blame is already on for — the
+        // switch stays where the user put it.
+        void this.#refreshBlame(id);
       }),
       workspace.events.on('buffer-reset', ({ id }) => void this.#refresh(id)),
       workspace.events.on('external-change', ({ id }) => {
         void this.#refresh(id);
         void this.refreshStatus();
+        void this.#refreshBlame(id);
       }),
       workspace.events.on('buffer-closed', ({ id }) => this.#drop(id)),
       // "Committed in the terminal, tabbed back" — nothing watches .git, so
@@ -144,11 +182,113 @@ export class GitService {
     return this.#bases.get(path);
   }
 
-  /** Forget every base and re-ask git about every open file. */
+  /**
+   * Forget every base and re-ask git about every open file.
+   *
+   * Blame goes with it, for the buffers it is on for: this runs after a
+   * stage or commit and on a `.git` change, and a commit is precisely the
+   * event that turns a run of "uncommitted" lines into somebody's. Buffers
+   * blame is *off* for are still not asked about — the switch is the user's,
+   * and a refresh must not turn it on.
+   */
   async refreshAll(): Promise<void> {
     this.#bases.clear();
     this.#refetched.clear();
-    await Promise.all(this.#workspace.fileBuffers().map(({ id }) => this.#refresh(id)));
+    await Promise.all([
+      ...this.#workspace.fileBuffers().map(({ id }) => this.#refresh(id)),
+      ...[...this.blame.get().keys()].map((id) => this.#refreshBlame(id)),
+    ]);
+  }
+
+  /** Whether the blame gutter is showing for `id`. */
+  blameShown(id: BufferId): boolean {
+    return this.blame.get().has(id);
+  }
+
+  /**
+   * Switch blame on or off for `id`, fetching on the way on.
+   *
+   * The only entry point, and deliberately the only one: nothing else in
+   * this service ever *starts* a blame, so a file nobody asked about never
+   * costs a `git blame`. That is the whole of the row's "on demand, not
+   * always on".
+   *
+   * The empty array goes in before the fetch so the gutter appears with the
+   * keystroke rather than after git answers — on a large repository that is
+   * the difference between a toggle and a toggle that seems not to have
+   * worked.
+   */
+  async toggleBlame(id: BufferId): Promise<void> {
+    if (this.blameShown(id)) {
+      this.#setBlame(id, null);
+      return;
+    }
+    this.#setBlame(id, []);
+    await this.#refreshBlame(id);
+  }
+
+  /**
+   * Re-ask git for every buffer blame is on for. What the palette's refresh
+   * reaches; `refreshAll` does the same as part of its own job.
+   */
+  async refreshBlame(): Promise<void> {
+    await Promise.all([...this.blame.get().keys()].map((id) => this.#refreshBlame(id)));
+  }
+
+  /**
+   * Ask git to blame `id`'s current text, and paint the answer.
+   *
+   * `retry` exists for one race and closes it: the answer describes the text
+   * as it was when the request went out, and if the user typed a *line* in
+   * the meantime every annotation below it is off by one until the next
+   * save. One re-request, and only when the revision actually moved, costs at
+   * most a second `git blame` per trigger and converges the moment typing
+   * stops. It cannot become a loop: nothing here is triggered by an edit, so
+   * a second stale answer is simply painted and corrected at the next save.
+   */
+  async #refreshBlame(id: BufferId, retry = true): Promise<void> {
+    // Off, or never on. Blame is never fetched for a buffer nobody asked
+    // about, and this is the check that guarantees it.
+    if (!this.blameShown(id)) return;
+
+    const path = this.#pathOf(id);
+    const text = this.#workspace.textOf(id);
+    if (!path || text === undefined) return;
+    if (text.length > MAX_BLAME_BYTES) {
+      this.#setBlame(id, []);
+      return;
+    }
+
+    const requestedAt = this.#workspace.revisionOf(id);
+    let raw: string | null;
+    try {
+      raw = await this.#platform.gitBlame(path, text);
+    } catch {
+      // The platform contract says a file with no blame answers null, but a
+      // broken seam must degrade to an empty gutter, never to an error.
+      raw = null;
+    }
+
+    // Switched off, or the buffer closed, while git was working. Painting
+    // now would put a gutter back that the user has already dismissed.
+    if (!this.blameShown(id)) return;
+
+    if (retry && this.#workspace.revisionOf(id) !== requestedAt) {
+      await this.#refreshBlame(id, false);
+      return;
+    }
+
+    this.#setBlame(id, raw === null ? [] : parseGitBlame(raw));
+  }
+
+  /** Set, or delete when `lines` is null. Null is "blame is off for this". */
+  #setBlame(id: BufferId, lines: readonly BlameLine[] | null): void {
+    const current = this.blame.get();
+    if (lines === null && !current.has(id)) return;
+    const next = new Map(current);
+    if (lines === null) next.delete(id);
+    else next.set(id, lines);
+    this.blame.set(next);
   }
 
   dispose(): void {
@@ -179,6 +319,9 @@ export class GitService {
     this.hunks.set(new Map());
     this.baseRevision.update((n) => n + 1);
     this.status.set(null);
+    // A new root is a new repository; every blame on screen described the
+    // old one, and the switches went with it.
+    this.blame.set(new Map());
   }
 
   #drop(id: BufferId): void {
@@ -186,6 +329,9 @@ export class GitService {
     if (timer) clearTimeout(timer);
     this.#timers.delete(id);
     this.#computed.delete(id);
+    // Closing the tab switches blame off with it. A buffer id is not reused,
+    // so a surviving entry would be a leak rather than a restored setting.
+    this.#setBlame(id, null);
     const current = this.hunks.get();
     if (current.has(id)) {
       const next = new Map(current);

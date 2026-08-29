@@ -129,3 +129,37 @@ export function modelReply(braces: number, seed = 11): string {
   parts.push('{"method":"context.openBuffers","id":1}');
   return parts.join('\n');
 }
+
+/**
+ * `git blame --porcelain` output for a file of `lines` lines whose history
+ * has 20 commits in it, cycling — which puts a fresh group on every line and
+ * so states each commit once and reduces the other 19 appearances of it to a
+ * bare header. That asymmetry is the shape the parser has to survive, so a
+ * corpus without it would measure the easy half.
+ */
+export function blamePorcelain(lines: number, commits = 20): string {
+  const rows: string[] = [];
+  const stated = new Set<string>();
+  for (let i = 0; i < lines; i++) {
+    const which = i % commits;
+    const hash = which.toString(16).padStart(40, '0');
+    rows.push(`${hash} ${i + 1} ${i + 1} 1`);
+    if (!stated.has(hash)) {
+      stated.add(hash);
+      rows.push(
+        `author Author ${which}`,
+        `author-mail <author${which}@example.com>`,
+        'author-time 1700000000',
+        'author-tz +0000',
+        `committer Author ${which}`,
+        `committer-mail <author${which}@example.com>`,
+        'committer-time 1700000000',
+        'committer-tz +0000',
+        `summary Commit number ${which}`,
+        'filename src/app.ts',
+      );
+    }
+    rows.push(`\tconst value${i} = ${i};`);
+  }
+  return rows.join('\n') + '\n';
+}

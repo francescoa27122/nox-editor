@@ -17,6 +17,7 @@
     { id: 'edit.toggleComment', separatorBefore: true },
     { id: 'edit.selectAllMatches' },
     { id: 'git.showDiff', separatorBefore: true },
+    { id: 'git.toggleBlame' },
   ];
 </script>
 
@@ -28,6 +29,7 @@
   import { mirroredAnnotation } from '@services/transactions';
   import { cursorInfo } from '@editor/commands';
   import {
+    blameCompartment,
     lspCompartment,
     reconfigureAllEffects,
     reconfigureEffects,
@@ -35,6 +37,7 @@
   import { completionExtension } from '@editor/completion';
   import { lspHoverExtension } from '@editor/hover';
   import { cachedLanguage, hasGrammar, languageCompartment, loadLanguage } from '@editor/languages';
+  import { blameGutter, setGitBlame } from '@editor/git-blame';
   import { onGitGutterClick, setGitGutter } from '@editor/git-gutter';
   import { gutterLines } from '@core/git-gutter';
   import { applyDiagnostics } from '@editor/lsp';
@@ -58,6 +61,14 @@
   let { groupId }: Props = $props();
 
   const app = useApp();
+
+  /**
+   * Built once, not per paint. `Compartment.reconfigure` with the same
+   * extension object leaves CodeMirror's existing instances alone; a fresh
+   * `blameGutter()` each time would tear the column down and rebuild it on
+   * every repaint, including the one that merely delivers git's answer.
+   */
+  const blameExtension = blameGutter();
   const { workspace, config, ui, find, lsp } = app;
 
   const groups = workspace.groups;
@@ -191,6 +202,7 @@
     const offDiagnostics = lsp.diagnostics.subscribe(() => paintDiagnostics());
     // Same trap, same fix: keyed off `currentId`, painted from the pane.
     const offGit = app.git.hunks.subscribe(() => paintGitGutter());
+    const offBlame = app.git.blame.subscribe(() => paintBlame());
     const offDecorations = app.plugins.decorations.revision.subscribe(() => paintPluginMarks());
 
     syncToBuffer(activeId);
@@ -211,6 +223,7 @@
       offDispatcher();
       offDiagnostics();
       offGit();
+      offBlame();
       offDecorations();
       if (autosaveTimer) clearTimeout(autosaveTimer);
       app.unregisterGroupView(groupId);
@@ -258,6 +271,31 @@
   function paintPluginMarks() {
     if (!view || !currentId) return;
     applyPluginDecorations(view, app.plugins.decorations.forBuffer(currentId));
+  }
+
+  /**
+   * Draw blame for the buffer this view is showing, and install or remove
+   * the gutter along with it.
+   *
+   * Keyed off `currentId` rather than the app-wide active id, for the reason
+   * `paintGitGutter` gives. The compartment and the marks move in one
+   * transaction on purpose: a gutter installed a tick ahead of its marks
+   * flashes empty, and marks dispatched into a state whose gutter has just
+   * gone are drawn by nothing.
+   *
+   * An absent entry is blame switched *off*, which is why this clears rather
+   * than returns — a view that has just swapped buffers would otherwise keep
+   * the column, and the names, of the file it was showing a moment ago.
+   */
+  function paintBlame() {
+    if (!view || !currentId) return;
+    const lines = app.git.blame.get().get(currentId);
+    view.dispatch({
+      effects: [
+        blameCompartment.reconfigure(lines ? blameExtension : []),
+        setGitBlame.of(lines ?? []),
+      ],
+    });
   }
 
   function paintDiagnostics() {
@@ -320,6 +358,7 @@
     // state is still loaded lands on the wrong buffer.
     paintDiagnostics();
     paintGitGutter();
+    paintBlame();
     paintPluginMarks();
 
     publishCursor();

@@ -3535,6 +3535,28 @@ export class NoxApp {
         run: () => this.ui.showDiff(),
       },
       {
+        id: 'git.toggleBlame',
+        title: 'Toggle Blame',
+        category: 'Git',
+        keywords: ['blame', 'annotate', 'author', 'who', 'wrote', 'history', 'git', 'gutter'],
+        // The same gate `git.showDiff` uses, and for the same two reasons:
+        // on the service rather than the platform flag because tests start it
+        // over a memory platform, and on a path because a buffer git has
+        // never seen has nothing to blame.
+        enabled: () => this.git.started && Boolean(this.workspace.activeSnapshot()?.path),
+        // No `capabilities`: blame is a read. It spawns a process, but so do
+        // the two git reads either side of it, and the capability model
+        // gates side effects rather than cost.
+        //
+        // Returned, not voided, so `execute()` awaits the fetch — a test that
+        // awaits the command should see the answer, not the request.
+        run: () => {
+          const active = this.workspace.activeSnapshot();
+          if (!active?.path) return;
+          return this.git.toggleBlame(active.id);
+        },
+      },
+      {
         id: 'git.refreshGutter',
         title: 'Refresh Git Gutter',
         category: 'Git',
@@ -4564,6 +4586,11 @@ export class NoxApp {
       // control and the one this scheme was missing; it cost `edit.findPrevious`
       // its `Mod+Shift+G`, which is argued where that binding used to be.
       'Mod+Shift+G': 'git.focus',
+      // `Mod+B` is the explorer, so blame takes the Alt form of the same
+      // letter. Free on every platform, and unclaimed by CodeMirror's keymap
+      // — which owns `Ctrl+B` on macOS for cursor-left, a chord this does not
+      // touch.
+      'Mod+Alt+B': 'git.toggleBlame',
 
       // Edit
       'Mod+F': 'edit.find',

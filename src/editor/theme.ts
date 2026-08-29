@@ -183,6 +183,31 @@ export function noxTheme(options: ThemeOptions): Extension {
         background: 'var(--nox-danger)',
       },
 
+      // --- Blame gutter -----------------------------------------------------
+      // Present only while blame is switched on for the buffer (the pane
+      // reconfigures `blameCompartment`), so this column costs nothing when
+      // it is off.
+      '.cm-blameGutter': {
+        padding: '0 8px 0 4px',
+        // The dividing rule is the gutter's, not each row's: a border on the
+        // elements would break at every line boundary.
+        borderRight: '1px solid var(--nox-border)',
+      },
+      '.cm-blameGutter .nox-blame-entry': {
+        display: 'block',
+        color: 'var(--nox-gutter-fg)',
+        // Pre, because the label is padded to a fixed width and the column's
+        // stability depends on those spaces surviving. `nowrap` alone would
+        // still collapse them.
+        whiteSpace: 'pre',
+      },
+      // A line no commit holds is dimmer still: it is the absence of an
+      // answer, and it must not read as loudly as a name.
+      '.cm-blameGutter .nox-blame-uncommitted': {
+        opacity: '0.6',
+        fontStyle: 'italic',
+      },
+
       // --- Active line ----------------------------------------------------
       '.cm-activeLine': {
         backgroundColor: 'var(--nox-line-active)',

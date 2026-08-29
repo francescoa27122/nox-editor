@@ -26,6 +26,7 @@ import {
 import type { Settings } from '@services/config/schema';
 import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
+import { gitBlameField } from './git-blame';
 import { gitGutter, gitGutterField } from './git-gutter';
 import { lspDiagnosticsExtension } from './lsp';
 
@@ -39,6 +40,21 @@ import { lspDiagnosticsExtension } from './lsp';
  * array rather than another wiring path.
  */
 export const lspCompartment = new Compartment();
+
+/**
+ * Holds the blame gutter, or nothing.
+ *
+ * Reconfigured by `EditorPane` rather than driven from `Settings`, and so
+ * deliberately absent from `compartments` and `SETTING_TO_COMPARTMENTS`:
+ * blame is switched on per *buffer*, at the user's request, and that is
+ * runtime state rather than a preference. `lspCompartment` above is the same
+ * arrangement for the same reason — a pane-level fact a settings-level
+ * factory cannot know.
+ *
+ * The field it renders is unconditional (see `staticExtensions`); only this
+ * rendering half comes and goes.
+ */
+export const blameCompartment = new Compartment();
 import { languageCompartment } from './languages';
 import { pluginDecorationExtension } from './plugin-decorations';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
@@ -229,6 +245,11 @@ function staticExtensions(): Extension[] {
     provenanceField,
     // Same split, same reason: the hunks survive a settings toggle.
     gitGutterField,
+    // And again, for the reason the header of `git-blame.ts` gives: the
+    // marks must survive the gutter being switched off and on, and removing
+    // a StateField destroys what it holds. There is no setting to gate this
+    // one on in any case — blame is a per-buffer request, not a preference.
+    gitBlameField,
     // Unconditional for the same reason as the two above, and there is no
     // setting to gate it on anyway: a plugin's marks are its output, not a
     // preference. The whole per-keystroke cost is mapping the set through the
@@ -254,6 +275,9 @@ export function buildExtensions(settings: Settings): Extension[] {
     lspDiagnosticsExtension(),
     // Empty until a pane fills it in; see `lspCompartment`.
     lspCompartment.of([]),
+    // Empty until blame is switched on for the buffer this state belongs to;
+    // see `blameCompartment`.
+    blameCompartment.of([]),
     // Empty until the grammar resolves; see `editor/languages.ts`.
     languageCompartment.of([]),
   ];

@@ -8,6 +8,97 @@ are knowledge.**
 
 ---
 
+## 2026-08-29 (cloud) — Blame, the last v0.5 row
+
+**Read the machine facts before the work: this session was not the PC.** A
+Linux container, not Windows; `cargo` was already on `PATH` at
+`/root/.cargo/bin/cargo`, and the `%APPDATA%` config directory, PowerShell and
+the WebView2 debugging route do not exist here. The handoff's top priority —
+the native-chrome walk — is not reachable from this machine at all, and needs
+consent besides, so the next row that *was* reachable is what got built.
+
+`cargo test` does not work in a fresh container until GTK is installed: the
+build fails at `gdk-sys` with "The system library `gdk-3.0` was not found",
+which reads like a broken toolchain and is a missing apt package.
+`apt-get install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+libjavascriptcoregtk-4.1-dev` fixes it, and every Rust test then runs here.
+Worth recording next to the PC's cargo/PATH note: same lesson, different
+disguise — "cargo does not work on this machine" was false both times.
+
+`npm run test:editor` is the other one that looks broken and is not. The
+container ships Chromium build **1194** and this project's Playwright wants
+**1234**, so it fails with "Executable doesn't exist" and an invitation to run
+`npx playwright install`, which the environment forbids. The layout changed
+between the two as well — 1194 has `chrome-linux/headless_shell`, 1234 expects
+`chrome-headless-shell-linux64/chrome-headless-shell`. Symlinking a `-1234`
+directory into that shape against the 1194 binary makes the suite run, and it
+passes. Environment only; nothing in the repo was changed for it.
+
+**Three claims were checked rather than carried, and two came back the
+opposite of what the comment beside them implied.**
+
+*A sync `#[tauri::command]` runs on the main thread.* Read in
+`tauri-macros` 2.6.3 rather than assumed: `ExecutionContext::Blocking` emits
+`let result = $path(…)` straight into the IPC handler, while `(async)` routes
+it through `respond_async_serialized`, which spawns. `git.rs`'s module comment
+argued no caller could be blocked "because every caller is async" — true of the
+renderer, and beside the point for the thread that draws the window. Blame is
+the first git read here whose cost follows a file's *history*, so it is the
+crate's only `#[tauri::command(async)]`. The two older reads still block; that
+is now a Known debt row rather than a silent change to shipped commands.
+
+*Writing a whole document to git's stdin before reading its stdout deadlocks.*
+It does not — measured, 440 KB through `git blame --contents -` with nothing
+draining stdout, because git 2.43 consumes all of `--contents` before emitting.
+The writer thread stayed anyway, and the doc comment now says which of those
+two things is a measurement and which is a guard.
+
+*`GIT_OPTIONAL_LOCKS=0` is what keeps blame from feeding the meta watch.*
+Also not: deleting it leaves the new meta-watch test passing, because
+`git blame` does not take `index.lock` the way `git status` does. The env var
+stayed, the test stayed, and the test now carries what it does not prove.
+
+**The design decision that matters most is `--contents`.** The gutter draws
+beside what is *open*; `git blame <path>` describes what is *saved*. Blaming
+the file would misalign every annotation below an unsaved insertion, so git is
+handed the buffer's text on stdin and computes the alignment itself — which
+also makes "Uncommitted" git's answer rather than an inference. Verified
+against real git before any of it was written. The second is that marks are
+one point per line and never one range per commit-run: a range grows when text
+is inserted inside it, so a line typed in the middle of a run would inherit
+that run's author.
+
+Shipped:    `nox_git_blame` + `repo_and_relpath` (shared with
+            `nox_git_file_base`, factored not copied); `gitBlame` across
+            `types.ts`/`tauri.ts`/`memory.ts`, the fake rendering **real**
+            porcelain from `seedGitBlame`; `core/git-blame.ts`;
+            `GitService.toggleBlame` + the `blame` signal, where an entry
+            *is* the switch; `editor/git-blame.ts` + `blameCompartment`,
+            reconfigured by the pane like `lspCompartment`;
+            `git.toggleBlame` (`Mod+Alt+B`, palette, context menu); theme
+            CSS; the design spec, two ARCHITECTURE decisions, a debt row,
+            ROADMAP, README and CHANGELOG.
+Verified:   `npm test` 2438 (was 2410) · `check` 1042/0/0 · `lint` 0 errors,
+            9 pre-existing warnings · `build` 2.30 s · `test:editor` 3 ·
+            `cargo test` 131+2+4 (was 122+2+4). Four mutation checks run and
+            recorded: the
+            stale-revision retry, the post-await switched-off guard, the
+            complexity budget (a full re-scan reports 63.6x against a 24x
+            budget), and the meta-watch guard — that last one *failed* to
+            catch its own removal, and says so.
+Next:       Tasks, the last unshipped v0.6 row. The native-chrome walk still
+            wants the PC and consent, and neither is available from here.
+Blocked:    Nothing.
+Confidence: High on everything with a test behind it, which is all of it
+            except the one thing no test here can reach: nobody has *seen*
+            this gutter. It is proved in jsdom, which has no layout, so the
+            column's width and alignment beside real code are unverified —
+            the fixed-width label and `initialSpacer` are the reasons to
+            expect them to be right, not evidence that they are. That is a
+            row for the next pixel walk.
+
+---
+
 ## 2026-08-29 (PC) — 0.11.0 prepared, then tagged on the operator's word
 
 Everything up to the tag was done and merged (#170) and handed over, because a

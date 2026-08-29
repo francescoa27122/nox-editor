@@ -112,6 +112,7 @@ src/
 │  ├─ fuzzy.ts           O(pattern × text) DP matcher for palette/quick-open
 │  ├─ diff.ts            Myers line diff; hunks for review and Git
 │  ├─ git-status.ts      Porcelain v2 → branch, staged/unstaged, renames
+│  ├─ git-blame.ts       Blame porcelain → a commit per line, and its label
 │  ├─ replace.ts         Replacement computation and expansion
 │  ├─ languages.ts       Language identity (no parsers)
 │  ├─ symbols.ts         Named structure in a file, read from a parse tree
@@ -1625,6 +1626,49 @@ this set too: it is the one place the feature would construct input for git
 (`apply --cached`) rather than naming files, and it gets its own envelope
 read when it is built.
 
+### Blame asks git about the buffer, not the file
+
+`nox_git_blame` passes the open document to `git blame --contents -` on
+stdin, rather than letting git read the path off disk. The gutter draws
+beside what is *open*; `git blame <path>` describes what is *saved*. The
+moment those differ — any unsaved insertion or deletion — blaming the saved
+file misaligns every annotation below the first one, and a gutter naming the
+wrong person is worse than no gutter. `--contents` is git's own answer:
+it blames the text it is handed against the path's history and attributes
+lines that are in no commit to the all-zero object name, so alignment is
+exact by construction and "not committed yet" is a fact git computed rather
+than one the renderer inferred. Verified against real git before it was
+built, and pinned by
+`an_unsaved_insertion_shifts_blame_instead_of_misattributing_it`.
+
+Two consequences a future reader would otherwise undo. **`uncommitted` is
+read off the hash, never the author** — git names that author
+`Not Committed Yet` when it blames a dirty worktree and
+`External file (--contents)` when it blames supplied text, which is how Nox
+always asks, so keying on the name would work in a fixture and fail in the
+product. And **the blame marks are one point per line, never one range per
+commit-run**, even though blame arrives run-length encoded and ranges would
+be a fraction of the marks: a range grows when text is inserted inside it, so
+a line typed in the middle of a run would inherit that run's commit. A point
+mark cannot do that — an inserted line simply has no mark.
+
+### `nox_git_blame` is the crate's only `#[tauri::command(async)]`
+
+A sync command body runs inline on the thread that handles the IPC message,
+which is the main thread — read in `tauri-macros` 2.6.3 rather than assumed:
+the default `ExecutionContext::Blocking` emits `let result = $path(…)`
+straight into the handler, while `(async)` routes it through
+`respond_async_serialized`, which spawns. Every other git read here costs one
+blob or one index scan; blame is the first whose cost follows a file's
+*history*, and on an old file in a large repository that is seconds. The
+function stays `pub fn` — there is nothing to await and nothing to cancel, so
+the reason the rest of the crate avoids `async fn` (a cancel handle that
+arrives only once there is nothing left to cancel) does not apply.
+
+The same reading says the git reads that came before it — `nox_git_file_base`
+and `nox_git_status` — do block the main thread for as long as they run. That
+is recorded in the Known debt table rather than changed here.
+
 ### Where the OS will not draw a menu, Nox draws its own
 
 macOS has a native menu bar and keeps it. Everywhere else — Windows, Linux,
@@ -2587,6 +2631,7 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 | A custom theme is not held to any contrast floor | `tests/token-contrast.test.ts` holds Nox's own tokens to WCAG 4.5:1 and keeps doing so; a theme a user writes is checked for *shape* and never for legibility. Deliberate — refusing to load someone's theme because a comment colour measures 4.2:1 would be Nox overruling a person about their own screen — but it means the guarantee that suite provides covers the built-in themes only, which is worth saying rather than leaving implied. |
 | A theme cannot set a shadow or the focus ring's geometry | `--nox-shadow-md`, `--nox-shadow-lg` and `--nox-focus-ring` are composite `box-shadow` values, so they would need a grammar of their own rather than the colour check every other token gets. `--nox-focus-ring-color` *is* themeable, which covers the case anyone actually wants. A theme on a light ground would want the shadows and cannot have them. |
 | Four config files still need a Reload command | The config directory is watched since 2026-08-28, and `snippets.json`, `plugin-settings.json` and a theme file all reload on an outside edit. `settings.json` and `keybindings.json` are **deliberately** absent: Nox writes both constantly, and live-reloading the layer that owns every preference wants its own envelope read rather than riding in on this one. `servers.json` and `agents.json` are absent because reloading them *restarts processes*, which is a decision a user makes — that is what **Reload Language Servers** is. `classifyConfigChange` is where that list lives, and a test pins the omissions so adding a file to the folder cannot silently start reloading it. |
+| The two older git reads still run on the main thread | `nox_git_file_base` and `nox_git_status` are plain `#[tauri::command]`, so their bodies run inline on the thread that handles the IPC message and draws the window. `git.rs`'s module comment argues no caller can be blocked because "every caller is async" — true of the *renderer*, and beside the point for the *main thread*, which is the thing a blocking body holds. In practice neither is slow: one blob, one index scan. `git status` on a very large repository with a cold cache is the case that would be felt, and it is a `#[tauri::command(async)]` away — deliberately not taken here, because it is a change to two shipped commands with no failure to point at, and this change already carries one command's worth of new argument. Found while building blame, by reading the macro rather than trusting the comment. |
 | The packaged app is verified, but not its native chrome | Three walks on 2026-08-29 covered the packaged Windows build: behaviour from disk (a command's effect on `settings.json`, a plugin's own log, warnings in `diagnostics.log`) and then appearance, by opening the WebView's debugging endpoint and screenshotting it — a custom theme painting, the Plugins tab and its controls, a plugin's status item and panel rows, the settings loop repainting, and a theme edited outside the editor repainting a running window. What no walk has yet driven is the part *outside* the WebView: the menu bar, native dialogs, the terminal, a real git repository. Those are the `nox-desktop-walk` checklist's own rows, and they need the desktop rather than the renderer. See `.desktop-pass-report.md`. |
 | A plugin process is not sandboxed | The same line `agents` already carries: the permission model governs what a plugin may ask *Nox* to do, not what its own process can reach. A plugin is trusted code you chose to install, like a shell plugin — the difference from an agent is only that more people will install one. |
 | A snippet's choice syntax keeps only its first option | `${1|const,let|}` becomes `${1:const}`. CodeMirror's snippet fields have no picker attached, so the alternatives have nowhere to be shown, and a field the user can type over beats a literal `|const,let|` in their code. Offering the real thing means a completion source that fires on entering the field — buildable, and a bigger feature than the conversion it would sit inside. |

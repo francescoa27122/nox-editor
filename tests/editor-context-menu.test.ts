@@ -104,7 +104,7 @@ describe('right-clicking the editor', () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it('offers the four LSP actions, the two edit actions and the diff, in groups', async () => {
+  it('offers the four LSP actions, the two edit actions and the two git ones, in groups', async () => {
     const { view, container } = await pane();
     rightClick(view);
 
@@ -116,6 +116,7 @@ describe('right-clicking the editor', () => {
       'Toggle Line Comment',
       'Select All Occurrences',
       'Show Changes',
+      'Toggle Blame',
     ]);
     // Two separators: LSP | edit | git.
     expect(container.querySelectorAll('[role="separator"]').length).toBe(2);
@@ -156,7 +157,7 @@ describe('right-clicking the editor', () => {
     const { app, view, container } = await pane();
     rightClick(view);
 
-    // No language server is running and Git never started, so these five are
+    // No language server is running and Git never started, so these six are
     // disabled — and still listed, which is the whole point of the menu.
     for (const label of [
       'Go to Definition',
@@ -164,6 +165,7 @@ describe('right-clicking the editor', () => {
       'Rename Symbol',
       'Format Document',
       'Show Changes',
+      'Toggle Blame',
     ]) {
       expect(app.commands.isEnabled(labelToId(label))).toBe(false);
       expect(find(container, label)?.disabled).toBe(true);
@@ -234,6 +236,7 @@ function labelToId(label: string): string {
     'Rename Symbol': 'lsp.renameSymbol',
     'Format Document': 'lsp.formatDocument',
     'Show Changes': 'git.showDiff',
+    'Toggle Blame': 'git.toggleBlame',
   };
   return ids[label]!;
 }

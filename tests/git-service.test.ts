@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NoxApp } from '../src/app';
 import { MemoryPlatform } from '../src/platform/memory';
-import { MAX_DIFF_BYTES } from '../src/services/git';
+import { MAX_BLAME_BYTES, MAX_DIFF_BYTES } from '../src/services/git';
 
 /**
  * GitService over a real workspace and a MemoryPlatform with seeded bases.
@@ -277,5 +277,228 @@ describe('the .git meta watch', () => {
 
     // One debounced refresh (plus at most its queued follower) — not three.
     expect(calls).toBeLessThanOrEqual(2);
+  });
+});
+
+/**
+ * Blame, over the same seeded platform.
+ *
+ * `seedGitBlame` names one commit per line and the fake renders real
+ * `--porcelain` from it — a commit stated once, repeats reduced to a bare
+ * header — so these tests exercise the parser through the same shape the
+ * Rust command produces rather than through a convenient one. The seed below
+ * puts the same commit on lines 1 and 3 with another between them, which is
+ * exactly the arrangement that produces a bare repeat.
+ */
+describe('the blame gutter´s service half', () => {
+  const FIRST = 'a'.repeat(40);
+  const SECOND = 'b'.repeat(40);
+  const SEED = [
+    { hash: FIRST, author: 'Jane Doe', summary: 'Add three lines' },
+    { hash: SECOND, author: 'Bo', summary: 'Shout the middle one' },
+    { hash: FIRST, author: 'Jane Doe', summary: 'Add three lines' },
+  ];
+
+  async function openBlamed(text = BASE) {
+    platform.seedFile(FILE, text);
+    platform.seedGitBase(FILE, text);
+    platform.seedGitBlame(FILE, SEED);
+    await app.workspace.openFolder('/w');
+    const id = (await app.workspace.open(FILE))!;
+    await vi.runAllTimersAsync();
+    return id;
+  }
+
+  function type(id: string, insert: string) {
+    const state = app.workspace.stateOf(id)!;
+    app.workspace.applyTransaction(id, state.update({ changes: { from: 0, insert } }));
+  }
+
+  /**
+   * The whole of "on demand, not always on" (ROADMAP v0.5). Opening a file,
+   * editing it and saving it must not cost a `git blame` — that walk is the
+   * most expensive read in the service, and nothing but the toggle may start
+   * one.
+   */
+  it('asks git nothing until it is switched on', async () => {
+    const spy = vi.spyOn(platform, 'gitBlame');
+    const id = await openBlamed();
+    type(id, 'zero\n');
+    await app.workspace.save(id);
+    await vi.runAllTimersAsync();
+    expect(spy).not.toHaveBeenCalled();
+    expect(app.git.blameShown(id)).toBe(false);
+  });
+
+  it('paints the blamed lines when switched on and drops them when switched off', async () => {
+    const id = await openBlamed();
+
+    await app.git.toggleBlame(id);
+    const lines = app.git.blame.get().get(id)!;
+    expect(lines.map((l) => l.line)).toEqual([1, 2, 3]);
+    expect(lines.map((l) => l.commit.author)).toEqual(['Jane Doe', 'Bo', 'Jane Doe']);
+    // The repeat carried its commit forward through the fake's real shape.
+    expect(lines[2]!.commit).toBe(lines[0]!.commit);
+
+    await app.git.toggleBlame(id);
+    expect(app.git.blameShown(id)).toBe(false);
+    expect(app.git.blame.get().has(id)).toBe(false);
+  });
+
+  /**
+   * The `--contents` contract, asserted at the seam that would break it. The
+   * gutter draws beside the buffer, so git must be given the buffer — hand
+   * it the saved file instead and every annotation below an unsaved
+   * insertion names the wrong person.
+   */
+  it('sends the buffer´s text rather than the file´s', async () => {
+    const id = await openBlamed();
+    const spy = vi.spyOn(platform, 'gitBlame');
+    type(id, 'unsaved\n');
+
+    await app.git.toggleBlame(id);
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]![1]).toBe(app.workspace.textOf(id));
+    // And not what is on disk, which is still the seeded text.
+    expect(spy.mock.calls[0]![1]).not.toBe(BASE);
+  });
+
+  /**
+   * Saving is where a blame taken mid-edit stops being an approximation, so
+   * it is the one edit that refetches. A buffer blame is *off* for still
+   * costs nothing — the switch is the user's, and a refresh must not flip it.
+   */
+  it('refetches on save, and only for the buffers it is on for', async () => {
+    const id = await openBlamed();
+    platform.seedFile('/w/other.ts', BASE);
+    platform.seedGitBase('/w/other.ts', BASE);
+    platform.seedGitBlame('/w/other.ts', SEED);
+    const other = (await app.workspace.open('/w/other.ts'))!;
+    await vi.runAllTimersAsync();
+
+    await app.git.toggleBlame(id);
+    const spy = vi.spyOn(platform, 'gitBlame');
+
+    type(id, 'zero\n');
+    await app.workspace.save(id);
+    await vi.runAllTimersAsync();
+    type(other, 'zero\n');
+    await app.workspace.save(other);
+    await vi.runAllTimersAsync();
+
+    expect(spy.mock.calls.map((call) => call[0])).toEqual([FILE]);
+  });
+
+  it('switches off when the buffer closes', async () => {
+    const id = await openBlamed();
+    await app.git.toggleBlame(id);
+    app.workspace.close(id, { force: true });
+    expect(app.git.blame.get().has(id)).toBe(false);
+  });
+
+  /**
+   * Absence, not refusal: a file outside a repository turns the gutter on
+   * and shows nothing, the same degraded state the git gutter has. The entry
+   * is what keeps the column installed, so the user can see that the toggle
+   * did something and turn it back off.
+   */
+  it('switches on but shows nothing for a file git has no blame for', async () => {
+    platform.seedFile('/w/loose.ts', BASE);
+    await app.workspace.openFolder('/w');
+    const id = (await app.workspace.open('/w/loose.ts'))!;
+    await vi.runAllTimersAsync();
+
+    await app.git.toggleBlame(id);
+    expect(app.git.blameShown(id)).toBe(true);
+    expect(app.git.blame.get().get(id)).toEqual([]);
+  });
+
+  it('does not ask git about a document past the size cap', async () => {
+    const id = await openBlamed('x'.repeat(MAX_BLAME_BYTES + 1));
+    const spy = vi.spyOn(platform, 'gitBlame');
+
+    await app.git.toggleBlame(id);
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(app.git.blame.get().get(id)).toEqual([]);
+  });
+
+  it('forgets every blame when the root changes', async () => {
+    const id = await openBlamed();
+    await app.git.toggleBlame(id);
+    expect(app.git.blameShown(id)).toBe(true);
+
+    platform.seedFile('/other/main.ts', BASE);
+    await app.workspace.openFolder('/other');
+    await vi.runAllTimersAsync();
+
+    expect(app.git.blame.get().size).toBe(0);
+  });
+
+  /**
+   * The race the retry exists for. git's answer describes the text the
+   * request carried, so a *line* typed while it was working leaves every
+   * annotation below it one row out until the next save. One re-request,
+   * only when the revision actually moved, closes that — and it cannot loop,
+   * because no edit ever triggers a fetch in the first place.
+   *
+   * Mutation check: disabling the `revisionOf(id) !== requestedAt` branch in
+   * `#refreshBlame` turned this red (expected 2 calls, got 1) and left the
+   * other 26 green; restored, suite green.
+   */
+  it('re-asks once, with fresh text, when the document moved while git worked', async () => {
+    const id = await openBlamed();
+    const real = platform.gitBlame.bind(platform);
+    let release: (() => void) | null = null;
+    const spy = vi
+      .spyOn(platform, 'gitBlame')
+      .mockImplementation(async (path: string, contents: string) => {
+        if (spy.mock.calls.length === 1) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return real(path, contents);
+      });
+
+    const toggling = app.git.toggleBlame(id);
+    await Promise.resolve();
+    type(id, 'typed while git was working\n');
+    release!();
+    await toggling;
+
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy.mock.calls[1]![1]).toBe(app.workspace.textOf(id));
+  });
+
+  /**
+   * An answer that lands after the user has already dismissed the gutter
+   * must not put it back.
+   *
+   * Mutation check: deleting the post-await `blameShown` guard in
+   * `#refreshBlame` turned this red — the entry is written straight back
+   * into the map and the column reappears on its own — and left the other 26
+   * green; restored, suite green.
+   */
+  it('does not paint an answer that arrived after it was switched off', async () => {
+    const id = await openBlamed();
+    let release: (() => void) | null = null;
+    vi.spyOn(platform, 'gitBlame').mockImplementation(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return null;
+    });
+
+    const toggling = app.git.toggleBlame(id);
+    await Promise.resolve();
+    // A second toggle while the first is in flight: the entry went in
+    // synchronously, so this is the "off" half.
+    void app.git.toggleBlame(id);
+    release!();
+    await toggling;
+
+    expect(app.git.blame.get().has(id)).toBe(false);
   });
 });

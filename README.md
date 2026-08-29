@@ -227,6 +227,7 @@ is why Umbra takes about 30 lines to describe rather than a second stylesheet.
 | <kbd>Mod E</kbd> | Switch between open files |
 | <kbd>Mod ⇧ F</kbd> | Search the whole project |
 | <kbd>Mod ⇧ G</kbd> | Git — stage, commit, switch branch |
+| <kbd>Mod ⌥ B</kbd> | Blame — who wrote each line |
 | <kbd>Mod .</kbd> | Fix what's under the cursor |
 | <kbd>Mod ⇧ A</kbd> | Answers from a model |
 | <kbd>Mod \\</kbd> | Split the editor |
@@ -263,9 +264,12 @@ on your clipboard, with your home directory stripped out of the paths.
 
 **Git arrived in 0.5.0** — a gutter marking what the index doesn't hold yet, a
 side-by-side or inline diff of the file against its base, and a focused panel
-to stage, unstage, commit and switch branches (<kbd>Mod ⇧ G</kbd>). Not a Git
-client: no push, pull, rebase or amend, and nothing that can discard your
-working tree.
+to stage, unstage, commit and switch branches (<kbd>Mod ⇧ G</kbd>). **Blame**
+completed it: <kbd>Mod ⌥ B</kbd> puts who wrote each line beside the line, on
+demand rather than always on, and it annotates what you have *open* — type an
+unsaved line and it reads Uncommitted instead of borrowing the name above it.
+Not a Git client: no push, pull, rebase or amend, and nothing that can discard
+your working tree.
 
 Also in 0.5.0: **you can change the keys** (every command, including the ones
 with none), **a project can carry its own conventions** in `.nox/settings.json`,
@@ -288,8 +292,7 @@ the cursor is. All of it from a `servers.json` you write. Run **Configure
 Language Servers** from the palette and Nox creates it with a working
 `typescript-language-server` entry to start from; **Reload Language Servers**
 picks up your edits. Nox never starts a server you did not list there, and
-Format on Save is off until you turn it on. Not there yet: blame. See
-[ROADMAP.md](ROADMAP.md).
+Format on Save is off until you turn it on. See [ROADMAP.md](ROADMAP.md).
 
 **0.11.0 made Nox extensible.** A folder with a `plugin.json` adds commands to
 the palette, a readout to the status bar, a panel to the sidebar, marks in the

@@ -13,6 +13,13 @@
 //! for what the fs.rs convention reserves it for and is not expected in
 //! practice.
 //!
+//! `nox_git_blame` shares that contract and that opening — both reach a file
+//! through `repo_and_relpath` — and differs in one way that matters: it is
+//! the crate's only `#[tauri::command(async)]`, because it is the only git
+//! read here whose cost scales with a file's *history* rather than with one
+//! blob, and a sync command body runs on the thread that must also draw the
+//! window. Its own doc comment carries the argument.
+//!
 //! No timeout on `output()`. `git show` against a local repo does not hang in
 //! practice, and if it ever did the cost is a gutter that never arrives —
 //! never a blocked save or keystroke, because every caller is async and
@@ -353,31 +360,7 @@ const INDEX_STAGES: [u8; 3] = [0, 2, 1];
 /// The index's version of the file, or `None` when there isn't one.
 #[tauri::command]
 pub fn nox_git_file_base(path: String) -> Result<Option<String>> {
-    // Resolved before anything else: the relpath computation below compares
-    // this against the root git prints, and git prints resolved paths.
-    let Some(file) = plain_canonical(Path::new(&path)) else {
-        return Ok(None);
-    };
-    let Some(parent) = Path::new(&file).parent() else {
-        return Ok(None);
-    };
-
-    let Some(output) = run_git(parent, &["rev-parse", "--show-toplevel"]) else {
-        return Ok(None);
-    };
-    if !output.status.success() {
-        // Not a repo. rev-parse says so on stderr; the gutter doesn't care.
-        return Ok(None);
-    }
-    let Ok(root) = String::from_utf8(output.stdout) else {
-        return Ok(None);
-    };
-    let root = root.trim_end_matches(['\r', '\n']);
-    if root.is_empty() {
-        return Ok(None);
-    }
-
-    let Some(relpath) = relative_to_root(root, &file) else {
+    let Some((root, relpath)) = repo_and_relpath(&path) else {
         return Ok(None);
     };
 
@@ -388,7 +371,7 @@ pub fn nox_git_file_base(path: String) -> Result<Option<String>> {
         // `--literal-pathspecs` so a `*` or `:` in a real filename is a
         // filename, not a glob or magic pathspec.
         let spec = format!(":{stage}:{relpath}");
-        let Some(output) = run_git(Path::new(root), &["--literal-pathspecs", "show", &spec]) else {
+        let Some(output) = run_git(Path::new(&root), &["--literal-pathspecs", "show", &spec]) else {
             return Ok(None);
         };
         if !output.status.success() {
@@ -406,6 +389,161 @@ pub fn nox_git_file_base(path: String) -> Result<Option<String>> {
         };
     }
     Ok(None)
+}
+
+/// The repository root for `path`, and `path` relative to it — the shared
+/// opening of every per-file read here. `None` for everything that is not a
+/// tracked place: no git, no repository, an unresolvable path.
+///
+/// Factored out of `nox_git_file_base` when blame arrived rather than
+/// copied: the two must agree about what "inside this repository" means, or
+/// a file could have a gutter and no blame for reasons neither one states.
+fn repo_and_relpath(path: &str) -> Option<(String, String)> {
+    // Resolved before anything else: the relpath computation compares this
+    // against the root git prints, and git prints resolved paths.
+    let file = plain_canonical(Path::new(path))?;
+    let parent = Path::new(&file).parent()?;
+
+    let output = run_git(parent, &["rev-parse", "--show-toplevel"])?;
+    if !output.status.success() {
+        // Not a repo. rev-parse says so on stderr; the callers don't care.
+        return None;
+    }
+    let root = String::from_utf8(output.stdout).ok()?;
+    let root = root.trim_end_matches(['\r', '\n']);
+    if root.is_empty() {
+        return None;
+    }
+
+    let relpath = relative_to_root(root, &file)?;
+    Some((root.to_string(), relpath))
+}
+
+/// Raw `git blame --porcelain` output for `contents` as the current text of
+/// `path`, or `None`.
+///
+/// **The buffer's text is blamed, not the file on disk, and that is the
+/// whole design.** `git blame <path>` describes what is saved; the gutter
+/// draws beside what is *open*. Whenever those differ — any unsaved edit —
+/// blaming the saved file misaligns every annotation after the first
+/// inserted or deleted line, and a blame gutter that attributes a line to
+/// someone who did not write it is worse than no gutter at all. `--contents`
+/// is git's own answer to exactly this: it blames the text it is given
+/// against the path's history, attributing lines that are in the text but in
+/// no commit to the all-zero object name. So alignment is exact by
+/// construction, and "not committed yet" becomes a fact git computed rather
+/// than one the renderer inferred.
+///
+/// **The one `#[tauri::command(async)]` in the crate, and it is deliberate.**
+/// A sync command body runs inline on the thread that handles the IPC
+/// message — the main thread — so its duration is the window's duration. For
+/// every other git read here that is a non-issue: `git show :0:<path>` and
+/// `git status` cost one blob and one index scan. Blame is the first git read
+/// in this codebase whose cost scales with a file's *history* rather than
+/// with one blob: it walks every commit that ever touched the path, and on an
+/// old file in a large repository that is seconds, not milliseconds.
+/// `(async)` on a sync function makes Tauri run the body on the async runtime
+/// instead (`sync_threadpool`, in the macro's own vocabulary), which is what
+/// keeps a slow blame from freezing the window it was invoked from. The
+/// function itself stays `pub fn` — there is nothing to await and nothing to
+/// cancel, so the reason the rest of the crate avoids `async fn` does not
+/// apply.
+///
+/// `--porcelain`, not `--line-porcelain`: the line variant repeats a commit's
+/// whole header block for every line it owns, which multiplies the payload
+/// crossing the boundary by the size of each group for no extra fact. Parsing
+/// lives in `core/git-blame.ts`, where it is testable without a repo — the
+/// same split `nox_git_status` makes.
+///
+/// `None` is the answer to everything that is not blame output: no
+/// repository, an untracked file, git not installed. The gutter's degraded
+/// state is absence, exactly as it is for `nox_git_file_base`, so no failure
+/// here may become a dialog.
+///
+/// `from_utf8_lossy` rather than a strict decode, and the choice is load
+/// bearing in the opposite direction from `nox_git_file_base`'s. Porcelain
+/// output interleaves the *file's own content* — one tab-prefixed line per
+/// blamed line — with the headers, so one line of Latin-1 in an otherwise
+/// ordinary source file would fail a strict decode and blank the blame for
+/// the whole file. The parser reads only the header fields and drops every
+/// content line, so a replacement character can only ever land somewhere
+/// nothing reads. Where a strict decode would be right — a blob that *is*
+/// the answer — `nox_git_file_base` still uses one.
+#[tauri::command(async)]
+pub fn nox_git_blame(path: String, contents: String) -> Result<Option<String>> {
+    use std::process::Stdio;
+
+    let Some((root, relpath)) = repo_and_relpath(&path) else {
+        return Ok(None);
+    };
+
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(&root)
+        // `--literal-pathspecs` so a `*` or `:` in a real filename is a
+        // filename, and `--` so nothing after it is ever read as an option.
+        // A read, like every argument here: nothing that writes, leaves the
+        // machine, or rewrites history.
+        .args(["--literal-pathspecs", "blame", "--porcelain", "--contents", "-", "--", &relpath])
+        // Same reasoning as `run_git`'s doc comment; this command builds its
+        // own `Command` for stdin piping and so needs its own copy.
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+
+    let Ok(mut child) = command.spawn() else {
+        // git is not installed. Absence, like every other non-answer here.
+        return Ok(None);
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        return Ok(None);
+    };
+
+    // **The write runs on its own thread.** Unlike `nox_git_commit`, whose
+    // message always fits in a pipe buffer, the text here is a whole
+    // document and the output is larger still — so a sequential
+    // write-everything-then-read would deadlock the moment git's stdout
+    // buffer filled: git blocked writing output nobody is draining, this
+    // thread blocked writing input git has stopped reading.
+    //
+    // Measured, not assumed, and the measurement says the opposite of what
+    // the paragraph above fears: git 2.43 consumes the whole of
+    // `--contents -` before emitting anything, so 440 KB of input completes
+    // a sequential write with nothing draining stdout. The thread stays
+    // because that is a property of git's *buffering*, not of its interface,
+    // and nothing in `git blame`'s contract promises it. The cost of being
+    // wrong is a hung thread in the runtime pool and a blame that never
+    // arrives; the cost of the thread is one spawn per invocation.
+    //
+    // A broken pipe is not a failure worth reporting — it means git exited
+    // before reading the text, which is what it does when it refuses the
+    // path — so the writer swallows its error and lets git's own exit status
+    // below decide.
+    let writer = std::thread::spawn(move || {
+        let _ = stdin.write_all(contents.as_bytes());
+        // Explicit, because git waits for EOF on `--contents -`.
+        drop(stdin);
+    });
+
+    let output = child.wait_with_output();
+    let _ = writer.join();
+
+    let Ok(output) = output else {
+        return Ok(None);
+    };
+    if !output.status.success() {
+        // Untracked, outside the repository, or a path git will not blame.
+        // All of them are "no blame for this file", which is what absence
+        // means to the caller.
+        return Ok(None);
+    }
+
+    Ok(Some(String::from_utf8_lossy(&output.stdout).into_owned()))
 }
 
 #[cfg(test)]
@@ -862,25 +1000,22 @@ mod tests {
     /// `git status` still takes and releases `.git/index.lock`, which a
     /// meta watch sees as a rename event — the self-sustaining refresh loop
     /// this fix closes. `nox_git_status` (via `run_git`) now sets the env
-    /// var, so a steady-state status must fire nothing at all.
-    #[test]
-    fn status_alone_does_not_touch_the_meta_watch() {
+    /// Run `work` with a non-recursive watch on `.git` and return whatever
+    /// meta-watch-relevant event arrived first, if any.
+    ///
+    /// Extracted when blame arrived so both reads can be held to the same
+    /// promise. The filter is `nox_git_meta_watch`'s own: only `HEAD` and
+    /// `index` (and their `.lock` shadows) count.
+    fn meta_events_while(dir: &Path, work: impl Fn()) -> Option<Vec<PathBuf>> {
         use notify::{RecursiveMode, Watcher};
         use std::sync::mpsc;
         use std::time::Duration;
-
-        let scratch = Scratch::new("git-status-quiet");
-        git_in(&scratch.0, &["init", "-b", "main"]);
-        git_in(&scratch.0, &["commit", "--allow-empty", "-m", "root"]);
-        fs::write(scratch.join("a.txt"), "one\n").unwrap();
 
         let (tx, rx) = mpsc::channel::<Vec<PathBuf>>();
         let mut watcher =
             notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
                 let Ok(event) = result else { return };
                 use notify::EventKind;
-                // Same filter nox_git_meta_watch applies: only HEAD/index
-                // (and their .lock shadows) count.
                 let relevant: Vec<PathBuf> = event
                     .paths
                     .iter()
@@ -901,26 +1036,271 @@ mod tests {
                 let _ = tx.send(relevant);
             })
             .expect("create watcher");
-        watcher
-            .watch(&scratch.join(".git"), RecursiveMode::NonRecursive)
-            .expect("watch .git");
+        watcher.watch(&dir.join(".git"), RecursiveMode::NonRecursive).expect("watch .git");
+
+        work();
+
+        // Give the watcher a beat, because the assertion is a negative.
+        let saw = rx.recv_timeout(Duration::from_millis(800)).ok();
+        drop(watcher);
+        saw
+    }
+
+    /// `GIT_OPTIONAL_LOCKS=0` earns its place here. Without it even a read
+    /// takes and releases `.git/index.lock`, the meta watch sees the
+    /// create-and-rename, and the debounced refresh it triggers runs the
+    /// read again — a loop that never settles.
+    #[test]
+    fn status_alone_does_not_touch_the_meta_watch() {
+        let scratch = Scratch::new("git-status-quiet");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        git_in(&scratch.0, &["commit", "--allow-empty", "-m", "root"]);
+        fs::write(scratch.join("a.txt"), "one\n").unwrap();
 
         // Steady state: a handful of reads, the way the debounced refresh
         // loop would run them back to back.
-        for _ in 0..5 {
-            let status = nox_git_status(as_string(&scratch.0)).unwrap();
-            assert!(status.contains("# git.toplevel"));
-        }
-
-        // No event should have arrived — give the watcher a beat to prove a
-        // negative, then check nothing landed.
-        let saw = rx.recv_timeout(Duration::from_millis(800));
-        drop(watcher);
+        let saw = meta_events_while(&scratch.0, || {
+            for _ in 0..5 {
+                let status = nox_git_status(as_string(&scratch.0)).unwrap();
+                assert!(status.contains("# git.toplevel"));
+            }
+        });
 
         assert!(
-            saw.is_err(),
+            saw.is_none(),
             "expected no meta-watch events from repeated status alone, got {saw:?}"
         );
     }
-}
 
+    /// The same promise for blame, and it matters more here. A meta-watch
+    /// event makes `GitService` run `refreshAll`, which re-blames every
+    /// buffer blame is on for — so a blame that disturbed the index would
+    /// feed the watch that triggered it, and each turn of that loop spawns a
+    /// process per open file.
+    ///
+    /// **This does not prove `GIT_OPTIONAL_LOCKS=0` is what keeps it quiet,
+    /// and it is worth knowing that before assuming otherwise.** Probed by
+    /// deleting the env var from `nox_git_blame`: the test still passes, so
+    /// `git blame --contents -` simply does not take `index.lock` the way
+    /// `git status` does. The env var stays — it is the module's rule for
+    /// every git invocation, and "today's git does not happen to need it" is
+    /// not a reason to be the one command without it — but what this test
+    /// defends is the *property*, not that line.
+    #[test]
+    fn blame_does_not_touch_the_meta_watch_either() {
+        let scratch = blame_scratch("git-blame-quiet");
+        let file = scratch.join("app.ts");
+
+        let saw = meta_events_while(&scratch.0, || {
+            for _ in 0..5 {
+                let raw = blame_saved(&file).unwrap().expect("blame answers");
+                assert!(raw.lines().any(is_blame_header));
+            }
+        });
+
+        assert!(saw.is_none(), "expected no meta-watch events from repeated blame, got {saw:?}");
+    }
+    /// True for a `--porcelain` per-line header: an object name, then the
+    /// original and final line numbers, and on a group's first line a count.
+    /// Written by hand rather than with a regex because the crate has no
+    /// regex dependency, and hex-width-agnostic because a SHA-256 repository
+    /// prints 64 characters where this one prints 40.
+    fn is_blame_header(line: &str) -> bool {
+        let mut parts = line.split(' ');
+        let Some(hash) = parts.next() else { return false };
+        if hash.len() < 40 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            return false;
+        }
+        let numbers = parts.clone().count();
+        (2..=3).contains(&numbers) && parts.all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    }
+
+    /// A repository whose one file was committed twice, the second commit
+    /// touching only the middle line. That leaves the first commit owning
+    /// two *separate* groups with another commit's group between them, which
+    /// is the shape the header test below needs.
+    /// Blame `file` with its own on-disk text, which is what the renderer
+    /// sends for a buffer with no unsaved edits.
+    fn blame_saved(file: &Path) -> Result<Option<String>> {
+        let contents = fs::read_to_string(file).expect("the file is readable");
+        nox_git_blame(as_string(file), contents)
+    }
+
+    fn blame_scratch(name: &str) -> Scratch {
+        let scratch = Scratch::new(name);
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        fs::write(scratch.join("app.ts"), "alpha\nbravo\ncharlie\n").unwrap();
+        git_in(&scratch.0, &["add", "app.ts"]);
+        git_in(&scratch.0, &["commit", "-m", "first"]);
+        fs::write(scratch.join("app.ts"), "alpha\nBRAVO\ncharlie\n").unwrap();
+        git_in(&scratch.0, &["commit", "-am", "second"]);
+        scratch
+    }
+
+    #[test]
+    fn blames_every_line_of_a_committed_file() {
+        let scratch = blame_scratch("git-blame-lines");
+        let raw = blame_saved(&scratch.join("app.ts"))
+            .expect("blame does not error")
+            .expect("a tracked file in a repository has blame");
+
+        let headers: Vec<&str> = raw.lines().filter(|l| is_blame_header(l)).collect();
+        assert_eq!(headers.len(), 3, "one header per line, got {headers:?}");
+        // The final-line number is the third field, and it is what the
+        // renderer indexes by; 1, 2, 3 in order for an unmoved file.
+        let finals: Vec<&str> =
+            headers.iter().map(|h| h.split(' ').nth(2).unwrap()).collect();
+        assert_eq!(finals, ["1", "2", "3"]);
+        assert!(raw.contains("\nsummary first\n"), "missing first summary: {raw}");
+        assert!(raw.contains("\nsummary second\n"), "missing second summary: {raw}");
+    }
+
+    /// Guards the assumption `core/git-blame.ts` is built on: `--porcelain`
+    /// emits a commit's metadata block **once**, and every later group from
+    /// that same commit carries only the short per-line header. A parser that
+    /// expected the block on every group would read those lines as having a
+    /// blank author — and nothing in the TypeScript suite could catch it,
+    /// because its fixtures are written to whatever shape the parser expects.
+    /// This is the only place the real format is asserted.
+    #[test]
+    fn porcelain_states_a_commit_once_and_repeats_only_the_line_header() {
+        let scratch = blame_scratch("git-blame-porcelain");
+        let raw = blame_saved(&scratch.join("app.ts"))
+            .expect("blame does not error")
+            .expect("a tracked file in a repository has blame");
+
+        let headers = raw.lines().filter(|l| is_blame_header(l)).count();
+        // `author ` with the space: `author-mail`, `author-time` and
+        // `author-tz` share the prefix and would triple the count.
+        let authors = raw.lines().filter(|l| l.starts_with("author ")).count();
+        assert_eq!(headers, 3, "three lines, so three headers");
+        assert_eq!(authors, 2, "two commits, so two metadata blocks: {raw}");
+
+        // And the repeat is a real repeat: line 3 is the first commit again,
+        // after line 2 moved to the second. Without that the count above
+        // would pass on output that never revisited a commit at all.
+        let hashes: Vec<&str> = raw
+            .lines()
+            .filter(|l| is_blame_header(l))
+            .map(|l| l.split(' ').next().unwrap())
+            .collect();
+        assert_eq!(hashes[0], hashes[2], "line 3 belongs to the first commit");
+        assert_ne!(hashes[0], hashes[1], "line 2 belongs to the second");
+    }
+
+    /// A line edited but not committed is attributed to the all-zero object
+    /// name. That sentinel is the whole basis of `BlameCommit.uncommitted`,
+    /// and it is git's, not ours — asserted here against real git so the
+    /// memory platform's fake cannot quietly invent a different one.
+    #[test]
+    fn an_uncommitted_line_gets_the_all_zero_hash() {
+        let scratch = blame_scratch("git-blame-uncommitted");
+        fs::write(scratch.join("app.ts"), "alpha\nBRAVO\ncharlie\ndelta\n").unwrap();
+
+        let raw = blame_saved(&scratch.join("app.ts"))
+            .expect("blame does not error")
+            .expect("a tracked file with a dirty worktree still has blame");
+
+        let last = raw
+            .lines()
+            .filter(|l| is_blame_header(l))
+            .last()
+            .expect("a header for the added line");
+        let hash = last.split(' ').next().unwrap();
+        assert!(
+            hash.chars().all(|c| c == '0'),
+            "an uncommitted line should carry the zero object name, got {hash}"
+        );
+    }
+
+    /// Absence, not an error — the same degraded state `nox_git_file_base`
+    /// promises. A dialog here would fire on every file opened outside a
+    /// repository.
+    #[test]
+    fn blame_outside_a_repository_is_none() {
+        let scratch = Scratch::new("git-blame-no-repo");
+        fs::write(scratch.join("loose.txt"), "alpha\n").unwrap();
+        assert_eq!(blame_saved(&scratch.join("loose.txt")), Ok(None));
+    }
+
+    #[test]
+    fn blame_of_an_untracked_file_is_none() {
+        let scratch = blame_scratch("git-blame-untracked");
+        fs::write(scratch.join("new.txt"), "alpha\n").unwrap();
+        assert_eq!(blame_saved(&scratch.join("new.txt")), Ok(None));
+    }
+
+    /// The refactor that gave blame and the gutter a shared opening has to
+    /// keep working for a workspace opened *below* the repository root — the
+    /// case where the file's parent is not the toplevel and the relpath has
+    /// more than one segment.
+    #[test]
+    fn blames_a_file_in_a_subdirectory() {
+        let scratch = Scratch::new("git-blame-subdir");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        fs::create_dir_all(scratch.join("src")).unwrap();
+        fs::write(scratch.join("src").join("app.ts"), "alpha\n").unwrap();
+        git_in(&scratch.0, &["add", "src/app.ts"]);
+        git_in(&scratch.0, &["commit", "-m", "first"]);
+
+        let raw = blame_saved(&scratch.join("src").join("app.ts"))
+            .expect("blame does not error")
+            .expect("a tracked file below the root has blame");
+        assert!(raw.contains("filename src/app.ts"), "missing relpath: {raw}");
+    }
+    /// The reason `--contents` exists in the argv at all. A buffer with an
+    /// unsaved line inserted at the top is blamed *as the buffer*: the new
+    /// line carries the all-zero object name at the position it actually
+    /// occupies, and every line after it keeps its own commit at its shifted
+    /// number. Blaming the saved file instead would attribute each of those
+    /// lines to whoever wrote the one above it — an annotation naming the
+    /// wrong person, which is worse than no annotation.
+    #[test]
+    fn an_unsaved_insertion_shifts_blame_instead_of_misattributing_it() {
+        let scratch = blame_scratch("git-blame-unsaved");
+        let buffer = "INSERTED\nalpha\nBRAVO\ncharlie\n".to_string();
+
+        let raw = nox_git_blame(as_string(&scratch.join("app.ts")), buffer)
+            .expect("blame does not error")
+            .expect("a tracked file has blame for edited contents");
+
+        let hashes: Vec<&str> = raw
+            .lines()
+            .filter(|l| is_blame_header(l))
+            .map(|l| l.split(' ').next().unwrap())
+            .collect();
+        assert_eq!(hashes.len(), 4, "four lines in the buffer, four headers");
+        assert!(
+            hashes[0].chars().all(|c| c == '0'),
+            "the inserted line is in no commit, got {}",
+            hashes[0]
+        );
+        // Lines 2 and 4 are the first commit's, line 3 the second's — the
+        // same attribution as before the insertion, one line further down.
+        assert_eq!(hashes[1], hashes[3], "alpha and charlie share a commit");
+        assert_ne!(hashes[1], hashes[2], "BRAVO belongs to the second commit");
+        assert!(!hashes[1].chars().all(|c| c == '0'), "alpha is committed");
+    }
+
+    /// A document far larger than a pipe buffer round-trips. This is the
+    /// case the writer thread exists for: 20,000 lines in, more than that
+    /// back out, with neither side able to finish before the other starts.
+    #[test]
+    fn a_document_larger_than_a_pipe_buffer_round_trips() {
+        let scratch = Scratch::new("git-blame-large");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        let body: String = (0..20_000).map(|i| format!("line {i} of the file\n")).collect();
+        fs::write(scratch.join("big.txt"), &body).unwrap();
+        git_in(&scratch.0, &["add", "big.txt"]);
+        git_in(&scratch.0, &["commit", "-m", "first"]);
+
+        let raw = nox_git_blame(as_string(&scratch.join("big.txt")), body)
+            .expect("blame does not error")
+            .expect("a large tracked file has blame");
+        assert_eq!(
+            raw.lines().filter(|l| is_blame_header(l)).count(),
+            20_000,
+            "one header per line, all the way through"
+        );
+    }
+}
