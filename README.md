@@ -255,8 +255,8 @@ endings, the language, the wrap.
 
 ## Status
 
-**v0.10.** It's young, and it's a personal project rather than a product, but
-it's real software with 2,300 tests and I use it. Expect rough edges, and open
+**v0.11.** It's young, and it's a personal project rather than a product, but
+it's real software with 2,400 tests and I use it. Expect rough edges, and open
 an issue if you hit one — and if you do, run **Copy Diagnostics** from the
 palette first. It puts the version, the platform and what recently went wrong
 on your clipboard, with your home directory stripped out of the paths.
@@ -291,13 +291,19 @@ picks up your edits. Nox never starts a server you did not list there, and
 Format on Save is off until you turn it on. Not there yet: blame. See
 [ROADMAP.md](ROADMAP.md).
 
-**Landed since 0.10, not yet in a release:** plugins. A folder with a
-`plugin.json` can add commands to the palette, a readout to the status bar, a
-panel to the sidebar, marks in the editor and its own settings — written in
-JavaScript or in any language that can speak JSON over stdio. Every plugin runs
-outside the editor's thread, which is what makes "a plugin cannot block your
-typing" a property rather than a promise. [CHANGELOG.md](CHANGELOG.md) has the
-rest of what is waiting.
+**0.11.0 made Nox extensible.** A folder with a `plugin.json` adds commands to
+the palette, a readout to the status bar, a panel to the sidebar, marks in the
+editor and settings of its own — written in JavaScript, or in any language that
+can speak JSON over a pipe. Every plugin runs outside the editor's thread,
+which is what makes "a plugin cannot block your typing" a property rather than
+a promise.
+
+**Themes are files too**, since the same release: a `.json` naming colours over
+Eclipse or Umbra, so a real theme is three lines. **Snippets** arrived with it
+— your own from `snippets.json`, and the ones your language server sends, which
+now expand instead of landing as flat text. All of those files, and a plugin's
+settings, apply when you edit them in another program: no Reload, no restart.
+Eleven languages Nox listed and then rendered flat are highlighted.
 
 Every release is driven before it ships. A test harness launches the packaged
 app on macOS, Windows and Linux and drives it the way you would — the window
