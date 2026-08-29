@@ -6,7 +6,34 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-08-29
+
+Nox can be extended now. A folder with a `plugin.json` adds commands, a
+status-bar readout, a sidebar panel, marks in the editor and settings of its
+own — written in JavaScript, or in any language that can speak JSON over a
+pipe. Every plugin runs outside the editor's thread, which is what makes "a
+plugin cannot block your typing" a property of the design rather than a promise
+in a document.
+
+Themes came the same way: a `.json` file naming colours over a base, so a real
+theme is three lines. So did snippets, yours and your language server's. And
+all three of those files, plus a plugin's settings, now apply when you edit
+them in another program — no Reload command, no restart.
+
+Eleven languages that Nox listed and then rendered as flat text are
+highlighted, and opening a file no longer downloads every grammar it ships.
+
 ### Fixed
+
+- **"Something went wrong" no longer appears for something that did not go
+  wrong.** `ResizeObserver loop completed with undelivered notifications.` is a
+  browser notice, not a failure: it means a panel measured itself, resized, and
+  needs another pass, which is what the specification asks for. 0.9.0 shipped
+  reporting it as a red toast, often as the first thing a new window showed;
+  0.9.1 added a filter for it that never once fired, because it tested for a
+  missing error object with `=== undefined` and the browser supplies `null`.
+  Both halves are fixed, and a real exception thrown inside an observer
+  callback still reports.
 
 - **Accepting a completion that adds an import no longer leaves the cursor in
   the import.** When a language server sends the import alongside the
@@ -1592,7 +1619,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/francescoa27122/nox-editor/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francescoa27122/nox-editor/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/francescoa27122/nox-editor/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/francescoa27122/nox-editor/compare/v0.8.3...v0.9.0
