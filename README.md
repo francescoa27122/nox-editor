@@ -17,30 +17,30 @@
 
 ---
 
-Nox is a text editor built around one idea: the editor should feel like a
-command center, not a document viewer. Dark, quiet, keyboard-driven, and quick
-enough that you stop noticing it.
+Nox is built around one idea: an editor should feel like a command center, not
+a document viewer. Dark, quiet, keyboard-driven, and quick enough that you stop
+noticing it.
 
 It is **not** a VS Code clone. It has its own design language, its own
 shortcuts where they can be better, and a deliberately small surface area. It
-is also about 4 MB, and starts instantly.
+is also about 4 MB, and it starts instantly.
 
-I built it because I wanted to know what an editor looks like if you take two
-things seriously from the first line of code: **never losing someone's work**,
-and **letting a program help you edit without ever letting it edit behind your
+I built it to find out what an editor looks like if you take two things
+seriously from the first line of code: **never losing someone's work**, and
+**letting a program help you edit without ever letting it edit behind your
 back.**
 
 ## Try it
 
 **Download it** from the [latest release](https://github.com/francescoa27122/nox-editor/releases/latest).
-macOS, Windows and Linux all have builds: take the `.dmg` for your Mac's
-chip, the `-setup.exe` on Windows, or the `.deb` or `.rpm` on Linux.
+macOS, Windows and Linux all have builds. Take the `.dmg` for your Mac's chip,
+the `-setup.exe` on Windows, or the `.deb` or `.rpm` on Linux.
 
-Nox is not signed with a paid certificate on either platform that asks for
-one, so both interrupt the first run. Neither means the download is broken.
+Nox is not signed with a paid certificate on either platform that asks for one,
+so both interrupt the first run. Neither means the download is broken.
 
-On **Windows**, SmartScreen says *"Windows protected your PC"* — choose
-**More info**, then **Run anyway**.
+On **Windows**, SmartScreen says *"Windows protected your PC"*. Choose **More
+info**, then **Run anyway**.
 
 On **macOS**, drag Nox to Applications and run this once:
 
@@ -49,8 +49,8 @@ xattr -dr com.apple.quarantine /Applications/Nox.app
 ```
 
 You will need that command. Nox is ad-hoc signed rather than signed with an
-Apple Developer ID, so macOS quarantines it on download and claims it is
-*"damaged"*. That sounds like a corrupt download, but the file is fine.
+Apple Developer ID, so macOS quarantines it on download and calls it
+*"damaged"*. That sounds like a corrupt download. The file is fine.
 
 Linux packages are built on Ubuntu 22.04, so they need glibc 2.35 or newer.
 There is no AppImage.
@@ -59,8 +59,8 @@ There is no AppImage.
 
 If there's no build for your platform, or you'd rather not run that command,
 build from source. It's the same thing, from code you can read. You need
-[Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your
-platform's [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+[Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your platform's
+[Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 ```bash
 git clone https://github.com/francescoa27122/nox-editor.git
@@ -79,11 +79,11 @@ demo project. No Rust build, and nothing touches your disk.
 
 ### It does not lose your work. Ever.
 
-Close the window with unsaved changes and Nox does not ask you a question. It
+Close the window with unsaved changes and Nox doesn't ask you a question. It
 keeps them, and hands them back next time you open it, still unsaved and still
 undoable back to what is on disk.
 
-A dialog can be answered wrong at 2am. Persistence cannot.
+A dialog can be answered wrong at 2am. Persistence can't.
 
 Saving writes to a temporary file and renames it into place, so a crash or a
 full disk part way through can't leave you with half a file. If something else
@@ -112,7 +112,7 @@ by hunk, and you keep the parts you want. Nothing is written until you say so,
 and one button takes a whole session back out again.
 
 Everything it read, everything it ran, and everything it was refused shows up
-in the Agents panel, so you can check what happened rather than trust it.
+in the Agents panel. You can check what happened rather than trust it.
 
 #### Setting up a model
 
@@ -175,8 +175,8 @@ nowhere, for the same reason.
 
 **Asking can't change anything.** A session started this way is allowed to talk
 and nothing else. Nox blocks the rest itself rather than asking the model
-nicely in a prompt, which matters because an agent running as a separate
-program never reads that prompt.
+nicely in a prompt. That matters: an agent running as a separate program never
+reads that prompt.
 
 The Answers section stays hidden until you've set up a model that can run. One
 caveat worth knowing: asked to explain some code *and* say what was surprising
@@ -208,9 +208,9 @@ turns it on does not ship.
 
 ### Dark only, on purpose
 
-Two dark themes. **Eclipse** is a blue-black night, and **Umbra** is true black
-for OLED screens. There is no light theme and there isn't going to be. That's
-the product, not an omission.
+Two dark themes. **Eclipse** is a blue-black night. **Umbra** is true black for
+OLED screens. There is no light theme and there isn't going to be. That's the
+product, not an omission.
 
 Every colour, corner and animation length in the app comes from one file, which
 is why Umbra takes about 30 lines to describe rather than a second stylesheet.
@@ -226,50 +226,53 @@ is why Umbra takes about 30 lines to describe rather than a second stylesheet.
 | <kbd>Mod R</kbd> | Jump to a symbol in this file |
 | <kbd>Mod E</kbd> | Switch between open files |
 | <kbd>Mod ⇧ F</kbd> | Search the whole project |
-| <kbd>Mod ⇧ G</kbd> | Git — stage, commit, switch branch |
-| <kbd>Mod ⌥ B</kbd> | Blame — who wrote each line |
+| <kbd>Mod ⇧ G</kbd> | Git: stage, commit, switch branch |
+| <kbd>Mod ⌥ B</kbd> | Blame: who wrote each line |
 | <kbd>Mod .</kbd> | Fix what's under the cursor |
 | <kbd>Mod ⇧ A</kbd> | Answers from a model |
 | <kbd>Mod \\</kbd> | Split the editor |
 | <kbd>Mod ,</kbd> | Settings |
 
-Press <kbd>Mod ⌥ K</kbd> for the full list — and to change any of it. Every
-command has a row there, including the ones with no key yet; press the chord
+Press <kbd>Mod ⌥ K</kbd> for the full list, and to change any of it. Every
+command has a row there, including the ones with no key yet. Press the chord
 you want and it's yours, with the command that already held it named before you
 take it. Your changes live in `keybindings.json` as rules layered over the
 defaults, so a new default key in a later Nox still reaches you. The list lives
 in the app and is always current. Every action in Nox is a command, so anything
 you can do is in the palette whether or not it has a shortcut.
 
-Also in the box: syntax highlighting for every language Nox names, snippets
-of your own that expand with tab stops, multiple cursors, code folding, jumping to a function or class by name in the file
-you're in, sticky scroll to keep the enclosing declaration on screen, split
-panes, a terminal, your own notes, and project-wide search and replace that
-shows you a diff first — one match at a time if that's what you want. The
-settings panel is built from the same list the app reads its settings from, so
-it can't drift out of date with what you're actually able to change.
+Also in the box: syntax highlighting for every language Nox names, snippets of
+your own that expand with tab stops, multiple cursors, code folding, jumping to
+a function or class by name in the file you're in, sticky scroll to keep the
+enclosing declaration on screen, split panes, a terminal, your own notes, and
+project-wide search and replace that shows you a diff first, one match at a
+time if that's what you want. The settings panel is built from the same list
+the app reads its settings from, so it can't drift out of date with what you're
+actually able to change.
 
 Nox guesses a file's language from its name, and you can disagree: click the
 language in the status bar and pick another. Every item in that bar does
-something — the cursor position, the indentation, the encoding, the line
+something. The cursor position, the indentation, the encoding, the line
 endings, the language, the wrap.
 
 ## Status
 
 **v0.11.** It's young, and it's a personal project rather than a product, but
-it's real software with 2,400 tests and I use it. Expect rough edges, and open
-an issue if you hit one — and if you do, run **Copy Diagnostics** from the
-palette first. It puts the version, the platform and what recently went wrong
-on your clipboard, with your home directory stripped out of the paths.
+it's real software with 2,438 tests and I use it. Expect rough edges. Open an
+issue if you hit one, and run **Copy Diagnostics** from the palette first: it
+puts the version, the platform and what recently went wrong on your clipboard,
+with your home directory stripped out of the paths.
 
-**Git arrived in 0.5.0** — a gutter marking what the index doesn't hold yet, a
+**Landed since 0.11.0 and not in a release yet: blame.** <kbd>Mod ⌥ B</kbd>
+puts who wrote each line beside the line, on demand rather than always on. It
+annotates what you have *open* rather than what's saved, so a line you just
+typed reads Uncommitted instead of borrowing the name above it.
+
+**Git arrived in 0.5.0.** A gutter marking what the index doesn't hold yet, a
 side-by-side or inline diff of the file against its base, and a focused panel
-to stage, unstage, commit and switch branches (<kbd>Mod ⇧ G</kbd>). **Blame**
-completed it: <kbd>Mod ⌥ B</kbd> puts who wrote each line beside the line, on
-demand rather than always on, and it annotates what you have *open* — type an
-unsaved line and it reads Uncommitted instead of borrowing the name above it.
-Not a Git client: no push, pull, rebase or amend, and nothing that can discard
-your working tree.
+to stage, unstage, commit and switch branches (<kbd>Mod ⇧ G</kbd>). Not a Git
+client: no push, pull, rebase or amend, and nothing that can discard your
+working tree.
 
 Also in 0.5.0: **you can change the keys** (every command, including the ones
 with none), **a project can carry its own conventions** in `.nox/settings.json`,
@@ -278,41 +281,41 @@ can update itself.
 
 Since then: **Windows and Linux got a menu bar** in 0.8.0, drawn from the same
 table macOS's native one reads, so the two can't drift. **Files that aren't
-UTF-8 open** — UTF-16 on its own, anything else by clicking the encoding in the
-status bar — and they're written back in the encoding they arrived in. **The
+UTF-8 open.** UTF-16 on its own, anything else by clicking the encoding in the
+status bar, and they're written back in the encoding they arrived in. **The
 same file can sit in two panes**, each with its own cursor, edits showing in
 both. 0.7.0 turned notes into something you can search, pin and anchor to the
-code they're about; 0.6.0 was a pass over how much of this you can actually
+code they're about. 0.6.0 was a pass over how much of this you can actually
 find.
 
-Language servers landed in 0.4.2 and have kept going — diagnostics, completion,
+Language servers landed in 0.4.2 and have kept going: diagnostics, completion,
 hover, go to definition, find references, rename symbol, formatting, and
 **quick fixes** (<kbd>Mod .</kbd>), which asks your server what it can do where
 the cursor is. All of it from a `servers.json` you write. Run **Configure
 Language Servers** from the palette and Nox creates it with a working
-`typescript-language-server` entry to start from; **Reload Language Servers**
+`typescript-language-server` entry to start from. **Reload Language Servers**
 picks up your edits. Nox never starts a server you did not list there, and
 Format on Save is off until you turn it on. See [ROADMAP.md](ROADMAP.md).
 
 **0.11.0 made Nox extensible.** A folder with a `plugin.json` adds commands to
 the palette, a readout to the status bar, a panel to the sidebar, marks in the
-editor and settings of its own — written in JavaScript, or in any language that
+editor and settings of its own. Write it in JavaScript, or in any language that
 can speak JSON over a pipe. Every plugin runs outside the editor's thread,
 which is what makes "a plugin cannot block your typing" a property rather than
 a promise.
 
 **Themes are files too**, since the same release: a `.json` naming colours over
-Eclipse or Umbra, so a real theme is three lines. **Snippets** arrived with it
-— your own from `snippets.json`, and the ones your language server sends, which
+Eclipse or Umbra, so a real theme is three lines. **Snippets** arrived with it,
+your own from `snippets.json` plus the ones your language server sends, which
 now expand instead of landing as flat text. All of those files, and a plugin's
-settings, apply when you edit them in another program: no Reload, no restart.
+settings, apply when you edit them in another program. No Reload, no restart.
 Eleven languages Nox listed and then rendered flat are highlighted.
 
 Every release is driven before it ships. A test harness launches the packaged
-app on macOS, Windows and Linux and drives it the way you would — the window
+app on macOS, Windows and Linux and drives it the way you would. The window
 comes up, the menu bar opens and switches between its menus, the palette opens
-on its chord and closes on <kbd>Esc</kbd>, a close prompt puts the keyboard on
-the safe answer rather than the destructive one — on every change, on all
+on its chord and closes on <kbd>Esc</kbd>, and a close prompt puts the keyboard
+on the safe answer rather than the destructive one. On every change, on all
 three.
 
 ## Under the hood
@@ -339,7 +342,7 @@ npm run app:build # a distributable, ~4 MB on macOS
 
 There's a second suite in [`e2e/`](e2e/README.md) that drives the built
 application rather than its source. It needs a Rust toolchain, so CI is where
-it usually runs — on all three platforms, on every change.
+it usually runs, on all three platforms, on every change.
 
 ## License
 
