@@ -8,6 +8,59 @@ are knowledge.**
 
 ---
 
+## 2026-08-29 (PC) — 0.11.0 prepared; the tag is the operator's
+
+Everything up to the tag is done and merged (#170). **The tag itself is not
+mine** — a `v*` tag produces a published release, which the charter keeps with
+the operator — so this is the seam, and it is deliberate rather than unfinished.
+
+**The gate built in #160 did its job on its first real use.** It refuses a tag
+whose README still opens with the previous series, and §Status did: the "landed
+since 0.10, not yet in a release" paragraph was still there, and folding it into
+history is exactly the edit the gate exists to force. All three gate steps were
+extracted from the parsed workflow YAML and run locally against
+`GITHUB_REF_NAME=v0.11.0` — before the tag, where a failure costs seconds rather
+than twenty minutes of binaries.
+
+**One Fixed entry the fix never got.** The ResizeObserver toast shipped in 0.9.0
+and its 0.9.1 filter never once fired; that is user-facing relative to 0.10.0
+and now appears in the changelog. The plugin-lifetime (#165) and handshake
+(#167) fixes deliberately get none: those bugs were in the plugin work itself,
+which has never shipped, so a changelog listing them would describe a release
+that never existed.
+
+**Found while bumping, and not fixed here: `src-tauri/Cargo.lock` is stale
+against `Cargo.toml`.** The optional `tauri-plugin-wdio-webdriver` is absent
+from it, so every local `cargo` run rewrites ~400 lines. Nothing builds
+`--locked` — checked both workflows — so no build can fail on it and the tag is
+safe; but it means the lock does not describe what is built, and a
+`cargo install --locked` would refuse. Its own change, with its own CI.
+
+Shipped:    version 0.10.0 → 0.11.0 across `package.json`,
+            `package-lock.json`, `tauri.conf.json`, `Cargo.toml` and the one
+            `Cargo.lock` line — the same seven files 0.10.0's prep touched;
+            CHANGELOG `[Unreleased]` cut to `[0.11.0] — 2026-08-29` with a
+            lede, a fresh empty Unreleased and both compare links; README
+            §Status rewritten.
+Verified:   All three release gates pass on `main` · `npm test` 2410 · `check`
+            1038/0/0 · `lint` 0 errors · `build` 1.29 s · `test:editor` 3 ·
+            `cargo test` 115+2+4 · 11/11 CI on #170. A full `npm run app:build`
+            produced **`Nox_0.11.0_x64-setup.exe`**, which is the check that
+            matters most: the bundler names assets from `tauri.conf.json`
+            rather than from the tag, so a disagreement there ships files
+            labelled with the wrong release and nothing complains.
+Next:       **The operator tags.** `git tag -a v0.11.0 -m 'Nox 0.11.0' && git
+            push origin v0.11.0` on `main` at 489e9ad. After that: regenerate
+            `Cargo.lock` as its own change, and a walk that can see pixels —
+            the only surface both of today's walks left untouched, and it needs
+            consent rather than tooling.
+Blocked:    The tag, by design.
+Confidence: High. Every gate was run locally before the tag rather than trusted
+            to fire after it, and the bundle name confirms the version reached
+            the artefact.
+
+---
+
 ## 2026-08-29 (PC) — The second walk: all six rows pass
 
 The rows the first walk could not reach, taken now that the bug blocking them
