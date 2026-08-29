@@ -1,6 +1,6 @@
 {
   "name": "nox",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Nox — a fast, dark, keyboard-first text editor.",
   "type": "module",
   "private": true,
