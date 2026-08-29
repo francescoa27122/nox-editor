@@ -220,6 +220,23 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # First, because it is seconds and it answers a question the other two
+      # cannot: does `Cargo.lock` still describe `Cargo.toml`?
+      #
+      # It did not, between the `wdio` feature being added and 2026-08-29 — the
+      # optional `tauri-plugin-wdio-webdriver` was absent from the lock
+      # entirely, so every `cargo` invocation quietly rewrote it and no build
+      # was reproducible from what was committed. Nothing failed, which is
+      # exactly why it went unnoticed for weeks: no step here passed `--locked`,
+      # so cargo was always free to fix it in passing and never say so.
+      #
+      # `metadata` rather than a build: it resolves the whole graph, including
+      # every optional dependency and every platform's, and needs no
+      # compilation to do it.
+      - name: Check the lockfile is current
+        working-directory: src-tauri
+        run: cargo metadata --format-version 1 --locked > /dev/null
+
       # Before `cargo test`, because a lint failure is cheaper to read than a
       # test failure and `--all-targets` compiles the test code anyway, so the
       # cache it warms is the one the next step wants.
