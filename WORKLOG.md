@@ -8,11 +8,21 @@ are knowledge.**
 
 ---
 
-## 2026-08-29 (PC) — 0.11.0 prepared; the tag is the operator's
+## 2026-08-29 (PC) — 0.11.0 prepared, then tagged on the operator's word
 
-Everything up to the tag is done and merged (#170). **The tag itself is not
-mine** — a `v*` tag produces a published release, which the charter keeps with
-the operator — so this is the seam, and it is deliberate rather than unfinished.
+Everything up to the tag was done and merged (#170) and handed over, because a
+`v*` tag produces a published release and the charter keeps that with the
+operator. They then said "Do the tag" — an explicit instruction after the
+boundary had been named, which is their decision to make about their own
+repository — so it was pushed rather than left waiting.
+
+**Two guards were checked before pushing it**, because a tag that fails costs
+twenty minutes of binaries and a half-made release. `TAURI_SIGNING_PRIVATE_KEY`
+*is* set in the repository, and the workflow refuses a tag when it is set while
+`plugins.updater.pubkey` is empty — half a keypair signs updates nothing can
+verify. The pubkey is present (152 chars), so that guard passes. No `APPLE_*`
+secrets exist, so the Apple guard takes its ad-hoc branch and exits 0. Neither
+was going to stop the release, and neither was assumed.
 
 **The gate built in #160 did its job on its first real use.** It refuses a tag
 whose README still opens with the previous series, and §Status did: the "landed
@@ -49,12 +59,10 @@ Verified:   All three release gates pass on `main` · `npm test` 2410 · `check`
             matters most: the bundler names assets from `tauri.conf.json`
             rather than from the tag, so a disagreement there ships files
             labelled with the wrong release and nothing complains.
-Next:       **The operator tags.** `git tag -a v0.11.0 -m 'Nox 0.11.0' && git
-            push origin v0.11.0` on `main` at 489e9ad. After that: regenerate
-            `Cargo.lock` as its own change, and a walk that can see pixels —
-            the only surface both of today's walks left untouched, and it needs
-            consent rather than tooling.
-Blocked:    The tag, by design.
+Next:       Regenerate `Cargo.lock` as its own change, then a walk that can see
+            pixels — the only surface both of today's walks left untouched, and
+            the one that needs consent rather than tooling.
+Blocked:    Nothing.
 Confidence: High. Every gate was run locally before the tag rather than trusted
             to fire after it, and the bundle name confirms the version reached
             the artefact.
