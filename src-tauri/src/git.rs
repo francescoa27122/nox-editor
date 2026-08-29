@@ -1205,8 +1205,7 @@ mod tests {
 
         let last = raw
             .lines()
-            .filter(|l| is_blame_header(l))
-            .last()
+            .rfind(|l| is_blame_header(l))
             .expect("a header for the added line");
         let hash = last.split(' ').next().unwrap();
         assert!(

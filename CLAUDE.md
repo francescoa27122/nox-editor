@@ -14,7 +14,10 @@ All three are mandatory before pushing. CI also runs `npm run build`, which catc
 
 `npm run test:editor` is a real browser with real layout, and it covers two things. It holds the typing path flat in document size, which is the check behind `CONTRIBUTING.md` rule 5. It is also where a claim about **geometry** goes, because jsdom measures everything as zero: `tests/browser/blame-gutter.test.ts` holds a gutter column to one width and writes screenshots of a passing run into the gitignored `__screenshots__/`. If a change is partly visual, run it and look at them.
 
-Rust: `cargo test --manifest-path src-tauri/Cargo.toml`.
+Rust: `cargo clippy --all-targets -- -D warnings && cargo test`, from
+`src-tauri`. **Clippy is a required check and is easy to miss**, because the
+tests can be green while it is red. Read its exit code rather than the tail of
+its output.
 
 **Check that cargo really is missing before saying so.** This file used to claim it "may not be installed", and that was wrong on both machines this project has been built on. On the Windows PC it is on PowerShell's PATH and not git-bash's, so five sessions in a row recorded it absent after checking only from Bash. In a fresh Linux container it is installed, but `cargo test` fails at `gdk-sys` with "the system library `gdk-3.0` was not found", which reads like a broken toolchain and is a missing apt package: `libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev`. If it genuinely will not run, write the tests, say plainly they are unrun locally, and let CI run them. Do not report them as passing.
 

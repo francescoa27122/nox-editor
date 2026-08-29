@@ -131,7 +131,19 @@ Roughly a quarter of the Rust tests carry a doc comment naming the failure they 
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-CI runs `cargo test` from `src-tauri` on Linux, macOS and Windows. Windows is in the matrix so the `#[cfg(windows)]` branches compile. **There is no `cargo fmt --check` and no `cargo clippy` step.**
+CI runs **`cargo clippy --all-targets -- -D warnings` and then `cargo test`**
+from `src-tauri` on Linux, macOS and Windows. Windows is in the matrix so the
+`#[cfg(windows)]` branches compile.
+
+**Run clippy, not just the tests.** This file used to say there was no clippy
+step, which was false, and the cost of believing it was a red CI on a branch
+whose Rust tests were green locally. `-D warnings` means any lint fails the
+build, and clippy chains: fixing `.last()` to `.next_back()` produced a second
+lint asking for `.rfind()`. Check the exit code rather than the tail of the
+output, because `cargo clippy | tail` reports `tail`'s status and a `&&` after
+it will run on a failure.
+
+There is still no `cargo fmt --check` step.
 
 **Check whether `cargo` runs before concluding it is missing, and check properly.** That sentence used to read "cargo may not be installed on this machine", and it was wrong on both machines this project has been built on. On the Windows PC cargo is on PowerShell's PATH and not git-bash's, so five sessions in a row recorded it as absent from the wrong shell. In a fresh Linux container it is installed, but `cargo test` fails at `gdk-sys` with "the system library `gdk-3.0` was not found", which reads like a broken toolchain and is a missing apt package (`libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev`).
 
