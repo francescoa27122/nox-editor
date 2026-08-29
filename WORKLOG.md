@@ -8,6 +8,42 @@ are knowledge.**
 
 ---
 
+## 2026-08-29 - Skill line anchors pointed at the wrong code
+
+Asked whether `vercel/react-best-practices` would help Nox. It would not:
+there is no React here, and the only literal "React" in `src/` is two
+language-table entries naming the file types Nox can edit. Checking what
+*would* help turned up the real thing.
+
+**Shipped: #175.** Twenty-eight `file:line` references across
+`nox-architecture`, `nox-codemirror` and `nox-tauri-ipc` pointed at the wrong
+code. `app.ts:1617-3038` for the command array landed on a comment terminator;
+`app.ts:3044` for the `bindAll` table was 1,490 lines short of it;
+`commands.ts:158` for `execute` landed on `isEnabled`; `agent.rs:245` for
+`fn poisoned` landed on a blank line. All re-derived. Also recorded, in
+`nox-architecture`, why `enabled` gates on service state rather than a platform
+capability flag.
+
+**Verified:** all 58 references re-derived and each cited region printed against
+its claim; every one now lands on the symbol its sentence names. CI green on the
+PR, 11 checks. The `enabled` counts were re-derived too, and caught an
+overstatement before it shipped: three commands *do* read
+`platform.capabilities` directly, so the rule is conditional, not absolute.
+
+**Next: decide how source citations are written.** #174 rewrote all five skills'
+prose and carried every stale anchor through unchanged, then shifted `git.rs`
+and `app.ts` further. Line numbers rot on roughly every PR and nothing
+re-derives them. Two options: a `tests/skill-refs.test.ts` in the house
+meta-test style, or drop line numbers from source citations in favour of symbol
+references, which do not rot. A cheap in-range check is worthless here: it
+passed against every broken anchor above.
+
+**Blocked:** nothing.
+
+**Confidence:** high on the anchors, all mechanically verified. Medium on which
+durable fix is right; that is a house-style call.
+
+---
 ## 2026-08-29 (cloud) - The docs, rewritten in a voice a person would use
 
 The operator read the docs back and said they read like a machine wrote them,
