@@ -15,7 +15,7 @@ CodeMirror *extensions* live in `src/editor/`. The layer rule is narrower than "
 
 Nothing enforces this with a lint rule. It holds by review.
 
-Composition happens in one place: `src/editor/extensions.ts#buildExtensions`. `WorkspaceService` receives it wrapped in a closure that discards the factory args (`app.ts:179-181`), so `buildExtensions` takes `Settings`, not `StateFactoryArgs`.
+Composition happens in one place: `src/editor/extensions.ts#buildExtensions`. `WorkspaceService` receives it wrapped in a closure that discards the factory args (`app.ts:226-228`), so `buildExtensions` takes `Settings`, not `StateFactoryArgs`.
 
 ## Quick reference
 
@@ -40,13 +40,13 @@ Adding one is exactly three edits in `extensions.ts`:
 2. an entry in `SETTING_TO_COMPARTMENTS` mapping the settings key to it
 3. a `case` in `compartmentContent`
 
-**Only edits 1 and 3 are compiler-checked.** `compartmentContent`'s switch has no `default:` and returns `Extension`, so a missing case fails with TS2366. But `SETTING_TO_COMPARTMENTS` is a `Partial<Record<…>>` (`extensions.ts:78`), so **omitting edit 2 compiles cleanly and silently produces a setting that never reconfigures anything.** That is the likeliest mistake and the one nothing will catch for you. Check it by hand.
+**Only edits 1 and 3 are compiler-checked.** `compartmentContent`'s switch has no `default:` and returns `Extension`, so a missing case fails with TS2366. But `SETTING_TO_COMPARTMENTS` is a `Partial<Record<…>>` (`extensions.ts:95`), so **omitting edit 2 compiles cleanly and silently produces a setting that never reconfigures anything.** That is the likeliest mistake and the one nothing will catch for you. Check it by hand.
 
 ### 2. A StateField must be unconditional; only its rendering is compartmentalised
 
 **Removing a `StateField` destroys the state it holds.** A compartment reconfigured to `[]` removes its extensions, so gating a field on a setting throws away every mark the moment the user toggles it off.
 
-The pattern (`extensions.ts:224-230`): the field goes in `staticExtensions()` unconditionally, and only the gutter/tooltip that renders it goes in the compartment. `provenanceField` and `gitGutterField` both do this. Copy it.
+The pattern (`extensions.ts:226-232`): the field goes in `staticExtensions()` unconditionally, and only the gutter/tooltip that renders it goes in the compartment. `provenanceField` and `gitGutterField` both do this. Copy it.
 
 ### 3. StateField vs ViewPlugin is a question about derivability
 
