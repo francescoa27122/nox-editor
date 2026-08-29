@@ -8,6 +8,62 @@ are knowledge.**
 
 ---
 
+## 2026-08-29 (PC) — The second walk: all six rows pass
+
+The rows the first walk could not reach, taken now that the bug blocking them
+is fixed. **W1–W6 all PASS**, and the two that carried real doubt were the two
+about *offering* rather than parsing.
+
+**W1 closes the oldest open question in the plugin work.** `worker-src 'self'
+blob:` does permit the blob worker under Tauri's **custom-protocol** origin,
+not only under `http://localhost` where it had been shown in Chromium. The
+attribution is designed rather than assumed: two startup plugins, and only the
+worker one calls `view.toggleTheme`, so exactly one toggle per launch is the
+proof it ran.
+
+**W2 needed a sharper test than "no complaint".** A theme being *read* is not a
+theme being *offered*. With the theme already on `umbra`, the worker's single
+toggle landed on `aurora` — being in the cycle means being in `themes.list()`.
+
+**W3 and W4 are observable only through the error path**, and that is worth
+being precise about: a *malformed* file written from outside makes the owning
+service complain into `diagnostics.log`, which is a timestamped fact on disk. So
+what they establish is that the watcher fired and the file was re-read. A valid
+edit taking effect follows from the same path and is unit-tested, but was not
+separately witnessed.
+
+**W6 is the whole config-watcher feature end to end** in the packaged app: an
+outside write to `plugin-settings.json` reached the plugin as
+`{"values":{"markers":"FIXME, XXX","limit":42}}` six seconds later, with no
+Reload command — Rust watcher, event, classify, reload, content comparison,
+host push.
+
+**The honest remainder shrank but did not vanish.** Every readout was a file.
+Nothing has observed a pixel: that Aurora's accent is drawn, that the Plugins
+tab renders rows, that a theme edited while selected repaints. Screen-control
+consent was declined on the first walk and was not asked for again. That is now
+the only untested surface, and it is about appearance rather than behaviour.
+
+Shipped:    `.desktop-pass-report.md` — the second walk, six rows with their
+            evidence and what the method cannot say; ARCHITECTURE — the
+            "worker transport is unverified in the packaged app" debt row
+            replaced by one that states what is actually left.
+Verified:   Six rows, each against a file readout quoted in the report. The
+            operator's config was backed up before and restored after, with the
+            file set and directory count verified identical.
+Next:       Cutting 0.11. `## [Unreleased]` holds ten merges: plugin settings,
+            the release gate, custom themes, the ResizeObserver fix, the config
+            watcher, the flake fix, the plugin-lifetime fix and the handshake
+            fix. The gate from #160 will refuse the tag until README §Status is
+            rewritten, which is what it is for. **The tag itself is the
+            operator's.**
+Blocked:    Nothing, except pixels — which need consent rather than tooling.
+Confidence: High on all six. Each is a quoted artefact rather than an
+            impression, and W1's attribution was built into the fixture rather
+            than argued after the fact.
+
+---
+
 ## 2026-08-29 (PC) — The ten-second silence, and why one fix was not enough
 
 The last confirmed defect from the walk. `onExit` settled every outstanding
