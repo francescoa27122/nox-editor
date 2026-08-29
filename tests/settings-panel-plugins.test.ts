@@ -71,14 +71,20 @@ async function setup(declared: PluginSetting[] = DECLARED) {
   const { app, container } = mounted;
 
   /**
-   * Before loading anything, and this is not politeness.
+   * Kept, but no longer load-bearing — and the story is worth the lines.
    *
-   * `NoxApp`'s constructor subscribes to `workspace.rootPath`, and
-   * `Signal.subscribe` calls its handler immediately — which reaches
-   * `#restartLanguageServers(null)`, which calls `plugins.stopAll()`. That
-   * promise settles a few microtasks later and clears every loaded plugin. A
-   * `load()` before it lands is silently undone, and the panel then renders
-   * correctly over nothing at all.
+   * This wait was added on 2026-08-28 because a `load()` before construction
+   * settled was silently undone: `NoxApp`'s constructor subscribes to
+   * `workspace.rootPath`, `Signal.subscribe` fires immediately, and that
+   * reached `#restartLanguageServers(null)` → `plugins.stopAll()`. It was
+   * written down here as a harness quirk and walked past.
+   *
+   * It was the product bug. Walking the packaged build the next day found the
+   * same sequence killing every plugin at boot for anyone with a folder open;
+   * `plugins.stopAll()` now lives in `dispose()`. The wait stays because a
+   * test should not depend on construction being quiet, but nothing here
+   * needs it any more — `tests/plugin-integration.test.ts` holds the
+   * behaviour directly.
    */
   await settle();
 

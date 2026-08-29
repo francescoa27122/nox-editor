@@ -169,3 +169,65 @@ describe('a folder that is not a usable plugin', () => {
     expect(instance.commands.get('plugin.demo.save')?.title).toBe('Not File Save');
   });
 });
+
+/**
+ * Opening a folder must not take the plugins with it.
+ *
+ * Found on 2026-08-29 by walking the packaged Windows build, and it had made
+ * the whole plugin feature dead for anyone with a workspace open. A `startup`
+ * plugin was spawned, wrote its greeting, and was killed inside two seconds;
+ * the handshake then timed out ten seconds later. With no folder restored the
+ * same plugin was answered in 6 ms and lived indefinitely.
+ *
+ * The cause was `#restartLanguageServers` calling `plugins.stopAll()`. Its
+ * comment gave the reason as "a reload does not kill what the renderer
+ * started" — which is true, and is `dispose()`'s job. That function instead
+ * runs on **every workspace root change**, and `stopAll()` *clears* the
+ * registry rather than restarting it, so the plugins never came back.
+ *
+ * Nothing in 2400 tests caught it, and one of them had already met it:
+ * `tests/settings-panel-plugins.test.ts` waits for construction to settle
+ * before loading plugins, and its comment explains this very sequence as a
+ * harness quirk. It was the product bug, written down and walked past.
+ */
+describe('a workspace root change', () => {
+  it('leaves the loaded plugins alone', async () => {
+    const { app: instance, platform } = await setup(MANIFEST);
+    expect(instance.plugins.list()).toHaveLength(1);
+
+    platform.mkdirp('/w');
+    await instance.workspace.openFolder('/w');
+    // The root change is announced synchronously; the teardown it used to
+    // trigger was asynchronous, so the assertion has to outlive a few ticks.
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    expect(instance.plugins.list()).toHaveLength(1);
+    expect(instance.commands.get('plugin.demo.greet')).toBeDefined();
+  });
+
+  it('leaves a running plugin running', async () => {
+    const { app: instance, platform } = await setup(MANIFEST);
+    await instance.commands.execute('plugin.demo.greet');
+    expect(instance.plugins.stateOf('demo')).toBe('running');
+
+    platform.mkdirp('/w');
+    await instance.workspace.openFolder('/w');
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    // The state that matters: a plugin the user had going does not silently
+    // stop because they opened a folder.
+    expect(instance.plugins.stateOf('demo')).toBe('running');
+  });
+
+  it('closing the folder does not stop them either', async () => {
+    const { app: instance, platform } = await setup(MANIFEST);
+    platform.mkdirp('/w');
+    await instance.workspace.openFolder('/w');
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    await instance.workspace.closeFolder();
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    expect(instance.plugins.list()).toHaveLength(1);
+  });
+});
