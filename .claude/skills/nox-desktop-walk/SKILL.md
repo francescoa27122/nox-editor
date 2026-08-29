@@ -1,6 +1,6 @@
 ---
 name: nox-desktop-walk
-description: Use when verifying Nox in the packaged macOS app rather than the browser — walking the UI, driving it with computer-use or screenshots, checking terminal/git/LSP/agent/native-dialog behaviour, resuming a walk that was interrupted, or deciding whether a browser observation is trustworthy.
+description: Use when verifying Nox in the packaged desktop app rather than the browser: walking the UI, driving it with computer-use or screenshots, checking terminal/git/LSP/agent/native-dialog behaviour, resuming a walk that was interrupted, or deciding whether a browser observation is trustworthy.
 ---
 
 # Walking the packaged Nox
@@ -14,9 +14,17 @@ The browser target runs the same renderer against `WebPlatform`, where
 sidebar panels and every native dialog are therefore unreachable there.
 
 **A walk's job is the part `npm test` structurally cannot reach.** Anything a
-headless test could assert should be a headless test instead — walks are the
-scarcest resource in this project and get spent on geometry, native chrome, and
+headless test could assert should be a headless test instead. Walks are the
+scarcest resource in this project and get spent on native chrome and
 real subprocesses.
+
+**Geometry inside the WebView no longer needs a walk.** The `editor` vitest
+project (`npm run test:editor`) is real chromium with real layout, so anything
+*drawn* can be measured and screenshotted there without a desktop at all.
+`tests/browser/blame-gutter.test.ts` is the worked example. What still needs
+the machine is what lives outside the WebView: the menu bar, native dialogs,
+the terminal, a real git repository, and how the packaged bundle behaves on
+disk.
 
 Verify commands live in `CLAUDE.md`. Layer rules live in `ARCHITECTURE.md`. This
 file covers only the walk itself.
@@ -34,8 +42,9 @@ monitor's *work area*, so `+0+0` is the top-left corner of usable space, not a
 y the menu bar will swallow. Size and position are clamped to that area and to
 the window minimums.
 
-It then echoes `nox: geometry WxH+X+Y` on stdout, in **absolute screen points**
-— the request after clamping, so it matches what an external tool measures.
+It then echoes `nox: geometry WxH+X+Y` on stdout, in **absolute screen
+points**, the request after clamping, so it matches what an external tool
+measures.
 Anchor on that line; never on measurements taken from a screenshot.
 
 It is arithmetic, not a read-back: `set_position` is asynchronous on macOS, so
@@ -53,10 +62,10 @@ These follow from macOS and from Nox, and stay true as tooling changes.
 | Fact | Consequence |
 |---|---|
 | `/Applications/Nox.app` shares bundle id `dev.nox.editor` | `open -a Nox` launches **that**, not your build. Always launch by executable path. |
-| Three coordinate spaces exist at once | Physical pixels, logical points, and whatever size your screenshot tool hands back — all different. **Derive the ratio, never assume 2x.** Anchor on the `nox: geometry` line instead of measuring an image. |
+| Three coordinate spaces exist at once | Physical pixels, logical points, and whatever size your screenshot tool hands back, all different. **Derive the ratio, never assume 2x.** Anchor on the `nox: geometry` line instead of measuring an image. |
 | `scripts/window-id.swift` prints a window **number**, not bounds | It is a handle for `screencapture -l <id>`, not a measuring tape. It needs no accessibility permission, which is its value. |
-| `devUrl` is hardcoded to port 1420 but `vite.config.ts` sets `strictPort: false` | A second `npm run dev` silently takes 1421 while `tauri dev` loads whatever already owns 1420 — so you can drive one checkout's renderer believing it is another's. Kill stray vite processes before any walk. |
-| The release bundle has no devtools | `Cargo.toml` declares `tauri = { features = [] }`. For exact layout numbers use `npm run app` (debug enables devtools); it is the same `platform.id === 'tauri'` and CSS layout cannot differ by optimisation level. |
+| `devUrl` is hardcoded to port 1420 but `vite.config.ts` sets `strictPort: false` | A second `npm run dev` silently takes 1421 while `tauri dev` loads whatever already owns 1420, so you can drive one checkout's renderer believing it is another's. Kill stray vite processes before any walk. |
+| The release bundle has no devtools | `Cargo.toml` declares `tauri = { features = [] }`. For exact layout numbers use `npm run app`, since debug enables devtools. It is the same `platform.id === 'tauri'` and CSS layout cannot differ by optimisation level. |
 | AppleScript `set {position, size}` on one line returns `-10003` | Use `--geometry`. If you must use AppleScript, set position and size in separate calls. |
 | Window geometry is never persisted | Every launch is `tauri.conf.json`'s size, centred. A walk that depends on last run's window is not repeatable. |
 | macOS draws traffic lights over the overlay title bar | `TitleBar.svelte`'s inset is gated on `platform.id === 'tauri'`, which **no test and no browser session can ever produce**. Only a walk sees it. |
@@ -64,7 +73,7 @@ These follow from macOS and from Nox, and stay true as tooling changes.
 ## Proving you are driving the build you just made
 
 `__APP_VERSION__` comes from `package.json`, so two different checkouts report
-the same version — it cannot tell builds apart. What can:
+the same version. It cannot tell builds apart. What can:
 
 - `shasum -a 256` the executable after building; compare with the path
   `ps -p <pid> -o comm=` reports for the process you are actually driving.
@@ -74,7 +83,7 @@ the same version — it cannot tell builds apart. What can:
 
 ## Harness quirks
 
-Volatile — verify before trusting, and prefer a durable workaround.
+Volatile. Verify before trusting, and prefer a durable workaround.
 
 | Quirk | Workaround |
 |---|---|
@@ -85,7 +94,7 @@ Volatile — verify before trusting, and prefer a durable workaround.
 ## Drive by command id, not by pixel
 
 Every user action is a `Command`. Open the palette, type the command's title,
-confirm the palette opened **before typing** — if it did not, the keystrokes
+confirm the palette opened **before typing**. If it did not, the keystrokes
 land in the buffer and silently edit your fixture.
 
 Prefer `commandId` and accessible names over coordinates: the chrome is under
@@ -94,11 +103,11 @@ active redesign and any coordinate you write down expires.
 ## Resumability
 
 `.desktop-pass-report.md` records a real walk that ended **2 PASS, 3 PARTIAL,
-12 UNSEEN** — abandoned mid-run, with no way to resume. Prevent the repeat:
+12 UNSEEN**, abandoned mid-run with no way to resume. Prevent the repeat:
 
 1. Write the checklist to a report file **before** starting, every item `UNSEEN`.
 2. After each item, update that one line to `PASS` / `PARTIAL` / `FAIL` with the
-   evidence — one sentence, and the screenshot if there is one.
+   evidence: one sentence, and the screenshot if there is one.
 3. On resume, read the file and start at the first `UNSEEN`.
 
 A walk interrupted at item 4 of 17 must cost four items to redo, not seventeen.

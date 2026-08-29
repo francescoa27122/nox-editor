@@ -145,6 +145,7 @@ pub fn run() {
             fs::nox_read_config,
             fs::nox_write_config,
             git::nox_git_file_base,
+            git::nox_git_blame,
             git::nox_git_status,
             git::nox_git_branches,
             git::nox_git_stage,

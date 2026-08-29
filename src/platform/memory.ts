@@ -115,6 +115,7 @@ export class MemoryPlatform implements Platform {
       commits: [],
       conflicts: new Map(),
       untrackedDirectories: new Set(),
+      blame: new Map(),
     });
   }
 
@@ -132,6 +133,27 @@ export class MemoryPlatform implements Platform {
     const rel = relative(root, p);
     repo.heads.get(repo.branch)!.set(rel, contents);
     repo.index.set(rel, contents);
+  }
+
+  /**
+   * Give the fake git a per-line attribution for `path`: one entry per line,
+   * line 1 first.
+   *
+   * Seeded rather than derived, for the reason every seed here is: there is
+   * no commit graph to walk, and a fake that invented one would be modelling
+   * git instead of answering a lookup. What the fake *does* own is the
+   * output **shape**, and `gitBlame` renders real `--porcelain`: the group
+   * count on a group's first line and nowhere else, a commit's metadata
+   * block exactly once however many groups it owns, and the blamed text
+   * tab-prefixed under each header. That is deliberate. A fake that emitted
+   * a convenient shape, one tidy block per line say, would let a parser that
+   * mishandles the real thing pass the entire suite.
+   */
+  seedGitBlame(path: string, lines: readonly BlameSeedLine[]): void {
+    const p = normalize(path);
+    if (!this.#repoFor(p)) this.seedGitRepo(dirname(p));
+    const [root, repo] = this.#repoEntryFor(p)!;
+    repo.blame.set(relative(root, p), [...lines]);
   }
 
   /**
@@ -339,6 +361,78 @@ export class MemoryPlatform implements Platform {
     const stages = repo.conflicts.get(rel);
     if (stages) return stages.ours ?? stages.base ?? null;
     return repo.index.get(rel) ?? null;
+  }
+
+  /**
+   * `git blame --porcelain --contents -` for `path`, rendered from what a
+   * test seeded, or null when nothing was.
+   *
+   * Null is what the real platform returns for a file with no blame: no
+   * repository, untracked, no git. Unseeded means exactly that here.
+   *
+   * `contents` supplies the tab-prefixed text and nothing else. The fake
+   * does not re-derive attribution from it: there is no history here to diff
+   * against, and inventing one would be modelling git. A test that wants the
+   * unsaved-insertion case seeds the zero-hash entry itself, which is the
+   * answer real git computes from `--contents`.
+   *
+   * The one thing a fake cannot check is the format itself, so
+   * `src-tauri/src/git.rs` asserts the real one against real git, that a
+   * commit is stated once and that repeats carry only the short header, and
+   * the rendering below mirrors it.
+   */
+  async gitBlame(path: string, contents: string): Promise<string | null> {
+    const p = normalize(path);
+    const entry = this.#repoEntryFor(p);
+    if (!entry) return null;
+    const [root, repo] = entry;
+    const rel = relative(root, p);
+    const seeded = repo.blame.get(rel);
+    if (!seeded || seeded.length === 0) return null;
+
+    const text = contents.split('\n');
+    const stated = new Set<string>();
+    const rows: string[] = [];
+
+    for (let i = 0; i < seeded.length; i++) {
+      const line = seeded[i]!;
+      let header = `${line.hash} ${i + 1} ${i + 1}`;
+      // The group count belongs on a group's first line and nowhere else.
+      // That asymmetry *is* the format, and a fake that put it on every line
+      // would hide a parser that read it as a required field.
+      if (i === 0 || seeded[i - 1]!.hash !== line.hash) {
+        let run = 1;
+        while (i + run < seeded.length && seeded[i + run]!.hash === line.hash) run++;
+        header += ` ${run}`;
+      }
+      rows.push(header);
+
+      if (!stated.has(line.hash)) {
+        stated.add(line.hash);
+        const email = line.email ?? 'dev@example.com';
+        const time = line.time ?? BLAME_SEED_TIME;
+        const tz = line.tz ?? '+0000';
+        rows.push(
+          `author ${line.author}`,
+          `author-mail <${email}>`,
+          `author-time ${time}`,
+          `author-tz ${tz}`,
+          // The committer block is rendered although nothing reads it: it is
+          // in real output, and it is what exercises a parser's handling of
+          // the keys it does not know.
+          `committer ${line.author}`,
+          `committer-mail <${email}>`,
+          `committer-time ${time}`,
+          `committer-tz ${tz}`,
+          `summary ${line.summary ?? 'A commit'}`,
+          `filename ${rel}`,
+        );
+      }
+
+      rows.push(`\t${text[i] ?? ''}`);
+    }
+
+    return rows.join('\n') + '\n';
   }
 
   async checkForUpdate(): Promise<UpdateInfo | null> {
@@ -1142,6 +1236,12 @@ interface FakeGitRepo {
    * this seam existed.
    */
   untrackedDirectories: Set<string>;
+  /**
+   * Repo-relative path -> one commit per line, line 1 first. Seeded, never
+   * derived: there is no commit graph here to walk, and inventing one would
+   * be modelling git rather than answering a lookup.
+   */
+  blame: Map<string, BlameSeedLine[]>;
 }
 
 /**
@@ -1155,6 +1255,25 @@ interface FakeGitRepo {
  * carrying `contents` here under the name "theirs" would be a lie the model
  * has no use for.
  */
+/**
+ * One line's attribution, as a test seeds it.
+ *
+ * Everything optional has a fixed default rather than a derived one, because
+ * a fake that varied its own output would make an assertion about a rendered
+ * date depend on the day the suite ran.
+ */
+export interface BlameSeedLine {
+  /** The object name. `'0'.repeat(40)` is git's no-commit-holds-this one. */
+  hash: string;
+  author: string;
+  email?: string;
+  /** Author time, epoch seconds. */
+  time?: number;
+  /** git's `author-tz` shape: `+0530`, `-0800`. */
+  tz?: string;
+  summary?: string;
+}
+
 interface ConflictStages {
   /** Stage 1 — the merge base. */
   base?: string;
@@ -1179,6 +1298,13 @@ export function sortEntries(entries: DirEntry[]): DirEntry[] {
  * stages in the wrong order as correct.
  */
 const MERGE_BASE_SEED = 'the merge base\n';
+
+/**
+ * The author time every seeded blame line gets unless a test names one.
+ * Fixed, because a rendered date is asserted on and `Date.now()` would make
+ * that assertion depend on the day the suite ran. 2023-11-14T22:13:20Z.
+ */
+const BLAME_SEED_TIME = 1_700_000_000;
 
 /** A deterministic 40-hex stand-in for an oid, derived from a counter. */
 function fakeOid(n: number): string {

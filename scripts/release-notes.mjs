@@ -10,7 +10,7 @@
  *
  * A CLI rather than a module because that is what a workflow can call, and
  * `tests/release-notes.test.ts` drives this same entry point as a child
- * process — the contract under test is the exit code and the stdout, which is
+ * process. The contract under test is the exit code and the stdout, which is
  * all the workflow can see.
  *
  *   node scripts/release-notes.mjs <version> [changelog.md]
@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
  * `## 0.4.1 - 2026-08-17` names the same release and a parser that only knew
  * the one spelling would fail a release for a typographic reason.
  *
- * `### Added` does not match — `^##\s` needs whitespace after two hashes, and
+ * `### Added` does not match, because `^##\s` needs whitespace after two hashes, and
  * a third hash is not whitespace.
  */
 function headingVersion(line) {
@@ -50,7 +50,7 @@ function isLinkDefinition(line) {
  *
  * The heading itself is dropped: GitHub already titles the page `Nox v0.10.0`,
  * and repeating the version under it reads like a mistake. The trailing
- * link-reference block is dropped too — it sits at the bottom of the file, so
+ * link-reference block is dropped too. It sits at the bottom of the file, so
  * it falls inside the *last* section's range without belonging to it, and
  * definitions nothing references render as literal text.
  */
@@ -105,7 +105,7 @@ if (section === null) {
     `CHANGELOG.md has no section for ${version}.\n` +
       `\n` +
       `A release page that does not say what changed is worse than no release page.\n` +
-      `Rename the '## [Unreleased]' heading to '## [${version}] — <date>', add the\n` +
+      `Rename the '## [Unreleased]' heading to '## [${version}] - <date>', add the\n` +
       `matching link-reference definition at the bottom of the file, then retag.`,
   );
 }
@@ -114,7 +114,7 @@ if (section.trim() === '') {
   fail(
     `CHANGELOG.md has a heading for ${version} with nothing under it.\n` +
       `\n` +
-      `Write what changed — the release body is this text, and an empty one ships a\n` +
+      `Write what changed. The release body is this text, and an empty one ships a\n` +
       `page that says nothing.`,
   );
 }

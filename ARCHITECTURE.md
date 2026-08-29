@@ -1,8 +1,8 @@
-# Nox — Architecture
+# Nox Architecture
 
 This document explains how Nox is put together and, more importantly, *why*.
 If you are about to add a feature, read §2 (Layers) and §5 (How to add a
-feature) first — those two sections determine where your code belongs.
+feature) first. Those two sections determine where your code belongs.
 
 ---
 
@@ -20,22 +20,22 @@ feature) first — those two sections determine where your code belongs.
 
 ### Alternatives considered
 
-**Electron** — rejected on weight. An editor whose thesis is speed cannot ship
+**Electron.** Rejected on weight. An editor whose thesis is speed cannot ship
 a private Chromium.
 
-**A fully native, GPU-rendered UI (the Zed model)** — the right answer with a
+**A fully native, GPU-rendered UI (the Zed model).** The right answer with a
 graphics team and a multi-year runway. For this project it is a ~10× cost
 multiplier on every UI change and forfeits the entire web ecosystem for future
 markdown preview, diffing and AI-chat surfaces. Revisitable: rendering sits
 behind `ui/`, not smeared through the services.
 
-**Monaco instead of CodeMirror** — Monaco's genuine advantage is near-free
+**Monaco instead of CodeMirror.** Monaco's genuine advantage is near-free
 TypeScript IntelliSense. That advantage is real but narrow (it is free for
 TS/JS and nothing else), and it comes bundled with 20× the code and a DOM that
 carries VS Code's visual DNA. Nox chooses a distinct identity and pays for
 language intelligence later via LSP over stdio, which is well-understood work.
 
-**React instead of Svelte** — larger ecosystem, but Nox writes every component
+**React instead of Svelte.** Larger ecosystem, but Nox writes every component
 by hand to hit its design bar, so the ecosystem advantage is never cashed in,
 while the reconciler cost lands on the exact thread CodeMirror needs. Mitigated
 risk: all logic lives outside components, so a framework swap touches `ui/` only.
@@ -81,16 +81,16 @@ fall out of that, and both are load-bearing:
 
 - The whole app runs in a plain browser against an in-memory filesystem, so UI
   work needs no Rust rebuild loop (`npm run dev`).
-- Every service is unit-testable against a fake disk with **no mocking library**
-  — you construct a different `Platform`. `tests/workspace.test.ts` exercises
-  the same code path the browser build uses.
+- Every service is unit-testable against a fake disk with **no mocking
+  library**. You construct a different `Platform`. `tests/workspace.test.ts`
+  exercises the same code path the browser build uses.
 
 When Tauri's API changes, exactly one file changes: `platform/tauri.ts`.
 
 The updater follows the same rule: its network request, signature
 verification and file replacement all happen in the Rust plugin, behind
 `checkForUpdate` and `installUpdate` on `Platform`. The renderer sees
-`UpdateInfo | null` and nothing else — absence is never an error.
+`UpdateInfo | null` and nothing else. Absence is never an error.
 
 **2. Every user action is a `Command`.**
 Menus, the palette, keybindings and buttons all dispatch the same `commandId`.
@@ -112,6 +112,7 @@ src/
 │  ├─ fuzzy.ts           O(pattern × text) DP matcher for palette/quick-open
 │  ├─ diff.ts            Myers line diff; hunks for review and Git
 │  ├─ git-status.ts      Porcelain v2 → branch, staged/unstaged, renames
+│  ├─ git-blame.ts       Blame porcelain → a commit per line, and its label
 │  ├─ replace.ts         Replacement computation and expansion
 │  ├─ languages.ts       Language identity (no parsers)
 │  ├─ symbols.ts         Named structure in a file, read from a parse tree
@@ -128,7 +129,7 @@ src/
 │  ├─ commands.ts        Command registry
 │  ├─ keymap.ts          Chord parsing, resolution, display formatting;
 │  │                     the default table plus the user rules over it
-│  ├─ config/schema.ts   THE settings schema — types derived from it
+│  ├─ config/schema.ts   THE settings schema. Types derived from it
 │  ├─ config/index.ts    ConfigService: the three layers, coerce, persist
 │  ├─ workspace.ts       Buffers, tabs, dirty tracking, file operations,
 │  │                     change-set application and grouped undo
@@ -205,7 +206,7 @@ imported, so `workspace.ts` never depends on `@codemirror/view`. Tests pass
 
 `EditorPane` dispatches through `workspace.applyTransaction(id, tr)` rather
 than letting the view own its state. The workspace therefore holds the
-authoritative state for *every* buffer, including background tabs — which is
+authoritative state for *every* buffer, including background tabs, which is
 what makes "save all" and session restore correct rather than approximate.
 
 ### Dirty tracking is exact, then pragmatic
@@ -228,7 +229,7 @@ nowhere else. **No component may hardcode a default.**
 schema's defaults, then the user's `settings.json`, then the open project's
 `.nox/settings.json`. That last file arrives with a cloned repository, so the
 keys it may supply are an **allowlist on the schema** (`workspace: true`),
-eight wide, holding only facts about the code — indentation, trimming, format
+eight wide, holding only facts about the code: indentation, trimming, format
 on save, what to hide. `terminal.shell` is the name that makes the rule
 concrete: a repository that could set it would run a binary of its author's
 choosing the first time you opened a terminal. Nothing naming a program, a
@@ -243,7 +244,7 @@ up new defaults instead of freezing whatever shipped first.
 ### One Compartment per setting group
 
 Changing the font size dispatches a `reconfigure` for the theme compartment
-only. It never rebuilds the state — a rebuild would discard undo history and
+only. It never rebuilds the state. A rebuild would discard undo history and
 scroll position, which users notice immediately and never forgive.
 
 Buffers created while a background tab was inactive may carry stale
@@ -263,14 +264,14 @@ and otherwise falls through to CodeMirror to collapse multi-cursors.
 
 The application layer has **two tiers**: the defaults `app.ts`'s
 `#registerKeybindings` builds with `bind()`, and a list of `KeybindingRule`s
-read from `keybindings.json`. A rule is *applied over* the defaults — the
-default table is never edited — which is what makes resetting a customisation a
+read from `keybindings.json`. A rule is *applied over* the defaults, and the
+default table is never edited, which is what makes resetting a customisation a
 deletion rather than a remembered original. `#rebuild()` replays the defaults
 minus every `(chord, command)` pair a `remove` rule names, then applies the
 additions; additions go last, and `#add` unshifts, so a user binding beats a
 default on the same chord with no extra precedence machinery. `when` cannot be
 serialised and `arg` usually is not, so both are inherited from the command's
-own default — rebinding Escape keeps its guard.
+own default, so rebinding Escape keeps its guard.
 
 Recording a new chord is a **mode of the service** (`beginCapture` /
 `endCapture`), not a listener in the panel: the service already resolves on the
@@ -283,7 +284,7 @@ handed to the recorder, and nothing runs. Design:
 
 `FileTreeService` has exposed the tree as a flat ordered list since v0.1, with
 a header saying why: flat is what the renderer wants, and it leaves the door
-open for windowing. `ExplorerPanel` now walks through that door alone — no
+open for windowing. `ExplorerPanel` now walks through that door alone. No
 service, no test and no `FlatNode` changed. It renders the slice of `nodes`
 the viewport covers plus an overscan, between two `role="presentation"`
 spacers that stand in for the rest, so the scrollbar describes the whole tree
@@ -291,7 +292,7 @@ and every row keeps its true offset. Spacers rather than a transform: the
 container is also the drop target and the keyboard surface, and a transformed
 child changes what `contains()` and `getBoundingClientRect()` mean for both.
 
-Two rules make it safe. **The row height has one home** — a TS constant that
+Two rules make it safe. **The row height has one home**, a TS constant that
 the stylesheet reads back through `--nox-tree-row-h`, because windowing by
 index breaks silently if the painted height and the arithmetic disagree. And
 **what cannot be measured is not windowed**: a viewport height of zero (before
@@ -310,9 +311,9 @@ is the whole reason it works: `FileTreeService` loads directories lazily, so a
 folder nobody has expanded has no entries to walk, and a tree-walking roll-up
 would answer "nothing in here" for exactly the folders the user has not looked
 inside. Git and the buffer list know about paths whether or not the tree does.
-Climbing stops once an ancestor already holds a letter at least as severe —
-the walk that set it had already raised everything above it — which costs one
-visit per distinct ancestor rather than one per file per level. Comparing
+Climbing stops once an ancestor already holds a letter at least as severe,
+because the walk that set it had already raised everything above it. That costs
+one visit per distinct ancestor rather than one per file per level. Comparing
 *presence* instead of severity is the bug that shape invites: a conflict
 arriving after an ordinary edit had claimed the folder above it would never
 reach the rows above that.
@@ -321,24 +322,24 @@ reach the rows above that.
 Worst rather than a count: a count answers "how much" when the question is
 "should I open this", loses the conflict entirely, and does not fit the rail.
 `C` outranks everything because staging a conflict is the one action that is
-actively harmful — the same argument that spends a scarce letter on it in
-`core/git-status.ts` — and `U` ranks last because a folder of untracked build
-output would otherwise shout over a real change above it. Collapsed-only
+actively harmful, the same argument that spends a scarce letter on it in
+`core/git-status.ts`. `U` ranks last because a folder of untracked build output
+would otherwise shout over a real change above it. Collapsed-only
 because an expanded folder's rows already answer, and because it makes the
 right edge single-occupancy by construction: `#flatten` gates `loading`,
 `empty` and `error` on `expanded`, so a row that can carry a marker can never
 also want the note slot, and the two need no precedence rule between them.
 
 The character, its colour token and the 8 px dot are the file markers
-unchanged — the twisty and the folder icon already say which kind of row this
+unchanged. The twisty and the folder icon already say which kind of row this
 is, so a second visual tier would be a new language for a distinction the row
 has made. Only the accessible name differs: *Contains modified files*, not
 *Modified*, which is also what keeps the difference off colour alone
 (WCAG 1.4.1).
 
 Two consequences worth naming. A **gitignored** folder is exempt from the
-letter for free — `git.rs` runs without `--ignored`, so those paths never
-reach the status list and there is nothing to roll up — but deliberately not
+letter for free, since `git.rs` runs without `--ignored`, so those paths never
+reach the status list and there is nothing to roll up. It is deliberately not
 exempt from the dot, because unsaved is not a git fact and you opened that
 file on purpose. And the git half rides `git.status` as the per-file map does,
 while the dirty half rides `workspace.buffers` and is therefore on the typing
@@ -349,15 +350,15 @@ one, so nothing unsaved costs nothing at all.
 
 CodeMirror's search *engine* is excellent and its panel looks nothing like Nox.
 We keep the engine (`SearchQuery`, `findNext`, `findPrevious`) and draw our own
-panel. Replace is the exception and is ours — see *The editor borrows the match
-and owns the text* below. One consequence worth knowing: CM ties highlighting to the
-lifecycle of its panel, which we never open — so
+panel. Replace is the exception and is ours: see *The editor borrows the match
+and owns the text* below. One consequence worth knowing is that CM ties
+highlighting to the lifecycle of its panel, which we never open, so
 `editor/search-highlight.ts` decorates matches itself, viewport-bounded.
 
 ### File watching: policy in one place
 
 Rust runs a single recursive `notify` watcher on the workspace root and
-forwards raw events. **All policy lives in `services/watcher.ts`** — the Rust
+forwards raw events. **All policy lives in `services/watcher.ts`.** The Rust
 side only filters noise directories (`.git`, `node_modules`, `target`, …),
 because a `cargo build` inside the workspace would otherwise push tens of
 thousands of events across the IPC boundary before anyone could ignore them.
@@ -366,8 +367,9 @@ side, where they can be unit-tested against `MemoryPlatform`.
 
 Three rules govern the behaviour:
 
-1. **Never fight the user.** A *clean* buffer reloads silently — that is what
-   clean means. A *dirty* buffer is never overwritten; it is marked and the
+1. **Never fight the user.** A *clean* buffer reloads silently, because that
+   is what clean means. A *dirty* buffer is never overwritten. It is marked
+   and the
    conflict is resolved at save time with an explicit
    Overwrite / Discard & Reload / Cancel choice.
 2. **Never mistake our own writes for someone else's.** Every open buffer
@@ -378,7 +380,7 @@ Three rules govern the behaviour:
    quick-open re-index runs on a separate 2 s timer, and a plain content
    modification never triggers a tree refresh at all.
 
-A deleted file keeps its tab, struck through and marked — the content is still
+A deleted file keeps its tab, struck through and marked. The content is still
 in memory, so nothing has been lost, and saving recreates the file.
 
 **Known limitation:** the mtime comparison is only as fine-grained as the
@@ -389,7 +391,7 @@ landing in the same second as a Nox save can be misread as our own.
 
 `reloadFromDisk` replaces the document with a *transaction* rather than a new
 `EditorState`. That keeps scroll position, maps the selection through the
-change, and leaves the reload on the undo stack — so a surprise reload is
+change, and leaves the reload on the undo stack, so a surprise reload is
 recoverable with ⌘Z.
 
 For that to reach the buffer you are actually looking at, the workspace needs
@@ -402,7 +404,7 @@ the background state itself.
 
 A rename that leaves a tab aimed at a dead path *looks* fine right up until you
 press save. So `renamePath` moves the file and then walks every open buffer,
-re-pointing anything at or beneath the old path — updating its path, name,
+re-pointing anything at or beneath the old path: updating its path, name,
 detected language (the extension may have changed, which means a different
 grammar) and recorded mtime.
 
@@ -414,7 +416,7 @@ trade the user agreed to.
 Deletion goes to the **OS trash**, not `unlink`. A text editor should never
 make a file unrecoverable with one click. `PlatformCapabilities.recoverableDelete`
 advertises whether that is true, and the confirmation dialog changes its wording
-accordingly — "Move to Trash" on the desktop, "deleted permanently" in the
+accordingly: "Move to Trash" on the desktop, "deleted permanently" in the
 browser target where there is nothing to recover from.
 
 ### Selection tracks three things, not one
@@ -427,7 +429,7 @@ Shift+Down then Shift+Up shrink the range back, which is what every file
 manager does and what everyone's fingers expect.
 
 Range operations take the ordered list of visible paths as an argument instead
-of reaching into `FileTreeService`, which keeps the model pure and testable —
+of reaching into `FileTreeService`, which keeps the model pure and testable.
 `tests/selection.test.ts` runs it against a plain array.
 
 Two rules exist because they prevent operating on things you cannot see:
@@ -444,7 +446,7 @@ Two rules exist because they prevent operating on things you cannot see:
 **Inside the tree** it is ordinary HTML5 drag and drop, and a drop resolves to
 a *folder*: dropping onto a file targets the folder containing it, because
 nobody intends to drop "into" a file. Validity is decided in `dragover` by
-`canMoveInto`, and only a valid target calls `preventDefault` — so an illegal
+`canMoveInto`, and only a valid target calls `preventDefault`, so an illegal
 drop is refused by the browser before it happens rather than failing halfway
 through a rename.
 
@@ -457,8 +459,8 @@ through and move the files to the root instead.
 sandboxed `File` with no path attached, so Nox would have nothing to open. It
 goes through Tauri's native `onDragDropEvent` instead, behind
 `PlatformCapabilities.externalFileDrop`, which is why the browser target simply
-does not offer it. The overlay is `pointer-events: none` — during an OS drag
-the pointer belongs to the OS, and intercepting it would swallow the drop.
+does not offer it. The overlay is `pointer-events: none`, because during an OS
+drag the pointer belongs to the OS and intercepting it would swallow the drop.
 
 Routing is the rule people expect without being told: files become tabs, a lone
 folder becomes the workspace, and in a mixed drop the files win.
@@ -466,9 +468,9 @@ folder becomes the workspace, and in a mixed drop the files win.
 ### Project search is the one thing Rust genuinely owns
 
 Everything else in `src-tauri/` is a thin adapter. Search is not: it is a
-parallel, gitignore-aware walk over a whole repository (`ignore` — ripgrep's
-walker — plus `regex`), and doing it in the webview would either block the main
-thread or push the entire tree through IPC file by file.
+parallel, gitignore-aware walk over a whole repository (`ignore`, ripgrep's
+own walker, plus `regex`), and doing it in the webview would either block the
+main thread or push the entire tree through IPC file by file.
 
 Results **stream in batches** (`nox://search-batch`, flushed every ~90 ms or 40
 files) rather than arriving at the end, so a large repo paints its first hits
@@ -476,7 +478,7 @@ immediately. Two consequences worth knowing:
 
 - Batches can arrive *before* `nox_search_start` returns the id they belong to,
   so `platform/tauri.ts` buffers early ones and replays them. Without that, the
-  fastest results — the ones from files already in page cache — are the ones
+  fastest results, the ones from files already in page cache, are the ones
   that get dropped.
 - The service tags each run with a generation counter and discards batches from
   a superseded search, because typing another character starts a new one while
@@ -487,13 +489,13 @@ immediately. Two consequences worth knowing:
 has one would silently search everything it lists. A `.gitignore` is the user's
 stated intent whether or not `git init` has been run.
 
-The in-memory platform implements search **for real**, not as a stub — the
+The in-memory platform implements search **for real**, not as a stub, so the
 browser target gets working project search and every service test exercises the
 same code path. The pure matching primitives live in `core/search-match.ts` and
 deliberately mirror `src-tauri/src/search.rs`; where the two must agree
 (preview windowing, whole-word semantics, column units) the same cases are
 asserted on both sides. Columns are UTF-16 units so the Rust numbers line up
-with JavaScript string indexing — an emoji earlier in the line would otherwise
+with JavaScript string indexing. An emoji earlier in the line would otherwise
 shift every highlight after it.
 
 ### Replace decides which text is authoritative
@@ -505,7 +507,7 @@ user cannot see. Three rules make that safe.
 replacing disk text under a buffer with unsaved edits would silently throw that
 work away. `#sourceTextFor` returns the buffer's text when the file is open,
 and the replacement is *recomputed* from it rather than trusting the stored
-result rows — which may be stale for a file edited since the search ran.
+result rows, which may be stale for a file edited since the search ran.
 
 **Open files change through a transaction**, not a write. `workspace.apply`
 routes through the live view where possible, so a project replace lands in the
@@ -515,7 +517,7 @@ unsaved state and stays the user's to save.
 
 **Everything else gets a journal.** Each replace records `{path, before, after}`
 per file. `undoLastReplace` restores a file only if its current contents still
-equal what the replace produced — if anything has touched it since, that file
+equal what the replace produced. If anything has touched it since, that file
 is skipped and counted, because restoring it would destroy newer work. The
 outcome is never silently partial: the notification says how many were left
 alone.
@@ -530,7 +532,7 @@ nothing and duplicate the rules above.
 
 ⌘F's replace no longer calls `@codemirror/search`'s `replaceNext`/`replaceAll`.
 It walks the same `SearchQuery` cursor those did, but the string each match is
-replaced *with* now comes from `core/replace.ts` — the same `expandReplacement`
+replaced *with* now comes from `core/replace.ts`, the same `expandReplacement`
 and `preserveCase` the project panel runs through. That is the whole point of
 the split: ⌘F and ⌘⇧F can no longer write different text for the same match,
 because there is only one function that decides what the text is.
@@ -539,7 +541,7 @@ because there is only one function that decides what the text is.
 replacements through `computeReplacements` outright, and it was built, measured
 and reverted: that function is line-based, so it lost multi-line regex, the
 `\n`/`\t` unquoting of the find field, and the Unicode character categorizer
-behind whole-word — `café café` stops matching both halves the moment a plain
+behind whole-word. `café café` stops matching both halves the moment a plain
 `\b` stands in for it. `SearchQuery` carries all three. Because the counter, the
 highlights and replace-all now walk one query, they also cannot disagree about
 what counts as a match.
@@ -549,7 +551,7 @@ replace only writes when the selection covers a match exactly (otherwise it
 advances, which is what makes Replace safe to lean on), that the search wraps at
 the end of the document, where the selection lands, and scrolling it into view.
 That is `replaceNext`'s contract, rebuilt on the one cursor the public API
-exposes — including two bounds that read like details and are not. The wrap
+exposes, including two bounds that read like details and are not. The wrap
 search stops at `from` for a regex query and `from + query.length` for a literal
 one, so it can only return a match *behind* the cursor; searching the whole
 document instead lets a match straddling the cursor come back and drags the
@@ -560,7 +562,7 @@ itself.
 One trap is worth naming because it shipped once. **Read the cursor by shape,
 never by class.** `RegExpCursor`'s constructor `return`s an unexported
 `MultilineRegExpCursor` for any pattern containing `\s`, `\W`, `\D`, `\n`, `\r`
-or `[^`, and that class is neither exported nor a subclass — so an `instanceof`
+or `[^`, and that class is neither exported nor a subclass, so an `instanceof`
 test silently loses the match object for exactly those patterns and writes the
 raw `$1` template into the document.
 
@@ -575,22 +577,23 @@ Two views over one document stay in step by **forwarding changes**, not by
 sharing an `EditorState`. When a pane's transaction reaches
 `applyTransaction`, its `changes` are dispatched to every other pane showing
 that file, carrying `mirroredAnnotation` so the receiver knows not to send it
-back. Only the changes travel, never the `Transaction` — `@codemirror/view`
-rejects one that does not start from the state it is applied to.
+back. Only the changes travel, never the `Transaction`, because
+`@codemirror/view` rejects one that does not start from the state it is applied
+to.
 
 Two rules keep that from looping or double-applying. A transaction that is
 itself a mirror is never forwarded again, guarded in the workspace rather than
 in the panes, because a consumer that re-enters without checking would
 otherwise bounce one keystroke between two views forever. And forwarding only
 happens when the caller says which pane it is: without that there is no way to
-skip the sender, and it would apply its own change twice — which is exactly
-how the watcher's fake pane found this, as `RangeError: Applying change set to
+skip the sender, and it would apply its own change twice. That is exactly how
+the watcher's fake pane found this, as `RangeError: Applying change set to
 a document with the wrong length`. A caller that does not identify itself gets
 the behaviour it had before panes could be mirrored.
 
 Each pane keeps its own cursor, saved and restored. `selectionOf(id, groupId)`
 asks *that pane* rather than the buffer, whose state carries whichever view
-moved last — the selection is **pulled** at save time, never published, because
+moved last. The selection is **pulled** at save time, never published, because
 a cursor moves on every keystroke and only the session ever reads it. Coming
 back, the mirror's cursor is parked in `takePaneSelection` for the pane to
 claim when it mounts, rather than written through `setSelection`, which moves
@@ -602,7 +605,7 @@ for those rather than `open`, which would focus the tab an earlier group had
 already restored instead of adding one.
 
 **VERSION stays 4 on purpose.** `#read` discards a session whose version it
-does not recognise — the same all-or-nothing check `notes.json` has — so
+does not recognise, the same all-or-nothing check `notes.json` has, so
 bumping it would cost every tab and every unsaved-backup pointer to gain one
 pane. The field is optional in both directions instead: an older session has
 no marker and restores exactly as it did, and an older Nox reading a newer
@@ -629,8 +632,8 @@ replace, the transaction log and the watcher are untouched by this, which is
 the whole reason it is shaped this way rather than by copying the document.
 
 The workspace holds a flat list of **editor groups**, each with its own tab
-order and active tab. `activeId` is now *derived* — the active buffer of the
-active group — so every command written against "the editor" keeps working
+order and active tab. `activeId` is now *derived*, being the active buffer of
+the active group, so every command written against "the editor" keeps working
 unchanged, and `app.view` is re-pointed at whichever pane has focus.
 
 **A buffer belongs to exactly one group.** This is the load-bearing invariant:
@@ -638,8 +641,8 @@ unchanged, and `app.view` is re-pointed at whichever pane has focus.
 session restore and project replace all depend on. Allowing the same document
 in two panes would mean two CodeMirror views over one document, which CM6 does
 not support without forwarding transactions between them and reconciling their
-selections — and it would break that invariant for every feature already built.
-The cost is that you cannot yet view one file in two panes; that is recorded as
+selections, and it would break that invariant for every feature already built.
+The cost is that you cannot yet view one file in two panes. That is recorded as
 known debt rather than smuggled in.
 
 Two consequences fall out of the invariant, and both are what people expect
@@ -653,15 +656,15 @@ harder drag target story for a case most people never reach. Orientation is a
 single setting for the whole layout (`workbench.splitOrientation`), so you get
 columns or rows but not both at once.
 
-Groups fold away when emptied — closing the last tab in a pane, or dragging it
-out — because a layout with a hole where a pane used to be is worse than one
-that heals. Closing a *pane* deliberately keeps its tabs, moving them into the
+Groups fold away when emptied, whether by closing the last tab in a pane or by
+dragging it out, because a layout with a hole where a pane used to be is worse
+than one that heals. Closing a *pane* deliberately keeps its tabs, moving them into the
 neighbour: that is a layout change, not a close-all.
 
 One bug worth remembering: tab drag state lives in `UIService`, not in the
 `TabBar` component. A tab dragged between panes starts in one component and is
 dropped on another, and a receiving strip with component-local state has no
-idea a drag is in progress — so it never calls `preventDefault` and the drop
+idea a drag is in progress, so it never calls `preventDefault` and the drop
 silently does nothing.
 
 ### Folding is grammar-driven, and its chords are ours
@@ -671,7 +674,7 @@ folding exists only for languages Nox ships a parser for. That is deliberate:
 indentation-guessed folds are wrong often enough to be worse than none, and the
 gutter simply shows no arrow where there is nothing to fold.
 
-Fold state lives in the `EditorState`, which the workspace owns per buffer — so
+Fold state lives in the `EditorState`, which the workspace owns per buffer, so
 folds survive a tab switch for free, exactly like selection and undo history.
 
 CodeMirror ships a `foldKeymap`, and Nox does **not** use it. Its chords are
@@ -679,7 +682,7 @@ CodeMirror ships a `foldKeymap`, and Nox does **not** use it. Its chords are
 Nox already binds to previous/next tab. Since the application keymap resolves on
 the capture phase it would win, and folding would silently never fire on those
 platforms. Folding is registered as application commands on the `⌥` variants
-instead — which also puts every fold action in the palette and the shortcut
+instead, which also puts every fold action in the palette and the shortcut
 reference, per the "one layer owns each chord" rule in §4.
 
 `foldRangesAtLevel` is pure and view-free so it can be tested against a real
@@ -697,7 +700,7 @@ and is tested against real parses with no DOM.
 **The rules are keyed by Lezer node name, with no dispatch on the file's
 language.** One table of 25 node names says what kind each is and where to read
 its name from, and the walk keeps a stack of enclosing names so a method comes
-out as `Foo.render` — fuzzy matching runs over that title, which is what lets
+out as `Foo.render`. Fuzzy matching runs over that title, which is what lets
 either half of it find the method.
 
 The deciding case is mixed-language files. `@codemirror/lang-html` configures
@@ -706,10 +709,10 @@ holds `RuleSet` *and* `FunctionDeclaration` nodes; `.svelte` and `.vue` load
 that same grammar in `editor/languages.ts`, so they are the same case. Rules
 keyed by the file's language would look up "html", find the rules for a grammar
 that deliberately collects nothing, and return an empty list for a file plainly
-full of structure — silently, because an empty list is also a legitimate
+full of structure, silently, because an empty list is also a legitimate
 answer. A shared name table has nothing to get wrong: it matches whatever node
 it meets, whichever grammar produced it. It has to be the *language* rather
-than the bare grammar, though — `@lezer/html` on its own does not nest, and
+than the bare grammar, though. `@lezer/html` on its own does not nest, and
 gives back `StyleText` and `ScriptText` with no structure inside them.
 
 One table works because the names do not collide. `FunctionDeclaration`,
@@ -725,13 +728,13 @@ match**, and this paragraph claimed that before it was true. It said a
 `PropertyName` child. `PropertyName` is what the JavaScript grammar produces
 for the `b` in `a.b`, and never appears under a method; `#foo() {}` is named by
 a `PrivatePropertyDefinition`, which was in neither the table nor this page. So
-every private method in a file was dropped without a trace — 26 of `app.ts`'s
-own 63 — and the tests agreed, because they were written from the same table.
+every private method in a file was dropped without a trace, 26 of `app.ts`'s
+own 63, and the tests agreed, because they were written from the same table.
 Rust's `ImplItem` was read the same way, by taking the last direct
 `TypeIdentifier` child: that is the target type in `impl Display for Foo`, but
 in `impl Foo<T>` a `GenericType` wraps the type so there is no such child at
 all, and in `impl<T> Display for Inner<T>` the only one left is the *trait*.
-The impl's target is now taken by position — the type before the block —
+The impl's target is now taken by position, the type before the block,
 because position is what the grammar keeps stable across all four shapes.
 Guessing produces a list that is wrong rather than empty, which is the more
 expensive kind of wrong.
@@ -741,7 +744,7 @@ level, not by containment: an ATX or Setext heading node spans only its own
 line, so it is a sibling of what follows it and never an ancestor, and the
 enclosing stack is empty again before the next heading is entered. A `flat`
 flag was written for this on the strength of the opposite prediction, then
-deleted — forcing it off against a real parse produced byte-identical output.
+deleted: forcing it off against a real parse produced byte-identical output.
 
 **Structure only, and JSON and HTML collect nothing themselves.** A file
 exporting thirty constants would bury its own functions, and fuzzy matching
@@ -752,13 +755,13 @@ file; what it contributes instead is the nesting above.
 
 **A symbol list is only as good as the parse frontier**, and this is the part
 that decides whether the feature is honest. `syntaxTree(state)` returns what
-CodeMirror has parsed so far, not the document. On one measured run — a fresh
-`EditorState` over a 39 KB JavaScript file of 1,000 functions — it stopped at
+CodeMirror has parsed so far, not the document. On one measured run, a fresh
+`EditorState` over a 39 KB JavaScript file of 1,000 functions, it stopped at
 3,002 characters, and a plain read of it found 80 of the 1,000. Treat that as
 an observation and not a constant: it follows from `Work.InitViewport`, a 3,000
 in a `const enum` inlined into `@codemirror/language`'s build and exported
 nowhere, so a version bump can move it and no test here pins it. What the tests
-do pin is the shape of the problem — a fresh state over an ordinary document
+do pin is the shape of the problem: a fresh state over an ordinary document
 is incomplete, a plain read caps well below the true count, and the palette's
 budget can be exhausted.
 
@@ -767,9 +770,9 @@ So the palette asks for the whole document with a deadline,
 what was parsed *and says the file is still parsing*. Listing the frontier
 quietly was the option to avoid: a short list that looks complete tells you the
 symbol is not there, which is worse than telling you nothing. The partial list
-does not creep upward as you type, either — `syntaxTree` reads the snapshot
+does not creep upward as you type, either. `syntaxTree` reads the snapshot
 frozen at the last dispatch while `ensureSyntaxTree` mutates the cached
-`ParseContext` without dispatching — so it sits at whatever the frontier held
+`ParseContext` without dispatching, so it sits at whatever the frontier held
 until one call finishes inside the budget, and then it is the whole file at
 once.
 
@@ -781,7 +784,7 @@ genuinely has no structure. Only the last of those may say so.
 
 The second is the one that bit. `EditorPane` attaches a grammar through a
 dynamic import that resolves after the buffer is already on screen, so for a
-moment there is a language id and no parser — and the first version of the list
+moment there is a language id and no parser, and the first version of the list
 said "No functions or classes in this file" about a file nothing had read yet.
 No unit test could reach that window: they hand `fileSymbols` a parser
 directly, or build an `EditorState` with the language already attached, and
@@ -789,38 +792,38 @@ neither goes near the dynamic import. It was found by opening a file in the
 running app and pressing ⌘R before the import landed.
 
 **Which of those four it is gets decided in `core/`, not in the component.**
-`symbolListState` takes the four facts they are told apart by — a grammar
-exists, it has loaded, the forced parse came back, how many symbols were found
-— and names the state, the fifth being an ordinary list of symbols, partial or
-not; `symbolRows` maps that to a sentence and does nothing else. The
+`symbolListState` takes the four facts they are told apart by (a grammar
+exists, it has loaded, the forced parse came back, how many symbols were found)
+and names the state, the fifth being an ordinary list of symbols, partial or
+not. `symbolRows` maps that to a sentence and does nothing else. The
 order is the substance of the function, because a document with no parser
 attached also comes back with no symbols: read after the parse facts, every
 grammar state shows up as "no functions or classes in this file", which is the
 bug above. That is testable and now tested, which it was not while it lived in
-a Svelte file this repo had no harness for. It does now — see §7. "No file is
+a Svelte file this repo had no harness for. It does now: see §7. "No file is
 open" is the exception and stays in the component, settled before there is
 anything to parse.
 
 ### Sticky scroll is a panel, and what pins is a pure function
 
 Sticky scroll reads `core/symbols.ts`'s table too, so it never disagrees with
-Go to Symbol about what counts as structure — declarations only, never `if`,
+Go to Symbol about what counts as structure: declarations only, never `if`,
 `for` or other control blocks.
 
 **What pins is `stickyRows`, a pure function beside `fileSymbols`, not a
 computation done inline in the extension.** It takes the symbol list, the top
-visible line, the document and a cap, and returns rows outermost-first — no
-`EditorView` in the signature, so it is tested against real parses with no
+visible line, the document and a cap, and returns rows outermost-first. There
+is no `EditorView` in the signature, so it is tested against real parses with no
 DOM, the same reason `symbolListState` was pulled out of `CommandPalette`.
 Deciding which rows pin costs on the order of the symbol walk itself: about
 0.012 ms on `src/app.ts` (2,690 lines, 67 symbols), against the walk's own
-~1.378 ms — which is also why the symbol cache is one slot per `EditorView`
+~1.378 ms. That is also why the symbol cache is one slot per `EditorView`
 rather than one shared slot. Two views open on different files would otherwise
 fight over a single cached parse.
 
 **The strip is a CodeMirror panel (`showPanel`, `{ top: true }`), not a
 floating overlay inside `.cm-scroller`.** A panel is positioned and sized by
-CodeMirror itself, which accounts for it in the editor's own layout — so the
+CodeMirror itself, which accounts for it in the editor's own layout, so the
 last line of the document is never hidden behind the strip, and there is no
 `scrollTop` arithmetic of Nox's own to get wrong. An overlay is the more
 familiar look and was considered; the panel is the version that cannot be
@@ -837,7 +840,7 @@ therefore ignores every save until `markReady()` is called at the end of boot.
 
 A second, related trap lived in restore itself: it read the group layout into a
 local, applied each group's active tab, then used that *same stale snapshot* to
-pick the focused tab — so the focus always landed on whichever tab was opened
+pick the focused tab, so the focus always landed on whichever tab was opened
 last rather than the one the session named. Restore now re-reads the layout
 after mutating it. The original test could not catch this because its fixture
 made the intended tab and the last-opened tab the same file.
@@ -858,15 +861,15 @@ behave like scratch buffers, which already worked this way.
 This is what `Platform.onCloseRequested` exists for: the window is held open
 until the final session write and settings flush complete. Before it, the only
 persistence was the 400 ms debounced save, and `NoxApp.dispose()` was dead
-code — nothing anywhere called it.
+code that nothing anywhere called.
 
 ### Programmatic edits go through change sets
 
 `workspace.apply(spec)` is the single entry point for any edit Nox makes on the
-user's behalf — today project replace and agents, later plugins. It validates
+user's behalf: today project replace and agents, later plugins. It validates
 the *whole* set before dispatching anything: every buffer present, every
 declared base revision current, and every buffer's `ChangeSet` successfully
-built. That last step is load-bearing and easy to skip — CodeMirror throws on a
+built. That last step is load-bearing and easy to skip. CodeMirror throws on a
 range the document cannot honour, so building transactions as you dispatch them
 means a bad offset in the second buffer leaves the first already written. Doing
 all the construction up front is what makes a half-applied set unrepresentable
@@ -887,7 +890,7 @@ change-set transaction is annotated `isolateHistory: 'full'`, so it is exactly
 one history event and never merges into adjacent typing. The workspace records
 the `undoDepth` that event produced, and undoes a buffer only while that depth
 still matches. Using CodeMirror's own accounting is what keeps this correct
-across edits, undos and redos the workspace never saw — a second history of our
+across edits, undos and redos the workspace never saw. A second history of our
 own would have to stay in step forever. A buffer the user has edited since is
 skipped and reported, never silently taken back.
 
@@ -918,9 +921,9 @@ See [AGENT-PLATFORM.md](AGENT-PLATFORM.md) §3.
 
 ### A file's charset is carried, never guessed
 
-Nox refused anything that was not valid UTF-8. That protected the file — a
-guess, saved, is corruption — but it meant a text editor that could not open a
-text file. It now reads legacy charsets, and the shape is chosen so the
+Nox refused anything that was not valid UTF-8. That protected the file, since
+a guess that gets saved is corruption, but it meant a text editor that could
+not open a text file. It now reads legacy charsets, and the shape is chosen so the
 protection survives.
 
 **The decoder is in Rust because it has to be.** The webview's `TextDecoder`
@@ -931,14 +934,14 @@ first save. `encoding.rs` over `encoding_rs` does both directions.
 
 **Detection stays honest.** A byte-order mark is a fact and valid UTF-8 is a
 fact; nothing else is knowable, so `detect` returns them and refuses the rest.
-The refusal is the feature — it is what routes the user to
+The refusal is the feature. It is what routes the user to
 `file.reopenWithEncoding` and the status-bar picker, where the person who
 knows what the file is makes the call. UTF-16 with a mark is therefore the
 only charset newly opened *automatically*; the rest are reachable by choice.
 
 **Encoding refuses rather than substitutes.** `encoding_rs` writes an HTML
 numeric reference for a character the charset cannot hold, so an emoji typed
-into a Shift_JIS file would save as the literal `&#128512;` — corruption
+into a Shift_JIS file would save as the literal `&#128512;`: corruption
 wearing the face of a successful save. The refusal happens before the atomic
 write begins, so the original survives it.
 
@@ -954,8 +957,8 @@ where mojibake creeps in.
 `fs::write` truncates before it fills, so a crash, a power cut or a full disk
 part-way through leaves the file empty and the old contents gone. Every save
 goes to a temp file in the *same directory*, is flushed to the device, and is
-then renamed over the target — atomic on every filesystem Nox targets, so a
-reader sees the whole old file or the whole new one and never a torn one.
+then renamed over the target. That is atomic on every filesystem Nox targets,
+so a reader sees the whole old file or the whole new one and never a torn one.
 
 Same directory specifically: rename across filesystems is a copy, which would
 put the truncation risk straight back. The old file's permissions are carried
@@ -969,7 +972,7 @@ file. See `nox_write_text_file` in `src-tauri/src/fs.rs`.
 in line-delimited JSON, supervised by `src-tauri/src/agent.rs`.
 
 The seam that matters is `Platform.spawnAgent`, which returns an
-`AgentProcess` — send a line, subscribe to lines, subscribe to exit. The
+`AgentProcess`: send a line, subscribe to lines, subscribe to exit. The
 transport is built from *that*, not from a command line, so it is testable
 against a fake process: no fixture binary, and failure modes like a silent
 agent or a crash mid-conversation become ordinary tests.
@@ -980,20 +983,20 @@ before `spawnAgent` returns, and dropping it loses the message every session
 starts with.
 
 Spawning is deliberately not reachable from the agent protocol. An agent
-cannot start another agent — only the user, through configuration.
+cannot start another agent. Only the user can, through configuration.
 
 ### One reader for every piped stream
 
 Three threads read a child process's output: an agent's stdout and stderr in
 `agent.rs`, and a language server's stderr in `lsp.rs`. All three go through
-`agent::read_lines`, and sharing it is not tidiness — it is the fix for a
+`agent::read_lines`, and sharing it is not tidiness. It is the fix for a
 defect all three had.
 
 `BufRead::lines()` yields `Err(InvalidData)` for a chunk that is not valid
 UTF-8, so **one** stray byte ended a reader thread for good. On an agent's
 stdout that cost the exit event too, because the `child.wait()` after the loop
 blocks on a process that is still alive: the panel sat on "Working…" until Nox
-was restarted. On a language server's stderr it was quieter and worse — stdout
+was restarted. On a language server's stderr it was quieter and worse. Stdout
 is byte-framed by `MessageStream` and was never affected, so the editor kept
 working while the one channel that explains a misbehaving server went silent.
 A cp1252 console needs a single accented character to produce either.
@@ -1015,15 +1018,15 @@ the process filling it, so a dead window is not a reason to stop draining one.
 should reuse it. It cannot, and the reason is the whole design.
 
 Piped stdio is not a terminal. A shell handed pipes sees `isatty` return
-false and turns itself off — no prompt redraw, no colour, no line editing —
-and `vim` or `less` refuse to run at all. `src-tauri/src/pty.rs` uses
+false and turns itself off: no prompt redraw, no colour, no line editing. And
+`vim` or `less` refuse to run at all. `src-tauri/src/pty.rs` uses
 `portable-pty` so the kernel presents a real terminal, which is also why
 Windows is not a special case in the renderer: a Windows pty is ConPTY, not a
 file descriptor, and the crate hides that.
 
 Two consequences follow, and both are visible in the code:
 
-**Output is chunks, not lines.** A prompt — `$ ` — has no trailing newline, so
+**Output is chunks, not lines.** A prompt, `$ `, has no trailing newline, so
 the line-buffered reads that are right for an agent would hold the prompt back
 until the user typed something: the terminal would look frozen at the exact
 moment it was ready. The reader thread emits `nox://pty-data` with whatever
@@ -1032,15 +1035,15 @@ arrives.
 **A chunk boundary lands anywhere, including mid-character.** `Utf8Stream`
 holds an incomplete trailing sequence back for the next read. Without it, any
 non-English output or box-drawing character has a chance of arriving as two
-replacement glyphs. It is a pure struct precisely so this is testable — the
+replacement glyphs. It is a pure struct precisely so this is testable. The
 case is near impossible to provoke against a real shell and trivial to write
 down.
 
 The panel keeps the rest honest. It sits below the editor rather than taking
 it over, because watching a build fail beside the code that failed is the
 point. It is mounted once and hidden with CSS rather than unmounted, since
-disposing the xterm.js instance would throw away the scrollback — closing the
-panel to glance at a file must not lose a build log. And `TerminalService`
+disposing the xterm.js instance would throw away the scrollback, and closing
+the panel to glance at a file must not lose a build log. And `TerminalService`
 deliberately does **not** store output: xterm.js already holds the scrollback,
 and mirroring it into a signal would double the memory of a large `cat` for
 nothing.
@@ -1048,7 +1051,7 @@ nothing.
 ### Notes are not files, and are not stored like them
 
 A note has no reader but the user. A file has git, a compiler, and an agent
-staging a change set — which is why files get buffers, transactions, dirty
+staging a change set. That is why files get buffers, transactions, dirty
 tracking and a watcher, and why notes get none of it. `NotesService` takes a
 `Platform` and nothing else: with no workspace in reach, opening another
 folder cannot change or hide notes, and no later edit can make it so by
@@ -1063,13 +1066,13 @@ titles and ordering while the bodies survive, and a torn body costs one note.
 
 The cost is real: two files to keep agreed, and a load that has to tolerate an
 index naming a body that is not there. That case is handled by loading the
-note with an empty body rather than dropping it — the title is still worth
+note with an empty body rather than dropping it. The title is still worth
 keeping.
 
 Notes leave Nox as Markdown, and the front matter is **not YAML**. No YAML
 parser ships and none was added for this: hand-rolling a subset of a
 whitespace-significant format is how importers rot. `core/note-file.ts` writes
-one `key: value` per line where the value is JSON — `stringify` out,
+one `key: value` per line where the value is JSON. `stringify` out,
 `parse` in, exact in both directions, and still readable as front matter by a
 person. Gaining compatibility with other note tools is a decision worth making
 on its own evidence, not one to smuggle in through an export format.
@@ -1085,17 +1088,17 @@ honouring it would make re-importing your own backup rewrite every note in
 place. Merging needs a conflict UI and a rule for which side wins; adding
 needs neither, and a duplicate note is a nuisance where an overwritten one is
 a loss. Filenames are the title slugified, with the note's ordinal appended on
-collision — titles are user-edited and not unique, and two notes sharing a
-path means exporting four notes and finding three files.
+collision. Titles are user-edited and not unique, and two notes sharing a path
+means exporting four notes and finding three files.
 
 Both commands are the first notes commands to leave Nox's own config
-directory, so they are also the first to declare `capabilities` —
+directory, so they are also the first to declare `capabilities`:
 `fs.create` and `fs.read`. They need a folder picker, which the browser build
 does not have, and are greyed there rather than hidden: a greyed command
 explains itself, a missing one does not.
 
 A note can point at code, and `NotesService` still cannot reach a workspace.
-An anchor is three primitives — a path, a line, the anchored text — stored
+An anchor is three primitives (a path, a line, the anchored text) stored
 verbatim and interpreted by nothing in that module. `app.ts` resolves them,
 because it already holds both services and already splits this way for
 `notes.rename`. This is what lets the feature exist without giving the service
@@ -1103,15 +1106,15 @@ the workspace its isolation depends on not having.
 
 Two failure modes are designed for rather than ignored. **Drift:** a line
 number alone rots, because inserting above an anchor makes it point at the
-wrong code *silently* — worse than pointing nowhere, since it still looks
-right. `core/anchor.ts` re-finds the snippet outward from the remembered line,
+wrong code *silently*, which is worse than pointing nowhere, since it still
+looks right. `core/anchor.ts` re-finds the snippet outward from the remembered line,
 so a non-unique one (`}` appears hundreds of times) lands on the nearest copy;
 past a 500-line window the remembered line is the safer answer, and only that
 window is read, so the cost is the same on a 10 MB file.
 
 **The anchor corrects itself rather than merely being re-guessed.** When it
-resolves against real text — on selecting the note, and on following the chip
-— a found line is written back, so the chip names where the code *is* and the
+resolves against real text, on selecting the note and on following the chip,
+a found line is written back, so the chip names where the code *is* and the
 anchor stops rotting. Only when the snippet was actually found: a fallback is
 the neighbourhood the code used to be in, and persisting one would overwrite
 the last thing anyone knew with a guess. Both triggers are discrete user
@@ -1119,11 +1122,11 @@ actions, deliberately: the buffer's revision changes on every keystroke, so
 deriving the label from the file's text would put a scan on the typing path
 for something nobody reads while typing. The cost of that choice is that the
 chip can go stale while a note stays selected and its file is edited
-underneath — following it still lands correctly, and reselecting corrects the
+underneath. Following it still lands correctly, and reselecting corrects the
 label. **The wrong folder:**
 an anchor into a folder that is not open greys its chip and the note is
 otherwise untouched. Dropping the anchor there would let opening a folder
-mutate notes, which is precisely what the service's isolation forbids — doing
+mutate notes, which is precisely what the service's isolation forbids. Doing
 it in the panel instead would not make it acceptable.
 
 Anchors are one-way. A note knows its code; the code does not know its notes.
@@ -1133,8 +1136,8 @@ they are kept up to date.
 
 Finding a note is a **view** concern, and stays one. `load()` reads every body
 into the signal, so the whole corpus is already in memory and filtering is a
-pure function over it — `core/note-search.ts`, which is where the matching and
-the snippet can be tested without a DOM. A search index inside `NotesService`
+pure function over it. That is `core/note-search.ts`, which is where the
+matching and the snippet can be tested without a DOM. A search index inside `NotesService`
 would be state to keep agreeing with the notes, bought for nothing at this
 size.
 
@@ -1150,7 +1153,7 @@ A note's dirty flag is cleared **before** its write, not after. The
 difference is not stylistic: clearing afterwards means the write has to prove
 that what it wrote is still what the note says, which took a revision counter
 per kind of dirtiness and a saved-revision shadow to compare against. Clearing
-first inverts it — the flag is false for as long as the write is in flight, so
+first inverts it. The flag is false for as long as the write is in flight, so
 an edit landing during it re-arms the flag by itself and is unambiguously
 newer than the data being written. A failed write re-arms the flag on its way
 out, which is why the per-call failure fences matter more under this scheme
@@ -1168,7 +1171,7 @@ preference that loses them.
 Search highlighting is a `ViewPlugin` because matches are *derivable*: given
 the query and the document, you can always recompute them. Provenance is not.
 Once a change set is applied, nothing in the document remembers who did it, so
-it has to be recorded as it happens and carried forward — which makes it a
+it has to be recorded as it happens and carried forward, which makes it a
 `StateField` holding a `RangeSet`, mapped through every later change by
 CodeMirror rather than by hand.
 
@@ -1179,7 +1182,7 @@ buffers accumulate provenance correctly, because the workspace updates their
 state whether or not a view exists.
 
 Two costs are real. A user's edit has to *subtract* its own changed ranges,
-because CodeMirror's default mapping extends a mark when you type inside it —
+because CodeMirror's default mapping extends a mark when you type inside it,
 the opposite of "touching a line takes ownership of it". And the field must
 stay out of the settings `Compartment`: reconfiguring a compartment to nothing
 removes its extensions, and removing a `StateField` destroys what it holds, so
@@ -1196,21 +1199,21 @@ confidently wrong. A mark that lies is worse than no mark.
 the first one, and what it had to become says something about local models.
 
 Network access lives in Rust behind `Platform.streamJsonLines`, loopback-only.
-The webview could not do it anyway — the CSP is `default-src 'self'` with no
-`connect-src` — and widening that to reach one port would open the app's
+The webview could not do it anyway, since the CSP is `default-src 'self'` with
+no `connect-src`, and widening that to reach one port would open the app's
 network surface permanently.
 
 Two findings shaped the provider, both measured before it was written rather
 than assumed. **There is no `tool_calls` field.** `qwen2.5-coder` advertises
 `tools` in `ollama show` and never produces one, so actions arrive as JSON
-inside the message content and the provider parses them — including stripping
+inside the message content and the provider parses them, including stripping
 code fences the model applies inconsistently between turns of one
 conversation. Building on native tool calls would have worked with an
 unknowable subset of models and failed opaquely for the rest.
 
 **And the model cannot compute character offsets.** Given `proposal.stage`'s
 real interface it produced a zero-width insertion of a whole function body:
-the intent right, the arithmetic nonsense. That is the dangerous shape —
+the intent right, the arithmetic nonsense. That is the dangerous shape:
 `proposal.stage` would accept it and the review panel would render a
 convincing corrupt diff. So the model quotes text instead, and the provider
 converts the quote to offsets against the text the model was shown when it
@@ -1218,8 +1221,8 @@ read the buffer, refusing anything it cannot find there or that matches twice.
 The protocol is untouched; everything below the provider still receives real
 offsets and never learns a model was involved.
 
-Resolving against what the model read is the only thing the provider *can* do
-— text is its whole window on the buffer — and it is not sufficient on its
+Resolving against what the model read is the only thing the provider *can* do,
+since text is its whole window on the buffer, and it is not sufficient on its
 own, because the user goes on typing while the model thinks. Offsets computed
 before a keystroke are arithmetically fine and land in the wrong place: one
 space typed at line 1 between a read and a stage turned a rename into
@@ -1228,19 +1231,20 @@ agent's name on it. So freshness is enforced in the runtime, which sees both
 halves: it remembers the revision a buffer was at when the session first read
 it, and refuses `proposal.stage` for a buffer that has moved since, as a
 `stale` error the agent is told about and can clear with a fresh whole read.
-`ReviewFile.baseRevision` does not cover this — it is captured at stage time,
+`ReviewFile.baseRevision` does not cover this. It is captured at stage time,
 which is after the drift.
 
 Two reads establish that baseline, because two hand back a position in the
 text: `context.bufferText`, and `context.selection`, which returns each range's
-offsets and the text at them — everything "uppercase my selection" needs.
+offsets and the text at them, which is everything "uppercase my selection"
+needs.
 
 The rest establish nothing. A viewport, a path tree and a change-set list
 locate no text at all. `context.openBuffers` is a deliberate trade rather than
 a claim that a listing is harmless: filing every open buffer at once, on the
 listing most sessions start with, would refuse the honest sequence of listing,
-the user typing, reading a range and staging from it — and a false refusal
-breaks working agents silently, which is worse than the hole it closes. The
+the user typing, reading a range and staging from it. A false refusal breaks
+working agents silently, which is worse than the hole it closes. The
 hole is real and worth naming: `BufferSummary.length` *is* the end-of-document
 offset, so a session that lists a buffer and appends to it stages against a
 position that may have moved, with nothing to refuse it.
@@ -1251,7 +1255,7 @@ narrow read proves the agent looked at part of the buffer, not that the offsets
 it is about to stage came from the current text, so letting one raise the
 baseline would re-bless stale offsets on a revision that had caught up. Whole
 is settled by comparing the read's answer to what a plain read returns rather
-than by inspecting the parameters — so a range that happens to span the
+than by inspecting the parameters, so a range that happens to span the
 document counts as whole however the parameters spell it, and does refresh.
 Refresh itself trusts the agent to stage from its most recent read: a session
 that reads, lets the buffer move, reads again and then stages offsets from the
@@ -1260,17 +1264,17 @@ with the buffer. Only the agent knows which read it computed from, which is
 what the declaration below is for.
 The comparison is used because the reader clamps the range and reads a missing
 `lines` as
-the whole document — so `lines: null` and a span past the end are whole reads
+the whole document, so `lines: null` and a span past the end are whole reads
 that a parameter test files as narrow, and only a comparison cannot drift.
 
 Inference stops there. A buffer for which the session called neither of those
-two reads — listing it does not count — has offsets from somewhere the runtime
-cannot see, and no rule over what it *watched* distinguishes the read an agent
+two reads, and listing it does not count, has offsets from somewhere the
+runtime cannot see, and no rule over what it *watched* distinguishes the read an agent
 computed from among several. So `proposal.stage` gained an optional
 `baseRevisions`: buffer id to revision, the same field `ChangeSetSpec` has
 always had, in the plain-JSON shape the wire can carry. Any declared entry the
 buffer is no longer at refuses the stage, under the same `stale` code, and that
-includes an entry for a buffer no edit names — `workspace.apply` reads the
+includes an entry for a buffer no edit names. `workspace.apply` reads the
 field that way, and an agent that read a file and concluded it needed no edit
 has a conclusion that goes stale when the file moves. A declared entry for a
 buffer that is not open at all refuses too, under `not-found` rather than
@@ -1279,7 +1283,7 @@ buffer that is not open at all refuses too, under `not-found` rather than
 It is checked **in addition to** the read tracking, never instead of it: an
 agent that declares the current revision while holding offsets from an older
 read is describing a check it did not do, and the baseline still refuses it.
-A malformed declaration refuses too, rather than being ignored — an agent that
+A malformed declaration refuses too, rather than being ignored. An agent that
 sent one believes it is protected, and staging anyway hands it a guarantee it
 does not have.
 
@@ -1292,9 +1296,9 @@ prove freshness; it cannot make a careless one honest.
 
 Failures surface as failures, and that too is the provider's job rather than
 the seam's. A refused connection and a server that rejects the request are
-both ordinary first-run experiences — the model name has a typo, or nothing is
-listening — and a session that reported success for either would be worse than
-one that crashed. So the provider throws, naming the configured host or
+both ordinary first-run experiences: the model name has a typo, or nothing is
+listening. A session that reported success for either would be worse than one
+that crashed. So the provider throws, naming the configured host or
 quoting the server's own words, and the session ends `Failed` with the message
 in its audit trail. `http.rs` stays ignorant of what an error body looks like:
 it forwards a status and an opaque string, and the knowledge of which field
@@ -1307,7 +1311,7 @@ models as they are, not as their APIs describe them.
 
 ### Selection edits are composition; the scope only ever defaults a checkbox
 
-`agents.runOnSelection` — **Edit Selection with a Model…** — adds no new
+`agents.runOnSelection`, **Edit Selection with a Model…**, adds no new
 machinery. The session, the audit trail, the provenance author, the
 permission model, job cancellation and the stale-read guard all come from
 `AgentRuntime` unchanged, and the result lands in `ReviewService` exactly as
@@ -1315,8 +1319,8 @@ any other proposal's does. What is new is two things: the selection reaching
 the model through `brief()`, and a scope that changes a hunk's default in
 `review.stage`.
 
-`SessionOptions` gains `scope?: ReviewScope` — `{ bufferId, fromLine, toLine }`
-— captured in `app.ts` before the instruction is even typed, so it describes
+`SessionOptions` gains `scope?: ReviewScope`, a `{ bufferId, fromLine, toLine }`
+captured in `app.ts` before the instruction is even typed, so it describes
 where the user was looking when they ran the command rather than where they
 are by the time the model answers. `review.stage(spec, scope)` uses it to
 flip one thing: a hunk whose line range does not touch the scope starts
@@ -1328,16 +1332,16 @@ not block one, and does not itself read the buffer. That is what keeps it
 out of the stale-read guard's way, which does refuse: the guard compares the
 revision a session read against the revision the buffer is now at and rejects
 a stage that has fallen behind. A scope captured against a selection that has
-since moved costs nothing sharper than a checkbox defaulted the wrong way —
+since moved costs nothing sharper than a checkbox defaulted the wrong way,
 confirmed in the walk, where the identical request against the identical
 buffer, once through **Edit Selection with a Model…** and once through a
 plain `Run Agent…`, staged the same hunk and differed only in which side the
 checkbox started on.
 
 The alternative was to refuse a hunk outside the scope outright rather than
-merely default it unkept. Rejected: a companion edit is often the correct
-one — a new import for a change requested in the middle of a file, the other
-half of a rename the model reached for on its own — and refusing it would
+merely default it unkept. Rejected: a companion edit is often the correct one,
+whether a new import for a change requested in the middle of a file or the
+other half of a rename the model reached for on its own, and refusing it would
 mean refusing the model for doing the right thing. Defaulting it unkept keeps
 that judgment with the person reading the diff instead of pre-empting it.
 
@@ -1350,18 +1354,18 @@ the only name it had been shown, got "Buffer shapes.js not found." back
 eleven times, and stopped at the turn cap having done nothing. Fixed by
 rendering each file as `name [id]`, brackets used for nothing else in the
 brief, so the identifier every `context.*` call needs sits next to the name a
-person would use. No unit test caught this — every scripted provider in the
-suite passes ids by construction — which is what the walk was for.
+person would use. No unit test caught this, because every scripted provider in
+the suite passes ids by construction. That is what the walk was for.
 
 `brief()` is on the record, and it took a second pass to get there. It
 originally read straight off `ContextService`, skipping the
-`context.reader(principal)` proxy every other read goes through — understandably,
+`context.reader(principal)` proxy every other read goes through. Understandably,
 since the brief is assembled before any request exists and `#handle` binds that
 proxy per request. The effect was that up to `SELECTION_MAX_CHARS` (8,000)
 characters of the user's code opened a session having been recorded nowhere.
-Not a security hole — the text leaves the machine only once `net.request` is
+Not a security hole. The text leaves the machine only once `net.request` is
 granted, and a model could read the same buffer through the recorded API
-anyway — but `reads` is meant to be the whole account of what a session saw,
+anyway. But `reads` is meant to be the whole account of what a session saw,
 and it was not.
 
 It now takes a principal and reads through the proxy, and a session records a
@@ -1369,15 +1373,15 @@ It now takes a principal and reads through the proxy, and a session records a
 is its own `AgentAction` variant rather than a `read`: the trail means *what
 the agent did*, and the brief is what Nox handed it unasked. Filing one as the
 other would misattribute the thing being made honest. It is recorded only when
-a selection was carried — open-file names and line counts were always in the
+a selection was carried. Open-file names and line counts were always in the
 brief, and a line on every session for those would bury the case the record
 exists for.
 
 ### A prose answer is a different question, not a different agent
 
 **Ask About Selection…** and **Explain Selection** reuse what the edit path
-reuses — the session, the job, cancellation, the audit trail, the permission
-model, the brief and the selection inside it — and change exactly one thing:
+reuses (the session, the job, cancellation, the audit trail, the permission
+model, the brief and the selection inside it) and change exactly one thing:
 what Nox asks for back. The one place that could not be composition was the
 provider, and the reason is a defect rather than a design.
 
@@ -1385,7 +1389,7 @@ provider, and the reason is a defect rather than a design.
 into narration and one JSON action, and a reply that is pure prose returns no
 action and the error *no JSON object in the reply*. An actionless turn
 increments `consecutiveFailures`, pushes `Reply with one JSON object` back at
-the model, and **on the second one throws** — which the runtime turns into a
+the model, and **on the second one throws**, which the runtime turns into a
 `failed` session. So a model asked to explain something did the obvious right
 thing, was corrected twice for it, and Nox reported its own feature as a
 broken model. The explanation was not even lost: it was yielded as narration
@@ -1404,7 +1408,7 @@ So `complete` branches once, at the top, on `expects === 'prose'`: one round
 trip, the assembled reply as a single `text` chunk, no `parseTurn`, no turn
 cap, no JSON anywhere. The failure stops existing by construction rather than
 by instruction, and the model is asked for the one thing every model does
-well. The cost is that the answer arrives whole rather than progressively —
+well. The cost is that the answer arrives whole rather than progressively.
 `#ask` accumulates the streamed frames and resolves with the content, and
 exposing partial text means rebuilding it as a channel the generator pumps.
 Real complexity, for an answer the user waits out either way; the session
@@ -1416,14 +1420,14 @@ about the reply, so a provider with no notion of a prose mode can ignore it,
 and no vendor's name reaches the interface. Absent means actions, so an agent
 written before the field is exactly where it was and `ScriptedProvider` needed
 no change at all. It threads onto the wire too, in `Outbound`'s `run`, rather
-than stopping at the in-process transport — telling a child process the
+than stopping at the in-process transport. Telling a child process the
 session is one thing while the runtime treats it as another is a lie that
 surfaces later as an unexplained refusal.
 
 Two alternatives cost more. Asking the model to put its answer in a
 `session.summary` string needs no interface change at all, and asks a small
-local model to fit multi-paragraph prose — newlines, quotes, backticks,
-fences — inside a JSON string. That is the surface the provider section
+local model to fit multi-paragraph prose (newlines, quotes, backticks,
+fences) inside a JSON string. That is the surface the provider section
 above already records as unreliable, where the model strips code fences
 inconsistently between turns of one conversation; an explanation of code is
 the prose *most* likely to contain a fence, and the failure mode is a failed
@@ -1445,8 +1449,8 @@ only asked a question.
 **The answer is published, not recorded.** Text chunks in a prose session
 accumulate into the session's `answer` and are deliberately not also filed as
 `note` actions. The trail means *what the agent did*, and an essay in it would
-bury the reads the trail exists to show — the same distinction the `brief`
-variant above draws, made the same way and for the same reason. The panel
+bury the reads the trail exists to show. That is the same distinction the
+`brief` variant above draws, made the same way and for the same reason. The panel
 reads `answer` off the snapshot the runtime already publishes; a separate
 `AnswersService` mirroring that state would be a second history to keep in
 step forever, which is the shape rejected for grouped undo.
@@ -1474,7 +1478,7 @@ of text. So the answer is split on triple backticks, every run is rendered as
 text through Svelte interpolation, `innerHTML` appears nowhere, and emphasis
 and headings arrive as the characters the model typed. The bound was drawn so
 that every way the splitter can be wrong shows content in the wrong style
-rather than showing none — which is what an earlier version did, matching a
+rather than showing none, which is what an earlier version did, matching a
 fence's info string whether or not a block had opened, so an inline fence
 tagged `json` ate the word after it. A deliberately bounded renderer may
 render prose plainly; it may never swallow it.
@@ -1483,13 +1487,13 @@ render prose plainly; it may never swallow it.
 
 `ReviewService.stage(spec)` computes what each buffer *would* say and diffs it
 against what the buffer says now. CodeMirror states are immutable, so working
-out the result costs a transaction that is computed and thrown away — no
+out the result costs a transaction that is computed and thrown away: no
 dispatch, no history entry, nothing on screen.
 
 The panel covers the editor, so it can be put away without deciding: Escape (or
 Close) hides it and keeps the staged set, going to any file does the same, and
 the status bar offers it back. Apply and Discard remain the only two ways to
-resolve it — neither should be reachable by accident, and neither should be the
+resolve it. Neither should be reachable by accident, and neither should be the
 only way to look at the file you are reviewing.
 
 Accepting a subset does **not** apply those hunks individually. The accepted
@@ -1498,7 +1502,7 @@ change set, so the reviewed result lands in a single transaction and one ⌘Z
 takes it back. Applying per hunk would reintroduce exactly the partially-applied
 state the transaction layer exists to make unrepresentable.
 
-The diff lives in `core/diff.ts` — Myers' O(ND) algorithm over lines, with the
+The diff lives in `core/diff.ts`: Myers' O(ND) algorithm over lines, with the
 common prefix and suffix trimmed first. `splitLines` keeps each line's
 terminator, which makes `lines.join('')` exact and makes a line index equal to a
 CodeMirror line number minus one; that is what keeps newline handling out of the
@@ -1511,7 +1515,7 @@ See [AGENT-PLATFORM.md](AGENT-PLATFORM.md) §2.3.
 `ContextService` is the read side of the platform: buffer summaries, text by
 line range, selections, live viewports, the workspace tree, recent
 transactions. Everything it returns is plain data that survives
-`JSON.stringify` — never a `Buffer`, an `EditorState` or a `Signal`.
+`JSON.stringify`, never a `Buffer`, an `EditorState` or a `Signal`.
 
 That is a correctness property, not a style preference. Every mutation is
 supposed to go through `workspace.apply` under the permission model, so a
@@ -1533,16 +1537,16 @@ See [AGENT-PLATFORM.md](AGENT-PLATFORM.md) §2.5.
 
 `CommandRegistry.execute` takes a principal and consults a single guard before
 running anything that declares a capability. That one check is sufficient
-*because* of the rule the registry already enforces — every action in Nox is a
-command — so there is no second path for a plugin or an agent to take.
+*because* of the rule the registry already enforces, that every action in Nox
+is a command, so there is no second path for a plugin or an agent to take.
 
 Commands declare `capabilities`, and `resourceFrom` to name what they are about
 to act on, which is what lets a grant be scoped to a file rather than to the
 whole disk.
 
-**The user never reaches the check.** `execute` called without a principal —
-every menu, keybinding and button — skips the guard, and `PermissionService`
-short-circuits `{ kind: 'user' }` regardless. This is load-bearing, not an
+**The user never reaches the check.** `execute` called without a principal,
+which is every menu, keybinding and button, skips the guard, and
+`PermissionService` short-circuits `{ kind: 'user' }` regardless. This is load-bearing, not an
 optimisation: a model that can interrupt a human mid-keystroke is a model they
 switch off, and a permission layer nobody runs protects nothing.
 
@@ -1555,7 +1559,7 @@ See [AGENT-PLATFORM.md](AGENT-PLATFORM.md) §2.6.
 
 `JobRunner` owns anything long-running: the project search walk, project
 replace, and whatever comes next. The rule that makes cancellation safe is
-structural rather than a matter of care — **a job never mutates a buffer.** It
+structural rather than a matter of care: **a job never mutates a buffer.** It
 returns a plan, and applying it happens after the job resolves, through
 `workspace.apply` with the base revisions the job recorded while reading. So
 cancelling is `discard`, with nothing to unwind.
@@ -1596,48 +1600,105 @@ CRLF file does not produce a whole-file diff the moment it is saved.
 
 ### Git writes are six fixed commands, never a shell
 
-Stage, commit, branch touches git through exactly six Rust commands — status,
-branches, stage, unstage, commit, switch — each `git -C <root>` run with a
+Stage, commit, branch touches git through exactly six Rust commands (status,
+branches, stage, unstage, commit, switch), each `git -C <root>` run with a
 hand-picked, literal argv (`--literal-pathspecs`, `--` before every pathspec)
 and no shell in the middle to reinterpret a `*` in a filename or a branch
 name. **There is no generic seam that takes an arbitrary git subcommand or
-flag.** A future capability means a new, equally fixed command, on purpose —
+flag.** A future capability means a new, equally fixed command, on purpose,
 so the argv a feature runs is always the one `git.rs` shows, never one
 assembled from parts a caller chose. The corollary a future reader would
 otherwise undo: **a git failure is shown verbatim, never translated.**
-`git_error` returns git's own stderr — or stdout, where git prints "nothing
-to commit" there instead — with an `io:` prefix and nothing rewritten, so
+`git_error` returns git's own stderr, or stdout where git prints "nothing to
+commit" there instead, with an `io:` prefix and nothing rewritten, so
 what the panel reports is what a terminal would have said.
 
 The six were also chosen defensively, not for convenience. Unstage runs `git
 reset -- <pathspec>`, not the more obviously-named `restore --staged`,
-because the latter fails on a repository with no commits yet — right after
-`git init` — with "could not resolve HEAD", found by running both against a
-real repo before picking one rather than by reading a man page; pathspec-
+because the latter fails on a repository with no commits yet, right after
+`git init`, with "could not resolve HEAD". Found by running both against a
+real repo before picking one rather than by reading a man page. Pathspec-
 limited `reset` handles that case cleanly and never touches the working
 tree either way. Deliberately absent for the same reason the README leads
 with "It does not lose your work. Ever.": no push, pull or fetch (nothing
 leaves the machine), no rebase, amend or force (history is never rewritten),
 no discard, stash or `checkout --` (the working tree is untouchable by
-construction of the commands chosen — `switch` refuses over a dirty conflict
+construction of the commands chosen: `switch` refuses over a dirty conflict
 rather than forcing through it). Hunk-level staging is deliberately out of
 this set too: it is the one place the feature would construct input for git
 (`apply --cached`) rather than naming files, and it gets its own envelope
 read when it is built.
 
+### Blame asks git about the buffer, not the file
+
+`nox_git_blame` passes the open document to `git blame --contents -` on
+stdin, rather than letting git read the path off disk. The gutter draws
+beside what is *open*; `git blame <path>` describes what is *saved*. The
+moment those differ, on any unsaved insertion or deletion, blaming the saved
+file misaligns every annotation below the first one, and a gutter naming the
+wrong person is worse than no gutter. `--contents` is git's own answer:
+it blames the text it is handed against the path's history and attributes
+lines that are in no commit to the all-zero object name, so alignment is
+exact by construction and "not committed yet" is a fact git computed rather
+than one the renderer inferred. Verified against real git before it was
+built, and pinned by
+`an_unsaved_insertion_shifts_blame_instead_of_misattributing_it`.
+
+Two consequences a future reader would otherwise undo. **`uncommitted` is
+read off the hash, never the author.** git names that author
+`Not Committed Yet` when it blames a dirty worktree and
+`External file (--contents)` when it blames supplied text, which is how Nox
+always asks, so keying on the name would work in a fixture and fail in the
+product. And **the blame marks are one point per line, never one range per
+commit-run**, even though blame arrives run-length encoded and ranges would
+be a fraction of the marks: a range grows when text is inserted inside it, so
+a line typed in the middle of a run would inherit that run's commit. A point
+mark cannot do that: an inserted line simply has no mark.
+
+A third thing about it was settled by looking rather than reasoning, and is
+recorded because the reasoning had already reached the wrong answer.
+`blameCompartment` is **first** in `buildExtensions`'s array, so the blame
+column is leftmost, outside the line numbers. `activeGutters` is an ordered
+facet, so a gutter's position on screen is its extension's position in that
+array, and going last put the widest column in the editor between the git
+gutter and the code: switching blame on then moved the change bars twenty
+characters away from the lines they mark. Outside everything, it adds a column
+instead of rearranging the apparatus a reader already knows. The same look
+halved the dead space in it: `BLAME_AUTHOR_WIDTH` is 12, not the 16 it was
+written as. Neither had a symptom any test reported, which is what
+`tests/browser/blame-gutter.test.ts` and its screenshots now exist for.
+
+### `nox_git_blame` is the crate's only `#[tauri::command(async)]`
+
+A sync command body runs inline on the thread that handles the IPC message,
+which is the main thread. Read in `tauri-macros` 2.6.3 rather than assumed:
+the default `ExecutionContext::Blocking` emits `let result = $path(…)`
+straight into the handler, while `(async)` routes it through
+`respond_async_serialized`, which spawns. Every other git read here costs one
+blob or one index scan; blame is the first whose cost follows a file's
+*history*, and on an old file in a large repository that is seconds. The
+function stays `pub fn`, because there is nothing to await and nothing to
+cancel, so the reason the rest of the crate avoids `async fn` (a cancel handle
+that
+arrives only once there is nothing left to cancel) does not apply.
+
+The same reading says the git reads that came before it, `nox_git_file_base`
+and `nox_git_status`, do block the main thread for as long as they run. That
+is recorded in the Known debt table rather than changed here.
+
 ### Where the OS will not draw a menu, Nox draws its own
 
-macOS has a native menu bar and keeps it. Everywhere else — Windows, Linux,
-the browser target — `MenuBar.svelte` renders one inside the title bar.
+macOS has a native menu bar and keeps it. Everywhere else (Windows, Linux and
+the browser target) `MenuBar.svelte` renders one inside the title bar.
 Windows is the reason: `set_decorations(false)` there removes the frame
 Windows hosts its menu in. Linux is not blocked by that (the `#[cfg(windows)]`
 block is Windows-only) but by the accelerator argument below being WKWebView's
-and never tested against WebKitGTK — one in-window bar for both is cheaper
+and never tested against WebKitGTK. One in-window bar for both is cheaper
 than a third code path with an unverified story.
 
 It is gated on `capabilities.applicationMenu`, so macOS is untouched and no
 `Platform` method or IPC is added. Both menus render `MenuService.describe()`,
-so drift is structurally impossible — there is no second layout table.
+so drift is structurally impossible. There is no second layout table.
 `buildMenu` takes `{ systemItems }` for the difference that is real:
 `COVERED_BY_SYSTEM_ITEMS` is not a list of commands a menu should never show,
 it is a list of commands *macOS already shows*, so off macOS they are listed
@@ -1646,13 +1707,13 @@ as ordinary commands and nothing `predefined` is emitted at all.
 **The payoff is `enabled`.** The native menu draws every item live because
 greying them would mean pushing ~130 command states across the IPC boundary.
 The predicates already live in the renderer, so the in-window bar simply calls
-them when a menu opens — once per item in the one submenu shown, no IPC,
+them when a menu opens: once per item in the one submenu shown, no IPC,
 nothing on the typing path.
 
 The popup is `ContextMenu` unchanged: it already does arrows, Home/End,
 type-ahead, Enter, Escape, focus return and viewport flipping, and a second
 implementation of that would be a second set of bugs. `UIService` stays the
-single authority on what Escape closes — the bar renders from `menuBarOpen`
+single authority on what Escape closes. The bar renders from `menuBarOpen`
 rather than owning it, because when it owned its own state the two disagreed
 and a menu stayed on screen that the app believed had closed.
 
@@ -1693,7 +1754,7 @@ binding**. Three groups are handled differently, each for a stated reason:
 | Undo/Redo/Cut/Copy/Paste/Select All | `PredefinedMenuItem`, no Nox command listed | They go through the responder chain and act on whatever has focus, which a command dispatched at the editor cannot |
 
 The one case where an accelerator *is* reached by a keypress is a command the
-keymap declined because it is **disabled** — and the menu item dispatches
+keymap declined because it is **disabled**, and the menu item dispatches
 through `CommandRegistry.execute`, which refuses a disabled command anyway. So
 the menu can never run something the keyboard would not. Menu items are
 nonetheless always drawn enabled; mirroring ~130 enablement predicates across
@@ -1703,7 +1764,7 @@ the IPC boundary on every state change is not worth it, and is recorded as debt.
 
 Window size and position persist to `window.json` in the app config directory,
 written by `src-tauri/src/window_state.rs` and restored through the same
-`apply_geometry` that `--geometry` uses — so there is exactly one clamp
+`apply_geometry` that `--geometry` uses, so there is exactly one clamp
 (`geometry::clamp`), and a window remembered on a monitor that is no longer
 attached comes back on screen rather than off it.
 
@@ -1730,18 +1791,18 @@ work-area-relative, which is the space `clamp` works in and what makes
 
 Nothing is written for the first second after launch: `set_position` is
 asynchronous on macOS, so a read-back taken that early reports where the window
-*used to be* — and since that is usually the centred default, the remembered
+*used to be*. Since that is usually the centred default, the remembered
 position would creep back to centre one launch at a time.
 
 ### Long panels are windowed, and each publishes its own row height
 
 The explorer and the search results both render flat, uniform-height row
-arrays that can run to thousands of entries — 5000 matches is `MAX_RESULTS`,
+arrays that can run to thousands of entries. 5000 matches is `MAX_RESULTS`,
 and a directory has no bound at all. Both window: a `viewportHeight > 0` guard
 (so jsdom, which has no layout, still renders everything and tests stay
 meaningful), a `MIN_ROWS_TO_WINDOW` floor so short lists pay nothing, spacer
 divs preserving scrollbar length, and `aria-setsize`/`aria-posinset` on every
-row — mandatory rather than decorative, because the DOM no longer holds the
+row, mandatory rather than decorative, because the DOM no longer holds the
 full set for a screen reader to count.
 
 Scroll-into-view is **index arithmetic**, not `scrollIntoView` on a
@@ -1749,9 +1810,9 @@ Scroll-into-view is **index arithmetic**, not `scrollIntoView` on a
 window, at which point there is no element to scroll to; a reveal built on the
 DOM silently stops working exactly when the list is long enough to need it.
 
-Each panel publishes its row height as its **own** custom property —
-`--nox-tree-row-h` at 23px, `--nox-search-row-h` at 22px — read back by that
-panel's CSS. One shared name was the obvious simplification and is wrong: the
+Each panel publishes its row height as its **own** custom property:
+`--nox-tree-row-h` at 23px and `--nox-search-row-h` at 22px, each read back by
+that panel's CSS. One shared name was the obvious simplification and is wrong: the
 two heights differ, and a single inherited property would silently paint one
 list at the other's pitch while the arithmetic used the correct one. The rule
 is that the number the arithmetic uses and the number the CSS paints must be
@@ -1761,15 +1822,15 @@ the same token, not that all panels share a token.
 
 ### A config file that will not parse is damaged, not absent
 
-Four load paths — `settings.json`, `keybindings.json`, `session.json`,
-`notes.json` — treated a file they could not parse as a file that was not
+Four load paths (`settings.json`, `keybindings.json`, `session.json` and
+`notes.json`) treated a file they could not parse as a file that was not
 there. Absent is a state Nox already handles: start from the defaults and
 write your own file over the top. That is correct for a file that genuinely
 is not there and destructive for one that is, and every one of these four is
 written back by Nox. The next `set()`, the next rebind, the next save
 replaced the user's file with a fresh one, silently.
 
-`servers.json` and `agents.json` had always done the right thing — publish the
+`servers.json` and `agents.json` had always done the right thing: publish the
 parse error and say so. Neither is ever written back by Nox, which is why the
 asymmetry survived: the two paths where reporting was merely *polite* had it,
 and the four where it was the only thing standing between a typo and a loss
@@ -1778,8 +1839,8 @@ did not.
 A damaged file is now **preserved, reported, and read for what survives**:
 
 - **Preserved** as `<name>.damaged.<ext>` beside the original, through
-  `core/damaged-config.ts`. The original is *not* deleted — Nox does not
-  delete a user's file to fix its own problem — and it being overwritten by
+  `core/damaged-config.ts`. The original is *not* deleted, because Nox does
+  not delete a user's file to fix its own problem, and it being overwritten by
   the next legitimate write is acceptable precisely because the copy exists.
 - **Reported** on a `damaged` signal that is deliberately **not** `error`.
   `error` means "the last *write* failed" and `ConfigService.#save` clears it
@@ -1787,7 +1848,7 @@ A damaged file is now **preserved, reported, and read for what survives**:
   250 ms after it appeared.
 - **Read for what survives.** `session.json` and `notes.json` both hand out
   content-file names (`unsaved-3.txt`, `note-7.txt`) from a counter that is
-  "recomputed on load" — so a load that fails reissues `unsaved-1.txt` and the
+  "recomputed on load", so a load that fails reissues `unsaved-1.txt` and the
   first dirty buffer overwrites text the user never saved. `JSON.parse`
   failing does not make the text unreadable, it makes it *unstructured*, and
   the names are still in it. `highestNumbered` recovers the high-water mark
@@ -1797,13 +1858,13 @@ A damaged file is now **preserved, reported, and read for what survives**:
 
 An unrecognised **version** counts as damage on the same reasoning. It is
 usually a newer Nox having written the file rather than corruption, but the
-old consequence was identical — discarded, then overwritten — and a downgrade
+old consequence was identical, discarded and then overwritten, and a downgrade
 should not cost you your tabs. Versions Nox does recognise still migrate.
 ### A pane routes changes back, so the workspace must deliver them once
 
 `#dispatchToView` handed a workspace-originated change to **every** pane
-showing the file. That was written to fix a real failure — one pane updated,
-the other left showing text that no longer exists — and it was correct at the
+showing the file. That was written to fix a real failure, one pane updated and
+the other left showing text that no longer exists, and it was correct at the
 time. Mirrored panes then arrived, and with them the forward in
 `applyTransaction`: a pane routes everything it is handed back to the
 workspace, which pushes the change out to every *other* pane. From that moment
@@ -1812,12 +1873,12 @@ document that has already moved.
 
 The cost was not cosmetic. A reload's spec is
 `{from: 0, to: oldLength, insert: newDoc}`, so a file that had grown came back
-as the new text with a slice of itself appended — and `reloadFromDisk` sets
+as the new text with a slice of itself appended, and `reloadFromDisk` sets
 `savedDoc` from the resulting state, which marked the corrupted document
 **clean**. The next save wrote it to disk. A file that had shrunk threw
 `RangeError` out of the reload instead. Every path that pushes a change into a
-view — reload, `applyEdits` for project replace, `apply` for agent and LSP
-change sets, grouped undo — went through it.
+view (reload, `applyEdits` for project replace, `apply` for agent and LSP
+change sets, grouped undo) went through it.
 
 The two directions are now two methods, because they want opposite rules:
 
@@ -1828,7 +1889,7 @@ The two directions are now two methods, because they want opposite rules:
 - **`#mirrorToOtherViews`** broadcasts, and is safe as one because its spec
   carries `mirroredAnnotation`: a pane applies it and stops rather than
   routing it back, so nothing re-enters and nothing can arrive twice. It has
-  to broadcast — with three panes on one file, stopping at the first would
+  to broadcast: with three panes on one file, stopping at the first would
   leave the third stale.
 
 **The test that missed this is the lesson.** `groups.test.ts` asserted the
@@ -1842,7 +1903,7 @@ Three more of the same family, all found by asking what the existing pane
 tests were *not* shaped to see:
 
 - **`selectionOf` asked a pane for "your cursor"**, and a view's live selection
-  is its active tab's — so every background tab in every pane was persisted
+  is its active tab's, so every background tab in every pane was persisted
   with the foreground tab's. The channel is now asked about a named buffer and
   declines for one it is not showing, which lets the caller fall back to that
   buffer's own state. The old tests gave each group one tab, where the two
@@ -1861,8 +1922,8 @@ tests were *not* shaped to see:
 
 `JsonRpcTransport.onRequest` was written with the client and had **no caller in
 `src/` for four months**. Every question a server asked was answered
-`MethodNotFound` — which is the correct answer, and is exactly why nobody
-noticed. A server told "I do not know that method" does not stall; it does
+`MethodNotFound`, which is the correct answer, and is exactly why nobody
+noticed. A server told "I do not know that method" does not stall. It does
 without. pyright, gopls and rust-analyzer all ask `workspace/configuration` as
 they start, and all three silently used their own defaults instead of the
 user's settings.
@@ -1871,8 +1932,9 @@ The seam now lives on `LspSession` rather than the transport, for the reason
 `onNotification` already did and one more. `onNotification`'s reason is that
 diagnostics arrive unasked and a subscriber that waited for the handshake would
 miss the first batch. The stronger reason here is that **a server may ask
-during the handshake** — one of the three asks before `initialized` goes out —
-so a handler registered after `start()` returns arrives to find the question
+during the handshake**, since one of the three asks before `initialized` goes
+out, so a handler registered after `start()` returns arrives to find the
+question
 already refused.
 
 The part worth arguing for is smaller and less obvious. `initialize` carries
@@ -1908,7 +1970,7 @@ the moment one added an option.
 
 The reply is a `map` over the requested items and never a `filter`, because a
 server reads `result[i]` as the answer to `items[i]`. Dropping an unknown
-section shifts every later answer onto the wrong question — a bug that
+section shifts every later answer onto the wrong question, a bug that
 presents as the user having misconfigured a setting they never touched.
 
 ### A code action lands where it reaches, not where it is classified
@@ -1929,21 +1991,21 @@ would inherit that disagreement. The line is how far the change reaches:
 > One file: applied directly, as one transaction. More than one: staged.
 
 A change inside the file you are looking at, that you asked for at your caret,
-is not a proposal — putting it behind a diff would make Format Document's
+is not a proposal, and putting it behind a diff would make Format Document's
 argument apply to it and be ignored. A change to files you have not opened is
 exactly what review is for, and it is the shape rename already produces.
 
 **An action may be a `Command` rather than an edit, and both now run.** Running
 a command means `workspace/executeCommand`, and the server answers by calling
-`workspace/applyEdit` *back* — so it needed the server-request seam
+`workspace/applyEdit` *back*, so it needed the server-request seam
 (`LspSession.onRequest`, 2026-08-25) and a decision: may a server-named command
 write to buffers unprompted?
 
-**The decision is that reach answers it, not trust** — the same rule this
-section already argues for. A server command that changes the file at your
+**The decision is that reach answers it, not trust**, which is the same rule
+this section already argues for. A server command that changes the file at your
 caret lands directly; one that reaches further stages in review. The
 alternative would have been a second policy for the same act, a server writing
-to a file, differing only in which message carried the edit — and two rules for
+to a file, differing only in which message carried the edit, and two rules for
 one thing is how one of them ends up wrong. `applyPlanByReach` is shared by
 both paths so they cannot drift.
 
@@ -1958,15 +2020,15 @@ Three smaller things worth keeping:
 - **`context.diagnostics` is load-bearing, not decoration.** It is what a
   server keys its quick fixes off; send none and tsserver answers with
   refactors only, so "no quick fix here" would be Nox's fault rather than the
-  server's. `overlapping` picks the ones the range touches, edges included —
+  server's. `overlapping` picks the ones the range touches, edges included:
   a caret resting on the end of a squiggle is still on it.
 - **`codeActionLiteralSupport` has to be advertised** or a server is entitled
   to answer with the pre-3.8 bare `Command` shape, which is precisely the half
   Nox cannot run. `resolveSupport` and `dataSupport` stay unclaimed, so a
   server must send complete actions rather than stubs.
 - **The request reads the workspace, not the view.** `buffer.state` is the
-  authoritative copy — a pane routes every transaction back into it — so this
-  feature needs no `EditorView` and is drivable under Node, which is why it
+  authoritative copy, because a pane routes every transaction back into it,
+  so this feature needs no `EditorView` and is drivable under Node, which is why it
   has app-level tests where rename beside it has none.
 
 `workspaceEditPlan` moved out of `lsp-rename.ts` on the way: one reader, two
@@ -1977,19 +2039,19 @@ callers, and a `WorkspaceEdit` is not a rename concept.
 ### The server names the start; the editor keeps the end
 
 `toCodeMirrorCompletions` has read `textEdit.range` into `from`/`to` since it
-was written — "believed over any range the client would guess", says its
+was written. "Believed over any range the client would guess", says its
 comment, and "ignoring it is how `console.log` becomes `console.console.log`",
 says its test. **Nothing read the result.** The source inserted at the
 list-level `from`, the start of whatever CodeMirror's own `[\w$]+` matched,
 and the two only *usually* agree. They part company wherever the server wants
-to rewrite more than the last word — a path inside a string, a member
-expression — and accepting left the rest of the range sitting in front of the
+to rewrite more than the last word, such as a path inside a string or a member
+expression, and accepting left the rest of the range sitting in front of the
 insertion, which is the failure that comment describes.
 
 Third of the same shape found in as many days, after the `skip` set on
 `computeReplacements` and `additionalTextEdits`: a value converted carefully,
 tested at the conversion, and never consumed. The conversion being covered is
-what makes it invisible — the test passes, and it is testing a function whose
+what makes it invisible. The test passes, and it is testing a function whose
 output goes nowhere.
 
 **The start is applied and the end is not**, and that split is the whole
@@ -1999,9 +2061,9 @@ decision:
   drift: everything typed while the list filters locally is at the caret, and
   the caret is after it.
 - The **end** is the half that cannot survive that. A range may also end
-  *after* the caret — "replace the whole word I am standing in the middle of"
-  — which is replace mode, gated in LSP behind `insertReplaceSupport`, a
-  capability `session.ts` does not advertise on the stated principle that Nox
+  *after* the caret, meaning "replace the whole word I am standing in the
+  middle of". That is replace mode, gated in LSP behind `insertReplaceSupport`,
+  a capability `session.ts` does not advertise on the stated principle that Nox
   claims nothing it does not implement. Insert mode is also every editor's
   default. So `to` stays CodeMirror's, which maps with assoc 1 and therefore
   follows the caret.
@@ -2011,12 +2073,12 @@ document the completion was *requested* against, and CodeMirror hands `apply`
 a `from` it has mapped forward through every change since
 (`ActiveResult.updateFor`). Keeping the request-time value of that same
 position makes `from === requestFrom` an exact test for "nothing before the
-completion has moved" — and when something has, the editor's own mapping is
-the answer and the server's raw offset is not.
+completion has moved". When something has, the editor's own mapping is the
+answer and the server's raw offset is not.
 
 One latent crash went with it. `InsertReplaceEdit` is `{ newText, insert,
 replace }` with **no `range`**, and `item.textEdit.range.start` threw a
-`TypeError` out of the completion source — which kills completions for that
+`TypeError` out of the completion source, which kills completions for that
 server and says nothing at all. The range is validated with `isLspRange` now,
 the same predicate rename and formatting read their edits through.
 
@@ -2025,7 +2087,7 @@ the same predicate rename and formatting read their edits through.
 ### An auto-import is a second edit, and it arrives late
 
 `additionalTextEdits` is how the protocol says "and also make these other
-changes" — the import an auto-import completion needs. `LspCompletionItem` had
+changes": the import an auto-import completion needs. `LspCompletionItem` had
 no such field, so accepting `readFileSync` inserted the symbol and dropped the
 import the server had already computed. Silent wrong output, not a missing
 feature: the completion appears to work and produces code that does not
@@ -2037,15 +2099,15 @@ servers send the edits in the completion list; **tsserver sends them only on
 has already pressed Enter.
 
 `CONTRIBUTING.md:65-69` decides the shape, with format-on-save as the
-precedent — *"the save always happens… a late answer is dropped, a keystroke
+precedent: *"the save always happens… a late answer is dropped, a keystroke
 during the request wins"*. So the completion is inserted **synchronously,
 always**: accepting one never gets slower than it was, whatever the server is
 doing. The import goes in the same transaction when the edits are already
 known, and in a second one when they are not.
 
 **The tooltip is what makes the atomic path the common one.** `info` was
-already a lazy resolve, and CodeMirror calls it when an item is *highlighted*
-— before Enter for a keyboard user, and always for a tsserver item, because
+already a lazy resolve, and CodeMirror calls it when an item is *highlighted*:
+before Enter for a keyboard user, and always for a tsserver item, because
 those carry no documentation in the list. Caching that resolved item and
 reading it from `apply` is the whole reason the asynchronous path is rare
 enough to accept, rather than a bolt-on optimisation.
@@ -2053,7 +2115,7 @@ enough to accept, rather than a bolt-on optimisation.
 **Offsets are request-time coordinates, and they are checked rather than
 trusted.** The list is filtered locally while the user keeps typing
 (`validFor`), so no new request is made and the offsets go stale by however
-many characters were typed at the cursor — all of them *after* an import at
+many characters were typed at the cursor, all of them *after* an import at
 the top of the file. So the guard is a prefix compare: the current document
 and the request-time document must still agree on everything up to the last
 position the edits touch. If they do, the offsets mean what they said; if they
@@ -2062,7 +2124,7 @@ means something else**, which is the call `undoLastReplace` and rename already
 make.
 
 The conversion is `changesOf` from `core/lsp-text-edit.ts`, which rename and
-formatting already share — one reading of `TextEdit`, one conversion.
+formatting already share: one reading of `TextEdit`, one conversion.
 
 ---
 
@@ -2077,15 +2139,15 @@ reports no unmappable characters while doing it.
 So the call returned `Ok`, the atomic write succeeded, the status bar went on
 saying "UTF-16 LE", and the file on disk was UTF-8. A PowerShell script or a
 `.reg` file opened in Nox stopped being UTF-16 the first time it was saved.
-The only signal was the tuple's second item — the encoding actually used —
-and the code discarded it with `let (bytes, _, had_unmappable)`.
+The only signal was the tuple's second item, the encoding actually used, and
+the code discarded it with `let (bytes, _, had_unmappable)`.
 
 Nothing in the type system or the return value distinguishes this from a
 successful save, which is why it survived a feature that shipped with tests:
 `round_trips_windows_1252` covers the charset where delegation works, and
 there was no encode test for the charset where it does not.
 
-UTF-16 is now encoded here rather than delegated — `str::encode_utf16`, then
+UTF-16 is now encoded here rather than delegated: `str::encode_utf16`, then
 each unit in the requested byte order. That is total, unlike the legacy
 charsets: every `str` is valid Unicode and every scalar value has a UTF-16
 form, so there is no `unmappable` case for this branch to refuse, and an
@@ -2094,14 +2156,14 @@ astral character becomes a surrogate pair rather than one lost unit.
 **The byte-order mark is always written**, and that is the load-bearing half.
 `detect` recognises UTF-16 only by its mark, and mark-less bytes are worse
 than undetectable: little-endian ASCII is `h\0i\0`, which `std::str::from_utf8`
-accepts — NUL is valid UTF-8 — so the file would be detected as UTF-8 and then
-refused by `looksBinary` for containing NULs. Writing the mark is what makes a
+accepts, since NUL is valid UTF-8, so the file would be detected as UTF-8 and
+then refused by `looksBinary` for containing NULs. Writing the mark is what makes a
 file Nox wrote a file Nox can open, and the round-trip test asserts exactly
 that property rather than only the bytes.
 
 The test vectors are not hand-written. They come from Python's `codecs`, and
 the encoder was checked against it over 4020 strings including astral
-characters before any of them was committed — an independent implementation
+characters before any of them was committed. An independent implementation
 rather than the module agreeing with itself.
 
 ---
@@ -2118,14 +2180,14 @@ written, documented as walking "in exactly the order `findMatches` does", and
 the state in between, and one decision.
 
 The decision is that an exclusion cannot be stored as an index.
-`#replacePaths` deliberately does not trust the stored result rows — it
+`#replacePaths` deliberately does not trust the stored result rows. It
 re-reads the file and recomputes, because a file edited since the search would
 otherwise be rewritten from stale coordinates, and because the replace source
 prefers an open buffer while the *results* came from disk. So index 3 of the
 results and index 3 of the text being replaced are the same match only while
 nothing has moved.
 
-An exclusion is therefore `path`, 1-based `line`, and the **absolute** column —
+An exclusion is therefore `path`, 1-based `line`, and the **absolute** column,
 `previewOffset + column`, because a long line's preview is a window into it and
 two matches on one long line would otherwise key the same. At replace time the
 current text is walked with `findMatches`, the same loop `computeReplacements`
@@ -2141,8 +2203,8 @@ for a file edited during review, and the same rule `undoLastReplace` uses for a
 file that no longer says what the replace left there: when the world has moved,
 refuse rather than guess.
 
-Replacing exactly one match is that machinery with the set inverted — every
-index except this one — which is why it costs a method rather than a mechanism
+Replacing exactly one match is that machinery with the set inverted, every
+index except this one, which is why it costs a method rather than a mechanism
 and why it inherits the refusal for free.
 
 The panel's counts needed no arithmetic of their own: `dismissMatch` removes
@@ -2170,14 +2232,14 @@ What that audit turned up, all since fixed: `git show :0:` fails on an
 unmerged path (the fake wrote a stage-0 entry that real git does not have, so
 a conflicted file silently lost its gutter); `ignore`'s walker defaults to
 skipping hidden files, so dotfiles were unsearchable while the fake walked
-them; `ignore`'s overrides are last-match-wins, so excludes added before
-includes were inert — and the test asserting otherwise encoded the *fake's*
-behaviour; `BufRead::lines()` ends a stream on one invalid byte, which the
+them. `ignore`'s overrides are last-match-wins, so excludes added before
+includes were inert, and the test asserting otherwise encoded the *fake's*
+behaviour. `BufRead::lines()` ends a stream on one invalid byte, which the
 fake could not represent because it deals in JS strings.
 
 The same reasoning applies to test *helpers*. `search_integration.rs` re-types
 the walker configuration rather than importing it, which is why it certified
-both search defects as absent — a copy of the logic under test is not a test.
+both search defects as absent. A copy of the logic under test is not a test.
 
 ---
 
@@ -2203,14 +2265,14 @@ the wrong layer.
 
 ### Snippets: one lifecycle, two dialects, and a translation between them
 
-Snippets arrived as one feature with two faces — the user's own, from
+Snippets arrived as one feature with two faces: the user's own, from
 `snippets.json`, and the language server's, once `snippetSupport` is claimed in
 the handshake. Only the *sources* differ; the expansion is CodeMirror's
 `snippet()` in both cases, which is the whole reason building them together
 cost barely more than building either.
 
 **The dialects are not the same, and the difference is not cosmetic.**
-CodeMirror's parser matches braced fields only — `${1}`, `${1:label}` — while
+CodeMirror's parser matches braced fields only (`${1}`, `${1:label}`) while
 LSP's tab stops are bare: `$0`, `$1`. A server's template therefore expanded
 its placeholders correctly and left `$0` sitting in the buffer as text.
 `core/snippets.ts#toCodeMirrorTemplate` is the translation, and it does three
@@ -2227,16 +2289,17 @@ send something Nox would have flattened.
 
 **A snippet may have to travel with an auto-import**, and `snippet()` dispatches
 for itself. Handing it a `dispatch` that captures is the only seam it offers,
-and what it builds — changes, a selection over the first field, the effect that
-installs the field keymap — is exactly a transaction spec. That effect is
+and what it builds (changes, a selection over the first field, the effect that
+installs the field keymap) is exactly a transaction spec. That effect is
 load-bearing: it carries the `appendConfig` that arms the `Prec.highest` Tab
 binding the first time a snippet runs in a buffer, so Tab moves between fields
 without Nox owning a mode flag, and falls through to accept-completion and then
 indent when no snippet is active.
 
 **Fixing that path uncovered an older bug.** Merging `additionalTextEdits` and
-the completion into one transaction was right — one undo — but the selection
-kept was the one `insertCompletionText` computed for a document containing only
+the completion into one transaction was right, since it is one undo, but the
+selection kept was the one `insertCompletionText` computed for a document
+containing only
 the completion. An import merged in above moves everything down and nothing
 moved the cursor with it, so **accepting a completion from a server that sends
 its imports in the list left the caret inside the import at the top of the
@@ -2244,8 +2307,8 @@ file**. tsserver sends them on `completionItem/resolve` and never hit it;
 rust-analyzer, gopls and pyright do not. The fix stops merging two change sets
 that describe the same document: the extra edits are applied to a throwaway
 state first and the completion is built against that, so `compose` joins them
-and no position is mapped by hand. The one position that is mapped — the
-completion's start — maps with assoc 1, because an import inserted at offset 0
+and no position is mapped by hand. The one position that is mapped, the
+completion's start, maps with assoc 1, because an import inserted at offset 0
 and a completion starting at offset 0 are the degenerate case, and the default
 association puts the completion *before* the import it was meant to accompany.
 
@@ -2262,8 +2325,9 @@ same call for agents, on the grounds that a crash boundary, real capability
 enforcement and language independence are "none of which are retrofittable".
 
 The cost is paid rather than hidden: **a plugin cannot hand Nox a CodeMirror
-object**, so the roadmap's "editor extensions" becomes a declarative surface —
-the plugin names ranges, Nox owns the render loop — and it is not built yet.
+object**, so the roadmap's "editor extensions" becomes a declarative surface,
+where the plugin names ranges and Nox owns the render loop, and it is not built
+yet.
 
 **Contributions live in `plugin.json`, not in a handshake.** So a plugin's
 commands are registered before it has run, and it starts on the first invoke of
@@ -2271,9 +2335,9 @@ one. A handshake would mean starting every installed plugin at launch to find
 out what it offers, on an editor whose thesis is starting fast.
 
 **The manifest is read stricter than any other config Nox parses**, and the two
-halves differ on purpose. Capabilities are all-or-nothing — one unrecognised
+halves differ on purpose. Capabilities are all-or-nothing: one unrecognised
 word refuses the manifest, because a trimmed list is a plugin whose declaration
-the user read and whose behaviour does not match it. Commands are lenient — a
+the user read and whose behaviour does not match it. Commands are lenient. A
 malformed one grants nothing, so dropping it beats refusing a plugin whose
 others are fine.
 
@@ -2284,7 +2348,7 @@ plugins can never collide, which is why the palette needs no conflict
 resolution.
 
 **Both transports are the same interface.** `AgentProcess` was already
-documented as knowing nothing about any protocol — "this moves lines" — so a
+documented as knowing nothing about any protocol ("this moves lines"), so a
 child process satisfies it as-is and a worker satisfies it behind
 `startPluginWorker`. The host branches on neither. That is also why this
 landed with **no Rust change**.
@@ -2301,7 +2365,7 @@ Added 2026-08-29, after the packaged-build walk measured it at **9.97 s**.
 `onExit` settled every outstanding *request* through `#settleAll` and left the
 handshake alone, so `#awaitHello` ran to its ten-second deadline even though
 the thing it was waiting for had already gone. The most likely cause is also
-the most ordinary — a syntax error in a plugin someone is writing — so the
+the most ordinary, a syntax error in a plugin someone is writing, so the
 first thing a plugin author met was ten seconds of silence followed by a
 sentence blaming them for being slow.
 
@@ -2311,15 +2375,16 @@ and either half alone leaves the other case hanging:
 - A worker refused at construction fires `onerror` in the tick it is made, and
   the host subscribes to `onExit` one statement *before* it calls
   `#awaitHello`. There is no waiter yet, so the verdict is **recorded** on the
-  entry and read on the way in — the exact counterpart of `helloVersion`,
-  which exists because greetings arrive early for the same reason.
+  entry and read on the way in. That is the exact counterpart of
+  `helloVersion`, which exists because greetings arrive early for the same
+  reason.
 - A plugin that dies part-way through the handshake *does* have a waiter, and
   only settling it will do.
 
 `helloWaiter` therefore takes a **verdict** rather than a version, so anything
 that knows the handshake can no longer succeed is able to settle it. And the
-two failures get different sentences — *"it stopped before it introduced
-itself"* against *"it did not introduce itself in time"* — because they want
+two failures get different sentences, *"it stopped before it introduced
+itself"* against *"it did not introduce itself in time"*, because they want
 different fixes, and a plugin that crashed is not a plugin that is taking its
 time.
 
@@ -2333,7 +2398,7 @@ command after a hand edit, and each named `FileWatcherService`'s single root as
 the cause.
 
 **Every one of those rows implied a renderer-side fix, and every one was
-wrong.** `nox_watch` holds `Mutex<Option<RecommendedWatcher>>` — one watcher —
+wrong.** `nox_watch` holds `Mutex<Option<RecommendedWatcher>>`, one watcher,
 and its own comment says *"replacing any previous watcher"*. Calling it for the
 config directory would have silently stopped watching the workspace: no
 external-change detection, no tree refresh, and no save-overwrite dialog. The
@@ -2342,12 +2407,12 @@ being wrong costs unsaved work.
 
 So it is a third Rust watcher, and the shape was already in the file:
 `watchGitMeta` is a second concurrent watch and it did not extend `nox_watch`
-into a registry — it added its own state, command pair and event channel. This
+into a registry. It added its own state, command pair and event channel. This
 follows that rather than refactoring the workspace watcher.
 
 **A separate service, too.** `FileWatcherService`'s whole body is workspace
-policy — reload clean buffers, protect dirty ones, refresh the tree, re-index,
-warn once per buffer — and none of it applies to a config file.
+policy (reload clean buffers, protect dirty ones, refresh the tree, re-index,
+warn once per buffer) and none of it applies to a config file.
 `ConfigWatcherService` watches, coalesces, and hands out a set of paths;
 every decision about what a change *means* stays with the service that owns the
 file.
@@ -2355,7 +2420,7 @@ file.
 **Self-writes are excluded by content, never by a timer.** Nox writes
 `plugin-settings.json` itself on a 250 ms debounce, so a reload that could not
 tell its own write from a stranger's would be a loop. The obvious fix is a time
-window — "ignore events for a second after we write" — and it is the wrong one:
+window, "ignore events for a second after we write", and it is the wrong one:
 it is a race written down as a constant, and it drops a real external edit that
 lands inside it. Instead `reload()` compares the resolved values before and
 after and announces only what moved. A byte comparison against `serialize()`
@@ -2372,7 +2437,7 @@ Added 2026-08-28, closing the last open row in the v0.6 table. `DESIGN.md` §9
 had said since v0.1 that a theme is a token override rather than a fork; this
 is the consequence.
 
-**The threat model is the decision.** Nobody writes a theme from nothing — they
+**The threat model is the decision.** Nobody writes a theme from nothing. They
 fetch one someone posted and drop it in a folder, exactly as they would a
 plugin. So a theme file is content from a stranger that Nox turns into CSS, and
 it gets `plugin.json`'s discipline rather than `settings.json`'s. Two
@@ -2383,8 +2448,8 @@ structural consequences, neither a blocklist:
   property Nox did not choose. `THEME_TOKENS` is 60 names; a key outside it is
   dropped and reported.
 - **Nox never builds a CSS rule out of the file.** Values go through
-  `CSSStyleDeclaration.setProperty`, so the browser's own parser reads them —
-  the same code that reads every other stylesheet — rather than a selector and
+  `CSSStyleDeclaration.setProperty`, so the browser's own parser reads them,
+  the same code that reads every other stylesheet, rather than a selector and
   a declaration assembled out of a stranger's JSON. Generating
   `[data-nox-theme='<id>'] { … }` as text would have invented two injection
   points for no gain.
@@ -2400,15 +2465,15 @@ the OS.
 three-line theme work: the cascade fills in everything the file did not
 mention, and the file's own tokens go on as inline properties, which outrank a
 `[data-nox-theme]` rule. It also makes switching back "remove the properties"
-rather than "reload a stylesheet" — and the removal needs the *previous*
+rather than "reload a stylesheet", and the removal needs the *previous*
 theme's key list, which is unreachable once the setting has changed, so
 `#themeProperties` is tracked rather than recomputed.
 
 **`workbench.theme` stopped being an enum because it stopped being closed.**
 `pick(['eclipse', 'umbra'])` made the type `'eclipse' | 'umbra'`, which was
 true while both themes shipped with the build. `coerce` would now enforce that
-falsehood — an enum rewrites an unrecognised value to its default, so a custom
-theme's id would be silently reset to `eclipse` on every load. The setting is a
+falsehood, because an enum rewrites an unrecognised value to its default, so a
+custom theme's id would be silently reset to `eclipse` on every load. The setting is a
 string, and `Common.optionsFrom` (a *closed* union naming a runtime source) is
 what keeps the Settings panel drawing a dropdown without hand-writing a control
 for one key.
@@ -2423,7 +2488,7 @@ back to the base means putting the file back brings the choice back.
 
 ### A plugin's settings are the user's layer, and only ever that
 
-Added 2026-08-28. A plugin declares its options in `plugin.json` — declared
+Added 2026-08-28. A plugin declares its options in `plugin.json`. Declared
 rather than registered, for the reason panels are: they have to be listable
 before the plugin runs, or seeing what a plugin can be configured to do would
 mean starting it, and every plugin would start at launch to fill a panel nobody
@@ -2435,8 +2500,9 @@ the entire basis of `config.get('editor.fontSize')` being typed rather than
 `unknown`. A key discovered at runtime would widen `Settings` to
 `Record<string, unknown>` and take every core setting's type down with it. So
 the values live in their own `plugin-settings.json`, namespaced by plugin id,
-owned by `PluginSettingsService` — the house pattern of one file per subsystem
-that `snippets.json`, `servers.json` and `keybindings.json` already follow. The
+owned by `PluginSettingsService`. That is the house pattern of one file per
+subsystem that `snippets.json`, `servers.json` and `keybindings.json` already
+follow. The
 *validation* is shared rather than copied: `coerce` was split into a schema
 lookup in front of a pure `coerceTo(shape, value)`, and a plugin's descriptor
 satisfies `SettingShape` structurally, with no cast.
@@ -2444,15 +2510,15 @@ satisfies `SettingShape` structurally, with no cast.
 **There is no workspace layer, and no way for an author to ask for one.**
 `.nox/settings.json` arrives with a cloned repository, and the schema's
 `workspace: true` allowlist works because Nox knows what each of its eight keys
-means — `terminal.shell` is why the list exists. Nox cannot know what a
+means, and `terminal.shell` is why the list exists. Nox cannot know what a
 plugin's keys mean: `formatter.path` and `margin.width` are both a string with
 a label. A `workspace: true` a plugin could set would hand the allowlist's
 decision to the party it exists to constrain, so the service has one layer by
 construction rather than by a check.
 
 **A namespace whose plugin is not loaded is written back untouched.**
-`ConfigService` drops unknown keys and is right to — its schema is complete, so
-unknown means stale. Here "known" is whatever discovery found *this launch*, so
+`ConfigService` drops unknown keys and is right to, because its schema is
+complete, so unknown means stale. Here "known" is whatever discovery found *this launch*, so
 dropping would let a manifest that failed to parse this morning, or a folder
 renamed mid-upgrade, erase a plugin's configuration on the next unrelated
 write. That is a transient failure made destructive, and it is the property
@@ -2462,7 +2528,7 @@ write. That is a transient failure made destructive, and it is the property
 document event is coarse because a document is large and the standing rule is
 that a plugin is never woken per keystroke. A settings object is a handful of
 scalars moving at human speed, so a bare notification would buy only a round
-trip. It also never *starts* a plugin — otherwise touching a row in the
+trip. It also never *starts* a plugin. Otherwise touching a row in the
 Settings panel would spawn every plugin that declares an option, which is the
 lazy activation declared contributions exist to protect.
 
@@ -2477,8 +2543,8 @@ looked like configuration. `override` **replaces** the source list CodeMirror
 gathers from language data rather than adding to it
 (`@codemirror/autocomplete`, `CompletionState.update`), so
 `autocompletion({ override: [lspSource] })` silently switched off every source
-the grammar packages register — `lang-html`'s tags and attributes,
-`lang-css`'s properties, `lang-javascript`'s locals were all in the bundle,
+the grammar packages register. `lang-html`'s tags and attributes,
+`lang-css`'s properties and `lang-javascript`'s locals were all in the bundle,
 wired up, and unreachable. The visible symptom was worse than that:
 **a file whose language had no server got no completions at all**, which is
 most languages, since Nox never spawns a server it was not told about.
@@ -2492,7 +2558,7 @@ Two consequences are worth writing down:
   every transaction, so constructing sources inside it hands back a new pair
   each time, no in-flight query is ever recognised as its own, and each is
   reset to pending by the transaction that would have delivered its result.
-  The picker then never opens — a hang, not a wrong list. This was written
+  The picker then never opens: a hang, not a wrong list. This was written
   wrong first and `tests/completion-sources.test.ts` is what caught it.
 - **Nothing structural can test this.** Asserting that the html source is
   registered passes with `override` still in place, because `override` is a
@@ -2502,9 +2568,9 @@ Two consequences are worth writing down:
 **The word fallback is a floor, and it stands down twice.** It uses
 CodeMirror's own `completeAnyWord`, which caches per rope node so an edit
 rescans one chunk. It declines when a language server offers completion for
-the document's language — server items carry `detail`, so CodeMirror's
+the document's language. Server items carry `detail`, so CodeMirror's
 cross-source dedupe would not collapse a bare word against the same symbol
-described properly, and the list would carry both — and it declines above
+described properly, and the list would carry both. It also declines above
 `WORD_COMPLETION_MAX_BYTES` (§6). A language that brings its own source keeps
 the fallback as well: those sources answer in syntactic positions rather than
 everywhere, so the overlap is small and the words are what fill the gap.
@@ -2514,7 +2580,7 @@ everywhere, so the overlap is small and the words are what fill the gap.
 ## 6. Performance notes
 
 - **Startup:** grammars are dynamic imports, chunked separately by Vite. Opening
-  a file never waits on a parser — the text paints first and highlighting
+  a file never waits on a parser. The text paints first and highlighting
   arrives on the next tick.
 - **Large files:** CodeMirror virtualises the viewport and stores the document
   as a rope, so scroll cost is independent of file size. Files over 64 MB are
@@ -2531,7 +2597,7 @@ everywhere, so the overlap is small and the words are what fill the gap.
 - **Grammar chunks:** one output chunk per grammar, not one for all of them
   (`scripts/chunks.mjs`). The rule returned a single `grammars` name until
   2026-08-26, which collapsed every dynamic import in `editor/languages.ts`
-  onto one file — opening a .json buffer loaded every parser Nox ships, 327 kB
+  onto one file. Opening a .json buffer loaded every parser Nox ships, 327 kB
   of it, and adding eleven languages would have made it 640 kB. Now .json
   costs 2 kB and .go costs 31 kB. Rollup still shares a chunk between grammars
   that genuinely embed each other: PHP and Vue really do contain HTML.
@@ -2541,14 +2607,14 @@ everywhere, so the overlap is small and the words are what fill the gap.
   query re-merges the cached child lists and the cost tracks distinct words.
   Measured over synthetic source text, per query after the first: 0.25 MB
   2-3 ms, 0.5 MB 3-4 ms, 1 MB ~8 ms, 2 MB ~23 ms, 10 MB ~112 ms. The cap is
-  where a query still leaves most of a frame — the rule that set quick-open's.
+  where a query still leaves most of a frame, the rule that set quick-open's.
 - **The typing path:** a keystroke costs **0.34 ms** in a 16,000-line document
-  and the same at 64,000 — measured in chromium, 2026-08-25, best of seven
+  and the same at 64,000. Measured in chromium, 2026-08-25, best of seven
   batched samples. Flat in document size because every editor extension is
   viewport-bounded; `tests/browser/typing-path.test.ts` is what holds it that
   way, and it catches a per-line document scan at 4.13x against a 3x budget.
 - **Fuzzy matching:** an optimal DP rather than a greedy scan. Greedy ranking is
-  visibly wrong on paths — typing `path` should not match the scattered
+  visibly wrong on paths: typing `path` should not match the scattered
   `p`,`a`,`t`,`h` across `src/core/…`. Inputs are short, so the DP is well
   under a frame across thousands of candidates.
 - **Motion budget:** nothing over 190 ms, opacity/transform only, and nothing
@@ -2562,51 +2628,52 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 
 | Item | Detail |
 |---|---|
-| Nine defensive initialisers are dead assignments | `no-useless-assignment` is right that the `let x = <value>` opening a `try` in `config/index.ts`, `keymap.ts`, `session.ts`, `updates.ts`, `watcher.ts` and `workspace.ts` is never read — every path that reaches a use overwrites it first. It is also the thing that stops TypeScript reporting a read before assignment on the early-return paths, so removing it is a change to what the compiler checks, not a tidy-up. Left at warning level in `eslint.config.js` rather than fixed in passing, because three of the nine are in `workspace.ts`, which owns unsaved work. |
-| Quick-open's cost is bounded by a cap rather than by the algorithm | The scan is linear in the index and the index is the whole project, so what keeps it inside a frame is `INDEX_MAX_FILES` (14,000, measured — see `filetree.ts`) and the 4,000-survivor break in `fileRows`, not anything about the matcher. Worst realistic query at the cap is ~10 ms of 16 ms. Two consequences worth knowing: a workspace larger than the cap has files quick-open can never find, and the survivor break means `total` is a lower bound and a perfect match late in index order can be missed on a dense query. Removing both needs the scan to become interruptible — chunked across frames — which makes the palette's result path async. |
+| Nine defensive initialisers are dead assignments | `no-useless-assignment` is right that the `let x = <value>` opening a `try` in `config/index.ts`, `keymap.ts`, `session.ts`, `updates.ts`, `watcher.ts` and `workspace.ts` is never read, because every path that reaches a use overwrites it first. It is also the thing that stops TypeScript reporting a read before assignment on the early-return paths, so removing it is a change to what the compiler checks, not a tidy-up. Left at warning level in `eslint.config.js` rather than fixed in passing, because three of the nine are in `workspace.ts`, which owns unsaved work. |
+| Quick-open's cost is bounded by a cap rather than by the algorithm | The scan is linear in the index and the index is the whole project, so what keeps it inside a frame is `INDEX_MAX_FILES` (14,000, measured, see `filetree.ts`) and the 4,000-survivor break in `fileRows`, not anything about the matcher. Worst realistic query at the cap is ~10 ms of 16 ms. Two consequences worth knowing: a workspace larger than the cap has files quick-open can never find, and the survivor break means `total` is a lower bound and a perfect match late in index order can be missed on a dense query. Removing both needs the scan to become interruptible, chunked across frames, which makes the palette's result path async. |
 | Problems and References are not windowed | They share the flat-row shape the explorer and search now window (see §4), but their natural limits are lower. Re-decide on their own merits rather than inheriting the explorer spec's out-of-scope line. |
 | Commit is enabled while a merge conflict is unresolved | The panel names conflicts and refuses to stage them, but the Commit button does not know about them. Real git refuses ("committing is not possible because you have unmerged files") and the refusal surfaces through the existing error path, so the outcome is correct and merely late. `MemoryPlatform.gitCommit` does not model the refusal, so nothing tests it. |
 | `undoSession` still revokes grants as a side effect | Revocation is its own command now (`permissions.revokeGrants`), so undoing an agent's *work* arguably should leave its *permissions* alone. The two are still welded in `agent/runtime.ts`; the panel's toast says so rather than surprising the user. |
 | The explorer does not dim gitignored files | `git.rs` runs `--porcelain=v2 --branch -z` without `--ignored`, so the `!` records never arrive. Real support is a Rust change plus a Platform-boundary change, not a component one. |
-| A save can still refresh the whole tree | FSEvents flags are sticky per path, so an in-place rewrite of a file renamed earlier in the session arrives as `Modify(Name(_))` and is classified a rename; Nox's own atomic save adds a `Create` and three renames of its own. The event kind cannot tell a sticky flag from a real rename — only re-reading the tree can — so the fix belongs in `FileTreeService.refresh()` reporting whether anything actually changed. |
-| The quick-open index still starves during a sustained write storm | The 1 s coalesce ceiling bounds the *flush*, but each structural flush resets `REINDEX_MS`, so the project re-walk still waits for the storm to end. Deliberate — the full walk is the expensive one — but worth revisiting. |
+| A save can still refresh the whole tree | FSEvents flags are sticky per path, so an in-place rewrite of a file renamed earlier in the session arrives as `Modify(Name(_))` and is classified a rename; Nox's own atomic save adds a `Create` and three renames of its own. The event kind cannot tell a sticky flag from a real rename, only re-reading the tree can, so the fix belongs in `FileTreeService.refresh()` reporting whether anything actually changed. |
+| The quick-open index still starves during a sustained write storm | The 1 s coalesce ceiling bounds the *flush*, but each structural flush resets `REINDEX_MS`, so the project re-walk still waits for the storm to end. Deliberate, since the full walk is the expensive one, but worth revisiting. |
 | `search_integration.rs` re-types the walker configuration | Its `walk()` helper is a hand-copy of `search.rs`'s builder with a truncated exclude list and no include handling, which is why four integration tests passed throughout both search defects. Importing the real `plan_walk` needs `pub mod search` in `lib.rs`. |
 | The browser search walks `node_modules` and `.git` | `MemoryPlatform.searchProject` applies no always-exclude list, so the dev target searches machine directories the desktop build prunes. Divergence in the harmless direction, but it is the fake being wrong. |
 | Dirty flag on huge files | See §4. Above 2 MB, undo-to-saved leaves the tab dirty. |
 | Watch mtime resolution | See §4. A coarse-mtime filesystem can let an external write in the same second as a save be misread as our own. |
-| Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. **A file in that state also never leaves `externalState: 'none'`, so the save-overwrite dialog never fires for it** — a concurrent edit is clobbered rather than reported. |
-| Folds are not persisted across sessions | Fold state lives in the buffer's `EditorState`, so it survives tab switches but not a restart. Cursor positions *are* persisted — see §4. |
+| Watch is root-only | Files opened outside the workspace root are not watched. One watcher, one root. **A file in that state also never leaves `externalState: 'none'`, so the save-overwrite dialog never fires for it**, and a concurrent edit is clobbered rather than reported. |
+| Folds are not persisted across sessions | Fold state lives in the buffer's `EditorState`, so it survives tab switches but not a restart. Cursor positions *are* persisted: see §4. |
 | A damaged config file is preserved, but never repaired | `<name>.damaged.<ext>` is a copy, not a merge: Nox does not attempt to recover the *contents* of an index it could not parse, only the one counter that stops the next write destroying a body file. Recovering a truncated `notes.json`'s rows is possible and unbuilt. |
-| An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead — deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see; what it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have — they came from disk and the replace may read a buffer. |
-| A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs — a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
-| The word fallback is capped by size, not by work | It declines above 1 MB (§6) rather than scanning an interruptible slice, so a large file gets no word completions at all instead of the ones near the caret. Bounded in the harmless direction — the fallback is a convenience and a language server, where there is one, is unaffected — but the honest fix is a bounded scan around the viewport rather than a cliff. `completeAnyWord` offers no way to ask for one; it would mean Nox owning the scan. |
-| A plugin's decorations are carried forward, not recomputed | Between one keystroke and the next Nox maps a plugin's `RangeSet` through the change rather than asking the plugin again — it is in another process and cannot answer that fast. So a mark stays over its text while you type and is corrected on the next `document.changed`, which means there is a window where a mark is *positioned* correctly and no longer *true*. The alternative is marks that vanish on the first keystroke, which is worse. |
-| Plugins get two events, not a feed | `document.changed` (2026-08-27) is debounced at 400 ms, coarse ("this buffer changed", never what changed), and sent **only to plugins that have already decorated that buffer** — that last clause is what stops it being an ambient feed. `settings.changed` (2026-08-28) joins it and is not comparable: it fires when a human moves a control, carries the new values, and reaches only a plugin that is *already running*. There is still no selection or focus event, and a status item still cannot track the editor live; `examples/plugins/counter/` says so rather than implying otherwise. |
-| A plugin setting cannot hold a secret | Built 2026-08-28 as four scalar kinds in a plaintext `plugin-settings.json`, so a plugin wanting an API key gets a string setting in a file anyone can read — exactly as `servers.json` and `agents.json` already do. Nox has no keychain seam and adding one would be its own feature, not a kind. Recorded rather than implied, because a `"kind": "string"` labelled *Token* looks like somewhere safe to put one. |
-| A project cannot configure a plugin | Deliberate, and the one thing plugin settings refuse. `.nox/settings.json` arrives with a cloned repository, and the schema's `workspace: true` allowlist works only because Nox knows what each of its eight keys means. It cannot know what a plugin's keys mean — `formatter.path` and `margin.width` are both a string with a label — so no plugin setting is ever workspace-scoped and there is no flag an author could set to make one. The cost is real: a repository cannot ship its linter plugin's configuration with itself. See `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §0. |
-| A custom theme is not held to any contrast floor | `tests/token-contrast.test.ts` holds Nox's own tokens to WCAG 4.5:1 and keeps doing so; a theme a user writes is checked for *shape* and never for legibility. Deliberate — refusing to load someone's theme because a comment colour measures 4.2:1 would be Nox overruling a person about their own screen — but it means the guarantee that suite provides covers the built-in themes only, which is worth saying rather than leaving implied. |
+| An excluded match is identified by line and column | So an edit that moves a *different* match onto exactly that line and column excludes that one instead, by deleting a line above a match whose column happens to align. Bounded in the safe direction: the run still replaces only what the pattern finds, and the exclusion still lands on a match the user could see. What it can get wrong is *which*. Anything less locatable is refused outright. A richer key needs a definition of "the same match across an edit", which is position mapping, which the results do not have. They came from disk and the replace may read a buffer. |
+| A UTF-16 file with no byte-order mark gains one when saved | Nox writes UTF-16 with a mark always, because `detect` knows UTF-16 by nothing else and mark-less little-endian ASCII reads as UTF-8 full of NULs, a file it could never reopen. Only reachable by choosing the charset by hand, since nothing detects mark-less UTF-16 in the first place. Modelling "UTF-16 without a mark" would need a seventh label carried through the IPC boundary, the status bar, the picker and the session record, to preserve a shape whose endianness is a guess anyway. |
+| The word fallback is capped by size, not by work | It declines above 1 MB (§6) rather than scanning an interruptible slice, so a large file gets no word completions at all instead of the ones near the caret. Bounded in the harmless direction, since the fallback is a convenience and a language server, where there is one, is unaffected, but the honest fix is a bounded scan around the viewport rather than a cliff. `completeAnyWord` offers no way to ask for one, and it would mean Nox owning the scan. |
+| A plugin's decorations are carried forward, not recomputed | Between one keystroke and the next Nox maps a plugin's `RangeSet` through the change rather than asking the plugin again, because it is in another process and cannot answer that fast. So a mark stays over its text while you type and is corrected on the next `document.changed`, which means there is a window where a mark is *positioned* correctly and no longer *true*. The alternative is marks that vanish on the first keystroke, which is worse. |
+| Plugins get two events, not a feed | `document.changed` (2026-08-27) is debounced at 400 ms, coarse ("this buffer changed", never what changed), and sent **only to plugins that have already decorated that buffer**, and that last clause is what stops it being an ambient feed. `settings.changed` (2026-08-28) joins it and is not comparable: it fires when a human moves a control, carries the new values, and reaches only a plugin that is *already running*. There is still no selection or focus event, and a status item still cannot track the editor live. `examples/plugins/counter/` says so rather than implying otherwise. |
+| A plugin setting cannot hold a secret | Built 2026-08-28 as four scalar kinds in a plaintext `plugin-settings.json`, so a plugin wanting an API key gets a string setting in a file anyone can read, exactly as `servers.json` and `agents.json` already do. Nox has no keychain seam and adding one would be its own feature, not a kind. Recorded rather than implied, because a `"kind": "string"` labelled *Token* looks like somewhere safe to put one. |
+| A project cannot configure a plugin | Deliberate, and the one thing plugin settings refuse. `.nox/settings.json` arrives with a cloned repository, and the schema's `workspace: true` allowlist works only because Nox knows what each of its eight keys means. It cannot know what a plugin's keys mean, since `formatter.path` and `margin.width` are both a string with a label, so no plugin setting is ever workspace-scoped and there is no flag an author could set to make one. The cost is real: a repository cannot ship its linter plugin's configuration with itself. See `docs/superpowers/specs/2026-08-28-plugin-settings-design.md` §0. |
+| A custom theme is not held to any contrast floor | `tests/token-contrast.test.ts` holds Nox's own tokens to WCAG 4.5:1 and keeps doing so. A theme a user writes is checked for *shape* and never for legibility. Deliberate, because refusing to load someone's theme over a comment colour measuring 4.2:1 would be Nox overruling a person about their own screen, but it means the guarantee that suite provides covers the built-in themes only, which is worth saying rather than leaving implied. |
 | A theme cannot set a shadow or the focus ring's geometry | `--nox-shadow-md`, `--nox-shadow-lg` and `--nox-focus-ring` are composite `box-shadow` values, so they would need a grammar of their own rather than the colour check every other token gets. `--nox-focus-ring-color` *is* themeable, which covers the case anyone actually wants. A theme on a light ground would want the shadows and cannot have them. |
-| Four config files still need a Reload command | The config directory is watched since 2026-08-28, and `snippets.json`, `plugin-settings.json` and a theme file all reload on an outside edit. `settings.json` and `keybindings.json` are **deliberately** absent: Nox writes both constantly, and live-reloading the layer that owns every preference wants its own envelope read rather than riding in on this one. `servers.json` and `agents.json` are absent because reloading them *restarts processes*, which is a decision a user makes — that is what **Reload Language Servers** is. `classifyConfigChange` is where that list lives, and a test pins the omissions so adding a file to the folder cannot silently start reloading it. |
-| The packaged app is verified, but not its native chrome | Three walks on 2026-08-29 covered the packaged Windows build: behaviour from disk (a command's effect on `settings.json`, a plugin's own log, warnings in `diagnostics.log`) and then appearance, by opening the WebView's debugging endpoint and screenshotting it — a custom theme painting, the Plugins tab and its controls, a plugin's status item and panel rows, the settings loop repainting, and a theme edited outside the editor repainting a running window. What no walk has yet driven is the part *outside* the WebView: the menu bar, native dialogs, the terminal, a real git repository. Those are the `nox-desktop-walk` checklist's own rows, and they need the desktop rather than the renderer. See `.desktop-pass-report.md`. |
-| A plugin process is not sandboxed | The same line `agents` already carries: the permission model governs what a plugin may ask *Nox* to do, not what its own process can reach. A plugin is trusted code you chose to install, like a shell plugin — the difference from an agent is only that more people will install one. |
-| A snippet's choice syntax keeps only its first option | `${1|const,let|}` becomes `${1:const}`. CodeMirror's snippet fields have no picker attached, so the alternatives have nowhere to be shown, and a field the user can type over beats a literal `|const,let|` in their code. Offering the real thing means a completion source that fires on entering the field — buildable, and a bigger feature than the conversion it would sit inside. |
-| Snippet variables are not substituted | `$TM_FILENAME`, `$CURRENT_YEAR` and the rest are left exactly as written. Resolving them is a table of a dozen names and a clock; deleting them silently is worse than leaving them, so leaving them is what happens. Visible, and fixable by the person who wrote it. |
-| Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default — so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
-| Servers run their own file watchers | Nox advertises no dynamic registration at all — not `workspace.didChangeWatchedFiles.dynamicRegistration`, and `synchronization.dynamicRegistration` is explicitly `false` — so a conforming server never sends `client/registerCapability` and falls back to watching files itself, which rust-analyzer and gopls both do. **That makes this conforming rather than broken**, and the mildest of the four items that waited on the server-request seam; the production-readiness plan's "they never get to" overstated it. What is lost is efficiency and consistency: N servers each running a watcher over the same tree, with their own ignore rules, rather than one `FileWatcherService` fanning out. Building it is a feature and not a handler — accept a registration, match its globs (`onPathsChanged` is already the right seam and `globToRegExp` already exists), derive created/changed/deleted, send `workspace/didChangeWatchedFiles`, honour `client/unregisterCapability` — and accepting a registration Nox would not honour is worse than never inviting one. |
+| Four config files still need a Reload command | The config directory is watched since 2026-08-28, and `snippets.json`, `plugin-settings.json` and a theme file all reload on an outside edit. `settings.json` and `keybindings.json` are **deliberately** absent: Nox writes both constantly, and live-reloading the layer that owns every preference wants its own envelope read rather than riding in on this one. `servers.json` and `agents.json` are absent because reloading them *restarts processes*, which is a decision a user makes. That is what **Reload Language Servers** is. `classifyConfigChange` is where that list lives, and a test pins the omissions so adding a file to the folder cannot silently start reloading it. |
+| The two older git reads still run on the main thread | `nox_git_file_base` and `nox_git_status` are plain `#[tauri::command]`, so their bodies run inline on the thread that handles the IPC message and draws the window. `git.rs`'s module comment argues no caller can be blocked because "every caller is async". True of the *renderer*, and beside the point for the *main thread*, which is the thing a blocking body holds. In practice neither is slow: one blob, one index scan. `git status` on a very large repository with a cold cache is the case that would be felt, and it is a `#[tauri::command(async)]` away. Deliberately not taken here, because it is a change to two shipped commands with no failure to point at, and this change already carries one command's worth of new argument. Found while building blame, by reading the macro rather than trusting the comment. |
+| The packaged app is verified, but not its native chrome | Three walks on 2026-08-29 covered the packaged Windows build: behaviour from disk (a command's effect on `settings.json`, a plugin's own log, warnings in `diagnostics.log`) and then appearance, by opening the WebView's debugging endpoint and screenshotting it: a custom theme painting, the Plugins tab and its controls, a plugin's status item and panel rows, the settings loop repainting, and a theme edited outside the editor repainting a running window. What no walk has yet driven is the part *outside* the WebView: the menu bar, native dialogs, the terminal, a real git repository. Those are the `nox-desktop-walk` checklist's own rows, and they need the desktop rather than the renderer. See `.desktop-pass-report.md`. |
+| A plugin process is not sandboxed | The same line `agents` already carries: the permission model governs what a plugin may ask *Nox* to do, not what its own process can reach. A plugin is trusted code you chose to install, like a shell plugin. The difference from an agent is only that more people will install one. |
+| A snippet's choice syntax keeps only its first option | `${1|const,let|}` becomes `${1:const}`. CodeMirror's snippet fields have no picker attached, so the alternatives have nowhere to be shown, and a field the user can type over beats a literal `|const,let|` in their code. Offering the real thing means a completion source that fires on entering the field. Buildable, and a bigger feature than the conversion it would sit inside. |
+| Snippet variables are not substituted | `$TM_FILENAME`, `$CURRENT_YEAR` and the rest are left exactly as written. Resolving them is a table of a dozen names and a clock, and deleting them silently is worse than leaving them, so leaving them is what happens. Visible, and fixable by the person who wrote it. |
+| Completions are insert mode only | A server's `textEdit` range may end after the caret, meaning "replace the word I am standing in the middle of". Nox applies the range's start and keeps its own end, so the tail of that word survives. Replace mode is gated in LSP behind `insertReplaceSupport`, which `session.ts` does not advertise, and insert mode is every editor's default, so this is a decision rather than an omission. Offering both needs the capability, the `InsertReplaceEdit` shape, and a preference. |
+| Servers run their own file watchers | Nox advertises no dynamic registration at all, neither `workspace.didChangeWatchedFiles.dynamicRegistration` nor `synchronization.dynamicRegistration`, which is explicitly `false`, so a conforming server never sends `client/registerCapability` and falls back to watching files itself, which rust-analyzer and gopls both do. **That makes this conforming rather than broken**, and the mildest of the four items that waited on the server-request seam. The production-readiness plan's "they never get to" overstated it. What is lost is efficiency and consistency: N servers each running a watcher over the same tree, with their own ignore rules, rather than one `FileWatcherService` fanning out. Building it is a feature and not a handler: accept a registration, match its globs (`onPathsChanged` is already the right seam and `globToRegExp` already exists), derive created/changed/deleted, send `workspace/didChangeWatchedFiles`, honour `client/unregisterCapability`. And accepting a registration Nox would not honour is worse than never inviting one. |
 | Scroll position is not persisted | Scroll is a view concern and not part of `EditorState`. On restore the cursor is scrolled into view instead, which covers the case people actually mean. |
-| No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen* — nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
-| Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace; nothing else needs it yet. |
-| The transaction log does not survive a restart | Deliberate — see §4. Undo history does not either, so a persisted log would list changes it could not undo. |
-| Agent processes are not sandboxed | A configured agent runs with Nox's own privileges. The permission model governs what it may ask *Nox* to do, not what its own process can reach — a stdio agent is trusted code you chose to run, like a shell plugin. |
+| No charset is auto-detected beyond UTF-8 and BOM'd UTF-16 | Legacy charsets open and save correctly (§4) but must be *chosen*. Nothing detects windows-1252 or Shift_JIS, because nothing honestly can without a statistical guess. `chardetng` would let the picker arrive pre-selected rather than empty, and is the obvious next step. Project **replace** still skips non-UTF-8 files: `search.rs` reads them strictly, so a replace can never target one. |
+| Grouped undo is bounded by CodeMirror's history depth | A change set old enough to have fallen out of a buffer's history cannot be undone as a group. The project-replace panel's journal covers that case for replace. Nothing else needs it yet. |
+| The transaction log does not survive a restart | Deliberate: see §4. Undo history does not either, so a persisted log would list changes it could not undo. |
+| Agent processes are not sandboxed | A configured agent runs with Nox's own privileges. The permission model governs what it may ask *Nox* to do, not what its own process can reach. A stdio agent is trusted code you chose to run, like a shell plugin. |
 | No model provider ships | Deliberate: a default provider would be a vendor in the core. The Agents panel says so rather than offering an input that cannot work. |
 | Splits do not nest | The layout is a flat row or column, not a tree, so you cannot have a column split inside a row. |
 | macOS trash has no "Put Back" | Nox trashes via `NSFileManager` rather than Finder/AppleScript, because the AppleScript path blocks for two minutes and then fails when Finder is unavailable. A trashed file restores to the Trash folder, not its original location. Covered by `tests/fileops_integration.rs`. |
-| Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**; unsaved work does, because it is in the session. The reload also kills any running agent, which is the point — a renderer that no longer exists cannot talk to them. |
-| Three grammars colour but do not parse | Shell, TOML and Ruby load `@codemirror/legacy-modes` through `StreamLanguage`, which tokenises line by line and builds no tree. They highlight correctly and **Go to Symbol, sticky scroll and syntax folding stay empty in them**, because all three read a parse tree. The palette says so in its own words rather than reporting the file as bare — `hasSymbolStructure` in `editor/languages.ts`, and `symbolListState`'s `no-structure`. No Lezer grammar exists for any of the three to upgrade to; `LOADERS` is the only place that would change. |
-| No *native* menu off macOS | Windows and Linux now draw an in-window menu bar instead (§4), so every platform has a menu; what is still missing is a **native** one off macOS. Windows cannot host one — `set_decorations(false)` removes the frame it lives in. A native GTK menu for Linux is possible but unbuilt: the accelerator argument in §4 is WKWebView's, never checked against WebKitGTK. `nox_set_menu` still returns `Ok(())` on both. |
-| Native menu items are always drawn enabled | macOS only: greying them means pushing every state change across the IPC boundary to keep ~130 items in step. Enablement is re-checked when the item is chosen (`CommandRegistry.execute` refuses a disabled command), so nothing runs that should not — but a disabled item looks live and does nothing when clicked. The in-window bar (§4) has no such problem: the predicates are already in the renderer, so it greys them correctly. |
+| Reloading the window drops in-memory agent state | Sessions and the transaction log do not survive **Reload Window**. Unsaved work does, because it is in the session. The reload also kills any running agent, which is the point: a renderer that no longer exists cannot talk to them. |
+| Three grammars colour but do not parse | Shell, TOML and Ruby load `@codemirror/legacy-modes` through `StreamLanguage`, which tokenises line by line and builds no tree. They highlight correctly and **Go to Symbol, sticky scroll and syntax folding stay empty in them**, because all three read a parse tree. The palette says so in its own words rather than reporting the file as bare: `hasSymbolStructure` in `editor/languages.ts`, and `symbolListState`'s `no-structure`. No Lezer grammar exists for any of the three to upgrade to. `LOADERS` is the only place that would change. |
+| No *native* menu off macOS | Windows and Linux now draw an in-window menu bar instead (§4), so every platform has a menu. What is still missing is a **native** one off macOS. Windows cannot host one, because `set_decorations(false)` removes the frame it lives in. A native GTK menu for Linux is possible but unbuilt: the accelerator argument in §4 is WKWebView's, never checked against WebKitGTK. `nox_set_menu` still returns `Ok(())` on both. |
+| Native menu items are always drawn enabled | macOS only: greying them means pushing every state change across the IPC boundary to keep ~130 items in step. Enablement is re-checked when the item is chosen (`CommandRegistry.execute` refuses a disabled command), so nothing runs that should not, but a disabled item looks live and does nothing when clicked. The in-window bar (§4) has no such problem: the predicates are already in the renderer, so it greys them correctly. |
 | The menu has no Close Window item | `PredefinedMenuItem::close_window` carries ⌘W and Nox binds ⌘W to `file.close`, so both in one menu would be two items claiming one accelerator. Nox has no `window.close` command to offer instead; the traffic light and ⌘Q are the ways out. |
-| `--geometry` suppresses geometry persistence for that launch | Deliberate — see §4 — but it means a walk cannot be used to *set* a remembered window, and a malformed `--geometry` falls back to an ordinary launch that does persist. |
+| `--geometry` suppresses geometry persistence for that launch | Deliberate (see §4) but it means a walk cannot be used to *set* a remembered window, and a malformed `--geometry` falls back to an ordinary launch that does persist. |
 | Browser build does not persist edits | Deliberate: it is for developing the UI, not storing work. Settings and session do persist via localStorage. |
-| Diagnostic redaction is case-sensitive | `redactHome` replaces the home directory with `~` on the way in, in both separator spellings, so `diagnostics.log` never holds the string that names the user. It matches exactly, so a path that reached Nox as `c:\users\ada` is not redacted when the home directory reports as `C:\Users\ada`. Bounded in the harmless direction and unreached in practice — paths that get here come from the same OS APIs that produced the home directory — but a Windows path typed by hand into a config file could differ in case. A case-insensitive scan is the fix, and it is a scan rather than a `split`/`join`. |
-| Components embedding CodeMirror are tested for wiring and text, not geometry | `EditorPane` mounts under jsdom (`tests/lsp-rendering.test.ts`, `tests/lsp-paint-target.test.ts`): a diagnostic paints under the text its range names, the picker lists what the server sent, the hover tooltip carries the server's markdown as text. jsdom has no layout, so a tooltip's placement and which symbol was under the pointer are not checkable — `tests/support/jsdom-layout.ts` fills `Range.getClientRects`, the one method CodeMirror needs to *run*, with a single all-zero rectangle whose numbers are jsdom's own and whose existence is the one invented fact, and says what that forbids a test from claiming. The first feature whose claim is geometric (a tooltip that must sit beside the pointer, an inlay hint that must not shift the line) is when vitest browser mode earns its browser download in CI. Of the corrected hover claim, "shows the server's markdown as text" is test-backed; "stays while the pointer is over the span" is read from `@codemirror/view`'s `HoverPlugin` and cannot be driven under zero geometry. |
+| Diagnostic redaction is case-sensitive | `redactHome` replaces the home directory with `~` on the way in, in both separator spellings, so `diagnostics.log` never holds the string that names the user. It matches exactly, so a path that reached Nox as `c:\users\ada` is not redacted when the home directory reports as `C:\Users\ada`. Bounded in the harmless direction and unreached in practice, since paths that get here come from the same OS APIs that produced the home directory, but a Windows path typed by hand into a config file could differ in case. A case-insensitive scan is the fix, and it is a scan rather than a `split`/`join`. |
+| Components embedding CodeMirror are tested for wiring and text, not geometry | `EditorPane` mounts under jsdom (`tests/lsp-rendering.test.ts`, `tests/lsp-paint-target.test.ts`): a diagnostic paints under the text its range names, the picker lists what the server sent, the hover tooltip carries the server's markdown as text. jsdom has no layout, so a tooltip's placement and which symbol was under the pointer are not checkable. `tests/support/jsdom-layout.ts` fills `Range.getClientRects`, the one method CodeMirror needs to *run*, with a single all-zero rectangle whose numbers are jsdom's own and whose existence is the one invented fact, and says what that forbids a test from claiming. **A geometric claim now has somewhere to go**, which it did not when this row was written: the `editor` browser project is real chromium with real layout, and `tests/browser/blame-gutter.test.ts` is the first feature to use it that way, holding a gutter column to one width across a scroll. What stays true is that a *component* mounted under jsdom cannot make such a claim, so the question for a new feature is which of the two harnesses it belongs in. Of the corrected hover claim, "shows the server's markdown as text" is test-backed. "Stays while the pointer is over the span" is read from `@codemirror/view`'s `HoverPlugin` and cannot be driven under zero geometry. |

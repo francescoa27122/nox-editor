@@ -6,7 +6,27 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.11.0] — 2026-08-29
+### Added
+
+- **Blame.** <kbd>Mod ⌥ B</kbd>, or **Toggle Blame** from the palette or the
+  editor's right-click menu, puts a column beside your code naming the commit
+  and the author of every line. Hover one for the full identity, the date the
+  author wrote it, and the commit's subject.
+
+  It is **on demand**, not always on, and per file rather than everywhere: Nox
+  never runs `git blame` for a file you have not asked about, because that walk
+  is the most expensive thing it can ask git for.
+
+  It annotates **what you have open**, not what is saved. Type a new line and it
+  reads *Uncommitted* rather than borrowing the name from the line above it, and
+  everything below it stays with its own author instead of sliding out of step.
+  Lines you go on to type after that show nothing at all until you save, which
+  is the honest answer: Nox does not re-run blame while you type.
+
+  A file outside a repository, or one git has never seen, turns the column on
+  and shows nothing rather than raising an error.
+
+## [0.11.0] - 2026-08-29
 
 Nox can be extended now. A folder with a `plugin.json` adds commands, a
 status-bar readout, a sidebar panel, marks in the editor and settings of its
@@ -190,7 +210,7 @@ highlighted, and opening a file no longer downloads every grammar it ships.
   the fallback declines rather than scan it, because at that size the scan
   costs more per keystroke than the list is worth.
 
-## [0.10.0] — 2026-08-26
+## [0.10.0] - 2026-08-26
 
 Language servers stop guessing. This release is mostly about the three things
 Nox never said back to them: the settings you wrote, the commands only they can
@@ -239,7 +259,7 @@ keeps it that way came down.
   `node_modules`, `.git`, `target` and `dist` out of the count, so the cap is
   further away than a directory listing suggests.
 
-## [0.9.1] — 2026-08-24
+## [0.9.1] - 2026-08-24
 
 ### Fixed
 
@@ -252,7 +272,7 @@ keeps it that way came down.
   was ever wrong. A real failure inside one of those callbacks is still
   reported.
 
-## [0.9.0] — 2026-08-24
+## [0.9.0] - 2026-08-24
 
 Nox could not tell you what went wrong. It can now — and three other things
 that were harder than they should have been are not any more: getting back to
@@ -403,7 +423,7 @@ opening the Git panel from the keyboard.
   the status bar, which reads as inspecting a setting rather than throwing
   work away; it now asks first, the way *Reload File from Disk* always has.
 
-## [0.8.3] — 2026-08-22
+## [0.8.3] - 2026-08-22
 
 ### Added
 
@@ -419,7 +439,7 @@ opening the Git panel from the keyboard.
   markers for every folder — so the one folder git *had* named was the one
   folder that showed nothing.
 
-## [0.8.2] — 2026-08-21
+## [0.8.2] - 2026-08-21
 
 ### Fixed
 
@@ -427,7 +447,7 @@ opening the Git panel from the keyboard.
   now comes back where you left its cursor, so a file you were reading at the
   top and editing at the bottom is still that way after a restart.
 
-## [0.8.1] — 2026-08-21
+## [0.8.1] - 2026-08-21
 
 ### Fixed
 
@@ -436,7 +456,7 @@ opening the Git panel from the keyboard.
   with nothing to say so. It comes back now, and both panes are still the one
   file — type in either and the other follows.
 
-## [0.8.0] — 2026-08-21
+## [0.8.0] - 2026-08-21
 
 Three things Nox could not do: show a menu on Windows or Linux, open a file
 that is not UTF-8, and put one file in two panes.
@@ -468,7 +488,7 @@ that is not UTF-8, and put one file in two panes.
 - Dialogs with several choices no longer squeeze them until the labels break
   across three lines.
 
-## [0.7.0] — 2026-08-21
+## [0.7.0] - 2026-08-21
 
 Notes stop being a scratchpad you cannot search and start being somewhere you
 can keep things: findable, pinnable, tied to the code they are about, and
@@ -541,7 +561,7 @@ readable outside Nox as Markdown.
   in front of you, and says `Python — no language server configured` when
   there is none, with somewhere to click.
 
-## [0.6.0] — 2026-08-21
+## [0.6.0] - 2026-08-21
 
 A pass over how discoverable Nox is, driven by an audit of the packaged app
 rather than the browser dev target — where more than half the UI is switched
@@ -596,7 +616,7 @@ off and so had never been looked at.
   answers arrow keys.
 
 
-## [0.5.1] — 2026-08-20
+## [0.5.1] - 2026-08-20
 
 The first signed release. No feature changes: this exists so that updates can
 be verified, which nothing before it could do.
@@ -615,7 +635,7 @@ be verified, which nothing before it could do.
   update installed through it skips the macOS quarantine ritual that a fresh
   download still needs.
 
-## [0.5.0] — 2026-08-20
+## [0.5.0] - 2026-08-20
 
 ### Added
 
@@ -777,7 +797,7 @@ be verified, which nothing before it could do.
   present, so Enter never deletes by default; and a burst of routine toasts
   can no longer push an unread error off the screen.
 
-## [0.4.3] — 2026-08-19
+## [0.4.3] - 2026-08-19
 
 ### Added
 
@@ -817,7 +837,7 @@ be verified, which nothing before it could do.
   how many there were. Same jump, no more guessing which of the others you
   wanted.
 
-## [0.4.2] — 2026-08-19
+## [0.4.2] - 2026-08-19
 
 ### Added
 
@@ -887,7 +907,7 @@ be verified, which nothing before it could do.
   file and driven with the arrow keys. It includes files you never opened —
   which is usually where a project's real errors are.
 
-## [0.4.1] — 2026-08-17
+## [0.4.1] - 2026-08-17
 
 ### Added
 
@@ -916,7 +936,7 @@ be verified, which nothing before it could do.
   - macOS is untouched: its traffic lights sit over an overlay title bar, and a
     second set of buttons beside them would be duplicate chrome.
 
-## [0.4.0] — 2026-08-17
+## [0.4.0] - 2026-08-17
 
 ### Added
 
@@ -999,7 +1019,7 @@ be verified, which nothing before it could do.
     carries its own highlight, and the theme has always had a separate,
     dimmer selection colour for exactly this.
 
-## [0.3.0] — 2026-08-16
+## [0.3.0] - 2026-08-16
 
 ### Added
 
@@ -1221,7 +1241,7 @@ be verified, which nothing before it could do.
   cannot reach. One line in `vite.config.ts`, gated on `VITEST` and inert
   outside tests. No user-visible change.
 
-## [0.2.0] — 2026-08-13
+## [0.2.0] - 2026-08-13
 
 ### Added
 
@@ -1558,7 +1578,7 @@ be verified, which nothing before it could do.
   milliseconds. Guarded by an integration test that fails if it ever takes
   longer than five seconds.
 
-## [0.1.0] — 2026-08-12
+## [0.1.0] - 2026-08-12
 
 First milestone. Nox is a usable editor.
 
