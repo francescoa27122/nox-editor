@@ -190,7 +190,7 @@ describe('presenting a blamed commit', () => {
     ].join('\n');
     const label = blameLabel(parseGitBlame(raw)[0]!.commit);
     expect(label).toHaveLength(BLAME_LABEL_WIDTH);
-    expect(label).toBe('bbbbbbb Bartholomew For…');
+    expect(label).toBe('bbbbbbb Bartholomew…');
   });
 
   it('puts the identity, the date and the subject in the hover text', () => {

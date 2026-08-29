@@ -68,6 +68,35 @@ one point per line and never one range per commit-run: a range grows when text
 is inserted inside it, so a line typed in the middle of a run would inherit
 that run's author.
 
+**Then the gap was closed, and it was worth closing.** This entry originally
+ended by naming one: everything was green and nobody had looked at the
+column. The `editor` vitest project is real chromium with real layout, so
+`tests/browser/blame-gutter.test.ts` now pins the two claims jsdom cannot
+reach — the width does not change as you scroll, and it is already final
+before any marks arrive — and writes three screenshots of a passing run into
+the gitignored `__screenshots__/` for a person to open.
+
+Opening the first one found two things no test had a symptom for.
+
+**The column was going in on the wrong side.** Gutters lay out in the order
+their extensions resolve, and `blameCompartment` was last in
+`buildExtensions`, so the widest column in the editor landed between the git
+gutter and the code — pushing the change bars twenty characters from the
+lines they mark. Moved to first, so it is leftmost and switching blame on
+*adds* a column rather than rearranging the apparatus the reader knows.
+
+**And it was half again too wide.** `BLAME_AUTHOR_WIDTH` was 16 on no
+evidence. A fixed column is sized for the longest name it will ever hold, so
+the surplus is dead space, and it sits between the name and the code where it
+shows most; at 16 the gap was wider than the label. Twelve, plus the line
+numbers' own type size and left inset, and it reads as one apparatus.
+
+One false alarm worth recording, because it nearly became a third fix: the
+screenshots are downscaled about 0.42x, so a 16 px inset is seven pixels in
+the picture and reads as flush against the window edge. Measuring
+`getComputedStyle` in the browser said 16 px, correct all along. **Read
+pixels to find what to question; measure to answer it.**
+
 Shipped:    `nox_git_blame` + `repo_and_relpath` (shared with
             `nox_git_file_base`, factored not copied); `gitBlame` across
             `types.ts`/`tauri.ts`/`memory.ts`, the fake rendering **real**
@@ -77,26 +106,29 @@ Shipped:    `nox_git_blame` + `repo_and_relpath` (shared with
             reconfigured by the pane like `lspCompartment`;
             `git.toggleBlame` (`Mod+Alt+B`, palette, context menu); theme
             CSS; the design spec, two ARCHITECTURE decisions, a debt row,
-            ROADMAP, README and CHANGELOG.
-Verified:   `npm test` 2438 (was 2410) · `check` 1042/0/0 · `lint` 0 errors,
-            9 pre-existing warnings · `build` 2.30 s · `test:editor` 3 ·
-            `cargo test` 131+2+4 (was 122+2+4). Four mutation checks run and
-            recorded: the
+            ROADMAP, README and CHANGELOG. Then, from the screenshots:
+            `tests/browser/blame-gutter.test.ts`, the gutter moved leftmost,
+            `BLAME_AUTHOR_WIDTH` 16 → 12, and the line-number gutter's type
+            size and left inset adopted.
+Verified:   `npm test` 2438 (was 2410) · `check` 1054/0/0 · `lint` 0 errors,
+            9 pre-existing warnings · `build` 2.53 s · `test:editor` 7 (was
+            3) · `cargo test` 131+2+4 (was 122+2+4). Four mutation checks run
+            and recorded: the
             stale-revision retry, the post-await switched-off guard, the
             complexity budget (a full re-scan reports 63.6x against a 24x
             budget), and the meta-watch guard — that last one *failed* to
             catch its own removal, and says so.
 Next:       Tasks, the last unshipped v0.6 row. The native-chrome walk still
-            wants the PC and consent, and neither is available from here.
+            wants the PC and consent, and neither is available from here —
+            but note that the `editor` project turned out to reach further
+            than "the typing path": it is a real browser with real layout,
+            and anything drawn *inside* the WebView can be checked there
+            without a desktop at all. Only the native chrome genuinely needs
+            the machine.
 Blocked:    Nothing.
-Confidence: High on everything with a test behind it, which is all of it
-            except the one thing no test here can reach: nobody has *seen*
-            this gutter. It is proved in jsdom, which has no layout, so the
-            column's width and alignment beside real code are unverified —
-            the fixed-width label and `initialSpacer` are the reasons to
-            expect them to be right, not evidence that they are. That is a
-            row for the next pixel walk.
-
+Confidence: High, and higher than it was an hour before the entry was
+            finished: the gap it originally ended on is the section above,
+            and closing it changed the feature twice.
 ---
 
 ## 2026-08-29 (PC) — 0.11.0 prepared, then tagged on the operator's word

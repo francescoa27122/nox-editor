@@ -190,6 +190,25 @@ arrive and then jumps, shoving the code sideways — on a large repository,
 seconds after the toggle. Every label is the same length, so one spacer is
 exactly right.
 
+**Two things were decided by looking at a screenshot, and neither had a
+symptom a test would have reported.**
+
+`blameCompartment` goes **first** in `buildExtensions`'s array, so the column
+is leftmost — outside the line numbers. `activeGutters` is an ordered facet,
+so a gutter's place on screen is its extension's place in that array, and
+going last put the widest column in the editor between the git gutter and the
+code. That pushed the change bars twenty characters away from the lines they
+mark and the line numbers further still: switching blame on rearranged the
+apparatus the reader already knew, instead of adding to the outside of it.
+
+`BLAME_AUTHOR_WIDTH` is **12**, not the 16 it was first written as. A fixed
+column is sized for the longest name it will ever hold, so the difference
+between that and the name actually present is dead space — and it lands
+between the name and the code, where it is most visible. At 16 the gap was
+wider than the label. Measured after: the column is 171 px of an 800 px
+editor at the default 12 px type, which is what a blame column costs
+elsewhere too.
+
 The field is installed unconditionally in `staticExtensions` and only the
 rendering is compartmentalised — removing a `StateField` destroys what it
 holds. `blameCompartment` is reconfigured by `EditorPane`, not from
@@ -216,6 +235,15 @@ every compartment.
   toggle and goes away again, the labels and `title` are right, marks shift
   and claim nothing for an inserted line, and the gutter survives a tab swap
   in both directions. This is the only coverage of the compartment wiring.
+- `tests/browser/blame-gutter.test.ts` (the `editor` project — real
+  chromium, real layout): the column is the same width wherever the file is
+  scrolled, it is already that width before any marks arrive, and no label is
+  clipped by the column it reserved. These are the claims `blameLabel`'s
+  padding and `initialSpacer` exist for, and jsdom cannot check any of them —
+  `tests/support/jsdom-layout.ts` records that it returns zeros from every
+  measurement, so a jsdom width assertion asserts against an invention. The
+  file also writes three screenshots of a passing run into `__screenshots__/`
+  for a person to open, which is how the two decisions above were made.
 - `tests/complexity.test.ts`: `parseGitBlame` stays linear.
 - `src-tauri/src/git.rs` `#[cfg(test)]`: nine tests on all three CI
   platforms. Three earn their place beyond the ordinary cases. The **format

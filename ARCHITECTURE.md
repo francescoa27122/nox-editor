@@ -1652,6 +1652,19 @@ be a fraction of the marks: a range grows when text is inserted inside it, so
 a line typed in the middle of a run would inherit that run's commit. A point
 mark cannot do that — an inserted line simply has no mark.
 
+A third thing about it was settled by looking rather than reasoning, and is
+recorded because the reasoning had already reached the wrong answer.
+`blameCompartment` is **first** in `buildExtensions`'s array, so the blame
+column is leftmost — outside the line numbers. `activeGutters` is an ordered
+facet, so a gutter's position on screen is its extension's position in that
+array, and going last put the widest column in the editor between the git
+gutter and the code: switching blame on then moved the change bars twenty
+characters away from the lines they mark. Outside everything, it adds a column
+instead of rearranging the apparatus a reader already knows. The same look
+halved the dead space in it — `BLAME_AUTHOR_WIDTH` is 12, not the 16 it was
+written as. Neither had a symptom any test reported, which is what
+`tests/browser/blame-gutter.test.ts` and its screenshots now exist for.
+
 ### `nox_git_blame` is the crate's only `#[tauri::command(async)]`
 
 A sync command body runs inline on the thread that handles the IPC message,

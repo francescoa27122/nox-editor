@@ -188,7 +188,10 @@ export function noxTheme(options: ThemeOptions): Extension {
       // reconfigures `blameCompartment`), so this column costs nothing when
       // it is off.
       '.cm-blameGutter': {
-        padding: '0 8px 0 4px',
+        // The line-number gutter's own left inset. Blame is the leftmost
+        // column when it is on, so this is the editor's left margin, and it
+        // sat flush against the window edge until it matched.
+        padding: '0 var(--nox-sp-4) 0 var(--nox-sp-6)',
         // The dividing rule is the gutter's, not each row's: a border on the
         // elements would break at every line boundary.
         borderRight: '1px solid var(--nox-border)',
@@ -196,6 +199,9 @@ export function noxTheme(options: ThemeOptions): Extension {
       '.cm-blameGutter .nox-blame-entry': {
         display: 'block',
         color: 'var(--nox-gutter-fg)',
+        // The line-number gutter's size, so the three columns down the left
+        // read as one apparatus rather than as code that has been indented.
+        fontSize: '0.92em',
         // Pre, because the label is padded to a fixed width and the column's
         // stability depends on those spaces surviving. `nowrap` alone would
         // still collapse them.

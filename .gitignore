@@ -30,7 +30,8 @@ storybook-static/
 *storybook.log
 
 # Vitest browser mode writes a screenshot and an attachment for every failing
-# test. They are debugging output for the run that produced them and mean
-# nothing afterwards.
+# test, and `tests/browser/blame-gutter.test.ts` deliberately writes three of
+# a passing one. Either way they are output of the run that produced them: the
+# pictures are for looking at now, not for keeping or diffing.
 .vitest-attachments/
 **/__screenshots__/

@@ -267,6 +267,16 @@ export function buildExtensions(settings: Settings): Extension[] {
     compartments[name].of(compartmentContent(name, settings)),
   );
   return [
+    // **First in the array, so leftmost on screen**, outside the line
+    // numbers. Gutters are laid out in the order their extensions resolve
+    // (`activeGutters` is an ordered facet), and blame is the widest column
+    // in the editor — inserted between the git gutter and the code, as it was
+    // when it went last, it pushed the change bars twenty characters away
+    // from the lines they mark and the line numbers further still. Outside
+    // everything, switching blame on *adds* a column rather than moving the
+    // apparatus the reader already knows. Found by looking at a screenshot of
+    // it; `tests/browser/blame-gutter.test.ts` is where that looking happens.
+    blameCompartment.of([]),
     ...staticExtensions(),
     ...configured,
     // The gutter marks. Squiggles arrive per batch through `setDiagnostics`,
@@ -275,9 +285,6 @@ export function buildExtensions(settings: Settings): Extension[] {
     lspDiagnosticsExtension(),
     // Empty until a pane fills it in; see `lspCompartment`.
     lspCompartment.of([]),
-    // Empty until blame is switched on for the buffer this state belongs to;
-    // see `blameCompartment`.
-    blameCompartment.of([]),
     // Empty until the grammar resolves; see `editor/languages.ts`.
     languageCompartment.of([]),
   ];

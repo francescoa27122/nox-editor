@@ -84,8 +84,17 @@ export const BLAME_HASH_WIDTH = 7;
  * and a column whose width follows its widest *visible* marker changes width
  * as you scroll, shifting the code beside it. Padding here makes every
  * marker the same length, so the column cannot move.
+ *
+ * **Twelve, and the number came from looking at it.** Sixteen was the first
+ * guess and it is wrong in a way no test could report: a fixed column is
+ * sized for the longest name it will ever hold, so every character of it is
+ * dead space beside every name shorter than that — and the dead space sits
+ * between the name and the code, which is where it is most visible. At
+ * sixteen the gap was wider than the label. Twelve still holds `Jane Doe`,
+ * `bmarshall` and `Alex Chen` whole, and cuts the rest where a name is
+ * usually already recognisable.
  */
-export const BLAME_AUTHOR_WIDTH = 16;
+export const BLAME_AUTHOR_WIDTH = 12;
 
 /** The width every label is padded to — hash, a space, author. */
 export const BLAME_LABEL_WIDTH = BLAME_HASH_WIDTH + 1 + BLAME_AUTHOR_WIDTH;
