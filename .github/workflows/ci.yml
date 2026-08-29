@@ -233,8 +233,15 @@ jobs:
       # `metadata` rather than a build: it resolves the whole graph, including
       # every optional dependency and every platform's, and needs no
       # compilation to do it.
+      #
+      # `shell: bash` because the matrix includes Windows, where the default
+      # shell is PowerShell and a Unix null redirect is read as a path that
+      # does not exist — which is how this step failed the first time it ran.
+      # The redirect itself matters: `cargo metadata` prints the entire
+      # resolved graph, and the exit code is the only part worth reading.
       - name: Check the lockfile is current
         working-directory: src-tauri
+        shell: bash
         run: cargo metadata --format-version 1 --locked > /dev/null
 
       # Before `cargo test`, because a lint failure is cheaper to read than a
