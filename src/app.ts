@@ -100,6 +100,7 @@ import { SearchService, type MatchPosition } from '@services/search';
 import { MenuService } from '@services/menu';
 import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
+import { TaskService, TASKS_FILE, workspaceTasksPath } from '@services/tasks';
 import { type SidebarView, UIService } from '@services/ui';
 import { UpdateService } from '@services/updates';
 import { FileWatcherService } from '@services/watcher';
@@ -178,6 +179,8 @@ export class NoxApp {
   /** The running servers, and the diagnostics they publish. */
   readonly lsp: LspService;
   readonly terminal: TerminalService;
+  /** The project's own commands, and what they printed. See `tasks.ts`. */
+  readonly tasks: TaskService;
   /** What git holds for each open file, for the gutter. */
   readonly git: GitService;
   /** The user's own notes — not workspace files. See `notes.ts`. */
@@ -321,6 +324,7 @@ export class NoxApp {
       () => this.workspace.rootPath.get(),
       () => this.config.get('terminal.shell'),
     );
+    this.tasks = new TaskService(platform, this.jobs, this.ui);
     this.agents = new AgentRuntime({
       workspace: this.workspace,
       context: this.context,
@@ -390,6 +394,7 @@ export class NoxApp {
     await this.agentConfig.load();
     await this.serverRegistry.load();
     await this.snippets.load();
+    await this.tasks.load(this.workspace.rootPath.get());
     // Before discovery, so `describe` in `loadPlugins` adopts each stored
     // namespace rather than parking it as belonging to nobody.
     await this.pluginSettings.load();
@@ -583,6 +588,10 @@ export class NoxApp {
       // A project's own settings arrive and leave with the project. Closing a
       // folder must not leave its indentation behind.
       void this.config.loadWorkspace(root);
+      // For the same reason, and it matters more here: closing a folder must
+      // not leave its *tasks* behind, or a repository's command would still be
+      // listed after the repository was gone.
+      void this.tasks.load(root);
       this.#updateWindowTitle();
       this.session.schedule();
     });
@@ -594,6 +603,16 @@ export class NoxApp {
       if (!root) return;
       if (!paths.has(workspaceConfigPath(root))) return;
       void this.config.loadWorkspace(root);
+    });
+
+    // The project's tasks, same event and same reasoning. Re-reading does not
+    // re-approve: trust is keyed on the argv, so an edit that changes what a
+    // task runs is a new question by construction. See `taskFingerprint`.
+    this.watcher.onPathsChanged((paths) => {
+      const root = this.workspace.rootPath.get();
+      if (!root) return;
+      if (!paths.has(workspaceTasksPath(root))) return;
+      void this.tasks.load(root);
     });
 
     // A closed tab should not keep its "changed on disk" warning suppressed.
@@ -743,7 +762,7 @@ export class NoxApp {
     /**
      * Config files edited outside Nox.
      *
-     * Three files, and the omissions are deliberate — see
+     * Four files, and the omissions are deliberate — see
      * `classifyConfigChange`. Each reload is idempotent and decides for itself
      * whether anything moved, which is what makes this safe for
      * `plugin-settings.json`, the one of the three Nox writes itself: a
@@ -769,6 +788,16 @@ export class NoxApp {
       if (change.themes) void this.loadThemes();
 
       if (change.pluginSettings) void this.pluginSettings.reload();
+
+      if (change.tasks) {
+        void this.tasks.load(this.workspace.rootPath.get()).then(() => {
+          const error = this.tasks.error.get();
+          // Same reasoning as `snippets.json` above: the tasks that were
+          // working stay listed, and a file being edited elsewhere is exactly
+          // when a silent failure looks like the edit not having worked.
+          if (error) this.notifications.error('tasks.json could not be read', error);
+        });
+      }
     });
 
     this.pluginSettings.damaged.subscribe((damage) => {
@@ -1577,6 +1606,38 @@ export class NoxApp {
     }
 
     await this.openPaths([join(directory, SNIPPETS_FILE)]);
+  }
+
+  /**
+   * Open the user's `tasks.json` for editing, creating it with examples if
+   * absent.
+   *
+   * The user's, never the project's. Nox authoring a `.nox/tasks.json` would
+   * be Nox helping to write the file the confirmation in `TaskService` exists
+   * to catch, and an editor that offers to create it teaches that the file is
+   * ordinary. Someone who wants one can write it; this command will not.
+   */
+  async openTasksConfig(): Promise<void> {
+    try {
+      await this.tasks.ensureFile();
+    } catch (error) {
+      this.notifications.error(
+        'Could not create tasks.json',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const directory = await this.platform.configDir().catch(() => null);
+    if (!directory) {
+      this.notifications.info(
+        'Tasks live in tasks.json',
+        'The browser build keeps settings in the browser, so there is no file to open here.',
+      );
+      return;
+    }
+
+    await this.openPaths([join(directory, TASKS_FILE)]);
   }
 
   /**
@@ -4262,6 +4323,90 @@ export class NoxApp {
         },
       },
 
+      // --- Tasks -------------------------------------------------------------
+      {
+        id: 'tasks.run',
+        title: 'Run Task…',
+        category: 'Tasks',
+        keywords: ['task', 'build', 'script', 'npm', 'make', 'run'],
+        // Hidden rather than disabled where nothing can be spawned, the same
+        // way the terminal commands are: a command that can never run is
+        // noise in the palette, not a discovery.
+        enabled: () => this.tasks.available,
+        // The declaration *is* the enforcement. `shell.exec` is denied by
+        // policy for non-user principals, so an agent or a plugin asking Nox
+        // to run a task is refused without a prompt, which is the existing
+        // policy and the right one for "start a program".
+        capabilities: ['shell.exec'],
+        // The task's own id, so a remembered grant could ever be about one
+        // task rather than about running anything. Nothing grants `shell.exec`
+        // today; this is what a resource-scoped grant would key on if one did.
+        resourceFrom: (arg) => (typeof arg === 'string' ? arg : undefined),
+        run: (arg) => {
+          // No argument means "ask me which", which is the palette's job.
+          if (typeof arg !== 'string') {
+            this.ui.overlay.set('task-run');
+            return;
+          }
+          void this.tasks.run(arg);
+        },
+      },
+      {
+        id: 'tasks.runLast',
+        title: 'Run Last Task',
+        category: 'Tasks',
+        keyHint: 'Mod+Shift+B',
+        keywords: ['task', 'again', 'repeat', 'build'],
+        enabled: () => this.tasks.available && this.tasks.lastTaskId.get() !== null,
+        capabilities: ['shell.exec'],
+        resourceFrom: () => this.tasks.lastTaskId.get() ?? undefined,
+        run: () => {
+          const id = this.tasks.lastTaskId.get();
+          if (id) void this.tasks.run(id);
+        },
+      },
+      {
+        id: 'tasks.stop',
+        title: 'Stop Task',
+        category: 'Tasks',
+        keywords: ['task', 'cancel', 'kill', 'abort'],
+        enabled: () => this.tasks.running.get().size > 0,
+        // Stopping is not starting: it needs no capability, and gating it on
+        // one would mean a principal that may not run a task may not stop one
+        // either.
+        run: () => this.tasks.stop(),
+      },
+      {
+        id: 'tasks.show',
+        title: 'Show Tasks',
+        category: 'Tasks',
+        keywords: ['task', 'output', 'panel', 'build'],
+        run: () => this.ui.showTasks(),
+      },
+      {
+        id: 'tasks.edit',
+        title: 'Edit Tasks',
+        category: 'Tasks',
+        keywords: ['task', 'configure', 'tasks.json', 'settings'],
+        // Writes the *user's* file, never the project's. Nox offering to
+        // author a file that arrives with a repository would be Nox helping
+        // to create the thing the confirmation exists to catch. See
+        // `docs/superpowers/specs/2026-08-30-tasks-design.md` §8.
+        capabilities: ['fs.create'],
+        run: () => this.openTasksConfig(),
+      },
+      {
+        id: 'tasks.forgetTrust',
+        title: 'Forget Approved Tasks',
+        category: 'Tasks',
+        keywords: ['task', 'trust', 'revoke', 'forget', 'permission'],
+        enabled: () => this.tasks.trusted.get().size > 0,
+        run: () => {
+          this.tasks.forgetTrust();
+          this.notifications.info('Approved tasks forgotten', 'Project tasks will ask again.');
+        },
+      },
+
       // --- Answers ------------------------------------------------------------
       {
         id: 'answers.focus',
@@ -4630,6 +4775,11 @@ export class NoxApp {
       // Terminal. `Ctrl+\`` rather than a Mod chord on purpose: it is the
       // convention on every platform, and ⌘` is already macOS's cycle-windows.
       'Ctrl+`': 'terminal.toggle',
+
+      // Tasks. The last task rather than a picker, because the chord is for
+      // the thing you are doing over and over; choosing is `Run Task…` in the
+      // palette, which is a decision and not a reflex.
+      'Mod+Shift+B': 'tasks.runLast',
 
       // Preferences
       'Mod+,': 'prefs.open',

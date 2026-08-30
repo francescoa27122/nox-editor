@@ -236,9 +236,10 @@ describe('what subscribers are told', () => {
 describe('routing a batch of changed paths', () => {
   const of = (...paths: string[]) => classifyConfigChange(paths);
 
-  it('routes the two files it knows by name', () => {
+  it('routes the three files it knows by name', () => {
     expect(of(`${CONFIG}/snippets.json`)).toMatchObject({ snippets: true, themes: false });
     expect(of(`${CONFIG}/plugin-settings.json`)).toMatchObject({ pluginSettings: true });
+    expect(of(`${CONFIG}/tasks.json`)).toMatchObject({ tasks: true, snippets: false });
   });
 
   it('routes any file in the themes folder, whatever it is called', () => {
@@ -260,6 +261,7 @@ describe('routing a batch of changed paths', () => {
       snippets: true,
       themes: true,
       pluginSettings: false,
+      tasks: false,
     });
   });
 
@@ -268,9 +270,14 @@ describe('routing a batch of changed paths', () => {
    * comment: adding a file to the folder must not silently start reloading it.
    * `servers.json` and `agents.json` restart processes; `settings.json` and
    * `keybindings.json` are written by Nox constantly.
+   *
+   * `tasks.json` is *not* in this list and the distinction is the point:
+   * re-reading it starts nothing, it only changes which commands are listed,
+   * and running one is still a separate act that a project task has to be
+   * approved for by argv. See `classifyConfigChange`.
    */
   it('routes nothing for the files that must not live-reload', () => {
-    const nothing = { snippets: false, themes: false, pluginSettings: false };
+    const nothing = { snippets: false, themes: false, pluginSettings: false, tasks: false };
     expect(of(`${CONFIG}/settings.json`)).toEqual(nothing);
     expect(of(`${CONFIG}/keybindings.json`)).toEqual(nothing);
     expect(of(`${CONFIG}/servers.json`)).toEqual(nothing);

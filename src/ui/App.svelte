@@ -10,6 +10,7 @@
   import TerminalPanel from './TerminalPanel.svelte';
   import DiffView from './DiffView.svelte';
   import ReviewPanel from './ReviewPanel.svelte';
+  import TasksPanel from './TasksPanel.svelte';
   import Welcome from './Welcome.svelte';
   import Overlays from './Overlays.svelte';
   import Toasts from './Toasts.svelte';
@@ -38,6 +39,8 @@
   const agentsOpen = app.ui.agentsOpen;
   // svelte-ignore state_referenced_locally
   const diffOpen = app.ui.diffOpen;
+  // svelte-ignore state_referenced_locally
+  const tasksOpen = app.ui.tasksOpen;
   // svelte-ignore state_referenced_locally
   const welcomeOpen = app.ui.welcomeOpen;
 
@@ -149,6 +152,8 @@
           <AgentPanel />
         {:else if $diffOpen}
           <DiffView />
+        {:else if $tasksOpen}
+          <TasksPanel />
         {:else if hasBuffers && !$welcomeOpen}
           <EditorArea />
         {:else}
