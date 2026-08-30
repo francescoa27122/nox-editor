@@ -2581,12 +2581,22 @@ implementation and reads fine. It would let a repository earn a yes for
 `test` meaning `npm test`, then change the file (a pull, a branch switch, the
 watcher-driven reload two paragraphs down, none of which anyone is looking at)
 and inherit the approval for something else under a name already trusted.
-Fingerprinting `command` and `args` joined with NUL makes any edit to what a
-task runs a new question, and NUL is the separator because it is the one byte
-an argv element cannot hold, so two distinct argvs cannot collide by
-construction rather than by being unlikely to. `tests/tasks.test.ts` pins it:
-swapping `taskFingerprint(task)` for `task.id` leaves nineteen of its twenty
-tests green and fails exactly that one.
+Fingerprinting the argv makes any edit to what a task runs a new question.
+`tests/tasks.test.ts` pins it: swapping `taskFingerprint` for `task.id` fails
+exactly that one test and leaves the rest green.
+
+**The first version of this key was still wrong, in the other direction**, and
+a review on 2026-08-30 found it. It covered the argv and not the *directory*,
+and `npm test`, `make` and `cargo test` are argvs whose entire meaning comes
+from the directory they run in. So approving `npm test` in a repository you
+trust and then opening a stranger's clone in the same window left the approval
+standing: same argv, same key, no second question, and the new root's
+`package.json` decided what ran. The root is part of the key now, which also
+means coming back to the first repository does not ask again. The same review
+found the NUL claim was about the wrong layer: `execve` is what cannot carry
+one, JSON carries it happily, and two tasks could collide before `parseTasks`
+began refusing it. Both are regression-tested, and both were the kind of
+mistake that reads as correct because the *shape* of the reasoning was right.
 
 Trust is session-scoped and never written to disk, the granularity
 `PermissionService` already offers for "allow for this session", and it is

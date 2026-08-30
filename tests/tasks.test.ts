@@ -250,9 +250,27 @@ describe('reading tasks.json', () => {
 describe('the argv fingerprint', () => {
   it('separates on a byte an argument cannot contain', () => {
     // A space would let these two collide, and they are different commands.
-    expect(taskFingerprint({ command: 'x', args: ['a b'] })).not.toBe(
-      taskFingerprint({ command: 'x', args: ['a', 'b'] }),
+    expect(taskFingerprint({ command: 'x', args: ['a b'] }, null)).not.toBe(
+      taskFingerprint({ command: 'x', args: ['a', 'b'] }, null),
     );
+  });
+
+  it('is different in a different folder, for the same argv', () => {
+    // What `npm test` *does* is decided by the package.json beside it, so the
+    // argv alone is not the thing being approved.
+    expect(taskFingerprint({ command: 'npm', args: ['test'] }, '/a')).not.toBe(
+      taskFingerprint({ command: 'npm', args: ['test'] }, '/b'),
+    );
+  });
+
+  it('refuses a NUL rather than letting it collide with the separator', () => {
+    // The comment on `taskFingerprint` called the key collision-free "by
+    // construction". That was a property of execve, not of this parser: JSON
+    // carries a NUL happily, and these two produced the same key.
+    expect(parseTasks({ tasks: [{ id: 'a', command: 'npm\u0000run' }] }, 'user').tasks).toEqual([]);
+    expect(
+      parseTasks({ tasks: [{ id: 'a', command: 'npm', args: ['run\u0000build'] }] }, 'user').tasks,
+    ).toEqual([]);
   });
 
   it('quotes an argument that would otherwise read as two', () => {
@@ -261,6 +279,20 @@ describe('the argv fingerprint', () => {
     expect(taskCommandLine({ command: 'git', args: ['commit', '-m', 'a b'] })).toBe(
       'git commit -m "a b"',
     );
+  });
+
+  it('does not render two different argvs as the same line', () => {
+    // The denylist this replaced tested JavaScript's `\s`, which does not
+    // include U+200B. So `["test"]` and `["test\u200b"]` both rendered as
+    // `npm test` while keying differently: the dialog would open a second time
+    // showing text indistinguishable from the text already approved, which is
+    // how a person is taught to click Run without reading.
+    const plain = taskCommandLine({ command: 'npm', args: ['test'] });
+    const sneaky = taskCommandLine({ command: 'npm', args: ['test\u200b'] });
+    expect(plain).not.toBe(sneaky);
+
+    // Same for a bidi override, which reorders what is drawn.
+    expect(taskCommandLine({ command: 'npm', args: ['\u202etest'] })).not.toBe(plain);
   });
 });
 
@@ -341,6 +373,38 @@ describe('running', () => {
     (await nthProcess(h.platform, 2)).end(0);
     await third;
     expect(asks).toBe(2);
+  });
+
+  it('asks again for the same argv in a different folder', async () => {
+    // The hole a review found on 2026-08-30. `npm test` means whatever the
+    // package.json beside it says, so an approval given in a repository you
+    // trust must not carry into a stranger's clone opened in the same window.
+    // Keying on the argv alone, this passes silently with no second dialog.
+    const h = await harness({ project: ONE('test', 'npm', ['test']) });
+    harnesses.push(h);
+
+    let asks = 0;
+    h.ui.confirm.subscribe((request) => {
+      if (!request) return;
+      asks += 1;
+      queueMicrotask(() => request.resolve('run'));
+    });
+
+    const first = h.tasks.run('test');
+    (await nthProcess(h.platform, 0)).end(0);
+    await first;
+    expect(asks).toBe(1);
+
+    // A different repository, same task id, same argv.
+    h.platform.seedFile('/other/.nox/tasks.json', ONE('test', 'npm', ['test']));
+    await h.tasks.load('/other');
+
+    const second = h.tasks.run('test');
+    (await nthProcess(h.platform, 1)).end(0);
+    await second;
+
+    expect(asks).toBe(2);
+    expect(h.platform.spawned[1]?.cwd).toBe('/other');
   });
 
   it('forgets approvals when asked, so the next run asks again', async () => {

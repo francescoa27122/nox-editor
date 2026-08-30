@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { taskCommandLine, taskFingerprint, type Task } from '@core/tasks';
+  import { taskCommandLine, type Task } from '@core/tasks';
   import { useApp } from './context';
   import PanelEmpty from './PanelEmpty.svelte';
 
@@ -17,7 +17,18 @@
    */
 
   const app = useApp();
-  const { tasks, ui, commands } = app;
+  const { tasks, ui, commands, platform } = app;
+
+  /**
+   * Whether this build can start a process at all.
+   *
+   * Read here as well as in the command's `enabled`, so the button and what
+   * running the command would actually do cannot disagree. `AgentPanel` makes
+   * the same argument for the same reason. Without it the browser target drew
+   * a working-looking Run button that did nothing at all when clicked, because
+   * `CommandRegistry.execute` returns false for a disabled command in silence.
+   */
+  const canRun = platform.capabilities.agentProcesses;
 
   const list = tasks.tasks;
   const shadowed = tasks.shadowed;
@@ -48,25 +59,59 @@
     return $runs.get(id)?.status ?? '';
   }
 
-  /** Whether this task would ask before running, given what is trusted now. */
+  /**
+   * How a finished run should read: passed, failed, or neither.
+   *
+   * `status` alone cannot answer it. A process that ran to completion is
+   * `exited` whatever it exited *with*, and `failed` means only that it could
+   * never be started, so `npm test` returning 1 looked exactly like `npm test`
+   * returning 0 until this existed. For a panel whose whole job is running
+   * builds, that is the one question it has to answer at a glance.
+   */
+  function toneOf(id: string): string {
+    const run = $runs.get(id);
+    if (!run || $running.has(id)) return '';
+    if (run.status === 'failed' || run.status === 'cancelled') return 'bad';
+    if (run.exitCode === null) return '';
+    return run.exitCode === 0 ? 'ok' : 'bad';
+  }
+
+  /** Whether this task would ask before running. The service owns the answer. */
   function asks(entry: Task): boolean {
-    return entry.source === 'project' && !$trusted.has(taskFingerprint(entry));
+    void $trusted; // Re-read when an approval is given or forgotten.
+    return tasks.willAsk(entry);
   }
 </script>
 
-<div class="tasks">
+<section class="tasks" aria-label="Tasks">
   <header>
     <div class="heading">
       <h2>Tasks</h2>
       <p>{$list.length} defined{$running.size > 0 ? ` · ${$running.size} running` : ''}</p>
     </div>
     <div class="actions">
+      {#if $trusted.size > 0}
+        <!--
+          A grant you cannot see is a grant you cannot withdraw. The spec said
+          the panel listed what was approved and it did not: a trusted task was
+          indistinguishable from one that never asks. Shaped after the agents
+          panel's revoke button, where the count is the disclosure.
+        -->
+        <button
+          class="nox-button small"
+          onclick={() => void commands.execute('tasks.forgetTrust')}
+          title="Project tasks will ask again before they run"
+        >
+          Forget {$trusted.size} approved
+        </button>
+      {/if}
       <button
         class="nox-button small"
         disabled={$running.size === 0}
         onclick={() => void commands.execute('tasks.stop')}
+        title="Stop every running task"
       >
-        Stop
+        Stop All
       </button>
       <button class="nox-button small" onclick={() => void commands.execute('tasks.edit')}>
         Edit Tasks
@@ -80,6 +125,13 @@
       </button>
     </div>
   </header>
+
+  {#if !canRun}
+    <p class="problem note">
+      This build cannot start a process, so nothing here can run. The desktop
+      build can.
+    </p>
+  {/if}
 
   {#if $error}
     <p class="problem" role="status">{$error}</p>
@@ -98,11 +150,13 @@
             <button
               class="row"
               class:selected={entry.id === selected}
+              aria-current={entry.id === selected}
+              title={canRun ? 'Double-click to run' : undefined}
               onclick={() => (selectedId = entry.id)}
-              ondblclick={() => void commands.execute('tasks.run', entry.id)}
+              ondblclick={() => canRun && void commands.execute('tasks.run', entry.id)}
             >
               <span class="label">{entry.label}</span>
-              <span class="line">{taskCommandLine(entry)}</span>
+              <span class="cmdline">{taskCommandLine(entry)}</span>
               <span class="tags">
                 {#if entry.source === 'project'}
                   <!-- Named on the row rather than only in the dialog, so the
@@ -113,7 +167,9 @@
                   <span class="tag" title="Will ask before running">asks</span>
                 {/if}
                 {#if statusOf(entry.id)}
-                  <span class="tag status {statusOf(entry.id)}">{statusOf(entry.id)}</span>
+                  <span class="tag status {statusOf(entry.id)} {toneOf(entry.id)}"
+                    >{statusOf(entry.id)}</span
+                  >
                 {/if}
               </span>
             </button>
@@ -127,7 +183,8 @@
             <code>{taskCommandLine(task)}</code>
             <button
               class="nox-button small"
-              disabled={$running.has(task.id)}
+              disabled={!canRun || $running.has(task.id)}
+              title={canRun ? undefined : 'This build cannot start a process'}
               onclick={() => void commands.execute('tasks.run', task.id)}
             >
               Run
@@ -144,7 +201,7 @@
             {/each}
           </div>
           {#if run.status !== 'running'}
-            <p class="exit">
+            <p class="exit {toneOf(run.taskId)}">
               {run.status}{run.exitCode === null ? '' : ` · exit ${run.exitCode}`}
             </p>
           {/if}
@@ -167,7 +224,7 @@
       {$shadowed.map((entry) => entry.id).join(', ')}
     </p>
   {/if}
-</div>
+</section>
 
 <style>
   .tasks {
@@ -226,7 +283,11 @@
 
   .list {
     margin: 0;
-    padding: 0;
+    /* Room for the focus ring, which `--nox-focus-ring` draws 3px *outside*
+       the row's border box. With the row flush to a scrolling container's
+       content box, the ring's left and right edges were clipped away on the
+       panel's primary keyboard target. */
+    padding: 0 3px;
     list-style: none;
     overflow-y: auto;
     min-height: 0;
@@ -258,7 +319,14 @@
     font-size: var(--nox-fs-sm);
   }
 
-  .line {
+  /*
+    `.cmdline`, not `.line`. Both names existed in this block at equal
+    specificity, the output line's `white-space: pre-wrap` came second and won,
+    and this rule's `nowrap` plus `text-overflow` were dead: a long command
+    wrapped and broke mid-word instead of eliding, giving the list ragged row
+    heights. Two rules, one selector, in one file, is not visible by eye.
+  */
+  .cmdline {
     display: block;
     font-family: var(--nox-font-mono);
     font-size: var(--nox-fs-xs);
@@ -290,8 +358,19 @@
     color: var(--nox-accent);
   }
 
-  .tag.status.failed {
+  /*
+    Keyed on the exit code, not on the status word. `exited` covers a build
+    that passed and one that failed, which is the distinction this panel exists
+    to show. DESIGN.md §2 allows semantic colour in a status context.
+  */
+  .tag.status.ok {
+    color: var(--nox-success);
+    border-color: var(--nox-success);
+  }
+
+  .tag.status.bad {
     color: var(--nox-danger-bright);
+    border-color: var(--nox-danger-bright);
   }
 
   .output {
@@ -328,6 +407,9 @@
     overflow: auto;
     padding: var(--nox-sp-3);
     background: var(--nox-bg-inset);
+    /* Umbra sets `bg-inset` and `bg-editor` to the same black, so without an
+       edge the output well is invisible against the panel behind it. */
+    border: 1px solid var(--nox-border-subtle);
     border-radius: var(--nox-r-md);
     font-family: var(--nox-font-mono);
     font-size: var(--nox-fs-xs);
@@ -351,5 +433,24 @@
     margin: var(--nox-sp-2) 0 0;
     font-size: var(--nox-fs-sm);
     color: var(--nox-text-muted);
+  }
+
+  .exit.ok {
+    color: var(--nox-success);
+  }
+
+  .exit.bad {
+    color: var(--nox-danger-bright);
+  }
+
+  .note {
+    color: var(--nox-text-muted);
+  }
+
+  /* Matches AgentPanel and SettingsPanel, which set the same two properties
+     for prose code. Without it this fell back to the UA's own monospace. */
+  .tasks :global(code) {
+    font-family: var(--nox-font-mono);
+    font-size: 0.92em;
   }
 </style>

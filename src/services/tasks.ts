@@ -179,6 +179,18 @@ export class TaskService {
     this.error.set(problems.length > 0 ? problems.join('; ') : null);
   }
 
+  /**
+   * Whether running this task would put the confirmation dialog on screen.
+   *
+   * Here rather than in the panel, which computed the fingerprint itself until
+   * a review on 2026-08-30. That was logic in a component (rule 1) and it went
+   * wrong the moment the key gained the root: a component cannot see `#root`,
+   * so it would have gone on answering the old question.
+   */
+  willAsk(task: Task): boolean {
+    return task.source === 'project' && !this.trusted.get().has(taskFingerprint(task, this.#root));
+  }
+
   byId(id: string): Task | null {
     return this.tasks.get().find((task) => task.id === id) ?? null;
   }
@@ -248,8 +260,9 @@ export class TaskService {
   }
 
   /**
-   * Stop a running task, or every one of them. The job's `onCancel` kills the
-   * process, including in the window before the spawn has returned one.
+   * Stop one running task, or every one of them when given no id. The job's
+   * `onCancel` kills the process, including in the window before the spawn has
+   * returned one.
    */
   stop(id?: string): void {
     const ids = id === undefined ? [...this.running.get()] : [id];
@@ -279,7 +292,8 @@ export class TaskService {
   async #approve(task: Task): Promise<boolean> {
     if (task.source === 'user') return true;
 
-    const fingerprint = taskFingerprint(task);
+    // Keyed on the argv *and the root*, never the id. See `taskFingerprint`.
+    const fingerprint = taskFingerprint(task, this.#root);
     if (this.trusted.get().has(fingerprint)) return true;
 
     const choice = await this.#ui.askToConfirm({
@@ -287,10 +301,21 @@ export class TaskService {
       message:
         'This task is defined by the repository, not by you, in .nox/tasks.json.\n\n' +
         `${taskCommandLine(task)}\n\n` +
-        "It will run in the workspace folder with your account's permissions.",
+        // The folder is named rather than implied. It is half of what the user
+        // is agreeing to: the argv means nothing without it, since what
+        // `npm test` does is decided by the `package.json` in this directory.
+        `It will run in ${this.#root ?? 'the workspace folder'} with your ` +
+        'account\'s permissions.\n\n' +
+        // Said out loud because it is true and the dialog was the only place a
+        // person could learn it. "Run" is not one run.
+        'Nox will not ask again for this exact command in this folder until you quit.',
       choices: [
-        { id: 'cancel', label: 'Cancel' },
+        // Destructive first, safe last, which is the order the other eight
+        // `askToConfirm` sites in the app use. This one had them reversed, so
+        // the single dialog that authorises running a stranger's program put
+        // Run where every other dialog puts Cancel.
         { id: 'run', label: 'Run', danger: true },
+        { id: 'cancel', label: 'Cancel' },
       ],
       // Named rather than inferred: `run` is the danger choice, so leaving the
       // default to position or to `danger` alone would put Enter on it.
@@ -298,8 +323,6 @@ export class TaskService {
     });
     if (choice !== 'run') return false;
 
-    // Keyed on the argv, never the id, so an edit to what this task runs is a
-    // new question. See `taskFingerprint`.
     this.trusted.update((set) => new Set(set).add(fingerprint));
     return true;
   }

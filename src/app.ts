@@ -30,7 +30,7 @@ import { offsetAt, positionAt } from '@core/lsp-position';
 import { ANCHOR_WINDOW, resolveAnchor } from '@core/anchor';
 import { ENCODING_CHOICES, type Encoding } from '@core/encoding';
 import { formatNoteFile, noteFileName, parseNoteFile } from '@core/note-file';
-import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
+import { basename, contains, dirname, join, relative, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
 import { pathToUri, uriToPath } from '@core/uri';
 import { addCursorAbove, addCursorBelow, goToLine } from '@editor/commands';
@@ -2071,6 +2071,48 @@ export class NoxApp {
    * Single-target commands (rename) use `targetPath`; anything that can
    * sensibly act on many (delete, duplicate, copy path) uses this.
    */
+  /**
+   * The path a permission decision about `arg` is made against.
+   *
+   * **It has to agree with what `run` will act on**, and until a review on
+   * 2026-08-30 it did not. Every explorer command's `resourceFrom` honoured
+   * only a *string* argument and otherwise fell back to `targetPath()`, while
+   * the run bodies pass the same argument to `targetPaths`, which honours an
+   * **array**. So a caller handing over `['/home/you/.ssh/id_rsa']` had its
+   * permission checked against the explorer's lead selection, a path inside
+   * the workspace, and then the command opened, duplicated or deleted the
+   * array instead. `fs.read` is `allow` by policy and the boundary check is
+   * what turns it into a question, so the effect was a plugin or agent reading
+   * any file on disk with no prompt at all.
+   *
+   * When the set has several members the check is made against the first one
+   * **outside** the workspace, because that is the member that decides the
+   * answer: the boundary only ever tightens, so checking an inside path while
+   * an outside path is present is checking the wrong one.
+   */
+  permissionTarget(explicit?: unknown): string | undefined {
+    const request = explicit as { paths?: unknown; target?: unknown } | undefined;
+    // `explorer.moveTo` carries an object rather than a path or a list, and
+    // both halves of it are things the command writes to.
+    const named =
+      request && typeof request === 'object' && !Array.isArray(request)
+        ? [
+            ...(Array.isArray(request.paths)
+              ? request.paths.filter((path): path is string => typeof path === 'string')
+              : []),
+            ...(typeof request.target === 'string' ? [request.target] : []),
+          ]
+        : this.targetPaths(explicit);
+
+    if (named.length === 0) return undefined;
+    const root = this.workspace.rootPath.get();
+    if (root) {
+      const outside = named.find((path) => !contains(root, path));
+      if (outside) return outside;
+    }
+    return named[0];
+  }
+
   targetPaths(explicit?: unknown): string[] {
     if (typeof explicit === 'string' && explicit.length > 0) return [explicit];
     if (Array.isArray(explicit) && explicit.length > 0) {
@@ -3097,7 +3139,7 @@ export class NoxApp {
 
       {
         id: 'explorer.newFile',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'New File Here…',
         category: 'Explorer',
@@ -3109,7 +3151,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.newFolder',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'New Folder Here…',
         category: 'Explorer',
@@ -3121,7 +3163,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.rename',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.write'],
         title: 'Rename…',
         category: 'Explorer',
@@ -3134,7 +3176,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.duplicate',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'Duplicate',
         category: 'Explorer',
@@ -3147,7 +3189,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.delete',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.delete'],
         title: 'Delete…',
         category: 'Explorer',
@@ -3160,7 +3202,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.openSelection',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.read'],
         title: 'Open Selected Files',
         category: 'Explorer',
@@ -3200,7 +3242,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.moveTo',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.write'],
         title: 'Move to Folder',
         category: 'Explorer',
@@ -3219,7 +3261,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.revealInFileManager',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['shell.exec'],
         title: 'Reveal in File Manager',
         category: 'Explorer',
