@@ -110,6 +110,75 @@ describe('the resource a permission is checked against', () => {
     expect(prompter).not.toHaveBeenCalled();
   });
 
+  /**
+   * The traversal form of the same attack.
+   *
+   * The first fix here derived the resource from what `run` acts on and then
+   * asked `contains()`, which is a string prefix test that does not resolve
+   * `..`. So `/w/../secrets/key` read as being *inside* `/w`, `fs.read` was
+   * allowed by policy, and the prompter was never called: the hole this file
+   * was written for, reopened by spelling the path differently. The OS
+   * resolves the traversal afterwards, which is what makes it easy to miss.
+   */
+  it('is not fooled by a path that traverses out of the workspace', async () => {
+    const { nox, prompter } = await app('deny');
+
+    await expect(
+      nox.commands.execute('explorer.openSelection', ['/w/../secrets/key'], { principal: AGENT }),
+    ).rejects.toThrow();
+
+    expect(prompter).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * An argument that names nothing must not name *nothing to check*.
+   *
+   * `permissionTarget` treated any non-array object as the `moveTo` shape, so
+   * `{}` produced an empty set and returned `undefined` while `run` went on to
+   * act on the lead selection. A request with no resource skips the workspace
+   * boundary entirely, so this was a hole rather than a missing label, and it
+   * was introduced by the commit that fixed the array one.
+   */
+  it('falls back to the active target when the argument names no path', async () => {
+    const { nox, prompter } = await app('deny');
+    await nox.workspace.open('/secrets/key');
+
+    await expect(
+      nox.commands.execute('explorer.openSelection', {}, { principal: AGENT }),
+    ).rejects.toThrow();
+
+    expect(prompter).toHaveBeenCalledTimes(1);
+    expect(prompter.mock.calls[0]?.[0]).toMatchObject({ resource: '/secrets/key' });
+  });
+
+  /**
+   * The other five commands wired to `permissionTarget`.
+   *
+   * The first version of this suite covered `openSelection` and `moveTo` only,
+   * and reverting `explorer.delete` to the old `resourceFrom` passed the whole
+   * repository. Six of the eight sites had no guard at all.
+   */
+  it.each([
+    ['explorer.delete', 'fs.delete'],
+    ['explorer.duplicate', 'fs.create'],
+    ['explorer.rename', 'fs.write'],
+    ['explorer.newFile', 'fs.create'],
+    ['explorer.newFolder', 'fs.create'],
+  ])('checks %s against the path it was handed', async (commandId) => {
+    const { nox, prompter } = await app('deny');
+
+    await expect(
+      nox.commands.execute(commandId, ['/secrets/key'], { principal: AGENT }),
+    ).rejects.toThrow();
+
+    expect(prompter).toHaveBeenCalled();
+    // `newFile`/`newFolder` act on the *directory* of what they were handed,
+    // which is inside whatever the named path is, so naming the path itself is
+    // the conservative answer rather than the wrong one.
+    const resource = prompter.mock.calls[0]?.[0]?.resource;
+    expect(typeof resource === 'string' && resource.startsWith('/secrets')).toBe(true);
+  });
+
   it('checks the destination of a move, not the explorer selection', async () => {
     // `explorer.moveTo` carries `{ paths, target }` rather than a path or a
     // list, so the old ternary fell through to the lead selection for it too.

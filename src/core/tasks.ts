@@ -101,38 +101,52 @@ export function taskFingerprint(
   return [root ?? '', task.command, ...task.args].join('\0');
 }
 
-/** The argv as a person reads it, for the confirmation dialog and the panel. */
+/**
+ * The argv as a person reads it, for the confirmation dialog and the panel.
+ *
+ * **Printable ASCII only, always.** That is the property, and it is stronger
+ * than quoting the parts that look like shell syntax. A dialog whose entire
+ * job is showing what is about to run has to be a faithful function of the
+ * argv, and it cannot be one while a character can be *invisible* (U+200B ZERO
+ * WIDTH SPACE) or can *reorder what is drawn* (U+202E RIGHT TO LEFT OVERRIDE).
+ * Two argvs that differ only in those render identically, so the second
+ * approval dialog shows text indistinguishable from the text already approved,
+ * which is how a person is taught to press Run without reading.
+ *
+ * Two earlier versions of this were wrong in instructive ways. The first
+ * tested a denylist, `[\s"'\\$`]`, and JavaScript's `\s` contains no
+ * zero-width characters. The second quoted anything outside a safe set with
+ * `JSON.stringify`, which escapes control characters and leaves every
+ * non-ASCII one exactly as it was, so `"test\u200b"` and `"test\u200c"` still
+ * drew the same glyphs. Escaping by codepoint is what actually closes it.
+ */
 export function taskCommandLine(task: Pick<Task, 'command' | 'args'>): string {
-  return [task.command, ...task.args].map(quoteIfNeeded).join(' ');
+  return [task.command, ...task.args].map(renderArgument).join(' ');
 }
 
+/** Printable ASCII, and none of what a reader would take as shell syntax. */
+const SAFE_BARE = /^[A-Za-z0-9_./=:@+-]+$/;
+
 /**
- * Quote an argv element that would otherwise read as more than one.
+ * One argv element, rendered so that what is drawn determines what will run.
  *
  * Presentation only, and deliberately never parsed back: nothing in Nox turns
- * this string into an argv again. It exists so that a task whose argument
- * contains a space cannot be *displayed* as two arguments in the one dialog
- * whose entire job is showing the user what will run.
+ * this string into an argv again.
  */
-function quoteIfNeeded(part: string): string {
-  return SAFE_BARE.test(part) ? part : JSON.stringify(part);
+function renderArgument(part: string): string {
+  if (SAFE_BARE.test(part)) return part;
+  let out = '"';
+  for (const character of part) {
+    const code = character.codePointAt(0) ?? 0;
+    if (character === '"' || character === '\\') out += `\\${character}`;
+    else if (code >= 0x20 && code <= 0x7e) out += character;
+    // Everything else by codepoint, so nothing invisible or reordering can
+    // reach the dialog. Costs legibility for a genuinely non-ASCII path, and
+    // that is the right trade for the one dialog that authorises execution.
+    else out += `\\u{${code.toString(16)}}`;
+  }
+  return `${out}"`;
 }
-
-/**
- * An argument that needs no quoting: printable ASCII, and none of the
- * characters a reader would take as shell syntax.
- *
- * An allowlist rather than a list of things to escape, and the difference is
- * the whole point. The denylist this replaced was `[\s"'\\$`]`, and
- * JavaScript's `\s` does not include U+200B ZERO WIDTH SPACE or U+202E RIGHT
- * TO LEFT OVERRIDE. Both passed through unquoted, so `["test"]` and
- * `["test\u200b"]` rendered as the identical string `npm test` while
- * producing different keys: the dialog would open a second time showing text
- * indistinguishable from the text already approved, which trains a person to
- * click Run. A dialog whose entire job is showing what will run has to be a
- * faithful function of the argv, and only an allowlist gives that.
- */
-const SAFE_BARE = /^[A-Za-z0-9_./=:@+-]+$/;
 
 export function parseTasks(value: unknown, source: TaskSource): ParsedTasks {
   const problems: string[] = [];

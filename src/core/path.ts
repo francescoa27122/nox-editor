@@ -58,11 +58,40 @@ export function relative(root: string, child: string): string {
   return child.slice(r.length).replace(/^[\\/]+/, '');
 }
 
-/** True when `child` is `parent` or lives beneath it. Guards against `/aa` ⊄ `/a`. */
+/**
+ * True when `child` is `parent` or lives beneath it. Guards against `/aa` ⊄ `/a`.
+ *
+ * **A string comparison, and never a trust boundary.** It does not resolve
+ * `..`, so `contains('/proj', '/proj/../../etc/shadow')` is `true`. That is
+ * fine for what most callers want, which is "does this path *read* as being
+ * under that folder" about paths the OS already handed them. It is not fine
+ * for deciding whether something is allowed to be touched. Use
+ * `containsResolved` there.
+ */
 export function contains(parent: string, child: string): boolean {
   const p = parent.replace(/[\\/]+$/, '');
   if (child === p) return true;
   return child.startsWith(p) && SEP_RE.test(child.charAt(p.length));
+}
+
+/**
+ * `contains`, after resolving `.` and `..` on both sides.
+ *
+ * The one to use when the answer decides whether an action is permitted.
+ * `PermissionService` asks exactly this question to know whether a path is
+ * outside the open folder, and until 2026-08-30 it asked `contains`, so
+ * `['/proj/../../etc/shadow']` was judged *inside* the workspace and `fs.read`
+ * was granted by policy with no prompt. The traversal is resolved by the OS
+ * later, which is what makes the string form so easy to miss.
+ *
+ * Separate from `contains` rather than folded into it because the twenty-odd
+ * other callers pass paths that came from the filesystem already resolved, and
+ * a normalise on each is work in a hot path for a question they are not
+ * asking. The cost of the split is that someone can still reach for the wrong
+ * one, which is what the warning on `contains` is for.
+ */
+export function containsResolved(parent: string, child: string): boolean {
+  return contains(normalize(parent), normalize(child));
 }
 
 /** Collapse `.` and `..` segments. Does not touch the leading separator. */

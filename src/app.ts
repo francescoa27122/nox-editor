@@ -30,7 +30,14 @@ import { offsetAt, positionAt } from '@core/lsp-position';
 import { ANCHOR_WINDOW, resolveAnchor } from '@core/anchor';
 import { ENCODING_CHOICES, type Encoding } from '@core/encoding';
 import { formatNoteFile, noteFileName, parseNoteFile } from '@core/note-file';
-import { basename, contains, dirname, join, relative, topLevelPaths } from '@core/path';
+import {
+  basename,
+  containsResolved,
+  dirname,
+  join,
+  relative,
+  topLevelPaths,
+} from '@core/path';
 import { Signal } from '@core/signal';
 import { pathToUri, uriToPath } from '@core/uri';
 import { addCursorAbove, addCursorBelow, goToLine } from '@editor/commands';
@@ -2093,8 +2100,14 @@ export class NoxApp {
   permissionTarget(explicit?: unknown): string | undefined {
     const request = explicit as { paths?: unknown; target?: unknown } | undefined;
     // `explorer.moveTo` carries an object rather than a path or a list, and
-    // both halves of it are things the command writes to.
-    const named =
+    // both halves of it are things the command writes to. Only treated as that
+    // shape when it actually carries one of the two fields: the first version
+    // of this took the branch for *any* object, so `{}` produced an empty set
+    // and then `undefined`, while `run` went on to act on the lead selection.
+    // A request with no resource skips the workspace check entirely
+    // (`permissions.ts`), so that was a hole rather than a cosmetic gap, and
+    // the code it replaced did not have it.
+    const fromRequest =
       request && typeof request === 'object' && !Array.isArray(request)
         ? [
             ...(Array.isArray(request.paths)
@@ -2102,12 +2115,16 @@ export class NoxApp {
               : []),
             ...(typeof request.target === 'string' ? [request.target] : []),
           ]
-        : this.targetPaths(explicit);
+        : [];
+    const named = fromRequest.length > 0 ? fromRequest : this.targetPaths(explicit);
 
-    if (named.length === 0) return undefined;
+    // Never undefined while the command has something to act on: the fallback
+    // is what `targetPath()` used to provide, and losing it silently widened
+    // every explorer permission from "this path" to "no path named".
+    if (named.length === 0) return this.targetPath() ?? undefined;
     const root = this.workspace.rootPath.get();
     if (root) {
-      const outside = named.find((path) => !contains(root, path));
+      const outside = named.find((path) => !containsResolved(root, path));
       if (outside) return outside;
     }
     return named[0];
@@ -4442,6 +4459,14 @@ export class NoxApp {
         title: 'Forget Approved Tasks',
         category: 'Tasks',
         keywords: ['task', 'trust', 'revoke', 'forget', 'permission'],
+        // This edits a record of what the user agreed to, which is the whole
+        // argument `permissions.ts` gives for `permissions.revoke` existing.
+        // It was undeclared until a review on 2026-08-30 pointed out that the
+        // same commit had just put a button on it. Denied by policy for a
+        // non-user principal rather than prompted, for the reason revocation
+        // is: asking an agent's user whether the agent may edit the record of
+        // what they agreed to is not a question worth putting on screen.
+        capabilities: ['permissions.revoke'],
         enabled: () => this.tasks.trusted.get().size > 0,
         run: () => {
           this.tasks.forgetTrust();

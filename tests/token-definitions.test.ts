@@ -25,7 +25,10 @@ import { THEME_TOKENS } from '../src/core/theme';
  *
  * Mutation-checked on 2026-08-30: deleting `--nox-accent-bright` from
  * `tokens.css` fails the first test with that name in the message, and adding
- * `var(--nox-nonexistent)` to any component fails it too.
+ * `var(--nox-nonexistent)` to a component, a stylesheet or `src/editor/` fails
+ * it too. The last of those is a later addition: the first version of this
+ * file scanned two directories while claiming to scan everything, which is the
+ * same species of untrue-comment the suite exists to catch.
  *
  * What it does not catch: a token that is declared and never read (harmless),
  * a value that is wrong rather than missing (that is `token-contrast.test.ts`),
@@ -35,6 +38,17 @@ import { THEME_TOKENS } from '../src/core/theme';
 
 const STYLES = join(process.cwd(), 'src', 'styles');
 const UI = join(process.cwd(), 'src', 'ui');
+/**
+ * `src/editor/` too, and it is not decoration.
+ *
+ * The first version of this suite scanned `src/styles` and `src/ui` only,
+ * while its own docstring claimed it held *every* `var(--nox-*)` in the
+ * repository. A review planted `var(--nox-does-not-exist)` in
+ * `editor/theme.ts` and the suite passed. That file is CSS-in-JS handed to
+ * CodeMirror, so an undefined token there fails exactly as silently as one in
+ * a stylesheet, and it is the file that paints the text you are editing.
+ */
+const EDITOR = join(process.cwd(), 'src', 'editor');
 
 /** Every `--nox-name` this text *declares*, i.e. writes as `--nox-name:`. */
 function declarations(source: string): Set<string> {
@@ -53,6 +67,9 @@ function stylesheets(): { name: string; source: string }[] {
   }
   for (const name of readdirSync(UI)) {
     if (name.endsWith('.svelte')) files.push({ name, source: readFileSync(join(UI, name), 'utf8') });
+  }
+  for (const name of readdirSync(EDITOR)) {
+    if (name.endsWith('.ts')) files.push({ name, source: readFileSync(join(EDITOR, name), 'utf8') });
   }
   return files;
 }

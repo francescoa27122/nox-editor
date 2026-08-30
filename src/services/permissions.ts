@@ -1,4 +1,4 @@
-import { contains } from '@core/path';
+import { containsResolved } from '@core/path';
 import { Signal } from '@core/signal';
 import { authorLabel, type Author } from './transactions';
 
@@ -324,7 +324,9 @@ export class PermissionService {
     // With no folder open there is no boundary to be outside of; the policy
     // is then the only thing deciding, which is what a scratch buffer wants.
     if (!root) return false;
-    return !contains(root, request.resource);
+    // Resolved, not a string prefix. `'/proj/../../etc/shadow'` reads as
+    // being under `/proj` and is not, and the OS resolves it afterwards.
+    return !containsResolved(root, request.resource);
   }
 
   #record(request: PermissionRequest, granted: boolean, source: DecisionSource): boolean {

@@ -281,18 +281,50 @@ describe('the argv fingerprint', () => {
     );
   });
 
-  it('does not render two different argvs as the same line', () => {
-    // The denylist this replaced tested JavaScript's `\s`, which does not
-    // include U+200B. So `["test"]` and `["test\u200b"]` both rendered as
-    // `npm test` while keying differently: the dialog would open a second time
-    // showing text indistinguishable from the text already approved, which is
-    // how a person is taught to click Run without reading.
-    const plain = taskCommandLine({ command: 'npm', args: ['test'] });
-    const sneaky = taskCommandLine({ command: 'npm', args: ['test\u200b'] });
-    expect(plain).not.toBe(sneaky);
+  /**
+   * **The property, and not a proxy for it.**
+   *
+   * The first version of this test asserted that two argvs produced different
+   * *JavaScript strings*, which they did even under the bug: `'npm test\u200b'`
+   * has never been `=== 'npm test'`. It passed against the broken renderer and
+   * against the fixed one, so it tested nothing. What matters is whether a
+   * *person* can tell the two lines apart, and the way to hold that is to
+   * refuse the characters that make two strings look the same: anything
+   * invisible, and anything that reorders what is drawn.
+   *
+   * Mutation-checked on 2026-08-30 against both earlier implementations. The
+   * original denylist (`[\s"'\\$`]`) and the `JSON.stringify` allowlist that
+   * replaced it both fail this, because `JSON.stringify` escapes control
+   * characters and passes every non-ASCII one through unchanged.
+   */
+  it('renders every argument as printable ASCII, whatever it contains', () => {
+    const nasty = [
+      'test\u200b', // zero width space: invisible
+      'test\u200c', // zero width non-joiner: also invisible, and not the same
+      '\u202etest', // right-to-left override: reorders what is drawn
+      'fix\u00a0it', // no-break space: draws as a space, is not one
+      'a\u0008b', // backspace
+    ];
 
-    // Same for a bidi override, which reorders what is drawn.
-    expect(taskCommandLine({ command: 'npm', args: ['\u202etest'] })).not.toBe(plain);
+    for (const argument of nasty) {
+      const line = taskCommandLine({ command: 'npm', args: [argument] });
+      expect(line, `${JSON.stringify(argument)} reached the dialog unescaped`).toMatch(
+        /^[\x20-\x7e]*$/,
+      );
+    }
+
+    // And the pairs that previously drew identically now do not.
+    const rendered = nasty.map((argument) => taskCommandLine({ command: 'npm', args: [argument] }));
+    expect(new Set(rendered).size).toBe(nasty.length);
+    expect(rendered).not.toContain(taskCommandLine({ command: 'npm', args: ['test'] }));
+  });
+
+  it('leaves an ordinary argument readable', () => {
+    // The escaping is a cost, and it must not be paid by the common case.
+    expect(taskCommandLine({ command: 'npm', args: ['run', 'build'] })).toBe('npm run build');
+    expect(taskCommandLine({ command: 'git', args: ['commit', '-m', 'a b'] })).toBe(
+      'git commit -m "a b"',
+    );
   });
 });
 
