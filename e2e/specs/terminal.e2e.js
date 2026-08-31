@@ -77,19 +77,25 @@ async function type(text) {
 }
 
 /**
- * Submit the line, the way the Enter key does.
+ * Submit the line, with the Enter key.
  *
- * **A carriage return, not a newline.** xterm sends `\r` when Enter is
- * pressed, on every platform, and that is what a tty expects to end a line.
- * Linux let `\n` through because the pty's line discipline accepts it too, so
- * the first version of this file used one and passed locally and on two of the
- * three CI platforms. Windows runs `cmd.exe` over ConPTY, which waits for the
- * carriage return: the command was typed, sat unsubmitted, and the marker
- * never arrived. Test one still passed, because a prompt had been printed
- * before any of this.
+ * **`browser.keys(['Enter'])`, not a carriage return in the text**, and this
+ * is the one place this file uses the key-event path on purpose.
+ *
+ * The text path cannot do it. `addValue('\r')` reaches the pty on WebKitGTK,
+ * because that driver puts the character into the textarea and xterm forwards
+ * what it finds there. On Chromium (Windows and macOS) Element Send Keys
+ * dispatches real key events, and a bare carriage return is not one, so the
+ * command was typed correctly and then sat at the prompt forever. The CI
+ * screen dump said so exactly: `C:\Users\runneradmin>echo NOXE^2E-OK`, no
+ * output, no second prompt.
+ *
+ * Enter is safe on the path the rest of this file avoids. The doubling
+ * documented at the top of this file duplicates *characters*; a duplicated
+ * Enter is an extra empty prompt and changes no assertion here.
  */
 async function submit() {
-  await type('\r');
+  await browser.keys(['Enter']);
 }
 
 /** Everything the terminal is currently showing, as one string. */
