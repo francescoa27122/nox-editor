@@ -76,6 +76,22 @@ async function type(text) {
   await $('.nox-terminal textarea').addValue(text);
 }
 
+/**
+ * Submit the line, the way the Enter key does.
+ *
+ * **A carriage return, not a newline.** xterm sends `\r` when Enter is
+ * pressed, on every platform, and that is what a tty expects to end a line.
+ * Linux let `\n` through because the pty's line discipline accepts it too, so
+ * the first version of this file used one and passed locally and on two of the
+ * three CI platforms. Windows runs `cmd.exe` over ConPTY, which waits for the
+ * carriage return: the command was typed, sat unsubmitted, and the marker
+ * never arrived. Test one still passed, because a prompt had been printed
+ * before any of this.
+ */
+async function submit() {
+  await type('\r');
+}
+
 /** Everything the terminal is currently showing, as one string. */
 async function screenText() {
   const rows = await $('.nox-terminal .xterm-rows');
@@ -151,14 +167,21 @@ describe('the terminal', () => {
       await waitForOutput(/\S/, 'the shell never printed a prompt');
     }
 
-    // `echo` is the one command every shell in this matrix has, including
-    // PowerShell, which is what Windows starts.
-    const command = WINDOWS ? 'echo ("NOXE" + "2E-OK")' : 'echo "NOXE""2E-OK"';
+    // `echo` is the one command every shell in this matrix has, but the way to
+    // join two literals is not shared. Windows starts **cmd.exe**, not
+    // PowerShell: `pty.rs`'s `default_shell` reads `ComSpec`. So the earlier
+    // `echo ("NOXE" + "2E-OK")` here was PowerShell syntax that cmd printed
+    // back verbatim, marker and all absent.
+    //
+    // In cmd, `^` is the escape character and is removed, so `NOXE^2E-OK` is
+    // typed and `NOXE2E-OK` is printed. In a POSIX shell adjacent quoted
+    // strings concatenate. Both keep the property the split is for: the
+    // terminal's echo of what was *typed* cannot satisfy the assertion,
+    // because the joined word only exists once a process has run.
+    const command = WINDOWS ? 'echo NOXE^2E-OK' : 'echo "NOXE""2E-OK"';
 
-    // The newline goes through the same path as the text. `browser.keys(Enter)`
-    // would work, but mixing the two input paths in one command is how a
-    // future reader ends up debugging the doubling above a second time.
-    await type(`${command}\n`);
+    await type(command);
+    await submit();
 
     await waitForOutput(
       /NOXE2E-OK/,
