@@ -105,13 +105,23 @@ async function screenText() {
  * Polls the rendered rows rather than waiting a fixed time: a shell's start-up
  * cost is the runner's, not ours, and the three platforms here disagree about
  * it by an order of magnitude.
+ *
+ * **On failure it prints what the terminal actually showed.** Without that,
+ * a red run on a platform the author cannot reach says only "the marker never
+ * came", which is consistent with the keystrokes not arriving, the line not
+ * being submitted, the shell rejecting the syntax, and the shell never having
+ * started. Two speculative fixes went in against that ambiguity before this
+ * was added. The screen contents distinguish all four in one run.
  */
-async function waitForOutput(pattern, timeoutMsg) {
-  await browser.waitUntil(async () => pattern.test(await screenText()), {
-    timeout: 60_000,
-    interval: 250,
-    timeoutMsg,
-  });
+async function waitForOutput(pattern, what, timeout = 60_000) {
+  try {
+    await browser.waitUntil(async () => pattern.test(await screenText()), {
+      timeout,
+      interval: 250,
+    });
+  } catch {
+    throw new Error(`${what}\n  looked for: ${pattern}\n  screen was: ${JSON.stringify(await screenText())}`);
+  }
 }
 
 describe('the terminal', () => {
@@ -181,11 +191,19 @@ describe('the terminal', () => {
     const command = WINDOWS ? 'echo NOXE^2E-OK' : 'echo "NOXE""2E-OK"';
 
     await type(command);
+
+    // Two waits, not one, and the split is the point. A terminal echoes what
+    // is typed before anything runs, so this first one fails only when the
+    // keystrokes never reached xterm at all, and the second only when a line
+    // that was typed did not run. One assertion could not tell those apart,
+    // which is what made the Windows failure guesswork.
+    await waitForOutput(/echo/, 'nothing typed reached the terminal', 15_000);
+
     await submit();
 
     await waitForOutput(
       /NOXE2E-OK/,
-      'the shell never produced the joined marker, so either the keystrokes did not reach the pty or its output did not come back',
+      'the line was typed but never produced the joined marker, so it was not submitted or the shell did not accept it',
     );
   });
 
