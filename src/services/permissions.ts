@@ -97,6 +97,15 @@ export const DEFAULT_POLICY: Policy = {
   rules: {
     // Reading is the one thing worth defaulting open: it cannot leave the
     // process on its own, and `net.request` is the gate that matters.
+    //
+    // That sentence was an intention until 2026-08-31. Enforcement runs off
+    // `command.capabilities`, and **no command declared `net.request`**, so a
+    // plugin could read a file with no prompt and then dispatch `agents.run`
+    // to send it to a model, also with no prompt. The five commands that can
+    // reach the network declare it now, and `tests/net-request-gate.test.ts`
+    // additionally fails on *any* capability in this vocabulary that no
+    // command declares, because a capability nothing asks for enforces
+    // nothing and reads exactly like one that does.
     'fs.read': 'allow',
     'shell.exec': 'deny',
     'net.request': 'deny',

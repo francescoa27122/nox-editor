@@ -215,8 +215,14 @@ a handle is a hole in that. Even the log's own `bufferIds` array is copied
 before it leaves.
 
 **Reads are recorded, not gated.** Context cannot leave the process on its
-own. `net.request` is the capability that matters and it is checked, so gating
-reads as well would mean a dialog for every keystroke of an agent's thinking. Instead
+own. `net.request` is the capability that matters, and since 2026-08-31 it is
+genuinely checked: the five commands that can reach the network declare it, and
+it is `deny` by policy for a non-user principal. Before that no command
+declared it at all, so this paragraph described a gate that did not exist, and
+what actually bounded the exposure was `http.rs`'s `is_loopback` refusing any
+non-loopback URL. Both layers are real and they answer different questions, so
+neither is the whole story on its own. Gating reads as well would mean a dialog
+for every keystroke of an agent's thinking. Instead
 `reader(principal)` binds the caller once, so no call site can forget to
 identify itself and the audit trail is complete by construction. The user's
 reads are not recorded, for the same reason their permission decisions are not.

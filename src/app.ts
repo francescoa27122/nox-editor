@@ -1452,6 +1452,25 @@ export class NoxApp {
    * `AgentPanel.svelte` — which cannot reach this private method — can call
    * the same function instead of re-deriving its own copy.
    */
+  /**
+   * The endpoint a `net.request` decision about an agent is made against.
+   *
+   * Only the *dialog text and the audit line* use it: `isResourceScoped` is
+   * false for `net.request`, so it is not part of a grant key, and
+   * `#isOutsideWorkspace` returns early for anything that is not `fs.*`, so a
+   * URL cannot be mistaken for a path escaping the workspace.
+   *
+   * A process agent has no host to name. It is still gated, because what
+   * leaves the process is the same context either way and where it goes next
+   * is that program's business rather than something Nox can see.
+   */
+  #agentEndpoint(arg?: unknown): string | undefined {
+    const agents = this.#runnableAgents();
+    const named = typeof arg === 'string' ? agents.find((agent) => agent.id === arg) : undefined;
+    const agent = named ?? (agents.length === 1 ? agents[0] : undefined);
+    return agent && agent.kind === 'ollama' ? agent.host : undefined;
+  }
+
   #runnableAgents(): AgentConfig[] {
     return runnableAgents(this.agentConfig.agents.get(), {
       canSpawn: this.platform.capabilities.agentProcesses,
@@ -3366,11 +3385,27 @@ export class NoxApp {
         keywords: ['ai', 'session', 'start', 'ask'],
         // Starting a process is the most powerful thing Nox does for someone,
         // so it is a command they run, never something that happens for them.
+        //
+        // **This is the declaration `fs.read: 'allow'` rests on.** The policy
+        // defaults reading open because "context cannot leave the process on
+        // its own, and `net.request` is the gate that matters", and three
+        // documents repeat it. Until 2026-08-31 no command declared
+        // `net.request` at all, so the sentence was an intention: a plugin or
+        // an agent could read a file with no prompt (policy `allow`) and then
+        // dispatch this command to send it to a model, also with no prompt.
+        // The gate exists now, and `net.request` is `deny` by default, so a
+        // non-user principal is refused without a dialog.
+        capabilities: ['net.request'],
+        resourceFrom: (arg) => this.#agentEndpoint(arg),
         enabled: () => this.#runnableAgents().length > 0,
         run: (arg) => this.runAgent(typeof arg === 'string' ? arg : undefined),
       },
       {
         id: 'agents.runOnSelection',
+        // Sends the selection to a model. See `agents.run` for why this is the
+        // declaration the `fs.read` default rests on.
+        capabilities: ['net.request'],
+        resourceFrom: () => this.#agentEndpoint(),
         title: 'Edit Selection with a Model…',
         category: 'Agents',
         keywords: ['ai', 'refactor', 'fix', 'rewrite', 'selection'],
@@ -3382,6 +3417,10 @@ export class NoxApp {
       },
       {
         id: 'agents.askAboutSelection',
+        // Sends the selection to a model. See `agents.run` for why this is the
+        // declaration the `fs.read` default rests on.
+        capabilities: ['net.request'],
+        resourceFrom: () => this.#agentEndpoint(),
         title: 'Ask About Selection…',
         category: 'Agents',
         keywords: ['ai', 'explain', 'what does', 'question', 'selection'],
@@ -3392,6 +3431,10 @@ export class NoxApp {
       },
       {
         id: 'agents.explainSelection',
+        // Sends the selection to a model. See `agents.run` for why this is the
+        // declaration the `fs.read` default rests on.
+        capabilities: ['net.request'],
+        resourceFrom: () => this.#agentEndpoint(),
         title: 'Explain Selection',
         category: 'Agents',
         keywords: ['ai', 'what does this do', 'describe', 'selection'],
@@ -4697,6 +4740,12 @@ export class NoxApp {
       // --- Application ------------------------------------------------------
       {
         id: 'app.checkForUpdates',
+        // A real outbound request, to a fixed endpoint with no caller-supplied
+        // payload, so this is the mildest of the five. Declared anyway: the
+        // claim being made elsewhere is that nothing programmatic reaches the
+        // network without this capability, and an exception nobody can see is
+        // how that claim stops being true again.
+        capabilities: ['net.request'],
         title: 'Check for Updates…',
         category: 'Application',
         keywords: ['update', 'upgrade', 'version', 'release', 'new'],

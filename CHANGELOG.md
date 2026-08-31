@@ -8,6 +8,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A plugin or an agent can no longer make Nox reach the network without
+  being allowed to.** Reading a file is allowed by default, on the argument
+  that what is read cannot leave your machine without a separate permission,
+  and that second permission was never actually being asked for. So a plugin
+  could read a file it was never questioned about and then ask Nox to send it
+  to a model, also without a question. The five commands that can reach the
+  network now declare it, and it is refused outright for anything that is not
+  you. Nothing about running your own agent changes.
+
 - **A program that prints without ever starting a new line can no longer take
   Nox down with it.** Anything Nox supervises and reads line by line, which is
   a language server's diagnostics, an agent, and now a task, was buffered whole
