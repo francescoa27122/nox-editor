@@ -78,30 +78,74 @@ export const TASKS_EXAMPLE = `{
  * a pull or a branch switch that the user is not looking at. Keying on the
  * argv means any change to what a task runs is a new question.
  *
- * NUL is the separator because it is the one byte an argv element cannot
- * contain: the OS uses it to terminate them. So no two distinct argvs can
- * produce the same fingerprint by construction, rather than by being unlikely
- * to. A separator like a space would let `["a b"]` and `["a", "b"]` collide.
+ * **And not the argv alone**, which is what this was until a review on
+ * 2026-08-30 found the hole. `npm test`, `make`, `cargo test` and every other
+ * realistic task are argvs whose entire meaning comes from the directory they
+ * run in, and the directory is not in them. Approving `npm test` in a
+ * repository you trust, then opening a stranger's clone in the same window,
+ * left the approval standing: same argv, same fingerprint, no second question,
+ * and `package.json` in the new root decides what actually runs. The root is
+ * therefore part of the key, which also means returning to the first
+ * repository does not ask again.
+ *
+ * NUL is the separator because it is the one byte a path or an argv element
+ * cannot contain: the OS uses it to terminate them, and `parseTasks` refuses
+ * one outright rather than trusting that. So no two distinct keys can collide
+ * by construction rather than by being unlikely to. A separator like a space
+ * would let `["a b"]` and `["a", "b"]` collide.
  */
-export function taskFingerprint(task: Pick<Task, 'command' | 'args'>): string {
-  return [task.command, ...task.args].join('\0');
-}
-
-/** The argv as a person reads it, for the confirmation dialog and the panel. */
-export function taskCommandLine(task: Pick<Task, 'command' | 'args'>): string {
-  return [task.command, ...task.args].map(quoteIfNeeded).join(' ');
+export function taskFingerprint(
+  task: Pick<Task, 'command' | 'args'>,
+  root: string | null,
+): string {
+  return [root ?? '', task.command, ...task.args].join('\0');
 }
 
 /**
- * Quote an argv element that would otherwise read as more than one.
+ * The argv as a person reads it, for the confirmation dialog and the panel.
+ *
+ * **Printable ASCII only, always.** That is the property, and it is stronger
+ * than quoting the parts that look like shell syntax. A dialog whose entire
+ * job is showing what is about to run has to be a faithful function of the
+ * argv, and it cannot be one while a character can be *invisible* (U+200B ZERO
+ * WIDTH SPACE) or can *reorder what is drawn* (U+202E RIGHT TO LEFT OVERRIDE).
+ * Two argvs that differ only in those render identically, so the second
+ * approval dialog shows text indistinguishable from the text already approved,
+ * which is how a person is taught to press Run without reading.
+ *
+ * Two earlier versions of this were wrong in instructive ways. The first
+ * tested a denylist, `[\s"'\\$`]`, and JavaScript's `\s` contains no
+ * zero-width characters. The second quoted anything outside a safe set with
+ * `JSON.stringify`, which escapes control characters and leaves every
+ * non-ASCII one exactly as it was, so `"test\u200b"` and `"test\u200c"` still
+ * drew the same glyphs. Escaping by codepoint is what actually closes it.
+ */
+export function taskCommandLine(task: Pick<Task, 'command' | 'args'>): string {
+  return [task.command, ...task.args].map(renderArgument).join(' ');
+}
+
+/** Printable ASCII, and none of what a reader would take as shell syntax. */
+const SAFE_BARE = /^[A-Za-z0-9_./=:@+-]+$/;
+
+/**
+ * One argv element, rendered so that what is drawn determines what will run.
  *
  * Presentation only, and deliberately never parsed back: nothing in Nox turns
- * this string into an argv again. It exists so that a task whose argument
- * contains a space cannot be *displayed* as two arguments in the one dialog
- * whose entire job is showing the user what will run.
+ * this string into an argv again.
  */
-function quoteIfNeeded(part: string): string {
-  return part.length > 0 && !/[\s"'\\$`]/.test(part) ? part : JSON.stringify(part);
+function renderArgument(part: string): string {
+  if (SAFE_BARE.test(part)) return part;
+  let out = '"';
+  for (const character of part) {
+    const code = character.codePointAt(0) ?? 0;
+    if (character === '"' || character === '\\') out += `\\${character}`;
+    else if (code >= 0x20 && code <= 0x7e) out += character;
+    // Everything else by codepoint, so nothing invisible or reordering can
+    // reach the dialog. Costs legibility for a genuinely non-ASCII path, and
+    // that is the right trade for the one dialog that authorises execution.
+    else out += `\\u{${code.toString(16)}}`;
+  }
+  return `${out}"`;
 }
 
 export function parseTasks(value: unknown, source: TaskSource): ParsedTasks {
@@ -173,13 +217,23 @@ function argsOf(record: Record<string, unknown>): readonly string[] | string {
   if (!Array.isArray(raw)) return 'has args that are not a list';
   for (const arg of raw) {
     if (typeof arg !== 'string') return 'has an argument that is not a string';
+    // See `stringField`. Rust refuses an interior NUL at spawn on both Unix
+    // and Windows, so this was never executable, but it was a fingerprint
+    // collision and the comment on that function claimed it could not be.
+    if (arg.includes('\0')) return 'has an argument containing a NUL';
   }
   return raw as string[];
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | null {
   const value = record[key];
-  return typeof value === 'string' && value.length > 0 ? value : null;
+  if (typeof value !== 'string' || value.length === 0) return null;
+  // JSON can carry a NUL that argv cannot. `taskFingerprint` joins on one and
+  // calls the result collision-free "by construction", which was only true of
+  // `execve`, not of this parser: `{"command":"npm\u0000run"}` and
+  // `{"command":"npm","args":["run"]}` produced the same key. Rejected here so
+  // the claim is a fact about the code rather than about the OS underneath it.
+  return value.includes('\0') ? null : value;
 }
 
 /**

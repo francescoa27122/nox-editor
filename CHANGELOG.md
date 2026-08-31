@@ -6,6 +6,18 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A program that prints without ever starting a new line can no longer take
+  Nox down with it.** Anything Nox supervises and reads line by line, which is
+  a language server's diagnostics, an agent, and now a task, was buffered whole
+  until a newline arrived. A build script that pipes something large through
+  `tr -d '\n'` never sends one, so the buffer grew until the process died and
+  took the unsaved work with it, and the search for that newline restarted from
+  the beginning on every read, so it got slower the longer it went on. A line
+  is capped now: past a megabyte it is handed over as it stands and the next
+  one starts.
+
 ### Added
 
 - **Tasks.** Your project's own commands, from the palette (**Run Task…**) or

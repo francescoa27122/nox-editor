@@ -250,14 +250,78 @@ describe('reading tasks.json', () => {
 describe('the argv fingerprint', () => {
   it('separates on a byte an argument cannot contain', () => {
     // A space would let these two collide, and they are different commands.
-    expect(taskFingerprint({ command: 'x', args: ['a b'] })).not.toBe(
-      taskFingerprint({ command: 'x', args: ['a', 'b'] }),
+    expect(taskFingerprint({ command: 'x', args: ['a b'] }, null)).not.toBe(
+      taskFingerprint({ command: 'x', args: ['a', 'b'] }, null),
     );
+  });
+
+  it('is different in a different folder, for the same argv', () => {
+    // What `npm test` *does* is decided by the package.json beside it, so the
+    // argv alone is not the thing being approved.
+    expect(taskFingerprint({ command: 'npm', args: ['test'] }, '/a')).not.toBe(
+      taskFingerprint({ command: 'npm', args: ['test'] }, '/b'),
+    );
+  });
+
+  it('refuses a NUL rather than letting it collide with the separator', () => {
+    // The comment on `taskFingerprint` called the key collision-free "by
+    // construction". That was a property of execve, not of this parser: JSON
+    // carries a NUL happily, and these two produced the same key.
+    expect(parseTasks({ tasks: [{ id: 'a', command: 'npm\u0000run' }] }, 'user').tasks).toEqual([]);
+    expect(
+      parseTasks({ tasks: [{ id: 'a', command: 'npm', args: ['run\u0000build'] }] }, 'user').tasks,
+    ).toEqual([]);
   });
 
   it('quotes an argument that would otherwise read as two', () => {
     // Presentation only, and never parsed back. It exists so the one dialog
     // whose job is showing what will run cannot show two arguments as one.
+    expect(taskCommandLine({ command: 'git', args: ['commit', '-m', 'a b'] })).toBe(
+      'git commit -m "a b"',
+    );
+  });
+
+  /**
+   * **The property, and not a proxy for it.**
+   *
+   * The first version of this test asserted that two argvs produced different
+   * *JavaScript strings*, which they did even under the bug: `'npm test\u200b'`
+   * has never been `=== 'npm test'`. It passed against the broken renderer and
+   * against the fixed one, so it tested nothing. What matters is whether a
+   * *person* can tell the two lines apart, and the way to hold that is to
+   * refuse the characters that make two strings look the same: anything
+   * invisible, and anything that reorders what is drawn.
+   *
+   * Mutation-checked on 2026-08-30 against both earlier implementations. The
+   * original denylist (`[\s"'\\$`]`) and the `JSON.stringify` allowlist that
+   * replaced it both fail this, because `JSON.stringify` escapes control
+   * characters and passes every non-ASCII one through unchanged.
+   */
+  it('renders every argument as printable ASCII, whatever it contains', () => {
+    const nasty = [
+      'test\u200b', // zero width space: invisible
+      'test\u200c', // zero width non-joiner: also invisible, and not the same
+      '\u202etest', // right-to-left override: reorders what is drawn
+      'fix\u00a0it', // no-break space: draws as a space, is not one
+      'a\u0008b', // backspace
+    ];
+
+    for (const argument of nasty) {
+      const line = taskCommandLine({ command: 'npm', args: [argument] });
+      expect(line, `${JSON.stringify(argument)} reached the dialog unescaped`).toMatch(
+        /^[\x20-\x7e]*$/,
+      );
+    }
+
+    // And the pairs that previously drew identically now do not.
+    const rendered = nasty.map((argument) => taskCommandLine({ command: 'npm', args: [argument] }));
+    expect(new Set(rendered).size).toBe(nasty.length);
+    expect(rendered).not.toContain(taskCommandLine({ command: 'npm', args: ['test'] }));
+  });
+
+  it('leaves an ordinary argument readable', () => {
+    // The escaping is a cost, and it must not be paid by the common case.
+    expect(taskCommandLine({ command: 'npm', args: ['run', 'build'] })).toBe('npm run build');
     expect(taskCommandLine({ command: 'git', args: ['commit', '-m', 'a b'] })).toBe(
       'git commit -m "a b"',
     );
@@ -341,6 +405,38 @@ describe('running', () => {
     (await nthProcess(h.platform, 2)).end(0);
     await third;
     expect(asks).toBe(2);
+  });
+
+  it('asks again for the same argv in a different folder', async () => {
+    // The hole a review found on 2026-08-30. `npm test` means whatever the
+    // package.json beside it says, so an approval given in a repository you
+    // trust must not carry into a stranger's clone opened in the same window.
+    // Keying on the argv alone, this passes silently with no second dialog.
+    const h = await harness({ project: ONE('test', 'npm', ['test']) });
+    harnesses.push(h);
+
+    let asks = 0;
+    h.ui.confirm.subscribe((request) => {
+      if (!request) return;
+      asks += 1;
+      queueMicrotask(() => request.resolve('run'));
+    });
+
+    const first = h.tasks.run('test');
+    (await nthProcess(h.platform, 0)).end(0);
+    await first;
+    expect(asks).toBe(1);
+
+    // A different repository, same task id, same argv.
+    h.platform.seedFile('/other/.nox/tasks.json', ONE('test', 'npm', ['test']));
+    await h.tasks.load('/other');
+
+    const second = h.tasks.run('test');
+    (await nthProcess(h.platform, 1)).end(0);
+    await second;
+
+    expect(asks).toBe(2);
+    expect(h.platform.spawned[1]?.cwd).toBe('/other');
   });
 
   it('forgets approvals when asked, so the next run asks again', async () => {

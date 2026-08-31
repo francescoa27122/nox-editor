@@ -101,6 +101,14 @@
 
   /* --- Accents ---------------------------------------------------------- */
   --nox-accent: #7dd3e0; /* glacial cyan — moonlight on water */
+  /* The primary button's hover. Referenced by `base.css` since the button
+     family was unified and declared nowhere until 2026-08-30, so the rule
+     fell back to `--nox-accent` (the resting colour) and the app's four
+     primary buttons answered the mouse with nothing. The same shape as the
+     `--nox-border-subtle` bug recorded above: an undefined custom property
+     fails silently, which is why `tests/token-definitions.test.ts` now holds
+     every `var(--nox-*)` reference to this file. */
+  --nox-accent-bright: #a3e3ec;
   --nox-accent-dim: #4b8e99;
   --nox-accent-glow: rgba(125, 211, 224, 0.22);
   --nox-violet: #8b7df5; /* twilight — selection, active spine */

@@ -258,7 +258,7 @@ tokens over it as custom properties.
 
 Two limits, and both are deliberate:
 
-- **Colours only.** The 60 tokens a theme may set are the surfaces, states,
+- **Colours only.** The 61 tokens a theme may set are the surfaces, states,
   borders, text, accents, editor colours and the `--nox-syn-*`. Geometry,
   motion, stacking and typography are not themeable. A colour scheme has no
   business resizing the tab bar, and `--nox-dur-*` is zeroed under

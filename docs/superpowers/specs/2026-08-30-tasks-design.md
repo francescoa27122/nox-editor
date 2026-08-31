@@ -143,15 +143,26 @@ to execute (`ui.confirm`, the existing dialog) with the command and every
 argument, says the task came from the repository rather than from the user's
 own file, and runs nothing unless the answer is yes.
 
-**The record it keeps is keyed on a fingerprint of the exact argv, not on the
-task's id.** That is the load-bearing half. Keying on the name would let a
+**The record it keeps is keyed on a fingerprint of the exact argv and the
+folder it will run in, not on the task's id.** That is the load-bearing half. Keying on the name would let a
 repository earn a yes for `test` meaning `npm test`, then change the file (a
 pull, a branch switch, a watcher-driven reload, none of which the user is
 looking at) and inherit the approval for something else under a name already
 trusted.
 Fingerprinting the argv means any edit to what a task runs is a new question.
-The fingerprint is `command` and `args` joined with a NUL, which no argv
-element can contain, so no two distinct argvs can collide by construction.
+**And not the argv alone**, which is what this said until a review on
+2026-08-30. `npm test`, `make` and `cargo test` are argvs whose entire meaning
+comes from the directory they run in, and the directory was not in the key:
+approving `npm test` in a repository you trust and then opening a stranger's
+clone in the same window left the approval standing, with `package.json` in the
+new root deciding what actually ran. The root is part of the key, which also
+means returning to the first repository does not ask again.
+
+The fingerprint is the root, `command` and `args` joined with a NUL, and
+`parseTasks` refuses a task carrying one, so no two distinct keys can collide
+by construction rather than by being unlikely to. (The refusal is the other
+half of that review: JSON carries a NUL happily, `execve` is what cannot, and
+the claim was about the wrong layer.)
 
 **Trust lasts the session and is not written to disk.** This is the same
 granularity `PermissionService` offers for "allow for this session"
@@ -248,15 +259,18 @@ now visible enough to name, and §9 names it.
 
 | Command | Id | |
 |---|---|---|
-| Run Task… | `tasks.run` | Picker of every task, user's and project's, shadowed ones marked |
+| Run Task… | `tasks.run` | Picker of every runnable task, user's and project's, each project one badged. A shadowed task is not runnable and so is not listed; the panel names those. |
 | Run Last Task | `tasks.runLast` | `Mod+Shift+B`, the one chord this feature asks for |
 | Stop Task | `tasks.stop` | Cancels the running job |
 | Show Tasks | `tasks.show` | Opens the panel |
 | Edit Tasks | `tasks.edit` | Creates `<config>/tasks.json` with a worked example and opens it |
 | Forget Approved Tasks | `tasks.forgetTrust` | Drops every session approval from §4 |
 
-All six declare `capabilities: ['shell.exec']` except `tasks.show` and
-`tasks.edit`, which open a panel and a file. `shell.exec` is `deny` by default
+`tasks.run` and `tasks.runLast` declare `capabilities: ['shell.exec']`.
+`tasks.edit` declares `['fs.create']`, because it writes a file. `tasks.show`,
+`tasks.stop` and `tasks.forgetTrust` declare none: opening a panel is not a
+side effect, and stopping is not starting, so gating it would mean a principal
+that may not run a task may not stop one either. `shell.exec` is `deny` by default
 for non-user principals, so an agent asking Nox to run a task is refused
 without a prompt, which is the existing policy and the right one.
 

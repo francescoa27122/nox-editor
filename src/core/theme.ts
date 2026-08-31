@@ -48,7 +48,7 @@ export type ParsedTheme =
 /**
  * Every token a theme may set: the colours, and nothing else.
  *
- * `tokens.css` defines 109; these are the 60 a theme is *about*. What is
+ * `tokens.css` defines 110; these are the 61 a theme is *about*. What is
  * missing is missing on purpose — geometry (`--nox-sp-*`, `--nox-r-*`, the
  * `-h` heights) because a colour scheme has no business resizing the tab bar;
  * motion (`--nox-dur-*`, `--nox-ease`) because the stylesheet zeroes those
@@ -80,7 +80,7 @@ export const THEME_TOKENS: ReadonlySet<string> = new Set([
   'text', 'text-bright', 'text-muted', 'text-faint',
   'text-on-accent', 'text-on-danger',
   // Accents and status
-  'accent', 'accent-dim', 'accent-glow', 'violet', 'violet-dim',
+  'accent', 'accent-bright', 'accent-dim', 'accent-glow', 'violet', 'violet-dim',
   'success', 'warning', 'danger', 'danger-bright', 'info', 'modified',
   'focus-ring-color',
   // The editor surface
