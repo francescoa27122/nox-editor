@@ -260,6 +260,11 @@ export class NoxApp {
         await this.permissions.require({
           principal,
           capability,
+          // Both, and they are not the same thing. The title is what the
+          // prompt says out loud; the id is what a remembered grant is keyed
+          // on, so that answering about one command does not quietly answer
+          // about its siblings. See `grantKey`.
+          commandId: command.id,
           description: command.title,
           ...(resource ? { resource } : {}),
         });
