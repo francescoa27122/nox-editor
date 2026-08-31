@@ -82,13 +82,22 @@ async function type(text) {
  * **`browser.keys(['Enter'])`, not a carriage return in the text**, and this
  * is the one place this file uses the key-event path on purpose.
  *
- * The text path cannot do it. `addValue('\r')` reaches the pty on WebKitGTK,
- * because that driver puts the character into the textarea and xterm forwards
- * what it finds there. On Chromium (Windows and macOS) Element Send Keys
- * dispatches real key events, and a bare carriage return is not one, so the
- * command was typed correctly and then sat at the prompt forever. The CI
- * screen dump said so exactly: `C:\Users\runneradmin>echo NOXE^2E-OK`, no
- * output, no second prompt.
+ * The text path does it on two of the three platforms and not the third, and
+ * the split is the webview rather than the OS. `addValue('\r')` reaches the
+ * pty under **WebKitGTK** (Linux) and **WKWebView** (macOS), because those
+ * drivers put the character into the textarea and xterm forwards what it finds
+ * there. Windows drives **WebView2**, which is Chromium, and the reporter says
+ * so: `msedge 151.0.0.0 windows`. There, Element Send Keys dispatches real key
+ * events, a bare carriage return is not one, and the command was typed
+ * correctly and then sat at the prompt until the wait expired. The CI screen
+ * dump said exactly that: `C:\Users\runneradmin>echo NOXE^2E-OK`, no output
+ * and no second prompt.
+ *
+ * (An earlier draft of this comment put macOS on the Chromium side. CI had
+ * already disproved it: the `\r` run was green on macOS and red only on
+ * Windows. Worth leaving as a note, because the whole point of this file's
+ * header is that a confident sentence about a platform you cannot run is
+ * exactly the thing to check twice.)
  *
  * Enter is safe on the path the rest of this file avoids. The doubling
  * documented at the top of this file duplicates *characters*; a duplicated
