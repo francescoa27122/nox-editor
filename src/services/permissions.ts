@@ -122,6 +122,16 @@ export interface PermissionRequest {
   resource?: string;
   /** What the caller is trying to do, for the prompt. */
   description?: string;
+  /**
+   * The command being dispatched, which is what a remembered grant is scoped
+   * to. See {@link grantKey}.
+   *
+   * Optional because the type is the shape of a *question*, and a caller that
+   * asks one outside the dispatcher is asking on its own behalf rather than a
+   * command's. There is no such caller today: `CommandRegistry`'s guard is the
+   * only one, and it always sets this.
+   */
+  commandId?: string;
 }
 
 /** How a decision was reached. Recorded so an audit can tell them apart. */
@@ -155,6 +165,17 @@ export interface Grant {
   capability: Capability;
   /** The path the grant is confined to, absent when it was asked capability-wide. */
   resource?: string;
+  /** The command the grant is confined to. See {@link grantKey}. */
+  commandId?: string;
+  /**
+   * That command's title, as the prompt spelled it.
+   *
+   * Carried rather than looked up, so the Agents panel can show a grant in the
+   * words the user read without the permission layer knowing a command
+   * registry exists. A grant is a record of an answer, and the question is
+   * part of it.
+   */
+  description?: string;
   /** When the user granted it. */
   at: number;
 }
@@ -309,6 +330,8 @@ export class PermissionService {
           principal: request.principal,
           capability: request.capability,
           ...(request.resource !== undefined ? { resource: request.resource } : {}),
+          ...(request.commandId !== undefined ? { commandId: request.commandId } : {}),
+          ...(request.description !== undefined ? { description: request.description } : {}),
           at: Date.now(),
         },
       ]);
@@ -399,10 +422,24 @@ export function isResourceScoped(capability: Capability): boolean {
 }
 
 /**
- * Key for a remembered grant.
+ * Key for a remembered grant: the principal, the capability, the command, and
+ * the resource where there is one.
  *
- * A capability outside {@link isResourceScoped} remembers at the capability
- * level, which is the granularity it is asked at.
+ * **The command is in the key because it is in the question.** The dialog says
+ * "wants to edit what is open (Apply Reviewed Changes)", so the user answers
+ * about *that* command. Until 2026-08-31 the key held only the capability and
+ * the resource, and `AGENT-PLATFORM.md` defended that as "the granularity each
+ * is asked at" — which was not true of the prompt it described. The live
+ * consequence was `buffer.edit`: `review.apply` and `search.replaceAll` both
+ * declare it and both deliberately name no file, so one bucket held both, and
+ * approving a review the user had just read on screen silently also approved a
+ * project-wide find-and-replace they had never been shown.
+ *
+ * The cost is more prompts: an agent using three editing commands on one file
+ * is asked three times rather than once. That is the honest price of matching
+ * the grant to the question, and the cheap alternative — dropping the command
+ * from the prompt so the narrow key is justified — buys quiet by telling the
+ * user less about what they are agreeing to.
  */
 function grantKey(request: PermissionRequest): string {
   const scope = isResourceScoped(request.capability) ? (request.resource ?? '') : '';
@@ -411,5 +448,5 @@ function grantKey(request: PermissionRequest): string {
   // other text tool. Not hypothetical — it is why `grep -rn "forgetSession"
   // src/` reported the call site in `runtime.ts` and never the definition in
   // this file, which is a good way to conclude a method does not exist.
-  return `${principalKey(request.principal)}\0${request.capability}\0${scope}`;
+  return `${principalKey(request.principal)}\0${request.capability}\0${request.commandId ?? ''}\0${scope}`;
 }

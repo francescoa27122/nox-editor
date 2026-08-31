@@ -260,6 +260,11 @@ export class NoxApp {
         await this.permissions.require({
           principal,
           capability,
+          // Both, and they are not the same thing. The title is what the
+          // prompt says out loud; the id is what a remembered grant is keyed
+          // on, so that answering about one command does not quietly answer
+          // about its siblings. See `grantKey`.
+          commandId: command.id,
           description: command.title,
           ...(resource ? { resource } : {}),
         });
@@ -3163,6 +3168,11 @@ export class NoxApp {
         id: 'search.undoReplace',
         title: 'Undo Last Project Replace',
         category: 'Search',
+        // Writes across every file the replace touched, so the same pair as
+        // `search.replaceAll` and for the same reason, and no `resourceFrom`
+        // for the same reason again: naming the active file would understate
+        // the reach of the grant. Undoing a write is a write.
+        capabilities: ['fs.write', 'buffer.edit'],
         enabled: () => this.search.lastReplace.get() !== null,
         run: () => this.undoProjectReplace(),
       },
@@ -3359,6 +3369,25 @@ export class NoxApp {
         title: 'Reload Window',
         category: 'View',
         keywords: ['refresh', 'restart', 'developer'],
+        /**
+         * `permissions.revoke`, which reads oddly for a command that reloads a
+         * window, and is the capability whose *effect* this has.
+         *
+         * `PermissionService.decisions` and `.grants` are in memory and
+         * nowhere else. A reload destroys the renderer, so dispatching this
+         * erases every standing grant and the entire audit trail that
+         * `AGENT-PLATFORM.md` presents as the record of what an agent was
+         * allowed to do. Until 2026-08-31 it declared nothing, which meant any
+         * plugin could clear that record and the clearing itself would leave
+         * no entry.
+         *
+         * Policy denies `permissions.revoke` outright rather than prompting,
+         * so this is refused for a non-user principal with no dialog, which is
+         * the right answer: "may this plugin restart your editor" is not a
+         * question worth putting on screen when the honest reason to ask is
+         * that it would wipe the log.
+         */
+        capabilities: ['permissions.revoke'],
         // Deliberately unbound. The desktop shell wires no reload of its own,
         // so without this there is no way to get a clean slate short of
         // quitting — which is what makes a stuck-looking window impossible to
@@ -3482,6 +3511,11 @@ export class NoxApp {
         title: 'Reload Plugins',
         category: 'Plugins',
         keywords: ['plugin', 'extension', 'restart'],
+        // `startPluginWorker` starts a process, so this is `shell.exec` even
+        // though nothing here spells a command line. What a plugin *is* was
+        // decided when the user installed it; what this decides is that a new
+        // copy of it gets to run, which is the thing the capability names.
+        capabilities: ['shell.exec'],
         run: async () => {
           // Stop first, then re-discover. `CommandRegistry.register` throws on
           // a duplicate id, so a reload that kept the old registrations would
@@ -3506,6 +3540,9 @@ export class NoxApp {
       {
         id: 'themes.reload',
         title: 'Reload Themes',
+        // No `capabilities`: re-reads Nox's own theme files and repaints.
+        // Nothing is written and no process starts, which is what separates
+        // this from `plugins.reload` and `lsp.reload` next to it.
         category: 'View',
         keywords: ['theme', 'colour', 'color', 'refresh'],
         run: async () => {
@@ -3543,6 +3580,7 @@ export class NoxApp {
       {
         id: 'snippets.reload',
         title: 'Reload Snippets',
+        // No `capabilities`: re-reads `snippets.json` and nothing else.
         category: 'Snippets',
         keywords: ['snippets.json', 'refresh'],
         run: async () => {
@@ -3570,6 +3608,11 @@ export class NoxApp {
         title: 'Reload Language Servers',
         category: 'Language',
         keywords: ['servers.json', 'lsp', 'restart'],
+        // Re-reads `servers.json` and then calls `startLanguageServer` for
+        // each entry, so the same argument as `plugins.reload`: this is what
+        // makes a process run, and the file it reads is one a repository can
+        // ship.
+        capabilities: ['shell.exec'],
         run: async () => {
           const previous = this.serverRegistry.servers.get();
           await this.serverRegistry.load();
@@ -3736,6 +3779,9 @@ export class NoxApp {
       {
         id: 'agents.reloadConfig',
         title: 'Reload Agent Configuration',
+        // No `capabilities`: re-reads `agents.json`. It changes which agents
+        // are *offered*; `agents.run` is what starts one, and that declares
+        // `net.request`.
         category: 'Agents',
         run: async () => {
           await this.agentConfig.load();
@@ -3750,6 +3796,9 @@ export class NoxApp {
       {
         id: 'agents.cancel',
         title: 'Stop the Running Agent',
+        // No `capabilities`, by `tasks.stop`'s argument: stopping is not
+        // starting, and gating it would mean a principal that may not run an
+        // agent may not stop one either.
         category: 'Agents',
         keywords: ['abort', 'kill'],
         enabled: () => this.agents.sessions.get().some((s) => s.status === 'running'),
@@ -3761,6 +3810,22 @@ export class NoxApp {
       {
         id: 'agents.undoLastSession',
         title: 'Undo the Last Agent Session',
+        /**
+         * Two, because `undoSession` does two things: it reverts the buffers
+         * the agent wrote (`buffer.edit`) and it revokes that session's
+         * standing grants (`permissions.revoke`), which is the welding the
+         * Known debt table already records.
+         *
+         * `permissions.revoke` is denied by policy, so in practice this is
+         * refused for any non-user principal, and that is the intended
+         * reading rather than a side effect of the pairing: an agent that can
+         * undo its own session can erase what it did and the record of what
+         * it was allowed to do, in one dispatch.
+         *
+         * No `resourceFrom`: this reverts whichever files that session wrote,
+         * and the active tab need not be one of them.
+         */
+        capabilities: ['buffer.edit', 'permissions.revoke'],
         category: 'View',
         keywords: ['revert', 'take back', 'ai'],
         enabled: () => this.agents.sessions.get().some((s) => this.agents.changesBy(s.id).length > 0),
@@ -3857,6 +3922,7 @@ export class NoxApp {
       {
         id: 'jobs.cancel',
         title: 'Cancel Background Task',
+        // No `capabilities`: same as `tasks.stop` and `agents.cancel`.
         category: 'View',
         keywords: ['stop', 'abort', 'search', 'replace', 'job'],
         // A job with room for exactly one offered here — same as the
@@ -4398,6 +4464,12 @@ export class NoxApp {
         category: 'Terminal',
         keyHint: 'Ctrl+`',
         keywords: ['shell', 'console', 'command line'],
+        // Opening the panel is what starts the shell: `App.svelte` mounts
+        // `TerminalPanel` the first time `terminalOpen` goes true, and the
+        // panel opens a pty. So a command whose body is one `toggle` call is
+        // nonetheless the thing that runs a login shell in the workspace
+        // directory, and `shell.exec` is denied by policy for exactly that.
+        capabilities: ['shell.exec'],
         // Hidden rather than disabled on the browser target: a command that
         // can never run is noise in the palette, not a discovery.
         enabled: () => this.terminal.available,
@@ -4408,6 +4480,10 @@ export class NoxApp {
         title: 'Focus Terminal',
         category: 'Terminal',
         keywords: ['shell', 'console'],
+        // `UIService.focusTerminal` sets `terminalOpen` before it moves focus,
+        // so this opens the panel when it was closed and starts a shell the
+        // same way `terminal.toggle` does. Named "focus" and not exempt for it.
+        capabilities: ['shell.exec'],
         enabled: () => this.terminal.available,
         run: () => this.ui.focusTerminal(),
       },
@@ -4416,6 +4492,10 @@ export class NoxApp {
         title: 'Restart Terminal',
         category: 'Terminal',
         keywords: ['shell', 'new', 'kill'],
+        // Kills the running shell and starts another. The kill half needs no
+        // capability, by `tasks.stop`'s argument; the start half is the whole
+        // of `shell.exec`.
+        capabilities: ['shell.exec'],
         enabled: () => this.terminal.available,
         run: () => {
           // The panel owns the measured size, so it does the restart; this
@@ -4588,8 +4668,14 @@ export class NoxApp {
         title: 'New Note from Selection',
         category: 'Notes',
         keywords: ['note', 'selection', 'quote', 'anchor', 'annotate'],
-        // No `capabilities`: reads the active buffer and writes a note.
-        // Neither touches the workspace filesystem.
+        // Writes a note, which is a file, so `fs.create` like `notes.new`.
+        // The comment here used to argue the opposite, that a note is not the
+        // workspace filesystem and so needs nothing. That is true of *where*
+        // the file lands and beside the point: `agents.configure` declares
+        // `fs.create` for a file in the same directory, and a rule that
+        // exempts writes by their destination is a rule with a directory-
+        // shaped hole in it.
+        capabilities: ['fs.create'],
         enabled: () => this.#selectionSeed() !== null,
         run: () => this.#newNoteFromSelection(),
       },
@@ -4631,6 +4717,10 @@ export class NoxApp {
         title: 'New Note',
         category: 'Notes',
         keywords: ['note', 'create', 'add'],
+        // Notes are files in the config directory, and a file Nox owns is
+        // still a file. The four writing note commands declare accordingly;
+        // `notes.open` and `notes.focus` move a selection and do not.
+        capabilities: ['fs.create'],
         run: () => {
           this.notes.create();
           this.revealNotes();
@@ -4640,6 +4730,7 @@ export class NoxApp {
         id: 'notes.rename',
         title: 'Rename Note',
         category: 'Notes',
+        capabilities: ['fs.write'],
         enabled: () => this.notes.selectedId.get() !== null,
         run: () => void this.#renameSelectedNote(),
       },
@@ -4648,6 +4739,7 @@ export class NoxApp {
         title: 'Delete Note',
         category: 'Notes',
         keywords: ['remove', 'trash'],
+        capabilities: ['fs.delete'],
         enabled: () => this.notes.selectedId.get() !== null,
         run: () => void this.#deleteSelectedNote(),
       },
@@ -4696,6 +4788,10 @@ export class NoxApp {
       {
         id: 'prefs.reset',
         title: 'Reset All Settings',
+        // Rewrites `settings.json` wholesale. The confirmation dialog is not
+        // the gate: it never says who asked, so a plugin dispatching this
+        // shows the user a question that looks like their own click.
+        capabilities: ['fs.write'],
         category: 'Preferences',
         run: async () => {
           const choice = await this.ui.askToConfirm({

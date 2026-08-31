@@ -102,6 +102,18 @@ describe('design tokens', () => {
       ['accent', 'accent-bright'],
       ['accent', 'accent-dim'],
       ['danger', 'danger-bright'],
+      // The editor's outlines, which joined the vocabulary on 2026-08-31.
+      // Each was an `rgba()` literal in `editor/theme.ts` sitting beside a
+      // fill that was already themeable, which is the same failure as
+      // `accent-bright` and reads worse: a matching bracket whose wash the
+      // theme moved and whose border it did not.
+      ['match-bracket', 'match-bracket-outline'],
+      ['search-match', 'search-match-outline'],
+      ['search-match-active', 'search-match-active-outline'],
+      // `.cm-nonmatchingBracket` takes its *text* colour from `--nox-danger`,
+      // so a theme recolouring danger used to move the glyph and leave the
+      // wash behind it red.
+      ['danger', 'nonmatching-bracket'],
     ];
 
     const absent = pairs
