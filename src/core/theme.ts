@@ -84,9 +84,11 @@ export const THEME_TOKENS: ReadonlySet<string> = new Set([
   'success', 'warning', 'danger', 'danger-bright', 'info', 'modified',
   'focus-ring-color',
   // The editor surface
-  'cursor', 'selection', 'selection-blur', 'line-active', 'match-bracket',
-  'search-match', 'search-match-active', 'gutter-fg', 'gutter-active-fg',
-  'plugin-highlight',
+  'cursor', 'selection', 'selection-blur', 'selection-match', 'line-active',
+  'match-bracket', 'match-bracket-outline', 'nonmatching-bracket',
+  'search-match', 'search-match-outline',
+  'search-match-active', 'search-match-active-outline',
+  'gutter-fg', 'gutter-active-fg', 'plugin-highlight',
   // Syntax
   'syn-keyword', 'syn-string', 'syn-number', 'syn-comment', 'syn-function',
   'syn-variable', 'syn-type', 'syn-constant', 'syn-operator', 'syn-property',
