@@ -977,9 +977,24 @@ export class WorkspaceService {
     const written = buffer.state.doc;
     const writtenCount = buffer.changeCount;
 
+    // The formatting as targeted changes, never one replacement of the whole
+    // document: CodeMirror maps a position strictly inside a replaced range
+    // to its start, so the replacement sent every cursor to offset 0, and the
+    // `buffer-reset` that followed cost the pane its scroll position too.
+    // Applied as changes, everything outside the edited spans maps through
+    // untouched and the pane needs no reset at all.
+    const formatting: { from: number; to?: number; insert?: string }[] = [];
     let text = written.toString();
-    if (options.trimTrailingWhitespace) text = text.replace(/[ \t]+$/gm, '');
-    if (options.insertFinalNewline && text.length > 0 && !text.endsWith('\n')) text += '\n';
+    if (options.trimTrailingWhitespace) {
+      for (const match of text.matchAll(/[ \t]+$/gm)) {
+        formatting.push({ from: match.index, to: match.index + match[0].length });
+      }
+      text = text.replace(/[ \t]+$/gm, '');
+    }
+    if (options.insertFinalNewline && text.length > 0 && !text.endsWith('\n')) {
+      formatting.push({ from: written.length, insert: '\n' });
+      text += '\n';
+    }
 
     const onDisk = encode(text, buffer.eol, buffer.encoding);
 
@@ -1005,16 +1020,15 @@ export class WorkspaceService {
       buffer.savedChangeCount = writtenCount;
     } else {
       // Formatting on save changes the document, so push it back into the
-      // state as a real transaction — the user can undo it.
-      if (text !== written.toString()) {
-        const transaction = buffer.state.update({
-          changes: { from: 0, to: buffer.state.doc.length, insert: text },
-          scrollIntoView: false,
-        });
-        buffer.state = transaction.state;
-        buffer.changeCount++;
-        buffer.revision++;
-        this.events.emit('buffer-reset', { id });
+      // state as a real transaction — the user can undo it. Through the live
+      // view where there is one, as a reload does, so the selection maps.
+      if (formatting.length > 0) {
+        const spec: TransactionSpec = { changes: formatting, scrollIntoView: false };
+        if (!this.#dispatchToView(id, spec)) {
+          buffer.state = buffer.state.update(spec).state;
+          buffer.changeCount++;
+          buffer.revision++;
+        }
       }
 
       buffer.savedDoc = buffer.state.doc;
@@ -1137,7 +1151,8 @@ export class WorkspaceService {
     buffer.savedEol = eol;
     buffer.encoding = encoding;
 
-    if (doc === buffer.state.doc.toString()) {
+    const before = buffer.state.doc.toString();
+    if (doc === before) {
       // Identical content: record the new mtime and leave the document alone
       // rather than pushing a no-op onto the undo stack.
       buffer.diskMtime = mtime;
@@ -1147,7 +1162,7 @@ export class WorkspaceService {
     }
 
     const spec: TransactionSpec = {
-      changes: { from: 0, to: buffer.state.doc.length, insert: doc },
+      changes: minimalChange(before, doc),
       scrollIntoView: false,
     };
 
@@ -1966,6 +1981,38 @@ function decode(raw: string, reported: Encoding = 'utf-8'): { doc: string; eol: 
 function encode(doc: string, eol: Eol, encoding: Encoding): string {
   const body = eol === '\r\n' ? doc.replace(/\n/g, '\r\n') : doc;
   return encoding === 'utf-8-bom' ? BOM + body : body;
+}
+
+/**
+ * The one change that turns `before` into `after`, trimmed to the span that
+ * actually differs.
+ *
+ * A reload used to replace `[0, length)` with the new text, and CodeMirror
+ * maps every position strictly inside a replaced range to its start, so the
+ * cursor landed at offset 0 on every external rewrite while the viewport
+ * stayed where it was. Trimming the common prefix and suffix keeps every
+ * cursor, fold and mark outside the rewritten span exactly where it was; one
+ * inside it lands at the start of what changed, the nearest position that
+ * still means anything. A line diff would place those better, but this is
+ * one linear pass with no allocation, which is what makes it safe on a file
+ * at the size limit.
+ */
+function minimalChange(before: string, after: string): { from: number; to: number; insert: string } {
+  const shortest = Math.min(before.length, after.length);
+  let prefix = 0;
+  while (prefix < shortest && before.charCodeAt(prefix) === after.charCodeAt(prefix)) prefix++;
+  let suffix = 0;
+  while (
+    suffix < shortest - prefix &&
+    before.charCodeAt(before.length - 1 - suffix) === after.charCodeAt(after.length - 1 - suffix)
+  ) {
+    suffix++;
+  }
+  // Never cut between the halves of a surrogate pair: the boundary is not a
+  // position a cursor can sit at, and both strings hold the same half there.
+  if (prefix > 0 && (before.charCodeAt(prefix - 1) & 0xfc00) === 0xd800) prefix--;
+  if (suffix > 0 && (before.charCodeAt(before.length - suffix) & 0xfc00) === 0xdc00) suffix--;
+  return { from: prefix, to: before.length - suffix, insert: after.slice(prefix, after.length - suffix) };
 }
 
 /**
