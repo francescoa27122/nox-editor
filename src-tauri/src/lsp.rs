@@ -74,6 +74,16 @@ pub struct MessageStream {
     buffer: Vec<u8>,
 }
 
+/// The largest body `MessageStream` will wait for: 256 MiB.
+///
+/// A `Content-Length` is a promise about bytes that have not arrived yet, so
+/// without a ceiling one corrupt or hostile header parks the reader waiting
+/// for gigabytes that never come, and nothing reports it. The number is far
+/// above anything the protocol produces (a full-workspace diagnostics push
+/// or a large completion list is single-digit megabytes) and far below the
+/// range where the offset arithmetic could wrap.
+pub const MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
+
 impl MessageStream {
     /// Take some bytes; return every complete message they finished.
     ///
@@ -113,17 +123,30 @@ impl MessageStream {
                 return Err("lsp: message with no Content-Length".to_string());
             };
 
+            if length > MAX_BODY_BYTES {
+                return Err(format!("lsp: Content-Length {length} is above the {MAX_BODY_BYTES} byte limit"));
+            }
+
+            // `checked_add`, not `+`: a length near `usize::MAX` parses, and
+            // in release the sum wrapped to a small number, the check below
+            // passed on it, and the slice panicked on a thread outside any
+            // Tauri catch. With `panic = "abort"` that was the whole editor.
+            // The cap above makes this unreachable today; it stays because
+            // the cap is a policy and this is the arithmetic.
             let body_start = header_end + 4;
-            if self.buffer.len() < body_start + length {
+            let Some(body_end) = body_start.checked_add(length) else {
+                return Err(format!("lsp: Content-Length {length} out of range"));
+            };
+            if self.buffer.len() < body_end {
                 return Ok(out); // Body still arriving.
             }
 
-            let body = &self.buffer[body_start..body_start + length];
+            let body = &self.buffer[body_start..body_end];
             let message = String::from_utf8(body.to_vec())
                 .map_err(|_| "lsp: body was not utf-8".to_string())?;
             out.push(message);
 
-            self.buffer.drain(..body_start + length);
+            self.buffer.drain(..body_end);
         }
     }
 }
@@ -534,6 +557,54 @@ mod tests {
     fn errors_on_an_unparseable_length() {
         let mut stream = MessageStream::default();
         assert!(stream.push(b"Content-Length: abc\r\n\r\n{}").is_err());
+    }
+
+    /// Guards A6-001: a length that parses but cannot be added to the body
+    /// offset. In release `body_start + length` wrapped, the "still arriving"
+    /// test passed on the wrapped value, and the slice panicked; the reader
+    /// thread is outside any Tauri catch and the release profile is
+    /// `panic = "abort"`, so one header from a language server took the
+    /// whole editor down. `Err` is the framing-lost path the reader already
+    /// reports and stops on. This catches the header alone; it does not
+    /// exercise the thread that would have died.
+    #[test]
+    fn errors_on_a_length_that_overflows_the_body_offset() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n{{}}", usize::MAX);
+        assert!(stream.push(header.as_bytes()).is_err());
+    }
+
+    /// The other edge of the same band. This header is 40 bytes, so a length
+    /// of `usize::MAX - 39` is the smallest value whose sum with the body
+    /// offset wraps to exactly zero, and one less than it merely waits for a
+    /// body that never comes. Pinned separately because an off-by-one in the
+    /// guard would let this one through while the `usize::MAX` case passed.
+    #[test]
+    fn errors_on_a_length_that_overflows_by_exactly_one() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n{{}}", usize::MAX - 39);
+        assert_eq!(header.find("{}"), Some(40), "the test assumes a 40-byte header");
+        assert!(stream.push(header.as_bytes()).is_err());
+    }
+
+    /// A length that does not overflow but could never be satisfied. Before
+    /// the cap this returned `Ok(empty)` and the reader waited forever for
+    /// gigabytes that were never coming; a corrupt header now ends the
+    /// session with a reason instead of a silent hang.
+    #[test]
+    fn errors_on_a_length_above_the_body_cap() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n", MAX_BODY_BYTES + 1);
+        assert!(stream.push(header.as_bytes()).is_err());
+    }
+
+    /// The cap is inclusive: a body exactly at the limit is still a body
+    /// worth waiting for, so the boundary is a wait rather than an error.
+    #[test]
+    fn a_length_at_the_body_cap_still_waits_for_its_body() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n", MAX_BODY_BYTES);
+        assert!(stream.push(header.as_bytes()).unwrap().is_empty());
     }
 
     #[test]
