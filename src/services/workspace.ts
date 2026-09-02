@@ -6,7 +6,7 @@ import {
   type Extension,
   type StateCommand,
   type StateEffect,
-  type Text,
+  Text,
   type Transaction,
   type TransactionSpec,
 } from '@codemirror/state';
@@ -970,7 +970,14 @@ export class WorkspaceService {
     const buffer = this.#map.get(id);
     if (!buffer || buffer.path === null) return false;
 
-    let text = buffer.state.doc.toString();
+    // What the save is writing, captured before the await below. A keystroke
+    // can land while the write is in flight, and the document after the
+    // await is then not the document that went to disk. Everything past the
+    // write compares against these, never against the live state.
+    const written = buffer.state.doc;
+    const writtenCount = buffer.changeCount;
+
+    let text = written.toString();
     if (options.trimTrailingWhitespace) text = text.replace(/[ \t]+$/gm, '');
     if (options.insertFinalNewline && text.length > 0 && !text.endsWith('\n')) text += '\n';
 
@@ -986,21 +993,33 @@ export class WorkspaceService {
       return false;
     }
 
-    // Formatting on save changes the document, so push it back into the state
-    // as a real transaction — the user can undo it.
-    if (text !== buffer.state.doc.toString()) {
-      const transaction = buffer.state.update({
-        changes: { from: 0, to: buffer.state.doc.length, insert: text },
-        scrollIntoView: false,
-      });
-      buffer.state = transaction.state;
-      buffer.changeCount++;
-      buffer.revision++;
-      this.events.emit('buffer-reset', { id });
-    }
+    if (buffer.changeCount !== writtenCount) {
+      // The user typed during the write. The document is theirs now, and
+      // replacing it with what was written would revert those keystrokes,
+      // which was the failure here: the revert merged with the keystroke into
+      // one history event, so undo could not reach the text either. The
+      // formatting is skipped (the next save applies it), and the buffer is
+      // dirty by exactly the edits that arrived: `savedDoc` is the text that
+      // actually reached the disk, and the count is the one it was made at.
+      buffer.savedDoc = Text.of(text.split('\n'));
+      buffer.savedChangeCount = writtenCount;
+    } else {
+      // Formatting on save changes the document, so push it back into the
+      // state as a real transaction — the user can undo it.
+      if (text !== written.toString()) {
+        const transaction = buffer.state.update({
+          changes: { from: 0, to: buffer.state.doc.length, insert: text },
+          scrollIntoView: false,
+        });
+        buffer.state = transaction.state;
+        buffer.changeCount++;
+        buffer.revision++;
+        this.events.emit('buffer-reset', { id });
+      }
 
-    buffer.savedDoc = buffer.state.doc;
-    buffer.savedChangeCount = buffer.changeCount;
+      buffer.savedDoc = buffer.state.doc;
+      buffer.savedChangeCount = buffer.changeCount;
+    }
     buffer.savedEol = buffer.eol;
     buffer.externalState = 'none';
 

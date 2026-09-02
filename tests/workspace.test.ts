@@ -1,5 +1,6 @@
 import { EditorSelection } from '@codemirror/state';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { Encoding } from '../src/core/encoding';
 import { MemoryPlatform } from '../src/platform/memory';
 import { WorkspaceService } from '../src/services/workspace';
 
@@ -174,7 +175,96 @@ describe('saving', () => {
     expect(await workspace.saveAs(id, '/nonexistent/dir/x.md')).toBe(false);
     expect(workspace.activeSnapshot()?.path).toBe('/work/README.md');
   });
+
+  /**
+   * Guards A3-001: a keystroke typed while the write was in flight used to be
+   * reverted by the whole-document replacement `save` made afterwards, and
+   * the buffer then reported clean, so the character was on disk nowhere and
+   * not reachable by undo either (the replacement merged with the keystroke
+   * into one history event). The write is held open so the keystroke lands
+   * exactly in that window, which `MemoryPlatform` normally closes on the next
+   * microtask.
+   *
+   * Does not catch the double-save variant (two `save` calls in flight at
+   * once), which has no gate here.
+   */
+  it('keeps a keystroke typed while the write is in flight, and stays dirty by it', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/alpha.txt', 'alpha\n');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/alpha.txt'))!;
+    const type = (text: string) =>
+      workspace.applyTransaction(
+        id,
+        workspace.stateOf(id)!.update({ changes: { from: 0, insert: text } }),
+      );
+
+    type('A');
+    const gate = platform.holdWrite('/work/alpha.txt');
+    const saving = workspace.save(id, { insertFinalNewline: true });
+    await gate.started;
+    type('B');
+    gate.release();
+    expect(await saving).toBe(true);
+
+    // The write carried what the document said when the save began.
+    expect(await platform.readTextFile('/work/alpha.txt')).toBe('Aalpha\n');
+    // The keystroke that arrived during it is still in the buffer, and the
+    // buffer is dirty by exactly that keystroke.
+    expect(workspace.textOf(id)).toBe('BAalpha\n');
+    expect(workspace.activeSnapshot()?.isDirty).toBe(true);
+  });
+
+  it('still applies the formatting when nothing was typed during the write', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/tail.txt', 'a');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/tail.txt'))!;
+
+    const gate = platform.holdWrite('/work/tail.txt');
+    const saving = workspace.save(id, { insertFinalNewline: true });
+    await gate.started;
+    gate.release();
+    expect(await saving).toBe(true);
+
+    expect(await platform.readTextFile('/work/tail.txt')).toBe('a\n');
+    expect(workspace.textOf(id)).toBe('a\n');
+    expect(workspace.activeSnapshot()?.isDirty).toBe(false);
+  });
 });
+
+/**
+ * Holds one `writeEncodedFile` call open so a test can act while the write is
+ * genuinely in flight. `started` resolves the instant the write is reached,
+ * and the write proceeds only once `release()` is called. The same shape
+ * `tests/notes.test.ts` uses for config writes.
+ */
+class GatedPlatform extends MemoryPlatform {
+  #writes = new Map<string, { markStarted: () => void; blocked: Promise<void> }>();
+
+  holdWrite(path: string): { started: Promise<void>; release: () => void } {
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#writes.set(path, { markStarted, blocked });
+    return { started, release };
+  }
+
+  override async writeEncodedFile(path: string, contents: string, encoding: Encoding): Promise<void> {
+    const gate = this.#writes.get(path);
+    if (gate) {
+      this.#writes.delete(path);
+      gate.markStarted();
+      await gate.blocked;
+    }
+    await super.writeEncodedFile(path, contents, encoding);
+  }
+}
 
 describe('tabs', () => {
   it('inserts new tabs after the active one', async () => {
