@@ -191,6 +191,14 @@ pub fn nox_agent_spawn(
 
 /// Send one line to an agent's stdin. The newline is added here so a caller
 /// cannot half-send a message by forgetting it.
+///
+/// Stays a plain `#[tauri::command]` on purpose, with `nox_lsp_send` and
+/// `nox_pty_write`. A sync body runs to completion before the next IPC
+/// message is read, so two sends issued back to back reach the agent in that
+/// order whether or not the caller awaited the first. `stdio.ts` does await
+/// each one today; the guarantee is kept here so a caller that stops doing so
+/// cannot swap two lines. Under `(async)` each send would be its own pool
+/// task racing for the registry lock.
 #[tauri::command]
 pub fn nox_agent_send(state: State<'_, AgentState>, id: String, line: String) -> Result<()> {
     let mut agents = state.0.lock().map_err(poisoned)?;

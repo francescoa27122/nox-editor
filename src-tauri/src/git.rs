@@ -14,11 +14,14 @@
 //! practice.
 //!
 //! `nox_git_blame` shares that contract and that opening, since both reach a
-//! file through `repo_and_relpath`, and differs in one way that matters: it is
-//! the crate's only `#[tauri::command(async)]`, because it is the only git
+//! file through `repo_and_relpath`, and differs in one way that matters: it was
+//! the crate's first `#[tauri::command(async)]`, because it is the only git
 //! read here whose cost scales with a file's *history* rather than with one
 //! blob, and a sync command body runs on the thread that must also draw the
-//! window. Its own doc comment carries the argument.
+//! window. Its own doc comment carries the argument. Every other command in
+//! this module is `(async)` now for the same reason: a commit runs whatever
+//! hooks the repository has, a switch checks out a tree, and a status on a
+//! cold cache scans the index, none of which the window should wait for.
 //!
 //! No timeout on `output()`. `git show` against a local repo does not hang in
 //! practice, and if it ever did the cost is a gutter that never arrives —
@@ -199,7 +202,7 @@ fn repo_relative(toplevel: &str, path: &str) -> Result<String> {
 /// large status must not fail the whole call and blank the panel — a
 /// replacement character in one row is the correct degraded state, the same
 /// principle `git_error` already applies to failure messages.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_git_status(root: String) -> Result<String> {
     let top = repo_toplevel(Path::new(&root))?;
     let output = run_git_ok(Path::new(&root), &["status", "--porcelain=v2", "--branch", "-z"])?;
@@ -208,7 +211,7 @@ pub fn nox_git_status(root: String) -> Result<String> {
 }
 
 /// Raw local branch list, one short refname per line.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_git_branches(root: String) -> Result<String> {
     let output = run_git_ok(
         Path::new(&root),
@@ -219,7 +222,7 @@ pub fn nox_git_branches(root: String) -> Result<String> {
 
 /// `git add`. Argv-fixed; `--literal-pathspecs` so a `*` or `:` in a real
 /// filename is a filename, and `--` so nothing is ever read as an option.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_git_stage(root: String, paths: Vec<String>) -> Result<()> {
     let top = repo_toplevel(Path::new(&root))?;
     let mut args: Vec<String> = vec!["--literal-pathspecs".into(), "add".into(), "--".into()];
@@ -237,7 +240,7 @@ pub fn nox_git_stage(root: String, paths: Vec<String>) -> Result<()> {
 /// fails with "fatal: could not resolve HEAD" on a repo with no commits yet
 /// (an unborn branch, e.g. right after `git init`), while pathspec-limited
 /// `reset` handles that case cleanly.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_git_unstage(root: String, paths: Vec<String>) -> Result<()> {
     // An empty pathspec list after `--` is not "nothing to do" to git — it is
     // `git reset --`, bare, which resets the *entire* index to HEAD. A caller
@@ -260,7 +263,7 @@ pub fn nox_git_unstage(root: String, paths: Vec<String>) -> Result<()> {
 /// contain quotes, dashes, anything. Never `-a`, never pathspecs: what you
 /// staged is what lands. Hooks and signing run because git runs them; a
 /// refusal is surfaced verbatim.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_git_commit(root: String, message: String) -> Result<String> {
     use std::process::Stdio;
 
@@ -318,7 +321,7 @@ pub fn nox_git_commit(root: String, message: String) -> Result<String> {
 /// (a read) so the only strings reaching the write are ones git itself
 /// blessed. Never `-f`: a refusal over dirty files is git's to make and
 /// ours to show.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_git_switch(root: String, name: String, create: bool) -> Result<()> {
     let dir = Path::new(&root);
     run_git_ok(dir, &["check-ref-format", "--branch", &name])?;
@@ -358,7 +361,7 @@ pub fn nox_git_switch(root: String, name: String, create: bool) -> Result<()> {
 const INDEX_STAGES: [u8; 3] = [0, 2, 1];
 
 /// The index's version of the file, or `None` when there isn't one.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_git_file_base(path: String) -> Result<Option<String>> {
     let Some((root, relpath)) = repo_and_relpath(&path) else {
         return Ok(None);
@@ -434,7 +437,7 @@ fn repo_and_relpath(path: &str) -> Option<(String, String)> {
 /// construction, and "not committed yet" becomes a fact git computed rather
 /// than one the renderer inferred.
 ///
-/// **The one `#[tauri::command(async)]` in the crate, and it is deliberate.**
+/// **The first `#[tauri::command(async)]` in the crate, and it is deliberate.**
 /// A sync command body runs inline on the thread that handles the IPC
 /// message, which is the main thread, so its duration is the window's
 /// duration. For

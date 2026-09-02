@@ -282,6 +282,11 @@ pub fn nox_pty_open(
 /// Raw, with no newline added — unlike `nox_agent_send`. Keystrokes are what
 /// arrives here, and a terminal distinguishes Return from Ctrl-C from an
 /// arrow key by the exact bytes it is given.
+///
+/// Stays a plain `#[tauri::command]` on purpose. Keystrokes are sent without
+/// being awaited, and a sync body runs to completion before the next IPC
+/// message is read, so they reach the shell in the order they were typed.
+/// Under `(async)` each would be its own pool task and two could swap.
 #[tauri::command]
 pub fn nox_pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<()> {
     let mut sessions = state.0.lock().map_err(poisoned)?;

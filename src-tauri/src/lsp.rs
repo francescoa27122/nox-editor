@@ -343,6 +343,12 @@ pub fn nox_lsp_start(
 
 /// Send one message. The framing is added here so a caller cannot half-send a
 /// message by computing its length on the wrong side of the encoding.
+///
+/// Stays a plain `#[tauri::command]` on purpose. `didChange` notifications are
+/// fired without being awaited, and a sync body runs to completion before the
+/// next IPC message is read, which is what keeps their versions in order.
+/// Under `(async)` two sends would race for the registry lock and a version
+/// could go backwards at the server.
 #[tauri::command]
 pub fn nox_lsp_send(state: State<'_, LspState>, id: String, message: String) -> Result<()> {
     let mut servers = state.0.lock().map_err(poisoned)?;
