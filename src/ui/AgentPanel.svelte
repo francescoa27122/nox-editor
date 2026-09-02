@@ -85,6 +85,7 @@
     proposal: 'file',
     summary: 'check',
     error: 'warning',
+    elided: 'info',
   };
 
   function describe(action: AgentAction): string {
@@ -104,6 +105,8 @@
         return `${action.description} · ${action.hunks} in ${action.files}`;
       case 'error':
         return action.message;
+      case 'elided':
+        return `${action.count} earlier ${action.count === 1 ? 'action' : 'actions'} dropped`;
     }
   }
 

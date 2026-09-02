@@ -45,6 +45,31 @@ const SELECTION_MAX_LINES = 200;
 const SELECTION_MAX_CHARS = 8_000;
 
 /**
+ * How many actions a session's trail keeps.
+ *
+ * Before this there was no cap, and every append copied the whole array and
+ * republished it, so a chatty agent made each note cost more than the last:
+ * measured, 32,000 notes took 2.7 s of main-thread time and the panel renders
+ * every one. The oldest are dropped behind one marker that counts them, so
+ * the trail still says that something was lost and how much. Newest kept
+ * rather than oldest, because the newest is what explains the state the
+ * session is in now.
+ */
+export const TRAIL_LIMIT = 2_000;
+
+/**
+ * How many protocol requests one session may make before it is stopped.
+ *
+ * The stdio transport's only deadline is silence, which an agent in a loop
+ * never falls into, and `maxTurns` bounds only the Ollama provider. This is
+ * the bound that covers every transport, and it is generous on purpose: a
+ * real session is tens of requests, so the number is not tuning but a ceiling
+ * a looping agent hits and a working one never sees. A runtime constant, not
+ * an `agents.json` key: a per-agent override is the config schema's business.
+ */
+export const REQUEST_BUDGET = 5_000;
+
+/**
  * The instruction **Explain Selection** sends.
  *
  * Here rather than in `app.ts` so a test can assert the string that actually
@@ -111,7 +136,28 @@ export type AgentAction =
       hunks: number;
     }
   | { kind: 'summary'; at: number; text: string }
-  | { kind: 'error'; at: number; message: string };
+  | { kind: 'error'; at: number; message: string }
+  /** Stands in for the oldest actions once the trail passed `TRAIL_LIMIT`. */
+  | { kind: 'elided'; at: number; count: number };
+
+/**
+ * Keep the newest `limit` entries of a trail, the oldest behind a marker.
+ *
+ * The marker is the first entry and carries the running total, so capping a
+ * trail that was already capped adds to the count rather than restarting it.
+ * Its timestamp is that of the newest action it replaced, which is when the
+ * dropping happened. Pure and exported so the arithmetic is testable without
+ * running a session of two thousand notes.
+ */
+export function capTrail(actions: AgentAction[], limit = TRAIL_LIMIT): AgentAction[] {
+  if (actions.length <= limit) return actions;
+  const first = actions[0];
+  const already = first?.kind === 'elided' ? first.count : 0;
+  const kept = actions.slice(actions.length - limit);
+  const dropped = actions.length - kept.length - (first?.kind === 'elided' ? 1 : 0);
+  const at = actions[actions.length - kept.length - 1]?.at ?? Date.now();
+  return [{ kind: 'elided', at, count: already + dropped }, ...kept];
+}
 
 /**
  * An action minus its timestamp, which the recorder stamps.
@@ -355,7 +401,11 @@ export class AgentRuntime {
     const about = new Signal<AnswerTarget | null>(null);
 
     const record = (action: NewAction) => {
-      actions.update((current) => [...current, { ...action, at: Date.now() }]);
+      // Capped on every append. With the cap in place the copy below is
+      // bounded, and so is what `#publish` hands the panel: a snapshot
+      // carries the array by reference, so republishing is the cost of the
+      // session list, not of the trail.
+      actions.update((current) => capTrail([...current, { ...action, at: Date.now() }]));
       this.#publish();
     };
 
@@ -444,8 +494,20 @@ export class AgentRuntime {
         };
 
         let staged = false;
+        let requests = 0;
         await transport.run(run, async (request) => {
           if (context.cancelled) return failure(request.id, 'cancelled', 'Session cancelled');
+          // Thrown rather than answered with a failure: an agent that has
+          // made this many requests is looping, and a refusal it can read is
+          // one more thing for the loop to react to. The throw ends the run,
+          // the session fails with this message on its trail, and `finally`
+          // below disposes the transport, which kills a stdio agent.
+          if (++requests > REQUEST_BUDGET) {
+            throw new Error(
+              `Stopped after ${REQUEST_BUDGET} requests, the budget for one session. ` +
+                `An agent that needs more than this is looping.`,
+            );
+          }
           // The answer is what the agent *said*, not something it did to the
           // workspace, so it is published rather than filed as an action.
           // An essay in the trail would bury the reads the trail is for —
