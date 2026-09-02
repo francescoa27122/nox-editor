@@ -523,6 +523,16 @@ export interface Platform {
   onExternalFileDrop(handler: (event: ExternalDropEvent) => void): Promise<() => void>;
 
   /**
+   * Observe paths the OS asks Nox to open: the positional arguments of the
+   * launch (`nox notes.txt`), and on macOS a file handed to the running app
+   * by Finder. Delivered once each; a path queued before anyone subscribed
+   * arrives on subscription. Files and folders alike, so the handler applies
+   * the same rule as a drop. Returns a disposer; platforms with no OS to
+   * hear from may never call the handler.
+   */
+  onOpenRequested(handler: (paths: readonly string[]) => void): Promise<() => void>;
+
+  /**
    * Run `handler` when the user closes the window, before it goes away.
    *
    * The window waits for the returned promise, which is the whole point: the

@@ -425,6 +425,25 @@ export class TauriPlatform implements Platform {
     return () => unlisten();
   }
 
+  /**
+   * The Rust side buffers what the OS handed it and only pokes the renderer
+   * (an empty `nox://open-request`) when more arrives, so this drains on
+   * subscription and again on every poke. Same buffer both times, which is
+   * what keeps a path that arrived before the webview booted from being lost
+   * and one that arrived after from being delivered twice.
+   */
+  async onOpenRequested(handler: (paths: readonly string[]) => void): Promise<() => void> {
+    const drain = async () => {
+      const paths = await invoke<string[]>('nox_launch_paths');
+      if (paths.length > 0) handler(paths);
+    };
+    const unlisten = await listen<null>('nox://open-request', () => {
+      void drain();
+    });
+    await drain();
+    return () => unlisten();
+  }
+
   async killAllAgents(): Promise<void> {
     await invoke('nox_agent_kill_all');
   }

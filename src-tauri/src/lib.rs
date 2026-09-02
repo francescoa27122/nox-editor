@@ -11,6 +11,7 @@ mod fs;
 mod geometry;
 mod git;
 mod http;
+mod launch;
 mod lsp;
 #[cfg(desktop)]
 mod menu;
@@ -41,6 +42,12 @@ pub fn run() {
 
     builder
         .setup(|_app| {
+            // `nox notes.txt`: queue the positional paths now, while the
+            // webview is still booting, and let the renderer collect them
+            // once it is listening. See `launch.rs` for why they are pulled
+            // rather than pushed.
+            launch::enqueue_argv(_app.handle());
+
             // `--geometry WxH+X+Y` — a launch-time window size for repeatable
             // desktop walks. See `geometry.rs` for why it is a test affordance
             // rather than a user feature (a Finder-launched .app gets no argv).
@@ -126,7 +133,9 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
         .manage(http::HttpState::default())
+        .manage(launch::LaunchState::default())
         .invoke_handler(tauri::generate_handler![
+            launch::nox_launch_paths,
             fs::nox_home_dir,
             fs::nox_read_text_file,
             fs::nox_read_encoded_file,
@@ -178,8 +187,12 @@ pub fn run() {
             #[cfg(desktop)]
             menu::nox_set_menu,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Nox");
+        .build(tauri::generate_context!())
+        .expect("error while building Nox")
+        // `build` then `run` rather than the one-call `run`: only this form
+        // sees run events, and macOS delivers a file opened from Finder as
+        // one of those rather than as argv.
+        .run(|app, event| launch::handle_run_event(app, &event));
 }
 
 /// Size and place the main window — for `--geometry`, and for the geometry the

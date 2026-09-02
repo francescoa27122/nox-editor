@@ -206,6 +206,7 @@ export class NoxApp {
   });
 
   #disposeDropListener: (() => void) | null = null;
+  #disposeOpenListener: (() => void) | null = null;
   #disposeCloseListener: (() => void) | null = null;
   #disposeRejectionListener: (() => void) | null = null;
   /**
@@ -364,9 +365,12 @@ export class NoxApp {
     this.#registerKeybindings();
   }
 
-  static async create(): Promise<NoxApp> {
-    const platform = await createPlatform();
-    const app = new NoxApp(platform);
+  /**
+   * `platform` is injectable so a test can run the real boot sequence over
+   * `MemoryPlatform`; `main.ts` passes nothing and gets the runtime's own.
+   */
+  static async create(platform?: Platform): Promise<NoxApp> {
+    const app = new NoxApp(platform ?? (await createPlatform()));
     await app.#boot();
     return app;
   }
@@ -417,6 +421,9 @@ export class NoxApp {
 
     await this.files.setRoot(this.workspace.rootPath.get());
     await this.#listenForExternalDrops();
+    // After the session restore, so a file named on the command line opens as
+    // a tab on top of the restored ones rather than being buried under them.
+    await this.#listenForOpenRequests();
     await this.#listenForClose();
     await this.#installMenu();
     this.#applyTheme();
@@ -457,6 +464,22 @@ export class NoxApp {
     } catch (error) {
       // Drag-and-drop is a convenience; failing to wire it must not stop boot.
       console.warn('[nox] external file drop unavailable:', error);
+    }
+  }
+
+  /**
+   * A path the OS handed to Nox (`nox notes.txt`, or Finder on macOS) follows
+   * the same rule as a drop: a file becomes a tab, a lone folder becomes the
+   * workspace. Same door on purpose, so the two entry points cannot drift.
+   */
+  async #listenForOpenRequests(): Promise<void> {
+    try {
+      this.#disposeOpenListener = await this.platform.onOpenRequested((paths) => {
+        void this.openDroppedPaths(paths);
+      });
+    } catch (error) {
+      // Like the drop listener: a convenience whose wiring must not stop boot.
+      console.warn('[nox] open requests from the OS unavailable:', error);
     }
   }
 
@@ -5285,6 +5308,8 @@ export class NoxApp {
   async dispose(): Promise<void> {
     this.#disposeDropListener?.();
     this.#disposeDropListener = null;
+    this.#disposeOpenListener?.();
+    this.#disposeOpenListener = null;
     this.#disposeCloseListener?.();
     this.#disposeCloseListener = null;
     this.#disposeRejectionListener?.();
