@@ -53,7 +53,7 @@ pub fn nox_home_dir() -> Option<String> {
 
 /// `$HOME` on unix, `%USERPROFILE%` on Windows. Avoids a `dirs` dependency
 /// for the one thing we actually need from it.
-fn dirs_home() -> Option<PathBuf> {
+pub(crate) fn dirs_home() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         std::env::var_os("USERPROFILE").map(PathBuf::from)
