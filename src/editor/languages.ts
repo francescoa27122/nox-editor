@@ -44,16 +44,16 @@ const LOADERS: Record<string, Loader> = {
   xml: async () => (await import('@codemirror/lang-xml')).xml(),
   yaml: async () => (await import('@codemirror/lang-yaml')).yaml(),
   /**
-   * The last three are stream parsers, not Lezer grammars.
+   * The rest are stream parsers, not Lezer grammars.
    *
    * `@codemirror/legacy-modes` ports CodeMirror 5's tokenizers, and
    * `StreamLanguage` adapts one into a `Language`. They tokenise line by line
    * rather than building a tree, so they colour correctly but carry no
    * structure: **`core/symbols.ts` and folding read a parse tree, so Go to
-   * Symbol, sticky scroll and syntax folding stay empty in these three.**
+   * Symbol, sticky scroll and syntax folding stay empty in these.**
    * That is the whole of what is given up, and it is worth it — flat grey was
-   * the alternative, and no Lezer grammar for shell, TOML or Ruby exists to
-   * upgrade to yet. `loadLanguage` is the only place that would change.
+   * the alternative, and no Lezer grammar for any of them exists to upgrade
+   * to yet. `loadLanguage` is the only place that would change.
    */
   shell: async () =>
     StreamLanguage.define((await import('@codemirror/legacy-modes/mode/shell')).shell),
@@ -61,6 +61,19 @@ const LOADERS: Record<string, Loader> = {
     StreamLanguage.define((await import('@codemirror/legacy-modes/mode/toml')).toml),
   ruby: async () =>
     StreamLanguage.define((await import('@codemirror/legacy-modes/mode/ruby')).ruby),
+  csharp: async () =>
+    StreamLanguage.define((await import('@codemirror/legacy-modes/mode/clike')).csharp),
+  kotlin: async () =>
+    StreamLanguage.define((await import('@codemirror/legacy-modes/mode/clike')).kotlin),
+  swift: async () =>
+    StreamLanguage.define((await import('@codemirror/legacy-modes/mode/swift')).swift),
+  lua: async () => StreamLanguage.define((await import('@codemirror/legacy-modes/mode/lua')).lua),
+  powershell: async () =>
+    StreamLanguage.define((await import('@codemirror/legacy-modes/mode/powershell')).powerShell),
+  ini: async () =>
+    StreamLanguage.define((await import('@codemirror/legacy-modes/mode/properties')).properties),
+  dockerfile: async () =>
+    StreamLanguage.define((await import('@codemirror/legacy-modes/mode/dockerfile')).dockerFile),
 };
 
 const cache = new Map<string, Extension>();
@@ -75,7 +88,18 @@ const inflight = new Map<string, Promise<Extension | null>>();
  * this list against loaded `StreamLanguage` instances, so it cannot drift
  * away from the loaders below it.
  */
-const STREAM_GRAMMARS = new Set(['shell', 'toml', 'ruby']);
+const STREAM_GRAMMARS = new Set([
+  'shell',
+  'toml',
+  'ruby',
+  'csharp',
+  'kotlin',
+  'swift',
+  'lua',
+  'powershell',
+  'ini',
+  'dockerfile',
+]);
 
 /** True when Nox can syntax-highlight this language id. */
 export function hasGrammar(languageId: string): boolean {
