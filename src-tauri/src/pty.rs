@@ -26,6 +26,8 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::agent::wait_unlocked;
+
 pub type Result<T> = std::result::Result<T, String>;
 
 #[derive(Default)]
@@ -253,11 +255,10 @@ pub fn nox_pty_open(
             }
 
             // Reaping here stops the child becoming a zombie when nobody calls
-            // close, exactly as in `agent.rs`.
-            let code = child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.wait().ok())
+            // close, exactly as in `agent.rs`, and with the same reaper: a
+            // shell that closed the pty but left a background job running
+            // must not hold the lock `close` needs.
+            let code = wait_unlocked(&child, |child| child.try_wait())
                 .map(|status| status.exit_code() as i32);
 
             // Forget it, or the id stays registered for the life of the app and

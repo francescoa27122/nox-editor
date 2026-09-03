@@ -27,7 +27,7 @@ use std::os::windows::process::CommandExt;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::agent::read_lines;
+use crate::agent::{read_lines, wait_unlocked};
 
 /// Suppresses the console window Windows would otherwise give a
 /// console-subsystem child of a GUI process. `winbase.h`'s value; not worth a
@@ -292,12 +292,11 @@ pub fn nox_lsp_start(
 
             // stdout closing is the earliest reliable sign the server is done.
             // Reaping here also stops the child becoming a zombie when nobody
-            // calls `stop`.
-            let code = child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.wait().ok())
-                .and_then(|status| status.code());
+            // calls `stop`. Polled with the lock released between polls, so a
+            // `stop` for a server that closed stdout and kept running does not
+            // block behind this; `wait_unlocked` says why.
+            let code =
+                wait_unlocked(&child, |child| child.try_wait()).and_then(|status| status.code());
 
             // Forget it, or the id stays registered for the life of the app and
             // starting under it again is refused as "already running" — which

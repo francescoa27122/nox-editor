@@ -19,6 +19,7 @@ use std::io::{Read, Write};
 use std::ops::ControlFlow;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -140,11 +141,8 @@ pub fn nox_agent_spawn(
             // stdout closing is the earliest reliable sign the agent is done.
             // Reaping here also stops the child becoming a zombie when nobody
             // calls `kill`.
-            let code = child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.wait().ok())
-                .and_then(|status| status.code());
+            let code =
+                wait_unlocked(&child, |child| child.try_wait()).and_then(|status| status.code());
 
             // Forget it, or the id stays registered for the life of the app
             // and spawning under it again is refused as "already running" —
@@ -360,6 +358,45 @@ pub fn read_lines(mut source: impl Read, mut on_line: impl FnMut(String) -> Cont
     }
 }
 
+/// How often a reader thread asks whether a child that has closed its stdout
+/// has also exited. Only ever paid by a child that keeps running after its
+/// output stops, which is nothing on the ordinary path: a process that exits
+/// is reaped on the first poll.
+const REAP_POLL: Duration = Duration::from_millis(25);
+
+/// Wait for a child to exit without holding its mutex for the wait.
+///
+/// The one reaper behind every reader thread Nox supervises: agents here, and
+/// the servers and terminals in `lsp.rs` and `pty.rs`. It exists because
+/// `child.lock().wait()` holds the lock for as long as the wait takes, and a
+/// child that closes its stdout but keeps running, a daemonising agent or a
+/// server that redirects its output after startup, parks the reader there.
+/// Every later `kill` for that id then blocks on the same lock, on the thread
+/// that draws the window, until the child decides to exit on its own; the
+/// `*_all` variants iterate every entry, so one such child held quit. Polling
+/// `try_wait` with the lock released between polls is what lets a `kill` get
+/// in between two polls.
+///
+/// Generic over the child type because `pty.rs` supervises a
+/// `portable_pty::Child`, not a `std::process::Child`; the caller hands over
+/// the one line that differs.
+pub fn wait_unlocked<C, S>(
+    child: &Mutex<C>,
+    mut try_wait: impl FnMut(&mut C) -> std::io::Result<Option<S>>,
+) -> Option<S> {
+    loop {
+        let polled = match child.lock() {
+            Ok(mut guard) => try_wait(&mut guard),
+            Err(_) => return None,
+        };
+        match polled {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) => std::thread::sleep(REAP_POLL),
+            Err(_) => return None,
+        }
+    }
+}
+
 /// A Windows agent's `print` writes CRLF, and the carriage return is framing
 /// rather than content. `BufRead::lines()` stripped it for free; once the
 /// splitting is done here it has to be stripped by hand.
@@ -510,5 +547,57 @@ mod tests {
         assert!(!worth_emitting(""));
         assert!(!worth_emitting("   "));
         assert!(worth_emitting("{}"));
+    }
+
+    /// The failure this prevents: `kill` blocking on the child's mutex behind
+    /// a reaper that took it for the whole of `wait()`. A child that closed
+    /// its stdout and kept running put the reader thread into `wait()` with
+    /// the lock held, and every later kill for that id parked the thread that
+    /// draws the window until the child chose to exit. The reaper has to poll
+    /// with the lock released between polls, so a kill gets in.
+    ///
+    /// A real long-lived child rather than a fake, because the property is
+    /// about a lock held across a blocking syscall. What it does not catch:
+    /// the reader threads in `nox_agent_spawn`, `lsp.rs` and `pty.rs`, which
+    /// need a Tauri application around them; they call this same function.
+    #[test]
+    fn a_kill_gets_in_while_the_reaper_is_waiting() {
+        use std::time::Instant;
+
+        let mut command = if cfg!(windows) {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        let child = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a long-lived child");
+        let child = Arc::new(Mutex::new(child));
+
+        let reaper = {
+            let child = Arc::clone(&child);
+            std::thread::spawn(move || wait_unlocked(&child, |child| child.try_wait()))
+        };
+        // Let the reaper reach its wait before the kill arrives, which is the
+        // ordering that used to deadlock the kill.
+        std::thread::sleep(REAP_POLL * 2);
+
+        let started = Instant::now();
+        child.lock().expect("child lock").kill().expect("kill the child");
+        let waited = started.elapsed();
+
+        let status = reaper.join().expect("reaper thread");
+        assert!(status.is_some(), "the reaper must see the exit the kill caused");
+        assert!(
+            waited < Duration::from_secs(5),
+            "kill waited {waited:?} for a lock the reaper should not have been holding"
+        );
     }
 }
