@@ -195,30 +195,60 @@ const SYMBOLS: Record<string, string> = {
   ctrl: '⌃',
 };
 
+/*
+  The labels every platform shares. Arrows are drawn by every OS and are
+  shorter than `Up`/`Down` in a menu column, so they stay glyphs everywhere.
+*/
 const KEY_LABELS: Record<string, string> = {
   escape: 'Esc',
-  enter: '↵',
   up: '↑',
   down: '↓',
   left: '←',
   right: '→',
   space: 'Space',
-  backspace: '⌫',
-  delete: '⌦',
-  tab: '⇥',
   pgup: 'PgUp',
   pgdown: 'PgDn',
 };
 
-/** Human display form. `meta+shift+p` → `⇧⌘P` on macOS, `Ctrl+Shift+P` elsewhere. */
-export function formatChord(chord: Chord): string {
+/*
+  The four keys macOS draws as symbols and nobody else does. These were in
+  the shared table, so a Windows chord rendered as `Ctrl+⌫` beside menus that
+  spell everything else out, and ⌫ means nothing to a user who presses
+  Delete. Windows and Linux get the key's own name, which is what their
+  menus print.
+*/
+const MAC_KEY_LABELS: Record<string, string> = {
+  enter: '↵',
+  backspace: '⌫',
+  delete: '⌦',
+  tab: '⇥',
+};
+
+const OTHER_KEY_LABELS: Record<string, string> = {
+  enter: 'Enter',
+  backspace: 'Backspace',
+  delete: 'Delete',
+  tab: 'Tab',
+};
+
+/**
+ * Human display form. `meta+shift+p` → `⇧⌘P` on macOS, `Ctrl+Shift+P` elsewhere.
+ *
+ * `mac` is the host by default. It is a parameter so both spellings can be
+ * asserted from one test run: `isMac` is read once at module scope, and the
+ * two test environments already disagree about it.
+ */
+export function formatChord(chord: Chord, mac: boolean = isMac): string {
   const parts = chord.split('+');
   const key = parts.pop() ?? '';
   const modifiers = new Set(parts);
 
-  const label = KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : titleCase(key));
+  const label =
+    (mac ? MAC_KEY_LABELS : OTHER_KEY_LABELS)[key] ??
+    KEY_LABELS[key] ??
+    (key.length === 1 ? key.toUpperCase() : titleCase(key));
 
-  if (isMac) {
+  if (mac) {
     // macOS convention orders modifiers ⌃⌥⇧⌘ regardless of how they were written.
     const ordered = (['ctrl', 'alt', 'shift', 'meta'] as const)
       .filter((m) => modifiers.has(m))
