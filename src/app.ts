@@ -364,9 +364,13 @@ export class NoxApp {
     this.#registerKeybindings();
   }
 
-  static async create(): Promise<NoxApp> {
-    const platform = await createPlatform();
-    const app = new NoxApp(platform);
+  /**
+   * Construct and boot. `platform` is for tests, which hand in a
+   * `MemoryPlatform` to run the real boot sequence headless; the app itself
+   * never passes one.
+   */
+  static async create(platform?: Platform): Promise<NoxApp> {
+    const app = new NoxApp(platform ?? (await createPlatform()));
     await app.#boot();
     return app;
   }
@@ -380,10 +384,6 @@ export class NoxApp {
     await this.diagnostics.start();
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
-    // Before the session restores a root: the subscription above fires on
-    // that restore, but boot's own `files.setRoot` below should already see
-    // the project's excludes.
-    await this.config.loadWorkspace(this.workspace.rootPath.get());
     // After the constructor, so `#registerKeybindings` has already recorded
     // the defaults these rules are layered over.
     await this.keymap.loadUserRules();
@@ -415,7 +415,12 @@ export class NoxApp {
       }
     }
 
-    await this.files.setRoot(this.workspace.rootPath.get());
+    // No `files.setRoot`, `watcher.start` or `config.loadWorkspace` here: the
+    // `rootPath` subscription in `#wireServices` runs all three the moment a
+    // root is restored or opened above, and it is the only caller. Boot used
+    // to call the first and the last a second time, which walked the project
+    // twice on every launch; a workspace `excludeFromExplorer` that arrives
+    // after the first walk re-walks through `files.setExcludes`.
     await this.#listenForExternalDrops();
     await this.#listenForClose();
     await this.#installMenu();
