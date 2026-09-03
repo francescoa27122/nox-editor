@@ -3109,12 +3109,19 @@ export class NoxApp {
         run: () => this.search.collapseAll(),
       },
 
+      // Hidden, like `explorer.moveTo`: the explorer's context menu dispatches
+      // these two by id with the clicked path as the argument, and that is
+      // their whole job. Listed beside `file.newInFolder` and `file.newFolder`
+      // they were a second New File / New Folder pair in the File menu whose
+      // difference (tree selection versus active file's folder) no title
+      // stated.
       {
         id: 'explorer.newFile',
         resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
         capabilities: ['fs.create'],
         title: 'New File Here…',
         category: 'Explorer',
+        hidden: true,
         enabled: this.#hasFolder,
         run: async (arg) => {
           const directory = await this.#targetDirectory(arg);
@@ -3127,6 +3134,7 @@ export class NoxApp {
         capabilities: ['fs.create'],
         title: 'New Folder Here…',
         category: 'Explorer',
+        hidden: true,
         enabled: this.#hasFolder,
         run: async (arg) => {
           const directory = await this.#targetDirectory(arg);

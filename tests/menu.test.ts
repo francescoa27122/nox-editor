@@ -103,8 +103,6 @@ describe('what the menu contains', () => {
       'explorer.duplicate',
       'explorer.copyPath',
       'explorer.copyRelativePath',
-      'explorer.newFile',
-      'explorer.newFolder',
     ]) {
       expect(file).toContain(id);
     }
@@ -116,6 +114,27 @@ describe('what the menu contains', () => {
     expect(view).toContain('explorer.selectAll');
     expect(view).not.toContain('explorer.delete');
     expect(view).not.toContain('explorer.rename');
+  });
+
+  /**
+   * The failure this prevents, from the 2026-09 audit (A1-008): two New
+   * File / New Folder pairs in the File menu, resolving their folder by
+   * different rules that neither title stated. The explorer pair is the
+   * context menu's, dispatched by id with the clicked path, and stays a
+   * command; the menu lists the File pair only.
+   */
+  it('lists one New File and one New Folder, not the explorer pair as well', () => {
+    const app = new NoxApp(new SystemMenuPlatform());
+    const listed = commandIds(app.menu.describe());
+
+    expect(listed).toContain('file.newInFolder');
+    expect(listed).toContain('file.newFolder');
+    expect(listed).not.toContain('explorer.newFile');
+    expect(listed).not.toContain('explorer.newFolder');
+    // Still registered and still dispatchable: the explorer's context menu
+    // depends on both.
+    expect(app.commands.has('explorer.newFile')).toBe(true);
+    expect(app.commands.has('explorer.newFolder')).toBe(true);
   });
 
   /**
