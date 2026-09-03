@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -50,5 +50,51 @@ describe('A8-004: a disclosure route and issue templates', () => {
     expect(firstHeading).toBe('## Copy Diagnostics');
     expect(bug).toMatch(/^name: /m);
     expect(read('.github', 'ISSUE_TEMPLATE', 'feature_request.md')).toMatch(/^name: /m);
+  });
+});
+
+describe('A8-005: third-party notices', () => {
+  const notices = read('THIRD-PARTY-NOTICES.md');
+  const listed = (name: string) => notices.includes(`| ${name} |`);
+
+  it('lists every production npm dependency', () => {
+    const pkg = JSON.parse(read('package.json')) as { dependencies: Record<string, string> };
+    const missing = Object.keys(pkg.dependencies).filter((name) => !listed(name));
+    expect(missing).toEqual([]);
+  });
+
+  /**
+   * A section-aware scan rather than a TOML parser: the manifest keeps one
+   * dependency per line, and the only shape that matters here is the key
+   * before `=`. An optional dependency is skipped because it is never in a
+   * release (the `wdio` feature says why).
+   */
+  it('lists every direct crate in Cargo.toml', () => {
+    const manifest = read('src-tauri', 'Cargo.toml');
+    let section = '';
+    const direct: string[] = [];
+    for (const line of manifest.split('\n')) {
+      const header = /^\[(.+)\]$/.exec(line.trim());
+      if (header) {
+        section = header[1] ?? '';
+        continue;
+      }
+      if (section !== 'dependencies' && section !== 'build-dependencies') continue;
+      const key = /^([A-Za-z0-9_-]+)\s*=/.exec(line);
+      if (key?.[1] && !line.includes('optional = true')) direct.push(key[1]);
+    }
+    expect(direct.length).toBeGreaterThan(10);
+    expect(direct.filter((name) => !listed(name))).toEqual([]);
+  });
+
+  it('the bundle carries the licence file and the README points at the notices', () => {
+    const config = JSON.parse(read('src-tauri', 'tauri.conf.json')) as {
+      bundle: { licenseFile?: string };
+    };
+    expect(config.bundle.licenseFile).toBeDefined();
+    // Relative to tauri.conf.json, which is how the bundler resolves it.
+    const licence = join(dirname(join(root, 'src-tauri', 'tauri.conf.json')), config.bundle.licenseFile ?? '');
+    expect(existsSync(licence)).toBe(true);
+    expect(read('README.md')).toContain('](THIRD-PARTY-NOTICES.md)');
   });
 });

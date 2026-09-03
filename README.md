@@ -333,6 +333,8 @@ For anyone who wants the deep version:
 Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 [CodeMirror 6](https://codemirror.net). The Rust side owns the window, the
 filesystem and project search. The editor itself lives in the renderer.
+Every library the bundle carries is listed, with its licence, in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ```bash
 npm test          # the unit suite (the count is in Status above)
