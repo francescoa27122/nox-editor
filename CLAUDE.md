@@ -2,6 +2,21 @@
 
 A fast, dark, keyboard-first text editor. Tauri 2 (Rust) + Svelte 5 (runes) + CodeMirror 6 + Vite 8 + TypeScript strict. Tests are Vitest, and the pure layers run headless in Node.
 
+## Shipping a change
+
+**Open the pull request and merge it when the work is ready. Standing, granted
+2026-08-31.** No need to ask first, and no need to wait for a reply before
+merging a green one.
+
+Ready means the whole gate set below passes, not that the code is written. A
+red or conflicted head is work, never something to hand over. If a change turns
+out to be contentious rather than merely finished, say so and leave it open.
+
+**This does not extend to tagging or publishing a release.** That is still an
+explicit instruction each time: prepare the release, then hand the command
+over. The two have separate answers because a merge is reversible and a
+published tag is not.
+
 ## Verify before claiming anything works
 
 ```bash

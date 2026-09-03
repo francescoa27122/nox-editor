@@ -18,8 +18,12 @@ Meanwhile Linux and Windows ship installers nobody has ever launched.
 
 ## Running it
 
-Needs a Rust toolchain, which the development machine does not have — this is
-why the harness is verified in CI rather than locally.
+Needs a Rust toolchain. The Windows development machine does not have one on
+git-bash's PATH, which is why this harness was written to be verified in CI.
+**It does run locally where a toolchain exists**: the whole suite was run that
+way on 2026-08-30 in a Linux container, four spec files in twelve seconds,
+which is a far shorter loop than a CI round trip. Check for `cargo` before
+assuming it is absent. That assumption has been wrong here before.
 
 ```bash
 npm ci                                        # at the repository root
@@ -60,8 +64,26 @@ delivering a keystroke, and the platforms that have no other coverage at all.
 | **Windows** | Green in CI. Nothing to install. |
 | **macOS** | Green in CI. Nothing to install. |
 
-All three run the same four specs against the same embedded WebDriver server,
-in well under a second each.
+All three run the same specs against the same embedded WebDriver server, in
+well under a second each.
+
+## The specs
+
+| File | What only it can answer |
+|---|---|
+| `smoke.e2e.js` | The packaged binary starts and draws its chrome; the palette opens on its chord and closes on Escape, which the manual walk could never check because its own harness ate Escape at the OS level. |
+| `menu-bar.e2e.js` | The in-window bar opens, switches between menus and closes. Guards `7389643`, where the click-away layer covered the titles and sliding between menus had never once worked. |
+| `terminal.e2e.js` | A real pty, a real shell, a command typed and its output read back, and the session surviving a hidden panel. `MemoryPlatform.openTerminal` throws, so no suite under `tests/` can run a shell at all. |
+| `walk.e2e.js` | Three items the 2026-08-20 hand walk marked UNSEEN: the destructive confirm's focus, the line-ending item, the sidebar chord. |
+
+## Typing into xterm
+
+`browser.keys` and the Actions API both deliver **every character twice** to
+xterm, and only to xterm. The palette's `<input>` is clean under the same
+driver in the same session. `terminal.e2e.js` therefore types with `addValue`
+on xterm's helper textarea, and its header sets out the evidence that this is
+the driver ignoring `preventDefault` rather than a defect in Nox. Read that
+before changing how anything here types.
 
 ## Why the external driver was abandoned (historical)
 

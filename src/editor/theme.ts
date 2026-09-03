@@ -92,7 +92,7 @@ export function noxTheme(options: ThemeOptions): Extension {
         background: 'var(--nox-selection)',
       },
       '.cm-selectionMatch': {
-        background: 'rgba(125, 211, 224, 0.11)',
+        background: 'var(--nox-selection-match)',
         borderRadius: '2px',
       },
 
@@ -222,17 +222,17 @@ export function noxTheme(options: ThemeOptions): Extension {
       // --- Brackets & search ----------------------------------------------
       '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
         backgroundColor: 'var(--nox-match-bracket)',
-        outline: '1px solid rgba(125, 211, 224, 0.4)',
+        outline: '1px solid var(--nox-match-bracket-outline)',
         borderRadius: '2px',
       },
       '.cm-nonmatchingBracket': {
         color: 'var(--nox-danger)',
-        backgroundColor: 'rgba(240, 97, 109, 0.12)',
+        backgroundColor: 'var(--nox-nonmatching-bracket)',
         borderRadius: '2px',
       },
       '.cm-searchMatch': {
         backgroundColor: 'var(--nox-search-match)',
-        outline: '1px solid rgba(227, 179, 65, 0.32)',
+        outline: '1px solid var(--nox-search-match-outline)',
         borderRadius: '2px',
       },
       // The active match takes an explicit foreground, and the descendant
@@ -251,7 +251,7 @@ export function noxTheme(options: ThemeOptions): Extension {
         },
       '.cm-searchMatch.cm-searchMatch-selected': {
         backgroundColor: 'var(--nox-search-match-active)',
-        outline: '1px solid rgba(227, 179, 65, 0.7)',
+        outline: '1px solid var(--nox-search-match-active-outline)',
       },
 
       // --- Whitespace & specials ------------------------------------------
