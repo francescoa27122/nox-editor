@@ -64,12 +64,18 @@ pub fn is_loopback(url: &str) -> bool {
 /// - `reqwest` also inherits `http_proxy`/`https_proxy` from the environment
 ///   by default, and the proxy matcher has no loopback exclusion. With a
 ///   proxy set, a "loopback-only" request would ship off machine anyway.
+/// - `localhost` is the one host `is_loopback` admits whose meaning this
+///   code did not decide: the system resolver did, and a hosts-file entry or
+///   a DNS search path can point it off the machine. `resolve` pins the name
+///   to 127.0.0.1 inside the client, so the resolver is never asked. The
+///   port in the pinned address is ignored by design; the URL's port is used.
 fn http_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
+            .resolve("localhost", std::net::SocketAddr::from(([127, 0, 0, 1], 0)))
             .build()
             // No TLS, no proxy, no redirects: nothing here can fail to build.
             .expect("the loopback http client is always constructible")
@@ -298,6 +304,58 @@ mod tests {
         assert!(
             !attacker_hit.load(Ordering::SeqCst),
             "the attacker server must never be contacted"
+        );
+    }
+
+    /// Guards A6-005: `is_loopback` admits the literal `localhost`, and
+    /// until now the system resolver decided what that meant. A hosts-file
+    /// entry or a DNS search path can point it off the machine, and the
+    /// request, prompt and all, would follow. The client now pins
+    /// `localhost` to 127.0.0.1 itself, so the resolver is never asked.
+    ///
+    /// Proved with the resolver's own other answer: a listener on `[::1]`
+    /// only. The system resolver returns `::1` for `localhost` on every
+    /// platform CI runs, so before the pin the client reached this
+    /// listener; with it, the request goes to 127.0.0.1, where nothing is
+    /// listening, and the listener is never hit. On a host whose resolver
+    /// answers 127.0.0.1 alone the test passes without proving anything,
+    /// and where `[::1]` cannot be bound at all it returns early.
+    #[tokio::test]
+    async fn localhost_is_pinned_to_ipv4_loopback_rather_than_resolved() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let Ok(listener) = TcpListener::bind("[::1]:0") else {
+            return;
+        };
+        let port = listener.local_addr().expect("listener addr").port();
+        let hit = Arc::new(AtomicBool::new(false));
+        {
+            let hit = Arc::clone(&hit);
+            std::thread::spawn(move || {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    hit.store(true, Ordering::SeqCst);
+                    let mut buf = [0u8; 1024];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
+                }
+            });
+        }
+
+        // The outcome is not asserted: with the pin this is a refused
+        // connection on 127.0.0.1, unless something unrelated happens to
+        // hold that port, and either way what matters is the listener.
+        let _ = http_client()
+            .post(format!("http://localhost:{port}/"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await;
+
+        assert!(
+            !hit.load(Ordering::SeqCst),
+            "localhost reached the resolver's [::1] answer; it must be pinned to 127.0.0.1"
         );
     }
 }

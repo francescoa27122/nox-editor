@@ -165,7 +165,7 @@ fn write_atomic(path: &str, bytes: &[u8]) -> Result<()> {
     }
 
     let temp = temp_path_for(&target);
-    let outcome = write_then_rename(&temp, &target, bytes);
+    let outcome = write_then_rename(&temp, &target, bytes, false);
 
     if outcome.is_err() {
         // Never leave litter next to the user's file.
@@ -175,11 +175,13 @@ fn write_atomic(path: &str, bytes: &[u8]) -> Result<()> {
 }
 
 /// The actual write-flush-rename, split out so the caller can clean up.
-fn write_then_rename(temp: &Path, target: &Path, bytes: &[u8]) -> Result<()> {
+/// `private` says what a target that does not exist yet should be: see
+/// `create_temp`.
+fn write_then_rename(temp: &Path, target: &Path, bytes: &[u8], private: bool) -> Result<()> {
     use std::io::Write;
 
     {
-        let mut file = fs::File::create(temp).map_err(|e| describe(&e, temp))?;
+        let mut file = create_temp(temp, target, private).map_err(|e| describe(&e, temp))?;
         file.write_all(bytes).map_err(|e| describe(&e, temp))?;
         // Without this the rename can land before the data does, and a crash
         // in that window leaves a file that exists but is empty.
@@ -192,6 +194,36 @@ fn write_then_rename(temp: &Path, target: &Path, bytes: &[u8]) -> Result<()> {
     copy_permissions(target, temp);
 
     fs::rename(temp, target).map_err(|e| describe(&e, target))
+}
+
+/// Open the temp file for writing, choosing its initial mode on unix.
+///
+/// `File::create` hands out `0666 & !umask`, typically 0644, and until now
+/// `copy_permissions` narrowed that only after the bytes were written, so the
+/// new contents of a 0600 target sat world-readable in the sibling for the
+/// whole write. The temp opens with the target's own mode instead: the umask
+/// can only narrow it further, and `copy_permissions` restores the exact
+/// mode afterwards. A target that does not exist yet gets 0600 when
+/// `private`, which every file in the config directory is (unsaved buffers,
+/// agent and server command lines, the diagnostics log), and the umask
+/// default otherwise, so a new file in the user's workspace keeps the mode
+/// every other tool would give it. `create_new` because the temp name is
+/// ours alone: a file already there was planted, not written by us. Windows
+/// has no mode bits; its ACLs are inherited from the directory.
+fn create_temp(temp: &Path, target: &Path, private: bool) -> std::io::Result<fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let existing = fs::metadata(target).ok().map(|m| m.permissions().mode() & 0o777);
+        if let Some(mode) = existing.or(private.then_some(0o600)) {
+            return fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(temp);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (target, private);
+
+    fs::File::create(temp)
 }
 
 /// A sibling of `target` that no other save will collide with.
@@ -419,9 +451,7 @@ pub fn nox_reveal(path: String) -> Result<()> {
 /// `name` is rejected if it contains separators — config keys are bare
 /// filenames, and treating them otherwise would be a path-traversal hole.
 pub(crate) fn config_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf> {
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err(format!("io: invalid config name {name}"));
-    }
+    check_config_name(name)?;
 
     let dir = app
         .path()
@@ -433,6 +463,28 @@ pub(crate) fn config_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf>
     }
 
     Ok(dir.join(name))
+}
+
+/// The guard `config_path` applies, split out so it can be tested without an
+/// `AppHandle`.
+///
+/// `:` is refused as well as the separators because on Windows `Path::join`
+/// replaces the base when the argument carries a drive prefix, and
+/// `C:evil.json` carries one with no separator in it: it names a file
+/// relative to the process's current directory on drive C, not one in the
+/// config directory. A leading `.` is refused because nothing Nox writes
+/// starts with one, and `.` alone would name the directory itself.
+fn check_config_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.starts_with('.')
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains(':')
+        || name.contains("..")
+    {
+        return Err(format!("io: invalid config name {name}"));
+    }
+    Ok(())
 }
 
 /// Where settings, session and `agents.json` live.
@@ -474,7 +526,10 @@ pub(crate) fn write_config_atomically(path: &Path, contents: &str) -> Result<()>
     // `~/.config/nox/settings.json` into a dotfiles repo, typically.
     let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let temp = temp_path_for(&target);
-    let outcome = write_then_rename(&temp, &target, contents.as_bytes());
+    // `private`: nothing in the config directory should be readable by
+    // another local account, and a config file has no mode of its own worth
+    // keeping the way a script's executable bit is.
+    let outcome = write_then_rename(&temp, &target, contents.as_bytes(), true);
     if outcome.is_err() {
         let _ = fs::remove_file(&temp);
     }
@@ -726,5 +781,110 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"version":2}"#);
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    }
+
+    /// Guards A6-004: on Windows `Path::join` replaces the base when the
+    /// argument carries a drive prefix, and `C:evil.json` carries one with no
+    /// separator in it, so the separator check let it through and the
+    /// "config file" resolved against the process's current directory on
+    /// drive C. Rejecting `:` outright is platform-independent, so this test
+    /// proves the same thing on Linux and macOS, where `Path::join` would
+    /// not have misbehaved. Every caller today passes a fixed literal or a
+    /// generated `<word>-<n>.txt`, so this is defence in depth, and the
+    /// accepted set is pinned here to keep that true.
+    #[test]
+    fn config_names_are_bare_filenames() {
+        for name in ["settings.json", "unsaved-3.txt", "note-12.txt", "settings.damaged.json", "diagnostics.log"] {
+            assert!(check_config_name(name).is_ok(), "{name} should be accepted");
+        }
+        for name in ["", "C:evil.json", "C:", "../x.json", "..", "a/b.json", "a\\b.json", ".hidden", "."] {
+            assert!(check_config_name(name).is_err(), "{name:?} should be rejected");
+        }
+    }
+
+    /// Guards A6-006: `File::create` gave the temp `0666 & !umask`, typically
+    /// 0644, so for the whole write the new contents of a 0600 target sat
+    /// world-readable in the sibling, and `copy_permissions` only closed the
+    /// window after the bytes were down. The temp now opens with the
+    /// target's own mode. Checked on the helper directly, because the window
+    /// is milliseconds wide and there is nothing left to observe once the
+    /// rename has happened. What this does not catch: under a umask of 077
+    /// the old code produced 0600 too, since the umask can only narrow.
+    #[cfg(unix)]
+    #[test]
+    fn the_temp_file_opens_with_its_targets_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = Scratch::new("temp-mode");
+        let target = scratch.join("secret.txt");
+        fs::write(&target, "old\n").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        let temp = temp_path_for(&target);
+
+        let file = create_temp(&temp, &target, false).expect("temp opens");
+
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "mode was {mode:o}");
+    }
+
+    /// The config directory holds every unsaved buffer's full text
+    /// (`unsaved-N.txt`), the agent and server command lines and the
+    /// diagnostics log, and on Linux `~/.config` is commonly traversable by
+    /// other local accounts. A config file that does not exist yet is now
+    /// created 0600 rather than with the umask default.
+    #[cfg(unix)]
+    #[test]
+    fn a_new_config_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = Scratch::new("config-private");
+        let path = scratch.join("unsaved-1.txt");
+
+        write_config_atomically(&path, "draft\n").expect("write");
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "mode was {mode:o}");
+    }
+
+    /// A config file that already exists keeps its mode, the same rule a
+    /// file save follows, so a user who deliberately widened one is not
+    /// overruled on the next write. The cost is that files created by
+    /// earlier versions stay at the umask default until removed.
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_config_file_keeps_its_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = Scratch::new("config-keep-mode");
+        let path = scratch.join("settings.json");
+        fs::write(&path, "{}").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_config_atomically(&path, r#"{"version":2}"#).expect("write");
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644, "mode was {mode:o}");
+    }
+
+    /// The other side of the rule: a *workspace* file that does not exist
+    /// yet must get exactly what `File::create` would give it, because a
+    /// source file saved 0600 breaks the next thing that reads it (a web
+    /// server, a colleague on a shared checkout). Compared against a sibling
+    /// made by `File::create` so the assertion holds under any umask.
+    #[cfg(unix)]
+    #[test]
+    fn a_new_workspace_file_keeps_the_umask_default() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = Scratch::new("write-default-mode");
+        let plain = scratch.join("plain.txt");
+        fs::File::create(&plain).unwrap();
+        let saved = scratch.join("saved.txt");
+
+        nox_write_text_file(saved.to_string_lossy().into_owned(), "hi\n".into()).unwrap();
+
+        let expected = fs::metadata(&plain).unwrap().permissions().mode() & 0o777;
+        let mode = fs::metadata(&saved).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, expected, "mode was {mode:o}, File::create gives {expected:o}");
     }
 }

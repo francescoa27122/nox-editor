@@ -72,9 +72,23 @@ pub type Result<T> = std::result::Result<T, String>;
 /// `git status --porcelain=v2 --branch -z` without this env var, and sees
 /// nothing from repeated `git status` calls with it set (see the
 /// `status_alone_does_not_touch_the_meta_watch` test below).
+///
+/// `-c core.fsmonitor=false`: a repository's own `.git/config` may name a
+/// command there, and `git status` runs it. Nox issues `git status` on folder
+/// open, on buffer activation and on every meta-watch event, with no prompt,
+/// so a repository that arrived as an archive or on a shared drive (a clone
+/// never carries `.git/config`) would run that command with the user's
+/// privileges the moment it was opened. The `-c` outranks the repository
+/// value. `nox_git_commit` deliberately does not carry it: hooks and signing
+/// are expected on a commit, and the user asked for that one.
 fn run_git(dir: &Path, args: &[&str]) -> Option<std::process::Output> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(dir).args(args).env("GIT_OPTIONAL_LOCKS", "0");
+    command
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "core.fsmonitor=false"])
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0");
 
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -483,13 +497,15 @@ pub fn nox_git_blame(path: String, contents: String) -> Result<Option<String>> {
     command
         .arg("-C")
         .arg(&root)
+        // Same reasoning as `run_git`'s doc comment for both the `-c` and
+        // the env var; this command builds its own `Command` for stdin
+        // piping and so needs its own copy of each.
+        .args(["-c", "core.fsmonitor=false"])
         // `--literal-pathspecs` so a `*` or `:` in a real filename is a
         // filename, and `--` so nothing after it is ever read as an option.
         // A read, like every argument here: nothing that writes, leaves the
         // machine, or rewrites history.
         .args(["--literal-pathspecs", "blame", "--porcelain", "--contents", "-", "--", &relpath])
-        // Same reasoning as `run_git`'s doc comment; this command builds its
-        // own `Command` for stdin piping and so needs its own copy.
         .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -993,6 +1009,60 @@ mod tests {
         nox_git_unstage(as_string(&scratch.0), vec![]).unwrap();
 
         assert!(git_out(&scratch.0, &["status", "--porcelain"]).starts_with("A  a.txt"));
+    }
+
+    /// Guards A6-002: `git status` runs the repository's own `core.fsmonitor`
+    /// command, and Nox runs `git status` on folder open, on buffer
+    /// activation and on every meta-watch event, with no prompt. A
+    /// `.git/config` that arrived in an archive or on a shared drive (a clone
+    /// never carries one) therefore executed whatever it named, with the
+    /// user's privileges, the moment the folder was opened. Every read Nox
+    /// issues now passes `-c core.fsmonitor=false`, which outranks the
+    /// repository's value.
+    ///
+    /// The control step runs a plain `git status` first, built by hand rather
+    /// than through `run_git`, and insists the hook fires: a git that never
+    /// ran the hook would otherwise pass this test while proving nothing.
+    /// What this does not cover is `commit`, which honours repo-local config
+    /// by design because hooks are expected there.
+    #[test]
+    fn reads_do_not_run_the_repositorys_fsmonitor_command() {
+        let scratch = Scratch::new("git-fsmonitor");
+        git_in(&scratch.0, &["init", "-b", "main"]);
+        let file = scratch.join("a.txt");
+        fs::write(&file, "one\n").unwrap();
+        git_in(&scratch.0, &["add", "a.txt"]);
+        git_in(&scratch.0, &["commit", "-m", "base"]);
+
+        // Git runs the hook through a shell on every platform (its own `sh`
+        // on Windows), so a redirect is the most portable mark there is.
+        // Forward slashes because that shell reads them on Windows too.
+        let marker = scratch.join("fsmonitor-ran");
+        let hook = format!("echo x > \"{}\"", marker.to_string_lossy().replace('\\', "/"));
+        git_in(&scratch.0, &["config", "core.fsmonitor", &hook]);
+
+        let control = Command::new("git")
+            .arg("-C")
+            .arg(&scratch.0)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .args(["status", "--porcelain=v2", "--branch", "-z"])
+            .output()
+            .expect("git runs");
+        assert!(control.status.success(), "{}", String::from_utf8_lossy(&control.stderr));
+        assert!(
+            marker.exists(),
+            "this git did not run the fsmonitor hook on a plain status, so the test cannot prove anything"
+        );
+        fs::remove_file(&marker).unwrap();
+
+        nox_git_status(as_string(&scratch.0)).unwrap();
+        assert!(!marker.exists(), "nox_git_status ran the repository's fsmonitor command");
+
+        nox_git_file_base(as_string(&file)).unwrap();
+        assert!(!marker.exists(), "nox_git_file_base ran the repository's fsmonitor command");
+
+        nox_git_blame(as_string(&file), "one\n".to_string()).unwrap();
+        assert!(!marker.exists(), "nox_git_blame ran the repository's fsmonitor command");
     }
 
     /// The Critical-1 probe: reproduces the reviewer's scenario directly —
