@@ -364,9 +364,17 @@ export class WorkspaceService {
    * buffer's current one is how grouped undo knows whether a set is still the
    * next thing to be taken back — rather than keeping a second history and
    * hoping it stays in step with CodeMirror's.
+   *
+   * The depth alone is not identity. CodeMirror trims history above 100
+   * events, back to 101 once it passes 120, so the depth cycles through the
+   * same twenty values for as long as the user keeps typing, and a recorded
+   * depth recurs with some later edit on top. `doc` is the document the set
+   * left behind: the set is on top only when the depth matches *and* the
+   * document is that one again. Shares structure with the live `Text`, so
+   * it is a reference, not a copy.
    */
-  #undoIndex = new Map<BufferId, { id: ChangeSetId; depth: number }[]>();
-  #redoIndex = new Map<BufferId, { id: ChangeSetId; depth: number }[]>();
+  #undoIndex = new Map<BufferId, { id: ChangeSetId; depth: number; doc: Text }[]>();
+  #redoIndex = new Map<BufferId, { id: ChangeSetId; depth: number; doc: Text }[]>();
 
   constructor(platform: Platform, createState: StateFactory) {
     this.#platform = platform;
@@ -1535,7 +1543,7 @@ export class WorkspaceService {
       }
 
       const stack = this.#undoIndex.get(bufferId) ?? [];
-      stack.push({ id, depth: undoDepth(buffer.state) });
+      stack.push({ id, depth: undoDepth(buffer.state), doc: buffer.state.doc });
       this.#undoIndex.set(bufferId, stack);
       // Any new edit invalidates whatever was waiting to be redone.
       this.#redoIndex.delete(bufferId);
@@ -1634,7 +1642,7 @@ export class WorkspaceService {
     const index = direction === 'undo' ? this.#undoIndex : this.#redoIndex;
     const depthOf = direction === 'undo' ? undoDepth : redoDepth;
     const top = index.get(buffer.id)?.at(-1);
-    if (!top || depthOf(buffer.state) !== top.depth) return null;
+    if (!top || !onTop(buffer.state, top, depthOf)) return null;
 
     const entry = this.log.get(top.id);
     return entry && entry.bufferIds.length > 1 ? top.id : null;
@@ -1663,7 +1671,7 @@ export class WorkspaceService {
       // The set has to still be on top of this buffer's history. Comparing
       // CodeMirror's own depth is what makes that check honest — it accounts
       // for edits, undos and redos we never saw.
-      if (!buffer || !top || top.id !== id || depthBefore(buffer.state) !== top.depth) {
+      if (!buffer || !top || top.id !== id || !onTop(buffer.state, top, depthBefore)) {
         skipped.push(bufferId);
         continue;
       }
@@ -1675,7 +1683,7 @@ export class WorkspaceService {
 
       stack!.pop();
       const target = to.get(bufferId) ?? [];
-      target.push({ id, depth: depthAfter(buffer.state) });
+      target.push({ id, depth: depthAfter(buffer.state), doc: buffer.state.doc });
       to.set(bufferId, target);
       undone.push(bufferId);
     }
@@ -2110,6 +2118,24 @@ function minimalChange(before: string, after: string): { from: number; to: numbe
   if (prefix > 0 && (before.charCodeAt(prefix - 1) & 0xfc00) === 0xd800) prefix--;
   if (suffix > 0 && (before.charCodeAt(before.length - suffix) & 0xfc00) === 0xdc00) suffix--;
   return { from: prefix, to: before.length - suffix, insert: after.slice(prefix, after.length - suffix) };
+}
+
+/**
+ * Whether a change set's index entry is the next thing this history would
+ * hand back. See `#undoIndex` for why the depth alone is not enough.
+ *
+ * The identity check comes first because it is the common case for free: a
+ * selection-only transaction keeps the same `Text`. An edit that was then
+ * undone rebuilds an equal document under a new object, which is what `eq`
+ * is for. It walks the text, and it runs on an undo rather than a keystroke.
+ */
+function onTop(
+  state: EditorState,
+  entry: { depth: number; doc: Text },
+  depthOf: (state: EditorState) => number,
+): boolean {
+  if (depthOf(state) !== entry.depth) return false;
+  return state.doc === entry.doc || state.doc.eq(entry.doc);
 }
 
 /**
