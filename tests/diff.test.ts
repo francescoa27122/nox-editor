@@ -131,7 +131,7 @@ describe('diffText past MAX_D, A4-003', () => {
     return [before.join(''), after.join('')];
   }
 
-  it('completes the 8,000-all-different case in well under 200 ms and a bounded amount of memory', () => {
+  it('completes the 8,000-all-different case quickly and in a bounded amount of memory', () => {
     const [before, after] = allDifferent(8_000);
 
     const started = performance.now();
@@ -139,7 +139,13 @@ describe('diffText past MAX_D, A4-003', () => {
     const elapsed = performance.now() - started;
     const heapAfter = process.memoryUsage().arrayBuffers;
 
-    expect(elapsed, `took ${elapsed.toFixed(1)}ms`).toBeLessThan(200);
+    // Measured well under 100 ms in isolation (60-85 ms, `core/diff.ts`'s own
+    // comment). 500 ms, the same threshold `stays quick on a large file with
+    // a small edit` above uses, is the CI-safe version of that: the pre-fix
+    // code measured 1.6-1.7 s here, so a 500 ms bound still fails loudly on a
+    // cap that stopped capping without this test flaking under a busy runner
+    // the way a tighter bound measured against did.
+    expect(elapsed, `took ${elapsed.toFixed(1)}ms`).toBeLessThan(500);
     // Loose on purpose, the way the other memory-shaped checks in this repo
     // are: the point is "bounded", not a specific byte count, and `v.slice()`
     // per round means this scales with MAX_D regardless of how the runtime's
