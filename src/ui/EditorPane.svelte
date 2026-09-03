@@ -119,6 +119,8 @@
     onGitGutterClick.of(() => void app.commands.execute('git.showDiff')),
   ];
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The buffer `autosaveTimer` was armed for; see `scheduleAutosave`. */
+  let autosaveTarget: string | null = null;
 
   onMount(() => {
     if (!host) return;
@@ -312,6 +314,10 @@
     if (!view) return;
     if (id === currentId && !options.force) return;
 
+    // Leaving a buffer ends the pause its autosave was waiting for. Saving it
+    // now rather than letting the timer run keeps the promise for exactly the
+    // buffer the user just left, which is the one a stale timer used to skip.
+    if (id !== currentId) flushAutosave();
     currentId = id;
     if (!id) return;
 
@@ -387,14 +393,33 @@
   function scheduleAutosave() {
     const mode = config.get('files.autoSave');
     if (mode !== 'afterDelay') return;
+    // Captured now, not read when the timer fires: the timer outlives a tab
+    // switch, and `currentId` by then is whichever buffer the pane moved to.
+    const id = currentId;
+    if (!id) return;
     if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTarget = id;
     autosaveTimer = setTimeout(() => {
       autosaveTimer = null;
-      const id = currentId;
-      const buffer = id ? workspace.buffers.get().find((b) => b.id === id) : null;
-      // Never auto-prompt a Save As dialog behind the user's back.
-      if (id && buffer?.isDirty && !buffer.isUntitled) void app.save(id);
+      autosaveTarget = null;
+      autosaveIfDirty(id);
     }, config.get('files.autoSaveDelay'));
+  }
+
+  /** Run a pending after-delay save now instead of when its timer fires. */
+  function flushAutosave() {
+    if (!autosaveTimer) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    const id = autosaveTarget;
+    autosaveTarget = null;
+    if (id) autosaveIfDirty(id);
+  }
+
+  function autosaveIfDirty(id: string) {
+    const buffer = workspace.buffers.get().find((b) => b.id === id);
+    // Never auto-prompt a Save As dialog behind the user's back.
+    if (buffer?.isDirty && !buffer.isUntitled) void app.save(id);
   }
 
   function onBlur() {
