@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::ops::ControlFlow;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,7 +28,7 @@ use std::os::windows::process::CommandExt;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::pty::Utf8Stream;
+use crate::pty::{coalesce, Utf8Stream};
 
 /// Suppresses the console window Windows would otherwise give a
 /// console-subsystem child of a GUI process. `winbase.h`'s value; not worth a
@@ -49,6 +50,16 @@ struct Running {
 struct LinePayload {
     id: String,
     line: String,
+}
+
+/// A burst of stdout lines in one event. One event per line was one
+/// main-thread hop per `print`, which a chatty agent turns into thousands;
+/// `pty::coalesce` says how they are batched. The renderer unpacks them in
+/// order (`platform/tauri.ts`), so nothing above it sees a batch.
+#[derive(Clone, Serialize)]
+struct LinesPayload {
+    id: String,
+    lines: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -116,27 +127,50 @@ pub fn nox_agent_spawn(
 
     let child = Arc::new(Mutex::new(child));
 
-    // stdout: one line, one message.
+    // stdout: one line, one message. Two threads, as for a terminal in
+    // `pty.rs`: the reader splits lines and hands them over, and the emitter
+    // batches a burst of them into one event, then reaps the child once the
+    // reader is done so the exit event stays behind the last line.
+    let (sender, receiver) = channel::<String>();
+    std::thread::spawn(move || {
+        // Read through `read_lines` rather than `BufRead::lines()`,
+        // because that turns one non-UTF-8 byte into the end of the
+        // conversation.
+        read_lines(stdout, |line| {
+            if !worth_emitting(&line) {
+                return ControlFlow::Continue(());
+            }
+            // A failed send means the emitter has stopped, which means the
+            // window is gone; nothing to recover, and no reason to go on
+            // reading.
+            if sender.send(line).is_ok() {
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(())
+            }
+        });
+    });
     {
         let app = app.clone();
         let id = id.clone();
         let child = Arc::clone(&child);
         std::thread::spawn(move || {
-            // Read through `read_lines` rather than `BufRead::lines()`,
-            // because that turns one non-UTF-8 byte into the end of the
-            // conversation.
-            read_lines(stdout, |line| {
-                if !worth_emitting(&line) {
-                    return ControlFlow::Continue(());
-                }
-                // A failed emit means the window is gone; nothing to recover,
-                // and no reason to go on reading.
-                if emit_line(&app, "nox://agent-line", &id, line) {
-                    ControlFlow::Continue(())
-                } else {
-                    ControlFlow::Break(())
-                }
-            });
+            coalesce(
+                receiver,
+                |line| line.len(),
+                |lines| {
+                    let payload = LinesPayload {
+                        id: id.clone(),
+                        lines,
+                    };
+                    // A failed emit means the window is gone.
+                    if app.emit("nox://agent-line", payload).is_ok() {
+                        ControlFlow::Continue(())
+                    } else {
+                        ControlFlow::Break(())
+                    }
+                },
+            );
 
             // stdout closing is the earliest reliable sign the agent is done.
             // Reaping here also stops the child becoming a zombie when nobody
