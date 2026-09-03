@@ -55,6 +55,16 @@ export const lspCompartment = new Compartment();
  * rendering half comes and goes.
  */
 export const blameCompartment = new Compartment();
+
+/**
+ * The textbox's accessible name.
+ *
+ * CodeMirror's `contentDOM` is the element that takes focus, and with no
+ * name a screen reader calls it by its own first line. The name is the
+ * buffer's, which only the pane knows, so this is the same arrangement as
+ * `lspCompartment`: empty here, filled on every swap by `EditorPane`.
+ */
+export const accessibleNameCompartment = new Compartment();
 import { languageCompartment } from './languages';
 import { pluginDecorationExtension } from './plugin-decorations';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
@@ -285,6 +295,8 @@ export function buildExtensions(settings: Settings): Extension[] {
     lspDiagnosticsExtension(),
     // Empty until a pane fills it in; see `lspCompartment`.
     lspCompartment.of([]),
+    // Same again; see `accessibleNameCompartment`.
+    accessibleNameCompartment.of([]),
     // Empty until the grammar resolves; see `editor/languages.ts`.
     languageCompartment.of([]),
   ];
