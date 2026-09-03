@@ -397,6 +397,10 @@ export class TauriPlatform implements Platform {
     await processRelaunch();
   }
 
+  async reloadWindow(): Promise<void> {
+    globalThis.location.reload();
+  }
+
   /**
    * OS-level drag and drop. This is the reason the desktop build can accept a
    * dropped file at all: the webview's own HTML5 drop event hands over a

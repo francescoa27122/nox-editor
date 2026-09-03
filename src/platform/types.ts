@@ -762,6 +762,13 @@ export interface Platform {
 
   /** Restart the app the way the OS would start it. Used after an install. */
   relaunch(): Promise<void>;
+
+  /**
+   * Replace the renderer with a fresh load of the same page, the way
+   * `location.reload()` does. The host stops nothing the page started, so the
+   * caller runs its own teardown first and waits for it; see `NoxApp.reloadWindow`.
+   */
+  reloadWindow(): Promise<void>;
 }
 
 /** Thrown for every platform failure so services can present one error shape. */

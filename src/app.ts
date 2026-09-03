@@ -1440,7 +1440,9 @@ export class NoxApp {
     // startup plugins and killed them a moment later, and nothing brought them
     // back short of Reload Plugins. Found by walking the packaged build on
     // 2026-08-29; the teardown it was reaching for is a *reload* concern and
-    // now lives in `dispose()`, which is what a reload actually runs.
+    // now lives in `dispose()`, which `reloadWindow` runs and waits for
+    // before the page goes away. A bare `location.reload()` would run none
+    // of it, which is how every reload used to orphan the servers.
     if (!root) return;
     if (!this.platform.capabilities.languageServers) return;
     await this.lsp.start();
@@ -3227,10 +3229,7 @@ export class NoxApp {
         // session. In-memory state does not — agent sessions and the
         // transaction log start again — so this stays off the keyboard where
         // it cannot be hit by accident.
-        run: () => {
-          this.notifications.info('Reloading…');
-          globalThis.location.reload();
-        },
+        run: () => this.reloadWindow(),
       },
       {
         id: 'agents.show',
@@ -5282,6 +5281,28 @@ export class NoxApp {
     return false;
   }
 
+  /**
+   * Reload Window, teardown first and navigation second.
+   *
+   * A bare `location.reload()` replaces the renderer and nothing else: the
+   * language servers, plugin workers and pending flushes belong to the page
+   * that started them, and the host does not stop what a page started. Until
+   * 2026-09-02 the command was exactly that bare reload, so every reload
+   * started a fresh set of servers beside the orphaned old one, and two
+   * comments claimed otherwise. `dispose()` is the one place that stops the
+   * servers and awaits the flushes, so it runs here and is waited for.
+   * `finally`, because a teardown that fails must still reload: the
+   * alternative is a half-disposed app with no way out short of quitting.
+   */
+  async reloadWindow(): Promise<void> {
+    this.notifications.info('Reloading…');
+    try {
+      await this.dispose();
+    } finally {
+      await this.platform.reloadWindow();
+    }
+  }
+
   async dispose(): Promise<void> {
     this.#disposeDropListener?.();
     this.#disposeDropListener = null;
@@ -5297,8 +5318,9 @@ export class NoxApp {
     // Notes first: settings and session each have an on-disk original to
     // fall back on if their flush is lost, but a note does not.
     // Before the flushes: a reload does not kill the processes the renderer
-    // started, so without this every reload leaves a server orphaned with
-    // nothing left to talk to it.
+    // started, which is why `reloadWindow` runs this and waits for it. Without
+    // that, every reload left a server orphaned with nothing left to talk to
+    // it.
     await this.lsp.stop();
     await this.platform.stopAllLanguageServers().catch(() => undefined);
     // The plugins' half of the same sentence: a reload does not kill what the
