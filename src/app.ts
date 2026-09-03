@@ -4036,17 +4036,6 @@ export class NoxApp {
         run: () => this.#runEditor(unfoldAll),
       },
       {
-        id: 'edit.foldLevel',
-        title: 'Fold to Level…',
-        category: 'Edit',
-        hidden: true,
-        enabled: editorEnabled,
-        run: (arg) => {
-          const level = Number(arg);
-          if (Number.isFinite(level) && level > 0) this.#runEditor(foldToLevel(level));
-        },
-      },
-      {
         id: 'edit.toggleComment',
         resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
         capabilities: ['buffer.edit'],
