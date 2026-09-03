@@ -686,16 +686,28 @@ export class WorkspaceService {
     if (id) this.setActive(id);
   }
 
-  /** Reorder tabs, used by drag-and-drop in the tab strip. */
-  moveTab(id: BufferId, toIndex: number, targetGroupId?: GroupId): void {
-    const from = this.#groupOf(id);
+  /**
+   * Reorder tabs, used by drag-and-drop in the tab strip.
+   *
+   * `fromGroupId` says which pane the tab leaves when the buffer is shown in
+   * more than one; without it the first pane showing it is assumed, which is
+   * the wrong one for a move out of the copy.
+   */
+  moveTab(id: BufferId, toIndex: number, targetGroupId?: GroupId, fromGroupId?: GroupId): void {
+    const from = this.#groupOf(id, fromGroupId);
     if (!from) return;
     const to = targetGroupId ? this.#group(targetGroupId) : from;
     if (!to) return;
 
     from.order.splice(from.order.indexOf(id), 1);
-    const clamped = Math.max(0, Math.min(to.order.length, toIndex));
-    to.order.splice(clamped, 0, id);
+    // A pane already showing the buffer takes the move as a close here plus
+    // an activate there. A tab cannot be shown twice in one pane (see
+    // `mirrorInto`): the keyed tab strip throws on the duplicate id and stops
+    // updating.
+    if (!to.order.includes(id)) {
+      const clamped = Math.max(0, Math.min(to.order.length, toIndex));
+      to.order.splice(clamped, 0, id);
+    }
 
     if (from !== to) {
       // Dragging the last tab out of a group takes the group with it.
@@ -788,7 +800,11 @@ export class WorkspaceService {
 
     const index = this.#groups.indexOf(group);
     const neighbour = this.#groups[index === 0 ? 1 : index - 1]!;
-    neighbour.order.push(...group.order);
+    // Only what the neighbour is not already showing: a file open in both
+    // panes would otherwise become two tabs in one, which the keyed tab strip
+    // refuses to render. The active tab is fine either way, since the id is
+    // in the neighbour whichever branch it took.
+    neighbour.order.push(...group.order.filter((id) => !neighbour.order.includes(id)));
     if (group.activeId) neighbour.activeId = group.activeId;
 
     this.#removeGroup(id);
@@ -826,7 +842,9 @@ export class WorkspaceService {
       this.splitEditor();
       return;
     }
-    this.moveTab(id, target.order.length, target.id);
+    // From *this* pane, named: the buffer may be showing in both, and the
+    // default lookup finds the first pane rather than the active one.
+    this.moveTab(id, target.order.length, target.id, source.id);
   }
 
   #group(id: GroupId): EditorGroup | undefined {
