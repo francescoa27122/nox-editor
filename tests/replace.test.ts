@@ -3,7 +3,7 @@ import { history } from '@codemirror/commands';
 import type { ChangeSet, Transaction, TransactionSpec } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { applyEdits, computeReplacements, expandReplacement } from '../src/core/replace';
-import { buildSearchRegex } from '../src/core/search-match';
+import { buildSearchRegex, findMatches } from '../src/core/search-match';
 import { MemoryPlatform } from '../src/platform/memory';
 import { SearchService } from '../src/services/search';
 import { WorkspaceService } from '../src/services/workspace';
@@ -122,6 +122,33 @@ describe('computeReplacements', () => {
     });
     expect(result.count).toBe(0);
     expect(result.text).toBe('abc');
+  });
+
+  /**
+   * Guards A3-011. The Rust search iterates `lines()`, which strips the
+   * `\r` of a CRLF file, but replace and the in-memory search split on `\n`
+   * and left it on each line, so an end-anchored pattern found a hit in the
+   * results and none at replace time on a Windows-ending file that was not
+   * open in a buffer. Matching happens on the line without its `\r`, and
+   * the `\r` survives the edit.
+   *
+   * Does not cover a lone `\r` line ending, which neither side treats as a
+   * line break.
+   */
+  it('matches an end-anchored pattern on CRLF lines and keeps the \\r', () => {
+    const result = computeReplacements('foo\r\nboo\r\nbar\r\n', /o$/g, 'X');
+    expect(result.count).toBe(2);
+    expect(result.text).toBe('foX\r\nboX\r\nbar\r\n');
+  });
+
+  it('reports the same CRLF matches as the search does', () => {
+    const found = findMatches('foo\r\nboo\r\n', /o$/g);
+    expect(found.map((match) => [match.line, match.column])).toEqual([
+      [1, 2],
+      [2, 2],
+    ]);
+    // The preview is the line as the results panel shows it: no `\r`.
+    expect(found[0]?.preview).toBe('foo');
   });
 
   it('supports deleting matches with an empty replacement', () => {

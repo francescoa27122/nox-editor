@@ -120,7 +120,12 @@ export function computeReplacements(
   let lineStart = 0;
   let index = -1;
 
-  for (const line of lines) {
+  for (const raw of lines) {
+    // Matched without its `\r`, so a CRLF file matches the way the Rust
+    // search's `lines()` sees it and `$` anchors at the text rather than at
+    // the `\r`. Offsets are unaffected: the `\r` sits after every match on
+    // its line, and stays in the output.
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     matcher.lastIndex = 0;
     let found: RegExpExecArray | null;
 
@@ -144,7 +149,7 @@ export function computeReplacements(
       }
     }
 
-    lineStart += line.length + 1; // +1 for the newline `split` removed.
+    lineStart += raw.length + 1; // +1 for the newline `split` removed.
   }
 
   return { text: applyEdits(text, edits), edits, count: edits.length };
