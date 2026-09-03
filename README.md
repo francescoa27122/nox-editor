@@ -79,18 +79,23 @@ demo project. No Rust build, and nothing touches your disk.
 
 ## What makes it different
 
-### It does not lose your work. Ever.
+### It does not lose your work
 
 Close the window with unsaved changes and Nox doesn't ask you a question. It
 keeps them, and hands them back next time you open it, still unsaved and still
-undoable back to what is on disk.
+undoable back to what is on disk. That holds even if the file itself has gone
+by then: the tab comes back as unsaved rather than vanishing with it.
 
-A dialog can be answered wrong at 2am. Persistence can't.
+A dialog can be answered wrong at 2am. Persistence can't. The one gap is a
+crash, rather than a quit, in the fraction of a second between a keystroke
+and the session file catching up with it.
 
 Saving writes to a temporary file and renames it into place, so a crash or a
-full disk part way through can't leave you with half a file. If something else
-changes a file while you have it open, Nox tells you instead of quietly picking
-a winner.
+full disk part way through can't leave you with half a file, and a keystroke
+that lands while a save is in flight is kept. If something else changes a
+file while you have it open, Nox tells you instead of quietly picking a
+winner, with one exception it cannot see: a change that lands in the same
+filesystem tick as its own save.
 
 ### Undo works across files
 
