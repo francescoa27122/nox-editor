@@ -178,10 +178,12 @@ pub fn nox_agent_spawn(
             let code =
                 wait_unlocked(&child, |child| child.try_wait()).and_then(|status| status.code());
 
-            // Forget it, or the id stays registered for the life of the app
-            // and spawning under it again is refused as "already running" —
-            // which is exactly what happens after the window reloads and the
-            // renderer's counter starts over.
+            // Forget it: the entry is stale now the child is gone. Left in place,
+            // a later `kill` for this id would act on a dead child, `kill_all` would
+            // iterate it, and the registry would grow by one for every agent that
+            // ever ran. A reload cannot collide on the id, whatever this comment
+            // once said: `platform/tauri.ts` puts a per-load token in every id, so
+            // a fresh renderer never reuses one.
             if let Some(state) = app.try_state::<AgentState>() {
                 if let Ok(mut agents) = state.0.lock() {
                     agents.remove(&id);

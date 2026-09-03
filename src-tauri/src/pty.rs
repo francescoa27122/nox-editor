@@ -353,9 +353,12 @@ pub fn nox_pty_open(
             let code = wait_unlocked(&child, |child| child.try_wait())
                 .map(|status| status.exit_code() as i32);
 
-            // Forget it, or the id stays registered for the life of the app and
-            // opening under it again is refused as "already open" — which is
-            // what happens after a reload restarts the renderer's counter.
+            // Forget it: the entry is stale now the child is gone. Left in place,
+            // a later `close` for this id would act on a dead child, `close_all` would
+            // iterate it, and the registry would grow by one for every terminal that
+            // ever ran. A reload cannot collide on the id, whatever this comment
+            // once said: `platform/tauri.ts` puts a per-load token in every id, so
+            // a fresh renderer never reuses one.
             if let Some(state) = app.try_state::<PtyState>() {
                 if let Ok(mut sessions) = state.0.lock() {
                     sessions.remove(&id);
