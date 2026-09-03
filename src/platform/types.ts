@@ -256,6 +256,8 @@ export interface SearchMatch {
 export interface SearchFileResult {
   path: string;
   matches: SearchMatch[];
+  /** True when this file had more matches than were collected (A4-005). */
+  truncated: boolean;
 }
 
 export interface SearchSummary {
