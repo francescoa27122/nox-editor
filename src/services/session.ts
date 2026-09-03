@@ -182,10 +182,10 @@ export class SessionService {
       for (const tab of group.tabs ?? []) {
         let id: string | null = null;
 
-        if (tab.kind === 'file') {
-          // A file may have been deleted since last launch; skip it quietly.
-          if (!(await this.#platform.exists(tab.path))) continue;
+        /** The backup this tab's text came from, to keep it on that file. */
+        let backup: string | undefined;
 
+        if (tab.kind === 'file') {
           // A second view of a buffer an earlier group already restored.
           // `open` would focus that one rather than adding a tab here, which
           // is why the marker exists.
@@ -200,28 +200,51 @@ export class SessionService {
             continue;
           }
 
-          id = await this.#workspace.open(
-            tab.path,
-            tab.encoding ? { encoding: tab.encoding } : {},
-          );
-          // Unsaved work goes back on top of the file as it is now, as a real
-          // edit — so the tab is dirty and ⌘Z reaches the on-disk content.
-          if (id && tab.unsaved) {
-            const content = await this.#unsavedText(tab.unsaved);
-            // A backup that has gone missing must not silently blank the file.
-            if (content !== null) {
-              this.#workspace.restoreUnsaved(id, content, tab.unsaved.baseMtime);
+          if (!(await this.#platform.exists(tab.path))) {
+            // Deleted since last launch. A clean tab is skipped quietly; one
+            // with unsaved work comes back open and marked deleted, as the
+            // watcher keeps it while Nox runs. Skipping it too lost the text
+            // twice over: the tab vanished without a word, and its backup
+            // name was then reissued to another buffer.
+            const content = tab.unsaved ? await this.#unsavedText(tab.unsaved) : null;
+            if (content === null) continue;
+            id = this.#workspace.openDeleted(
+              tab.path,
+              content,
+              tab.encoding ? { encoding: tab.encoding } : {},
+            );
+            backup = tab.unsaved?.backup;
+          } else {
+            id = await this.#workspace.open(
+              tab.path,
+              tab.encoding ? { encoding: tab.encoding } : {},
+            );
+            // Unsaved work goes back on top of the file as it is now, as a real
+            // edit — so the tab is dirty and ⌘Z reaches the on-disk content.
+            if (id && tab.unsaved) {
+              const content = await this.#unsavedText(tab.unsaved);
+              // A backup that has gone missing must not silently blank the file.
+              if (content !== null) {
+                this.#workspace.restoreUnsaved(id, content, tab.unsaved.baseMtime);
+                backup = tab.unsaved.backup;
+              }
             }
           }
         } else {
           const content = (await this.#readBackup(tab.backup)) ?? tab.content ?? '';
           if (content.length === 0) continue;
           id = this.#workspace.newUntitled({ content, languageId: tab.languageId });
+          backup = tab.backup;
         }
 
         if (!id) continue;
         // After the content, so offsets are clamped against the final document.
         if (tab.selection) this.#workspace.setSelection(id, tab.selection);
+        // Registered at the revision the restore left it at, so the first
+        // save after boot keeps the buffer on the file it already has and
+        // rewrites nothing. Unregistered, every restored buffer was renamed
+        // on that save, and with a fresh counter the names collided.
+        if (backup) this.#backups.set(id, { name: backup, revision: this.#workspace.revisionOf(id) });
         opened.push(id);
       }
       groupActives.push(opened[group.activeIndex] ?? opened[0] ?? null);
@@ -446,6 +469,12 @@ export class SessionService {
       return null;
     }
     if (!raw) return null;
+
+    // Seeded from the names the index uses whether or not it parses (the
+    // damaged path below does the same). A tab the restore cannot bring back
+    // leaves its name here with a file that may still hold text, and a
+    // counter starting at 1 handed that name to the next dirty buffer.
+    this.#nextBackup = highestNumbered(raw, /unsaved-(\d+)\.txt/g) + 1;
 
     try {
       const parsed = JSON.parse(raw) as SessionData;

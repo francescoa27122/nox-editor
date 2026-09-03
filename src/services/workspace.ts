@@ -531,6 +531,45 @@ export class WorkspaceService {
     return buffer.id;
   }
 
+  /**
+   * Open a path whose file is gone, holding `content` as unsaved work.
+   *
+   * Session restore's case: the user edited a file, quit, and something
+   * removed the file before the next launch (a branch switch, a stash, a
+   * regenerated directory). While Nox runs the watcher keeps such a tab open
+   * and marked `deleted`; across a restart the tab used to be dropped without
+   * a word. The buffer starts empty, which is what the disk now says, and
+   * takes the text as a real edit: it is dirty, undo reaches the empty
+   * document, and saving recreates the file exactly as it does for a deletion
+   * the watcher saw.
+   */
+  openDeleted(path: string, content: string, options: { encoding?: Encoding } = {}): BufferId {
+    const existing = this.findByPath(path);
+    if (existing) {
+      this.setActive(existing.id);
+      return existing.id;
+    }
+
+    const language = detectLanguage(path);
+    const buffer = new Buffer({
+      id: this.#mintId(),
+      path,
+      name: basename(path),
+      language,
+      eol: '\n',
+      encoding: options.encoding,
+      state: EditorState.create({
+        doc: '',
+        extensions: this.#createState({ doc: '', languageId: language.id }),
+      }),
+    });
+    buffer.externalState = 'deleted';
+    this.#insert(buffer);
+    this.replaceContents(buffer.id, content);
+    this.events.emit('buffer-opened', { id: buffer.id });
+    return buffer.id;
+  }
+
   /** Create an empty untitled buffer and focus it. */
   newUntitled(options: { languageId?: string; content?: string } = {}): BufferId {
     const language = options.languageId ? languageById(options.languageId) : detectLanguage(null);

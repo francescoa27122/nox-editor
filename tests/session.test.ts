@@ -235,6 +235,129 @@ describe('SessionService', () => {
     expect(restored.buffers.get().map((b) => b.name)).toEqual(['a.ts']);
   });
 
+  /**
+   * Guards A3-004, first half. A dirty tab whose file vanished between
+   * sessions used to be skipped as quietly as a clean one, so the unsaved
+   * text was gone from the window with no notice. It comes back the way the
+   * watcher keeps such a tab while Nox runs: open, dirty, marked deleted.
+   * The second assertion is the same finding's other half: the counter used
+   * to restart at 1, so the first save after boot wrote b's text over a's
+   * backup, and this holds both backups intact across that save.
+   */
+  it('restores a dirty tab whose file vanished, marked deleted, and keeps its backup', async () => {
+    const { platform, workspace, session } = setup();
+    const a = (await workspace.open('/work/a.ts'))!;
+    const b = (await workspace.open('/work/b.md'))!;
+    workspace.applyTransaction(
+      a,
+      workspace.stateOf(a)!.update({ changes: { from: 0, insert: 'UNSAVED-A ' } }),
+    );
+    workspace.applyTransaction(
+      b,
+      workspace.stateOf(b)!.update({ changes: { from: 0, insert: 'UNSAVED-B ' } }),
+    );
+    await session.save();
+    expect(await platform.readConfigFile('unsaved-1.txt')).toBe('UNSAVED-A const a = 1;\n');
+
+    // A branch switch removed the file before the next launch.
+    await platform.trash('/work/a.ts');
+
+    const restored = new WorkspaceService(platform, () => []);
+    const restoredSession = new SessionService(platform, restored);
+    restoredSession.markReady();
+    await restoredSession.restore();
+
+    const tabs = restored.buffers.get();
+    expect(tabs.map((tab) => tab.name)).toEqual(['a.ts', 'b.md']);
+    const restoredA = tabs[0]!;
+    expect(restored.textOf(restoredA.id)).toBe('UNSAVED-A const a = 1;\n');
+    expect(restoredA.isDirty).toBe(true);
+    expect(restoredA.externalState).toBe('deleted');
+    expect(restoredA.path).toBe('/work/a.ts');
+
+    // The first save after boot, with no edit: neither backup may change hands.
+    await restoredSession.save();
+    expect(await platform.readConfigFile('unsaved-1.txt')).toBe('UNSAVED-A const a = 1;\n');
+    expect(await platform.readConfigFile('unsaved-2.txt')).toBe('UNSAVED-B # b\n');
+  });
+
+  /**
+   * The counter half of A3-004 on its own: a tab the restore cannot bring
+   * back (file and backup both gone) still leaves its name in the index, and
+   * a fresh service must count on from there rather than from 1. Nothing is
+   * registered for this tab, so only the seed protects the name.
+   */
+  it('never reissues a backup name the index already uses', async () => {
+    const platform = new MemoryPlatform();
+    platform.mkdirp('/work');
+    await platform.writeConfigFile(
+      'session.json',
+      JSON.stringify({
+        version: 4,
+        rootPath: null,
+        groups: [
+          {
+            tabs: [{ kind: 'file', path: '/work/gone.ts', unsaved: { backup: 'unsaved-7.txt', baseMtime: 0 } }],
+            activeIndex: 0,
+          },
+        ],
+        activeGroupIndex: 0,
+        recentFiles: [],
+        recentFolders: [],
+      }),
+    );
+
+    const workspace = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, workspace);
+    session.markReady();
+    await session.restore();
+    expect(workspace.buffers.get()).toHaveLength(0);
+
+    const id = workspace.newUntitled();
+    workspace.applyTransaction(
+      id,
+      workspace.stateOf(id)!.update({ changes: { from: 0, insert: 'scratch' } }),
+    );
+    await session.save();
+
+    expect(await platform.readConfigFile('unsaved-8.txt')).toBe('scratch');
+    expect(await platform.readConfigFile('unsaved-7.txt')).toBeNull();
+  });
+
+  /**
+   * A restored dirty tab keeps the backup file it had, rather than being
+   * issued a new name on the first save after boot. Set up so that reissuing
+   * in tab order would *not* land on the old name by luck: `unsaved-1` was
+   * released when a.ts was saved, so b.md's backup is `unsaved-2`.
+   */
+  it('keeps a restored dirty tab on the backup it had', async () => {
+    const { platform, workspace, session } = setup();
+    const a = (await workspace.open('/work/a.ts'))!;
+    workspace.applyTransaction(
+      a,
+      workspace.stateOf(a)!.update({ changes: { from: 0, insert: 'x' } }),
+    );
+    await session.save();
+    await workspace.save(a);
+    const b = (await workspace.open('/work/b.md'))!;
+    workspace.applyTransaction(
+      b,
+      workspace.stateOf(b)!.update({ changes: { from: 0, insert: 'UNSAVED-B ' } }),
+    );
+    await session.save();
+    expect(await platform.readConfigFile('unsaved-1.txt')).toBe('');
+    expect(await platform.readConfigFile('unsaved-2.txt')).toBe('UNSAVED-B # b\n');
+
+    const restored = new WorkspaceService(platform, () => []);
+    const restoredSession = new SessionService(platform, restored);
+    restoredSession.markReady();
+    await restoredSession.restore();
+    await restoredSession.save();
+
+    expect(await platform.readConfigFile('unsaved-2.txt')).toBe('UNSAVED-B # b\n');
+    expect(await platform.readConfigFile('unsaved-1.txt')).toBe('');
+  });
+
   it('ignores a corrupt session file', async () => {
     const platform = new MemoryPlatform();
     await platform.writeConfigFile('session.json', 'not json at all');
