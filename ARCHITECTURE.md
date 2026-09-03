@@ -393,9 +393,10 @@ landing in the same second as a Nox save can be misread as our own.
 ### Reloads are transactions, not state resets
 
 `reloadFromDisk` replaces the document with a *transaction* rather than a new
-`EditorState`. That keeps scroll position, maps the selection through the
-change, and leaves the reload on the undo stack, so a surprise reload is
-recoverable with ⌘Z.
+`EditorState`. That keeps scroll position and leaves the reload on the undo
+stack, so a surprise reload is recoverable with ⌘Z. The selection is mapped
+through the change, which is not the same as putting the cursor back on the
+line it was on: after a whole-document replacement, expect it to move.
 
 For that to reach the buffer you are actually looking at, the workspace needs
 to push into the live view. `ViewDispatcher` is the mirror image of

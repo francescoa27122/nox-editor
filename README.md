@@ -23,7 +23,7 @@ noticing it.
 
 It is **not** a VS Code clone. It has its own design language, its own
 shortcuts where they can be better, and a deliberately small surface area. It
-is also about 4 MB, and it starts instantly.
+is also about 5 MB, and it starts instantly.
 
 I built it to find out what an editor looks like if you take two things
 seriously from the first line of code: **never losing someone's work**, and
@@ -50,7 +50,9 @@ xattr -dr com.apple.quarantine /Applications/Nox.app
 
 You will need that command. Nox is ad-hoc signed rather than signed with an
 Apple Developer ID, so macOS quarantines it on download and calls it
-*"damaged"*. That sounds like a corrupt download. The file is fine.
+*"damaged"*. That sounds like a corrupt download. The file is fine. Nox needs
+macOS 13 or newer: the WebKit in older versions cannot draw the colours the
+diff and review views are made of.
 
 Linux packages are built on Ubuntu 22.04, so they need glibc 2.35 or newer.
 There is no AppImage.
@@ -77,18 +79,23 @@ demo project. No Rust build, and nothing touches your disk.
 
 ## What makes it different
 
-### It does not lose your work. Ever.
+### It does not lose your work
 
 Close the window with unsaved changes and Nox doesn't ask you a question. It
 keeps them, and hands them back next time you open it, still unsaved and still
-undoable back to what is on disk.
+undoable back to what is on disk. That holds even if the file itself has gone
+by then: the tab comes back as unsaved rather than vanishing with it.
 
-A dialog can be answered wrong at 2am. Persistence can't.
+A dialog can be answered wrong at 2am. Persistence can't. The one gap is a
+crash, rather than a quit, in the fraction of a second between a keystroke
+and the session file catching up with it.
 
 Saving writes to a temporary file and renames it into place, so a crash or a
-full disk part way through can't leave you with half a file. If something else
-changes a file while you have it open, Nox tells you instead of quietly picking
-a winner.
+full disk part way through can't leave you with half a file, and a keystroke
+that lands while a save is in flight is kept. If something else changes a
+file while you have it open, Nox tells you instead of quietly picking a
+winner, with one exception it cannot see: a change that lands in the same
+filesystem tick as its own save.
 
 ### Undo works across files
 
@@ -119,12 +126,16 @@ in the Agents panel. You can check what happened rather than trust it.
 Run **Configure Agents** from the command palette. Nox creates the file for
 you, fills it with a working example, and opens it. Point the example at an
 [Ollama](https://ollama.com) server, save, and you're done. There's no account,
-no API key, and no telemetry.
+no API key, and no telemetry. Nox makes one network request of its own: ten
+seconds after launch it fetches the release feed from GitHub to learn whether
+a newer version exists. The address is fixed, so the request carries nothing
+about you or your install, and finding a newer version only shows a toast.
+**Check for Updates on Launch** in Settings turns it off.
 
-The model runs on your own machine and Nox will only talk to your own machine.
-That limit lives in the part of the app a web page has no way to reach, so it
-isn't a setting that can be flipped by accident or by a page you happened to
-open.
+The model runs on your own machine, and the model integration will only talk
+to your own machine. That limit lives in the part of the app a web page has
+no way to reach, so it isn't a setting that can be flipped by accident or by
+a page you happened to open.
 
 **It reads and it proposes. It cannot run commands.** That isn't a switch you
 left off. Nox has no way to express "run this" to an agent yet.
@@ -332,11 +343,13 @@ For anyone who wants the deep version:
 Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 [CodeMirror 6](https://codemirror.net). The Rust side owns the window, the
 filesystem and project search. The editor itself lives in the renderer.
+Every library the bundle carries is listed, with its licence, in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ```bash
 npm test          # the unit suite (the count is in Status above)
 npm run check     # TypeScript + Svelte
-npm run app:build # a distributable, ~4 MB on macOS
+npm run app:build # a distributable, ~5 MB on macOS
 ```
 
 There's a second suite in [`e2e/`](e2e/README.md) that drives the built

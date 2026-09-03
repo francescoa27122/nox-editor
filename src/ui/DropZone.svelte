@@ -39,6 +39,10 @@
     display: grid;
     place-items: center;
     background: var(--nox-scrim);
+    /* Prefixed first: Safari shipped the unprefixed property in 18, and this
+       app's floor is macOS 13, so 13 through 17 need the -webkit- spelling
+       or the scrim loses its blur silently. */
+    -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
     /* The OS owns the pointer during a drag; never intercept it. */
     pointer-events: none;
