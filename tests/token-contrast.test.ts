@@ -278,6 +278,29 @@ describe.each(themes)('%s', (_theme, tokens) => {
   });
 
   /**
+   * Line numbers are text a person reads: Go to Line, a diagnostic, blame and
+   * every stack trace point at one. `--nox-gutter-fg` was in neither
+   * `TEXT_TOKENS` nor the `--nox-syn-*` sweep, so it sat at 2.03:1 on the
+   * writing surface with nothing to say so. Measured on `--nox-bg-editor`
+   * only, because `theme.ts` paints the gutter on that one ground.
+   *
+   * The ordering is the other half: the column has to stay quieter than the
+   * code beside it and than the active line's own number, or it stops reading
+   * as a margin. What this does not catch: the 0.92em the gutter is set in,
+   * which WCAG's 4.5:1 already assumes for small text.
+   */
+  it('line numbers are legible on the writing surface and stay a margin', () => {
+    const editor = resolve(tokens, '--nox-bg-editor');
+    const at = (name: string) => contrast(resolve(tokens, name), editor);
+
+    for (const name of ['--nox-gutter-fg', '--nox-gutter-active-fg']) {
+      expect(`${name}: ${at(name).toFixed(2)}`).toBe(`${name}: ${Math.max(at(name), 4.5).toFixed(2)}`);
+    }
+    expect(at('--nox-gutter-fg')).toBeLessThan(at('--nox-gutter-active-fg'));
+    expect(at('--nox-gutter-fg')).toBeLessThan(at('--nox-text'));
+  });
+
+  /**
    * `--nox-text-faint` is the one foreground held to the *lower* bar, and that
    * is the whole reason it is dangerous. It clears 1.4.11's 3:1 for icons and
    * glyphs and fails 1.4.3's 4.5:1 for text, so the day it creeps back onto
