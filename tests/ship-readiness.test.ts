@@ -182,6 +182,31 @@ describe('A8-010: e2e/README.md counts what e2e/specs/ holds', () => {
   });
 });
 
+describe('A8-006: nothing in the stylesheets needs a floor above the one we set', () => {
+  /**
+   * Raising `minimumSystemVersion` to 13.0 was argued from `color-mix()`,
+   * which Safari shipped in 16.2. That argument is only worth anything if
+   * nothing else in the stylesheets needs a *higher* floor, and one thing did:
+   * Safari shipped unprefixed `backdrop-filter` in 18, so every macOS between
+   * the new floor and 18 lost the scrim's blur with no error and no fallback.
+   *
+   * Held as a rule rather than a count, because the next unprefixed use will
+   * be written by someone who never read this comment.
+   */
+  it('pairs every backdrop-filter with its -webkit- spelling', () => {
+    const offenders: string[] = [];
+
+    for (const name of readdirSync(join(root, 'src', 'ui')).filter((n) => n.endsWith('.svelte'))) {
+      const source = readFileSync(join(root, 'src', 'ui', name), 'utf8');
+      const plain = (source.match(/^\s*backdrop-filter:/gm) ?? []).length;
+      const prefixed = (source.match(/^\s*-webkit-backdrop-filter:/gm) ?? []).length;
+      if (plain !== prefixed) offenders.push(`${name}: ${plain} plain, ${prefixed} prefixed`);
+    }
+
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('A8-012: the bundle copyright is the LICENSE line', () => {
   /**
    * bundle.copyright was an empty string, so Get Info on the .app and
