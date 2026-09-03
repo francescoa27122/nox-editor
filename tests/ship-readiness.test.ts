@@ -178,3 +178,18 @@ describe('A8-010: e2e/README.md counts what e2e/specs/ holds', () => {
     expect(readme).toContain(`${words[files.length]} spec files (${words[its]} \`it\` blocks)`);
   });
 });
+
+describe('A8-012: the bundle copyright is the LICENSE line', () => {
+  /**
+   * bundle.copyright was an empty string, so Get Info on the .app and
+   * Properties on nox.exe showed nothing where a user looks when an
+   * unsigned binary asks to be trusted. Held equal to LICENSE rather than
+   * to a literal, so the year and the name have one source.
+   */
+  it('matches the Copyright line in LICENSE exactly', () => {
+    const line = read('LICENSE').split('\n').find((l) => l.startsWith('Copyright (c) '));
+    expect(line).toBeDefined();
+    const config = JSON.parse(read('src-tauri', 'tauri.conf.json')) as { bundle: { copyright: string } };
+    expect(config.bundle.copyright).toBe(line);
+  });
+});

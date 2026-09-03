@@ -48,7 +48,7 @@
     "category": "DeveloperTool",
     "shortDescription": "A fast, dark, keyboard-first text editor",
     "longDescription": "Nox is a fast, dark, keyboard-first text editor built for focus.",
-    "copyright": "",
+    "copyright": "Copyright (c) 2026 Francesco Assalone",
     "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
