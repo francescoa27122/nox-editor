@@ -2,6 +2,7 @@ import { EditorSelection } from '@codemirror/state';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Encoding } from '../src/core/encoding';
 import { MemoryPlatform } from '../src/platform/memory';
+import type { EncodedText } from '../src/platform/types';
 import { WorkspaceService } from '../src/services/workspace';
 
 /**
@@ -233,37 +234,113 @@ describe('saving', () => {
   });
 });
 
+describe('reloading from disk', () => {
+  /**
+   * Guards A3-007: a reload decided for a clean buffer used to replace the
+   * document with the disk text after its read resolved, whatever had been
+   * typed in between, and marked the buffer clean. The keystroke was still
+   * in undo history, but nothing said a reload had happened, so the user was
+   * more likely to retype it than to undo. The read is held open so the
+   * keystroke lands inside it.
+   *
+   * Does not drive the watcher: it checks `isDirty` once before calling this
+   * and now falls through to its dirty-buffer path when the reload declines,
+   * which `tests/watcher.test.ts` would be the place to hold.
+   */
+  it('refuses to overwrite a keystroke typed while the read is in flight', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/alpha.txt', 'alpha\n');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/alpha.txt'))!;
+
+    platform.seedFile('/work/alpha.txt', 'rewritten\n');
+    const gate = platform.holdRead('/work/alpha.txt');
+    const reloading = workspace.reloadFromDisk(id);
+    await gate.started;
+    workspace.applyTransaction(
+      id,
+      workspace.stateOf(id)!.update({ changes: { from: 0, insert: 'X' } }),
+    );
+    gate.release();
+
+    expect(await reloading).toBe(false);
+    expect(workspace.textOf(id)).toBe('Xalpha\n');
+    const snapshot = workspace.activeSnapshot()!;
+    expect(snapshot.isDirty).toBe(true);
+    // The disk still differs, and the buffer says so, exactly as it would
+    // had the keystroke come first.
+    expect(snapshot.externalState).toBe('modified');
+  });
+
+  it('still reloads when nothing was typed during the read', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/alpha.txt', 'alpha\n');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/alpha.txt'))!;
+
+    platform.seedFile('/work/alpha.txt', 'rewritten\n');
+    const gate = platform.holdRead('/work/alpha.txt');
+    const reloading = workspace.reloadFromDisk(id);
+    await gate.started;
+    gate.release();
+
+    expect(await reloading).toBe(true);
+    expect(workspace.textOf(id)).toBe('rewritten\n');
+    expect(workspace.activeSnapshot()?.isDirty).toBe(false);
+  });
+});
+
 /**
- * Holds one `writeEncodedFile` call open so a test can act while the write is
- * genuinely in flight. `started` resolves the instant the write is reached,
- * and the write proceeds only once `release()` is called. The same shape
- * `tests/notes.test.ts` uses for config writes.
+ * Holds one `writeEncodedFile` or `readEncodedFile` call open so a test can
+ * act while it is genuinely in flight. `started` resolves the instant the
+ * call is reached, and it proceeds only once `release()` is called. The same
+ * shape `tests/notes.test.ts` uses for config writes.
  */
 class GatedPlatform extends MemoryPlatform {
   #writes = new Map<string, { markStarted: () => void; blocked: Promise<void> }>();
+  #reads = new Map<string, { markStarted: () => void; blocked: Promise<void> }>();
 
   holdWrite(path: string): { started: Promise<void>; release: () => void } {
-    let markStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      markStarted = resolve;
-    });
-    let release!: () => void;
-    const blocked = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.#writes.set(path, { markStarted, blocked });
-    return { started, release };
+    return hold(this.#writes, path);
+  }
+
+  holdRead(path: string): { started: Promise<void>; release: () => void } {
+    return hold(this.#reads, path);
   }
 
   override async writeEncodedFile(path: string, contents: string, encoding: Encoding): Promise<void> {
-    const gate = this.#writes.get(path);
-    if (gate) {
-      this.#writes.delete(path);
-      gate.markStarted();
-      await gate.blocked;
-    }
+    await pass(this.#writes, path);
     await super.writeEncodedFile(path, contents, encoding);
   }
+
+  override async readEncodedFile(path: string, encoding?: Encoding): Promise<EncodedText> {
+    await pass(this.#reads, path);
+    return super.readEncodedFile(path, encoding);
+  }
+}
+
+type Gate = { markStarted: () => void; blocked: Promise<void> };
+
+function hold(gates: Map<string, Gate>, path: string): { started: Promise<void>; release: () => void } {
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  gates.set(path, { markStarted, blocked });
+  return { started, release };
+}
+
+/** Wait at the gate for `path`, if one is set, and consume it. */
+async function pass(gates: Map<string, Gate>, path: string): Promise<void> {
+  const gate = gates.get(path);
+  if (!gate) return;
+  gates.delete(path);
+  gate.markStarted();
+  await gate.blocked;
 }
 
 describe('tabs', () => {

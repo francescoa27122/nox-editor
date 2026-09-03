@@ -1219,6 +1219,12 @@ export class WorkspaceService {
     // way they are being read. Passing one adopts it for every later save.
     const charset = readAs ?? buffer.encoding;
 
+    // The document this reload was decided against. The read below is an
+    // IPC round trip, and a keystroke can land inside it; replacing the
+    // document afterwards would take that keystroke with it and call the
+    // result clean. Same shape as `apply`'s `baseRevisions` check.
+    const revision = buffer.revision;
+
     let raw: string;
     let mtime = 0;
     try {
@@ -1229,6 +1235,14 @@ export class WorkspaceService {
       mtime = (await this.#platform.stat(buffer.path)).modified;
     } catch (error) {
       this.#fail(`Could not reload ${buffer.name}.`, describe(error));
+      return false;
+    }
+
+    if (buffer.revision !== revision) {
+      // The user typed while the file was being read. Their edit wins, as it
+      // would have had it come first: the buffer is marked so the next save
+      // meets the conflict prompt, and the disk text is left for then.
+      this.markExternalState(id, 'modified');
       return false;
     }
 
