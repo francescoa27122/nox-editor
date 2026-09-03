@@ -7,6 +7,13 @@ on:
   # So a red main can be re-checked without an empty commit.
   workflow_dispatch:
 
+# Read-only by default. Nothing here pushes, comments or publishes, and a
+# pull_request run with the repository's default token scope is exactly the
+# token a compromised action would run with. Every action below is pinned
+# by commit SHA for the same reason: a tag can be moved, a SHA cannot.
+permissions:
+  contents: read
+
 # A newer push to the same branch makes the older run irrelevant.
 concurrency:
   group: ci-${{ github.ref }}
@@ -40,9 +47,9 @@ jobs:
     # removed rather than a duration being tuned.
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -81,9 +88,9 @@ jobs:
         # would test the least interesting half.
         os: [ubuntu-22.04, windows-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -123,7 +130,7 @@ jobs:
       # and the fix is the runner image, not `--with-deps`.
       - name: Cache Playwright browsers
         if: matrix.os == 'ubuntu-22.04' && matrix.node == 22
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('package-lock.json') }}
@@ -189,7 +196,7 @@ jobs:
         # have found that out at tag time, which is the worst moment.
         os: [ubuntu-22.04, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # The Azure apt mirror behind these runners intermittently degrades in a
       # way apt cannot detect: every request still succeeds, but each one takes
@@ -201,7 +208,7 @@ jobs:
       # inside the action bounds the cost of a cold cache on a bad day.
       - name: Cache apt archives
         if: matrix.os == 'ubuntu-22.04'
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/apt-archives
           key: apt-jammy-base-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
@@ -214,9 +221,11 @@ jobs:
         # long before this does.
         timeout-minutes: 20
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
 
@@ -243,6 +252,23 @@ jobs:
         working-directory: src-tauri
         shell: bash
         run: cargo metadata --format-version 1 --locked > /dev/null
+
+      # Advisory, not blocking, and that is deliberate for now: with
+      # `enforce_admins` on there is no override, so a RUSTSEC advisory
+      # against a transitive crate whose fix has not been released yet would
+      # block every pull request with nothing anyone could do about it. The
+      # step still goes red in the run, which is the point: before this the
+      # graph was audited only when someone remembered to. Promote it to
+      # blocking once it has been quiet for a while. One leg, because the
+      # graph is the same on every platform. `~/.cargo/bin` is in the
+      # rust-cache, so the install is paid once per lockfile change.
+      - name: Audit the dependency graph
+        if: matrix.os == 'ubuntu-22.04'
+        working-directory: src-tauri
+        continue-on-error: true
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
 
       # Before `cargo test`, because a lint failure is cheaper to read than a
       # test failure and `--all-targets` compiles the test code anyway, so the
@@ -328,9 +354,9 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -340,7 +366,7 @@ jobs:
       # other's archives on every run.
       - name: Cache apt archives
         if: runner.os == 'Linux'
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/apt-archives
           key: apt-jammy-e2e-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
@@ -361,9 +387,11 @@ jobs:
           extra-packages: xvfb
         timeout-minutes: 20
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
 
@@ -413,7 +441,7 @@ jobs:
       # failed.
       - name: Keep the logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           # Per matrix entry: v4 refuses a name another job already uploaded,
           # so a shared one would fail the second platform to finish.
