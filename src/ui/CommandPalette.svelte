@@ -34,6 +34,7 @@
   const fileIndex = files.fileIndex;
   const buffers = workspace.buffers;
   const recentFiles = workspace.recentFiles;
+  const recentFolders = workspace.recentFolders;
   const rootPath = workspace.rootPath;
   const commandVersion = commands.version;
 
@@ -57,7 +58,16 @@
 
   /** The active mode, which the prefix can change without reopening. */
   const effectiveMode = $derived.by<
-    'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches' | 'notes' | 'actions' | 'languages'
+    | 'commands'
+    | 'files'
+    | 'buffers'
+    | 'line'
+    | 'symbols'
+    | 'branches'
+    | 'notes'
+    | 'actions'
+    | 'languages'
+    | 'recent'
   >(
     () => {
       // The branch picker is a picker, not the multiplexed palette: no prefix
@@ -73,6 +83,8 @@
       // And again: a dedicated picker, so no prefix may switch it. `C++`
       // starts with nothing special, but `>` is not worth the exception.
       if (mode === 'language') return 'languages';
+      // A picker over paths, and a path may start with anything.
+      if (mode === 'recent') return 'recent';
       if (text.startsWith('>')) return 'commands';
       if (text.startsWith('~')) return 'buffers';
       if (text.startsWith(':')) return 'line';
@@ -86,7 +98,8 @@
     effectiveMode === 'branches' ||
     effectiveMode === 'notes' ||
     effectiveMode === 'actions' ||
-    effectiveMode === 'languages'
+    effectiveMode === 'languages' ||
+    effectiveMode === 'recent'
       ? text.trim()
       : text.slice(1).trim(),
   );
@@ -109,6 +122,8 @@
         return 'Go to a note…';
       case 'actions':
         return 'Choose a fix…';
+      case 'recent':
+        return 'Open a recent folder or file…';
       default:
         return 'Search files by name…';
     }
@@ -197,6 +212,7 @@
     if (effectiveMode === 'notes') return noteRows(term);
     if (effectiveMode === 'actions') return actionRows(term);
     if (effectiveMode === 'languages') return languageRows(term);
+    if (effectiveMode === 'recent') return recentRows(term);
     return fileRows(term);
   });
   const rows = $derived(result.rows);
@@ -486,6 +502,50 @@
     // `total` is capped by the 4000-candidate scoring break above, so on a
     // huge index it is a lower bound — still far more honest than the slice.
     return { rows: scored.slice(0, 100).map((s) => s.row), total: scored.length };
+  }
+
+  /**
+   * Recent folders, then recent files, each most recent first.
+   *
+   * Folders lead because switching project is the case quick-open cannot
+   * serve at all: it indexes the folder that is open, and a folder that is
+   * not open is not in it. Both lists are already capped by the workspace,
+   * so nothing here is sliced. With no query the order is left alone, for
+   * the reason `bufferRows` gives.
+   */
+  function recentRows(query: string): RowsResult {
+    const root = $rootPath;
+    const scored: { row: Row; score: number; order: number }[] = [];
+
+    const push = (path: string, kind: 'folder' | 'file', order: number) => {
+      const name = basename(path);
+      const match = query.length === 0 ? { score: 0, positions: [] } : fuzzyMatch(query, name);
+      if (!match) return;
+      const detail = kind === 'folder' ? dirname(path) : dirname(root ? relative(root, path) : path);
+      scored.push({
+        score: match.score,
+        order,
+        row: {
+          key: `${kind}:${path}`,
+          title: name,
+          positions: match.positions,
+          icon: kind,
+          ...(detail && detail !== '.' ? { detail } : {}),
+          ...(kind === 'folder' ? { hint: 'Folder' } : {}),
+          accept: () => {
+            ui.closeOverlay();
+            if (kind === 'folder') void app.openFolderDialogFor(path);
+            else void workspace.open(path);
+          },
+        },
+      });
+    };
+
+    $recentFolders.forEach((path, order) => push(path, 'folder', order));
+    $recentFiles.forEach((path, order) => push(path, 'file', $recentFolders.length + order));
+
+    scored.sort((a, b) => b.score - a.score || a.order - b.order);
+    return { rows: scored.map((s) => s.row), total: scored.length };
   }
 
   /**
@@ -920,6 +980,8 @@
         return 'Titles only here — use the filter box in the Notes panel to search inside a note.';
       case 'actions':
         return 'No action here matches that.';
+      case 'recent':
+        return 'Only folders and files opened before are listed — try Go to File for the rest.';
       case 'files':
         return 'Try part of the file name, or > for commands and ~ for an open file.';
       default:

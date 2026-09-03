@@ -2824,6 +2824,18 @@ export class NoxApp {
         run: () => this.openFileDialog(),
       },
       {
+        id: 'file.openRecent',
+        title: 'Open Recent…',
+        category: 'File',
+        keywords: ['recent', 'history', 'previous', 'folder', 'project'],
+        // No `capabilities`: this opens a picker. The open itself happens
+        // when a row is chosen, on the same path a click in the explorer
+        // takes.
+        enabled: () =>
+          this.workspace.recentFolders.get().length + this.workspace.recentFiles.get().length > 0,
+        run: () => this.ui.openOverlay('recent'),
+      },
+      {
         id: 'file.openFolder',
         capabilities: ['workspace.open'],
         title: 'Open Folder…',

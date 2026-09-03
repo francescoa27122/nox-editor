@@ -29,7 +29,8 @@
       $overlay === 'git-branch' ||
       $overlay === 'code-action' ||
       $overlay === 'note-open' ||
-      $overlay === 'language',
+      $overlay === 'language' ||
+      $overlay === 'recent',
   );
 
   function onScrimClick(event: MouseEvent) {

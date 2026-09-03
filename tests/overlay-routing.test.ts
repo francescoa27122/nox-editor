@@ -52,6 +52,7 @@ const EVERY_KIND: Record<OverlayKind, string> = {
   'code-action': '.palette',
   'note-open': '.palette',
   language: '.palette',
+  recent: '.palette',
   settings: '.settings',
   keybindings: '.keys',
 };
