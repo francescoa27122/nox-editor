@@ -406,10 +406,20 @@ describe('the prompt Nox builds', () => {
    */
   it('names the file behind every buffer.edit command that has one', async () => {
     const app = await appWithFile();
-    // These three write across a set of files, so naming the active one would
+    // These four write across a set of files, so naming the active one would
     // understate the grant; `file.new` is about a buffer that does not exist
     // yet. Each is commented at its registration in `app.ts`.
-    const unscoped = new Set(['file.new', 'search.replaceAll', 'review.apply']);
+    //
+    // `agents.undoLastSession` is the fifth and the one that reads least like
+    // the others: it reverts whichever files one agent session wrote, which is
+    // a set nobody can name from the active tab.
+    const unscoped = new Set([
+      'agents.undoLastSession',
+      'file.new',
+      'review.apply',
+      'search.replaceAll',
+      'search.undoReplace',
+    ]);
 
     const editing = app.commands
       .all()

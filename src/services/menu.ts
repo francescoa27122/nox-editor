@@ -121,7 +121,10 @@ export const LAYOUT: readonly MenuGroup[] = [
     trailing: [separator, predefined('fullscreen')],
   },
   { label: 'Code', categories: ['Language', 'Snippets', 'Change Marks', 'Review'] },
-  { label: 'Tools', categories: ['Terminal', 'Git', 'Agents', 'Answers', 'Notes', 'Plugins'] },
+  {
+    label: 'Tools',
+    categories: ['Terminal', 'Tasks', 'Git', 'Agents', 'Answers', 'Notes', 'Plugins'],
+  },
   {
     // The role is what makes macOS list the open windows in it and add its
     // own Bring All to Front; a submenu merely *labelled* Window is an

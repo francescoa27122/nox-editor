@@ -21,10 +21,26 @@ real subprocesses.
 **Geometry inside the WebView no longer needs a walk.** The `editor` vitest
 project (`npm run test:editor`) is real chromium with real layout, so anything
 *drawn* can be measured and screenshotted there without a desktop at all.
-`tests/browser/blame-gutter.test.ts` is the worked example. What still needs
-the machine is what lives outside the WebView: the menu bar, native dialogs,
-the terminal, a real git repository, and how the packaged bundle behaves on
-disk.
+`tests/browser/blame-gutter.test.ts` is the worked example.
+
+**Nor does the terminal, as of 2026-08-30.** `e2e/specs/terminal.e2e.js` drives
+a real pty in the packaged binary on all three platforms: the panel opens, a
+command is typed, its output comes back, and the session survives the panel
+being hidden. The in-window menu bar has had `e2e/specs/menu-bar.e2e.js` for
+longer. Read `e2e/README.md` before walking either by hand.
+
+What still needs the machine is what lives outside the WebView: **native
+dialogs**, the **native macOS menu**, a **real git repository**, and how the
+packaged bundle behaves on disk.
+
+**One question the harness raised and cannot answer.** Under WebDriver every
+character reaches xterm *twice*: typing `echo` produces `eecchhoo`. The palette
+is clean under the same driver, and a probe shows the character arriving as an
+`input` event on xterm's helper textarea, which is what `preventDefault` exists
+to stop. That points at the driver rather than at Nox, and a synthetic-input
+harness is the wrong instrument to settle it. So, on the walk: **type a few
+words in the terminal and check each character appears once.** It costs ten
+seconds and it closes the one thing the automated suite had to leave open.
 
 Verify commands live in `CLAUDE.md`. Layer rules live in `ARCHITECTURE.md`. This
 file covers only the walk itself.

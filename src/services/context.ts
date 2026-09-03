@@ -17,7 +17,10 @@ import type { BufferId, Encoding, Eol, ExternalState, WorkspaceService } from '.
  *    permission model. A read API that leaks a handle is a hole in that.
  * 2. **Reading is not gated, but it is recorded.** Context cannot leave the
  *    process on its own — `net.request` is the capability that matters, and
- *    it is checked. Prompting per read would mean a dialog for every
+ *    it is checked by the five commands that can reach the network. It was
+ *    declared by none of them until 2026-08-31, which made this sentence an
+ *    intention rather than a fact; `tests/net-request-gate.test.ts` is what
+ *    stops it becoming one again. Prompting per read would mean a dialog for every
  *    keystroke of an agent's thinking, so instead every read by a non-user
  *    principal lands in `reads`.
  *

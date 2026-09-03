@@ -25,6 +25,10 @@ export type OverlayKind =
   // and three unions sharing a member name makes a bare string literal
   // ambiguous at every call site.
   | 'note-open'
+  // Not 'tasks': `SidebarView` has no tasks view, but the command id is
+  // `tasks.run` and naming the overlay after the *action* keeps the two from
+  // reading as the same thing at a call site.
+  | 'task-run'
   | 'settings'
   | 'keybindings';
 
@@ -171,6 +175,17 @@ export class UIService {
    */
   readonly diffOpen = new Signal(false);
   /**
+   * Whether the tasks panel is showing, in the same slot again.
+   *
+   * The editor area rather than the sidebar, on the agents panel's argument
+   * two fields up: a task's output is an audit trail of what ran, and it wraps
+   * to nonsense in a 200px column. It would sit better *below* the editor
+   * beside the terminal, for the reason `terminalOpen` gives, and there is no
+   * bottom-panel container to put it in. See the Known debt table and
+   * `docs/superpowers/specs/2026-08-30-tasks-design.md` §7.
+   */
+  readonly tasksOpen = new Signal(false);
+  /**
    * Whether the welcome screen was asked for.
    *
    * It renders in this slot anyway whenever no buffer is open, so this signal
@@ -301,6 +316,7 @@ export class UIService {
   showAgents(): void {
     this.reviewOpen.set(false);
     this.diffOpen.set(false);
+    this.tasksOpen.set(false);
     this.agentsOpen.set(true);
   }
 
@@ -308,7 +324,16 @@ export class UIService {
   showDiff(): void {
     this.reviewOpen.set(false);
     this.agentsOpen.set(false);
+    this.tasksOpen.set(false);
     this.diffOpen.set(true);
+  }
+
+  /** Show the tasks panel, which shares the same slot again. */
+  showTasks(): void {
+    this.reviewOpen.set(false);
+    this.agentsOpen.set(false);
+    this.diffOpen.set(false);
+    this.tasksOpen.set(true);
   }
 
   /**
@@ -322,6 +347,7 @@ export class UIService {
     this.reviewOpen.set(false);
     this.agentsOpen.set(false);
     this.diffOpen.set(false);
+    this.tasksOpen.set(false);
     this.welcomeOpen.set(true);
   }
 
@@ -409,6 +435,7 @@ export class UIService {
       this.reviewOpen.get() ||
       this.agentsOpen.get() ||
       this.diffOpen.get() ||
+      this.tasksOpen.get() ||
       this.welcomeOpen.get() ||
       this.menuBarOpen.get() ||
       this.prompt.get() !== null ||
@@ -457,6 +484,15 @@ export class UIService {
     }
     if (this.diffOpen.get()) {
       this.diffOpen.set(false);
+      this.focusEditor();
+      return true;
+    }
+    // Escape closes the panel and leaves the task alone, the same way it
+    // leaves a staged review alone above. A run is a process, and putting a
+    // window away is not a reason to kill a build half way through: that is
+    // `hideTerminal`'s rule and it is the same one.
+    if (this.tasksOpen.get()) {
+      this.tasksOpen.set(false);
       this.focusEditor();
       return true;
     }

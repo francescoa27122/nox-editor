@@ -99,7 +99,7 @@
   }
 
   button.row:hover {
-    background: var(--nox-bg-hover);
+    background: var(--nox-hover);
   }
 
   button.row:focus-visible {

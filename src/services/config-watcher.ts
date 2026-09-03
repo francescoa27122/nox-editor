@@ -42,6 +42,7 @@ export interface ConfigChange {
   snippets: boolean;
   themes: boolean;
   pluginSettings: boolean;
+  tasks: boolean;
 }
 
 /**
@@ -57,19 +58,32 @@ export interface ConfigChange {
  * while `join` builds forward slashes, and an equality check would quietly
  * never fire. `basename` already reads both separators.
  *
- * Only three files are routed. `settings.json`, `keybindings.json`,
+ * Only four files are routed. `settings.json`, `keybindings.json`,
  * `servers.json` and `agents.json` are deliberately absent — the first two
  * because Nox writes them constantly and live-reloading the layer that owns
  * every preference wants its own envelope read, the last two because
  * reloading them *restarts processes*, which is a decision a user makes with
  * **Reload Language Servers**.
+ *
+ * `tasks.json` is routed rather than held back, and the line between it and
+ * the two that restart processes is worth naming: re-reading it starts
+ * nothing. It changes which commands are *listed*, and running one is still
+ * an act. Nor can a reload launder an approval, because trust is keyed on a
+ * task's argv rather than its name, so an edit that changes what a task runs
+ * is a new question by construction. See `core/tasks.ts#taskFingerprint`.
  */
 export function classifyConfigChange(paths: Iterable<string>): ConfigChange {
-  const change: ConfigChange = { snippets: false, themes: false, pluginSettings: false };
+  const change: ConfigChange = {
+    snippets: false,
+    themes: false,
+    pluginSettings: false,
+    tasks: false,
+  };
 
   for (const path of paths) {
     const name = basename(path);
     if (name === 'snippets.json') change.snippets = true;
+    else if (name === 'tasks.json') change.tasks = true;
     else if (name === 'plugin-settings.json') change.pluginSettings = true;
     // A theme is any file in the themes folder, including one being created or
     // deleted — the id is the file's stem, so the folder is the whole rule.

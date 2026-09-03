@@ -8,6 +8,73 @@ are knowledge.**
 
 ---
 
+## 2026-08-29 (cloud) - 0.12.0 prepared, and handed over
+
+Blame and the docs pass merged as #174 after CI caught a clippy failure the
+local run had not (see the entry below). Two more PRs from another session
+landed on top, #175 and #176, correcting stale line anchors *inside* the skill
+bodies. Fair catch: the docs pass fixed the anchors in CLAUDE.md and in each
+skill's opening list, and left the `app.ts:NNN` numbers scattered through the
+bodies at whatever they already claimed. Same class of error as the clippy
+sentence, one level down.
+
+**0.12.0 is prepared and not tagged.** The charter keeps the tag with the
+operator, because a `v*` tag publishes a release. Everything up to that point
+is done.
+
+Minor rather than patch: blame is a new capability, and it completes the Git
+work that started in 0.5.0.
+
+**All three release gates were run locally against `GITHUB_REF_NAME=v0.12.0`,
+extracted from the workflow YAML rather than trusted to fire after the tag**,
+where a failure costs twenty minutes of binaries and a half-made release. Tag
+matches the configured version, README §Status opens `**v0.12.**`, and
+`release-notes.mjs 0.12.0` returns 21 lines. The updater guard also passes:
+`plugins.updater.pubkey` is present at 152 characters, so a set signing key
+cannot ship updates nothing can verify.
+
+**The lockfile edit was checked the way CI checks it.** `Cargo.lock`'s version
+line is hand-edited during a bump, so `cargo metadata --format-version 1
+--locked` was run: exit 0, and cargo did not rewrite the file. Worth doing
+because a hand-edited lockfile that cargo disagrees with fails a required check
+on all three platforms.
+
+One thing worth recording about method rather than about the release. Two Bash
+calls issued in parallel raced on the working directory, so `cargo clippy` ran
+from the repo root and exited 101 with "could not find Cargo.toml". Reading the
+exit code is what caught it; the output tail alone would have read as a
+compile failure and sent me looking in the wrong place. Same lesson as the
+`cargo clippy | tail` trap from earlier today, arriving from the other side.
+
+Shipped:    version 0.12.0 across `package.json`, `package-lock.json` (the two
+            Nox entries only, since `@xterm/addon-fit` is also at 0.11.0),
+            `tauri.conf.json`, `Cargo.toml` and the one `Cargo.lock` line.
+            CHANGELOG `[Unreleased]` cut to `[0.12.0] - 2026-08-29` with a
+            lede, a fresh empty Unreleased and both compare links. README
+            §Status rewritten: the "landed since 0.11.0" paragraph folded into
+            a Git paragraph that now reads as complete. ROADMAP shipped rows
+            all name a release rather than a build date.
+Verified:   All three release gates on `v0.12.0` - `npm test` 2438 - `check`
+            1054/0/0 - `lint` 0 errors - `build` - `test:editor` 7 -
+            `cargo clippy` exit 0 - `cargo test` 131+2+4 - `cargo metadata
+            --locked` exit 0.
+Next:       The operator tags. `git tag v0.12.0 && git push origin v0.12.0`
+            once the prep is merged.
+Blocked:    **The desktop walk this release did not get.** CONTRIBUTING's
+            release checklist step 4 asks for one, and it cannot be done from
+            a Linux container: no packaged Windows or macOS app, and the
+            native chrome is outside the WebView either way. Blame's *drawn*
+            surface is covered by `tests/browser/blame-gutter.test.ts` in real
+            chromium, which is new since the last release and is the reason
+            that gap is narrower than it was. What is genuinely unwalked is
+            blame against a real repository on a real machine.
+Confidence: High on everything a gate or a test can reach, and every gate was
+            run rather than assumed. The honest caveat is the walk above, and
+            one interaction no test covers: `git blame --contents -` against a
+            repository with `core.autocrlf=true`.
+
+---
+
 ## 2026-08-29 - Skill line anchors pointed at the wrong code
 
 Asked whether `vercel/react-best-practices` would help Nox. It would not:
