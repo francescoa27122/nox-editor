@@ -117,6 +117,28 @@ describe('what the menu contains', () => {
   });
 
   /**
+   * The failure this prevents, from the 2026-09 audit (A1-009): `agents.show`
+   * and `agents.undoLastSession` carried `category: 'View'` and sat between
+   * Toggle Sidebar and Increase Font Size, away from the rest of Agents under
+   * Tools. Stated over every `agents.*` id so the next one cannot drift.
+   */
+  it('files every agents command under Tools, beside the rest of Agents', () => {
+    const app = new NoxApp(new SystemMenuPlatform());
+    const tools = app.menu
+      .describe()
+      .find((n): n is Extract<MenuNode, { kind: 'submenu' }> => n.kind === 'submenu' && n.label === 'Tools');
+    if (!tools) throw new Error('no Tools menu');
+    const listed = commandIds(tools.items);
+
+    const agents = app.commands.palette().filter((command) => command.id.startsWith('agents.'));
+    expect(agents.length).toBeGreaterThan(2);
+    for (const command of agents) {
+      expect(command.category, command.id).toBe('Agents');
+      expect(listed, command.id).toContain(command.id);
+    }
+  });
+
+  /**
    * The failure this prevents, from the 2026-09 audit (A1-008): two New
    * File / New Folder pairs in the File menu, resolving their folder by
    * different rules that neither title stated. The explorer pair is the

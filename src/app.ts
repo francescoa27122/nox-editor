@@ -3318,7 +3318,7 @@ export class NoxApp {
       {
         id: 'agents.show',
         title: 'Show Agents',
-        category: 'View',
+        category: 'Agents',
         keywords: ['sessions', 'audit', 'history', 'ai'],
         run: () => this.ui.showAgents(),
       },
@@ -3681,7 +3681,7 @@ export class NoxApp {
       {
         id: 'agents.undoLastSession',
         title: 'Undo the Last Agent Session',
-        category: 'View',
+        category: 'Agents',
         keywords: ['revert', 'take back', 'ai'],
         enabled: () => this.agents.sessions.get().some((s) => this.agents.changesBy(s.id).length > 0),
         run: () => {
