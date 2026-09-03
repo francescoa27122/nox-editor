@@ -621,6 +621,34 @@ export class AgentRuntime {
   }
 
   /**
+   * Everything recorded about a session, as JSON a person can file.
+   *
+   * The trail is the session's own record; the reads and the permission
+   * decisions are the two other logs the runtime feeds, kept by the services
+   * that own them and joined here on the session's principal. Gathered into
+   * one document because the question this answers ("what did the agent do
+   * yesterday") is asked of the session, not of three panels. Null for a
+   * session this runtime never ran.
+   */
+  exportTrail(sessionId: string): string | null {
+    const session = this.sessions.get().find((entry) => entry.id === sessionId);
+    if (!session) return null;
+    const ofSession = (principal: Principal) =>
+      principal.kind === 'agent' && principal.sessionId === sessionId;
+    return JSON.stringify(
+      {
+        exportedAt: new Date().toISOString(),
+        session,
+        changes: this.changesBy(sessionId),
+        reads: this.#context.reads.get().filter((read) => ofSession(read.principal)),
+        decisions: this.#permissions.decisions.get().filter((decision) => ofSession(decision.principal)),
+      },
+      null,
+      2,
+    );
+  }
+
+  /**
    * Undo everything a session did, in one step.
    *
    * Newest first, because a set applied later may sit on top of an earlier one

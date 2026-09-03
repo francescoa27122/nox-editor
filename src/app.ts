@@ -3596,6 +3596,24 @@ export class NoxApp {
         },
       },
       {
+        id: 'agents.copyTrail',
+        title: 'Copy the Last Agent Session Trail',
+        category: 'Agents',
+        keywords: ['audit', 'log', 'trail', 'export', 'json', 'clipboard', 'history'],
+        // No `capabilities`, on the same reasoning as `app.copyDiagnostics`:
+        // this reads Nox's own record of what an agent already did and puts
+        // it on the clipboard. The record survives only as long as the
+        // window, which is why it has to be possible to get it out.
+        enabled: () => this.agents.sessions.get().length > 0,
+        run: async (arg) => {
+          // An id from the panel's per-session button, else the newest.
+          const id = typeof arg === 'string' ? arg : this.agents.sessions.get()[0]?.id;
+          const trail = id === undefined ? null : this.agents.exportTrail(id);
+          if (trail === null) return;
+          await this.copyToClipboard(trail, 'the session trail');
+        },
+      },
+      {
         id: 'agents.undoLastSession',
         title: 'Undo the Last Agent Session',
         category: 'View',

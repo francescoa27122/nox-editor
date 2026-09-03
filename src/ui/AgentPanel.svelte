@@ -260,6 +260,13 @@
           {#if session.changes > 0}
             <button class="linkish" onclick={() => undo(session)}>Undo session</button>
           {/if}
+          <button
+            class="linkish"
+            onclick={() => void commands.execute('agents.copyTrail', session.id)}
+            title="Copy this session's trail, reads and permission decisions as JSON"
+          >
+            Copy trail
+          </button>
         </div>
 
         {#if expanded === session.id}
