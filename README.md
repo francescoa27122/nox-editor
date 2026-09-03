@@ -23,7 +23,7 @@ noticing it.
 
 It is **not** a VS Code clone. It has its own design language, its own
 shortcuts where they can be better, and a deliberately small surface area. It
-is also about 4 MB, and it starts instantly.
+is also about 5 MB, and it starts instantly.
 
 I built it to find out what an editor looks like if you take two things
 seriously from the first line of code: **never losing someone's work**, and
@@ -345,7 +345,7 @@ Every library the bundle carries is listed, with its licence, in
 ```bash
 npm test          # the unit suite (the count is in Status above)
 npm run check     # TypeScript + Svelte
-npm run app:build # a distributable, ~4 MB on macOS
+npm run app:build # a distributable, ~5 MB on macOS
 ```
 
 There's a second suite in [`e2e/`](e2e/README.md) that drives the built

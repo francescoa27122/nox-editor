@@ -18,8 +18,9 @@ Meanwhile Linux and Windows ship installers nobody has ever launched.
 
 ## Running it
 
-Needs a Rust toolchain, which the development machine does not have — this is
-why the harness is verified in CI rather than locally.
+Needs a Rust toolchain, and the first debug build takes a few minutes. CI
+runs it on every change on all three platforms, which is where it usually
+runs; nothing stops it running locally.
 
 ```bash
 npm ci                                        # at the repository root
@@ -60,8 +61,8 @@ delivering a keystroke, and the platforms that have no other coverage at all.
 | **Windows** | Green in CI. Nothing to install. |
 | **macOS** | Green in CI. Nothing to install. |
 
-All three run the same four specs against the same embedded WebDriver server,
-in well under a second each.
+All three run the same three spec files (eleven `it` blocks) against the same
+embedded WebDriver server, in well under a second each.
 
 ## Why the external driver was abandoned (historical)
 
@@ -143,6 +144,6 @@ Two things worth knowing about the shape of that gate:
 
 ## Still to do
 
-- **More specs.** Four is a smoke test, and the 2026-08-20 walk left twelve
+- **More specs.** Eleven is a smoke test, and the 2026-08-20 walk left twelve
   items UNSEEN. They are cheap now — a run is under a second, so the cost of a
   spec is writing it rather than waiting for it.

@@ -157,3 +157,24 @@ describe('A8-007: the README names the one outbound call and the setting that st
     expect(readme).not.toContain('Nox will only talk to your own machine');
   });
 });
+
+describe('A8-010: e2e/README.md counts what e2e/specs/ holds', () => {
+  /**
+   * The README said "four specs" for weeks after there were eight. The
+   * count is read from the spec files, so the sentence and the suite cannot
+   * drift apart again without this going red. The download size in the
+   * root README is not held here: it is a property of a release artifact,
+   * and CONTRIBUTING's Cutting a release checklist is where it is re-read.
+   */
+  it('names the spec file count and the it() count', () => {
+    const specs = join(root, 'e2e', 'specs');
+    const files = readdirSync(specs).filter((name) => name.endsWith('.e2e.js'));
+    let its = 0;
+    for (const file of files) {
+      its += (readFileSync(join(specs, file), 'utf8').match(/^\s*it\(/gm) ?? []).length;
+    }
+    const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+    const readme = read('e2e', 'README.md');
+    expect(readme).toContain(`${words[files.length]} spec files (${words[its]} \`it\` blocks)`);
+  });
+});
