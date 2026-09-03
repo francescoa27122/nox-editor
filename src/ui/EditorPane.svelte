@@ -144,7 +144,7 @@
         }
 
         publishCursor();
-        find.refresh();
+        find.refresh(docChanged);
         if (docChanged) {
           scheduleAutosave();
           // Beside the autosave timer because it is the same shape and the
@@ -371,7 +371,10 @@
 
     publishCursor();
     find.attach(view);
-    find.refresh();
+    // A buffer swap, not an edit or a selection move: always worth a fresh
+    // count, the same as before `refresh()` learned to skip selection-only
+    // dispatches.
+    find.refresh(true);
 
     // Only the focused pane may take the caret; a background pane swapping
     // tabs must not yank focus away from where the user is typing.
