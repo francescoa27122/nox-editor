@@ -1,6 +1,8 @@
 import { EditorState } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
+import type { Encoding } from '../src/core/encoding';
 import { MemoryPlatform } from '../src/platform/memory';
+import type { EncodedText } from '../src/platform/types';
 import { SessionService } from '../src/services/session';
 import { WorkspaceService } from '../src/services/workspace';
 
@@ -78,6 +80,101 @@ describe('SessionService', () => {
     await session.restore();
 
     expect(restored.activeSnapshot()?.name).toBe('a.ts');
+  });
+
+  /**
+   * A4-007: restore used to open every tab in a group one at a time, so
+   * thirty tabs cost thirty serial IPC round trips before the last of them,
+   * active or not, was ready. `#restoreTab` now reads the group's own active
+   * tab before starting on the rest of the group at all, which this pins by
+   * recording the order `readEncodedFile` is *called* in, not the order the
+   * results arrive — the platform resolves near-instantly regardless, so
+   * only call order tells the fixed behaviour apart from the old one.
+   */
+  it('reads the active tab before any other tab in its group', async () => {
+    class RecordingPlatform extends MemoryPlatform {
+      readonly reads: string[] = [];
+      override async readEncodedFile(path: string, encoding?: Encoding): Promise<EncodedText> {
+        this.reads.push(path);
+        return super.readEncodedFile(path, encoding);
+      }
+    }
+
+    const platform = new RecordingPlatform();
+    platform.mkdirp('/work');
+    platform.seedFile('/work/a.ts', 'a\n');
+    platform.seedFile('/work/b.md', 'b\n');
+    platform.seedFile('/work/c.txt', 'c\n');
+
+    const first = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, first);
+    session.markReady();
+    await first.openFolder('/work');
+    await first.open('/work/a.ts');
+    const active = (await first.open('/work/b.md'))!;
+    await first.open('/work/c.txt');
+    first.setActive(active);
+    await session.save();
+
+    platform.reads.length = 0; // only the restore's own reads matter here
+
+    const restored = new WorkspaceService(platform, () => []);
+    const restoredSession = new SessionService(platform, restored);
+    restoredSession.markReady();
+    await restoredSession.restore();
+
+    expect(platform.reads[0]).toBe('/work/b.md');
+  });
+
+  /**
+   * The other half of A4-007: reading tabs concurrently is only safe because
+   * their final *position* is fixed up afterward. `#insert` (workspace.ts)
+   * places a new tab right after whichever one is currently active, so
+   * without that fix-up the pane's tab order would end up in whatever order
+   * each tab's read happened to resolve in. `MemoryPlatform` resolves near-
+   * instantly regardless of call order, so this platform delays reads in
+   * *reverse* of the order they were saved in — the one shape guaranteed to
+   * disagree with insertion order if the position fix-up is missing.
+   */
+  it('keeps the session tab order even when files load out of order', async () => {
+    class OutOfOrderPlatform extends MemoryPlatform {
+      #delayMs = new Map<string, number>();
+      delayReadOf(path: string, ms: number): void {
+        this.#delayMs.set(path, ms);
+      }
+      override async readEncodedFile(path: string, encoding?: Encoding): Promise<EncodedText> {
+        const ms = this.#delayMs.get(path);
+        if (ms) await new Promise((resolve) => setTimeout(resolve, ms));
+        return super.readEncodedFile(path, encoding);
+      }
+    }
+
+    const platform = new OutOfOrderPlatform();
+    platform.mkdirp('/work');
+    platform.seedFile('/work/a.ts', 'a\n');
+    platform.seedFile('/work/b.md', 'b\n');
+    platform.seedFile('/work/c.txt', 'c\n');
+
+    const first = new WorkspaceService(platform, () => []);
+    const session = new SessionService(platform, first);
+    session.markReady();
+    await first.openFolder('/work');
+    await first.open('/work/a.ts');
+    await first.open('/work/b.md');
+    await first.open('/work/c.txt');
+    await session.save();
+
+    // a.ts, opened (and so saved) first, resolves slowest on restore; c.txt,
+    // saved last, resolves fastest — the reverse of the saved order.
+    platform.delayReadOf('/work/a.ts', 30);
+    platform.delayReadOf('/work/b.md', 15);
+
+    const restored = new WorkspaceService(platform, () => []);
+    const restoredSession = new SessionService(platform, restored);
+    restoredSession.markReady();
+    await restoredSession.restore();
+
+    expect(restored.buffers.get().map((b) => b.name)).toEqual(['a.ts', 'b.md', 'c.txt']);
   });
 
   it('restores unsaved edits to a file buffer', async () => {

@@ -178,75 +178,52 @@ export class SessionService {
       // used to relocate the second of them into the new pane — every launch.
       if (index > 0) this.#workspace.splitEditor({ move: false });
 
-      const opened: string[] = [];
-      for (const tab of group.tabs ?? []) {
-        let id: string | null = null;
+      const tabs = group.tabs ?? [];
+      const groupId = this.#workspace.activeGroupId.get();
+      const results: (string | null)[] = Array.from({ length: tabs.length }, () => null);
 
-        /** The backup this tab's text came from, to keep it on that file. */
-        let backup: string | undefined;
+      // A mirror tab's `mirrorInto` is synchronous once its original exists
+      // (see `#restoreTab`); every other tab does real I/O
+      // (`platform.exists`/`readEncodedFile`/`readConfigFile`). Restoring the
+      // group's own active tab first — when it is not itself a mirror — is
+      // what gets its content ready before every background tab's round trip
+      // even starts, rather than after all of them the way one serial loop
+      // used to (A4-007); the rest of the group's tabs then load together.
+      // Mirrors wait until every non-mirror tab in the group has settled,
+      // since a mirror can only reference a tab restored earlier in this same
+      // walk, never a later one — `save()`'s `written` set guarantees that.
+      const isMirror = (i: number) => tabs[i]?.kind === 'file' && tabs[i]?.mirror === true;
+      const activeIndex =
+        tabs.length > 0 ? Math.min(Math.max(group.activeIndex ?? 0, 0), tabs.length - 1) : -1;
+      const originals = tabs.map((_, i) => i).filter((i) => !isMirror(i));
+      const mirrors = tabs.map((_, i) => i).filter(isMirror);
 
-        if (tab.kind === 'file') {
-          // A second view of a buffer an earlier group already restored.
-          // `open` would focus that one rather than adding a tab here, which
-          // is why the marker exists.
-          const already = tab.mirror ? this.#workspace.findByPath(tab.path) : undefined;
-          if (already) {
-            const into = this.#workspace.activeGroupId.get();
-            this.#workspace.mirrorInto(into, already.id);
-            // Not `setSelection`, which moves the *buffer* and so would drag
-            // the other pane here too. This waits for the pane itself.
-            if (tab.selection) this.#workspace.setPaneSelection(into, already.id, tab.selection);
-            opened.push(already.id);
-            continue;
-          }
-
-          if (!(await this.#platform.exists(tab.path))) {
-            // Deleted since last launch. A clean tab is skipped quietly; one
-            // with unsaved work comes back open and marked deleted, as the
-            // watcher keeps it while Nox runs. Skipping it too lost the text
-            // twice over: the tab vanished without a word, and its backup
-            // name was then reissued to another buffer.
-            const content = tab.unsaved ? await this.#unsavedText(tab.unsaved) : null;
-            if (content === null) continue;
-            id = this.#workspace.openDeleted(
-              tab.path,
-              content,
-              tab.encoding ? { encoding: tab.encoding } : {},
-            );
-            backup = tab.unsaved?.backup;
-          } else {
-            id = await this.#workspace.open(
-              tab.path,
-              tab.encoding ? { encoding: tab.encoding } : {},
-            );
-            // Unsaved work goes back on top of the file as it is now, as a real
-            // edit — so the tab is dirty and ⌘Z reaches the on-disk content.
-            if (id && tab.unsaved) {
-              const content = await this.#unsavedText(tab.unsaved);
-              // A backup that has gone missing must not silently blank the file.
-              if (content !== null) {
-                this.#workspace.restoreUnsaved(id, content, tab.unsaved.baseMtime);
-                backup = tab.unsaved.backup;
-              }
-            }
-          }
-        } else {
-          const content = (await this.#readBackup(tab.backup)) ?? tab.content ?? '';
-          if (content.length === 0) continue;
-          id = this.#workspace.newUntitled({ content, languageId: tab.languageId });
-          backup = tab.backup;
-        }
-
-        if (!id) continue;
-        // After the content, so offsets are clamped against the final document.
-        if (tab.selection) this.#workspace.setSelection(id, tab.selection);
-        // Registered at the revision the restore left it at, so the first
-        // save after boot keeps the buffer on the file it already has and
-        // rewrites nothing. Unregistered, every restored buffer was renamed
-        // on that save, and with a fresh counter the names collided.
-        if (backup) this.#backups.set(id, { name: backup, revision: this.#workspace.revisionOf(id) });
-        opened.push(id);
+      if (activeIndex >= 0 && !isMirror(activeIndex)) {
+        results[activeIndex] = await this.#restoreTab(tabs[activeIndex]!);
       }
+      await Promise.all(
+        originals
+          .filter((i) => i !== activeIndex)
+          .map(async (i) => {
+            results[i] = await this.#restoreTab(tabs[i]!);
+          }),
+      );
+      await Promise.all(
+        mirrors.map(async (i) => {
+          results[i] = await this.#restoreTab(tabs[i]!);
+        }),
+      );
+
+      // Restoring out of order is what makes the active tab arrive first, but
+      // `#insert` (`workspace.ts`) places every new tab right after whichever
+      // one is currently active — so without this, the pane's *physical* tab
+      // order would end up in whatever order the I/O happened to resolve in,
+      // not the order the session recorded. `moveTab` to each tab's final
+      // position, left to right, restores it: with earlier positions already
+      // correct, each call only ever has to move the one tab still out of
+      // place, the standard way of sorting a list via one primitive move.
+      const opened = results.filter((id): id is string => id !== null);
+      opened.forEach((id, position) => this.#workspace.moveTab(id, position, groupId, groupId));
       groupActives.push(opened[group.activeIndex] ?? opened[0] ?? null);
     }
 
@@ -269,6 +246,84 @@ export class SessionService {
     if (focusTarget) this.#workspace.setActive(focusTarget);
 
     return this.#workspace.buffers.get().length > 0 || data.rootPath !== null;
+  }
+
+  /**
+   * Restore one tab: find or fetch its content, and return the buffer id it
+   * landed on, or null when there was nothing worth restoring (an empty
+   * scratch tab, a deleted file with no unsaved text).
+   *
+   * Split out of `restore` (A4-007) so the tabs that do real I/O
+   * (`platform.exists`, `readEncodedFile`, `readConfigFile`) can run
+   * concurrently rather than one at a time: every side effect here
+   * (`setSelection`, `#backups`) is scoped to this one tab's own buffer id,
+   * so nothing in this function depends on another tab having already run —
+   * the one exception, a mirror needing its original, is the caller's job to
+   * sequence, by waiting for every non-mirror tab in the group to settle
+   * before calling this for a mirror.
+   */
+  async #restoreTab(tab: TabRecord): Promise<string | null> {
+    let id: string | null = null;
+    /** The backup this tab's text came from, to keep it on that file. */
+    let backup: string | undefined;
+
+    if (tab.kind === 'file') {
+      // A second view of a buffer an earlier tab already restored. `open`
+      // would focus that one rather than adding a tab here, which is why the
+      // marker exists.
+      const already = tab.mirror ? this.#workspace.findByPath(tab.path) : undefined;
+      if (already) {
+        const into = this.#workspace.activeGroupId.get();
+        this.#workspace.mirrorInto(into, already.id);
+        // Not `setSelection`, which moves the *buffer* and so would drag the
+        // other pane here too. This waits for the pane itself.
+        if (tab.selection) this.#workspace.setPaneSelection(into, already.id, tab.selection);
+        return already.id;
+      }
+
+      if (!(await this.#platform.exists(tab.path))) {
+        // Deleted since last launch. A clean tab is skipped quietly; one with
+        // unsaved work comes back open and marked deleted, as the watcher
+        // keeps it while Nox runs. Skipping it too lost the text twice over:
+        // the tab vanished without a word, and its backup name was then
+        // reissued to another buffer.
+        const content = tab.unsaved ? await this.#unsavedText(tab.unsaved) : null;
+        if (content === null) return null;
+        id = this.#workspace.openDeleted(
+          tab.path,
+          content,
+          tab.encoding ? { encoding: tab.encoding } : {},
+        );
+        backup = tab.unsaved?.backup;
+      } else {
+        id = await this.#workspace.open(tab.path, tab.encoding ? { encoding: tab.encoding } : {});
+        // Unsaved work goes back on top of the file as it is now, as a real
+        // edit — so the tab is dirty and ⌘Z reaches the on-disk content.
+        if (id && tab.unsaved) {
+          const content = await this.#unsavedText(tab.unsaved);
+          // A backup that has gone missing must not silently blank the file.
+          if (content !== null) {
+            this.#workspace.restoreUnsaved(id, content, tab.unsaved.baseMtime);
+            backup = tab.unsaved.backup;
+          }
+        }
+      }
+    } else {
+      const content = (await this.#readBackup(tab.backup)) ?? tab.content ?? '';
+      if (content.length === 0) return null;
+      id = this.#workspace.newUntitled({ content, languageId: tab.languageId });
+      backup = tab.backup;
+    }
+
+    if (!id) return null;
+    // After the content, so offsets are clamped against the final document.
+    if (tab.selection) this.#workspace.setSelection(id, tab.selection);
+    // Registered at the revision the restore left it at, so the first save
+    // after boot keeps the buffer on the file it already has and rewrites
+    // nothing. Unregistered, every restored buffer was renamed on that save,
+    // and with a fresh counter the names collided.
+    if (backup) this.#backups.set(id, { name: backup, revision: this.#workspace.revisionOf(id) });
+    return id;
   }
 
   /**
