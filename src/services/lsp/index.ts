@@ -29,6 +29,35 @@ export interface LspDiagnostic {
   code?: string | number;
 }
 
+/**
+ * Errors, warnings and file count across every published diagnostic, kept in
+ * step with `diagnostics` (A4-010).
+ *
+ * The same shape `ui/problems.ts`'s `problemTotals` computes from the whole
+ * map — deliberately not imported from there, since `services/` never
+ * depends on `ui/` — but derived incrementally here instead of recomputed
+ * from scratch, which is what let a burst of publishes (a server's initial
+ * sweep of a large tree) cost tens of millions of operations in the
+ * renderer: every one of the three components that read `problemTotals`
+ * walked every diagnostic of every file, on every publish.
+ */
+export interface DiagnosticsTotals {
+  errors: number;
+  warnings: number;
+  files: number;
+}
+
+/** Errors and warnings in one file's diagnostics. Unlabelled counts as error. */
+function severityCounts(diagnostics: readonly LspDiagnostic[]): { errors: number; warnings: number } {
+  let errors = 0;
+  let warnings = 0;
+  for (const diagnostic of diagnostics) {
+    if ((diagnostic.severity ?? 1) === 1) errors++;
+    else if (diagnostic.severity === 2) warnings++;
+  }
+  return { errors, warnings };
+}
+
 export interface SessionStatusRow {
   name: string;
   status: SessionStatus;
@@ -106,6 +135,8 @@ interface Running {
 
 export class LspService {
   readonly diagnostics = new Signal<ReadonlyMap<string, LspDiagnostic[]>>(new Map());
+  /** See `DiagnosticsTotals`. Updated by the delta each publish makes. */
+  readonly diagnosticsTotals = new Signal<DiagnosticsTotals>({ errors: 0, warnings: 0, files: 0 });
   readonly sessions = new Signal<SessionStatusRow[]>([]);
 
   #workspace: WorkspaceService;
@@ -218,6 +249,7 @@ export class LspService {
     await Promise.all(running.map((entry) => entry.session.stop()));
 
     this.diagnostics.set(new Map());
+    this.diagnosticsTotals.set({ errors: 0, warnings: 0, files: 0 });
     this.sessions.set([]);
   }
 
@@ -331,6 +363,7 @@ export class LspService {
     }
 
     const next = new Map(this.diagnostics.get());
+    const previous = next.get(uri) ?? [];
     if (diagnostics.length === 0) {
       next.delete(uri);
       entry.published.delete(uri);
@@ -339,6 +372,22 @@ export class LspService {
       entry.published.add(uri);
     }
     this.diagnostics.set(next);
+    this.#adjustTotals(previous, diagnostics);
+  }
+
+  /**
+   * Move `diagnosticsTotals` by what replacing `before` with `after` (for one
+   * URI) changes, rather than re-totalling every file's diagnostics (A4-010).
+   */
+  #adjustTotals(before: readonly LspDiagnostic[], after: readonly LspDiagnostic[]): void {
+    const was = severityCounts(before);
+    const now = severityCounts(after);
+    const current = this.diagnosticsTotals.get();
+    this.diagnosticsTotals.set({
+      errors: current.errors - was.errors + now.errors,
+      warnings: current.warnings - was.warnings + now.warnings,
+      files: current.files - (before.length > 0 ? 1 : 0) + (after.length > 0 ? 1 : 0),
+    });
   }
 
   /** The revision of the buffer this URI names, or null when none is open. */
@@ -382,7 +431,11 @@ export class LspService {
     if (entry.published.size === 0) return;
 
     const next = new Map(this.diagnostics.get());
-    for (const uri of entry.published) next.delete(uri);
+    for (const uri of entry.published) {
+      const removed = next.get(uri);
+      if (removed) this.#adjustTotals(removed, []);
+      next.delete(uri);
+    }
     entry.published.clear();
     this.diagnostics.set(next);
   }
