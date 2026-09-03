@@ -168,8 +168,14 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
    * Put something on the clipboard that the user is already looking at.
    * `file.revealInExplorer` reveals in **Nox's** explorer, not the OS file
    * manager, so it reaches nothing outside the window either.
+   *
+   * `agents.copyTrail` is here for the same reason `app.copyDiagnostics` is:
+   * it copies out Nox's own record of what an agent already did, which the
+   * Agents panel is displaying at the time. It reads no file and sends
+   * nothing.
    */
   'copying what is already on screen': [
+    'agents.copyTrail',
     'app.copyDiagnostics',
     'explorer.copyPath',
     'explorer.copyRelativePath',
