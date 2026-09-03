@@ -186,6 +186,17 @@ class Buffer {
    */
   diskMtime = 0;
   externalState: ExternalState = 'none';
+  /**
+   * The pane whose view produced `state`, when one did.
+   *
+   * With one file in two panes each view keeps its own `EditorState`, and
+   * `state` is whichever dispatched last. A command the workspace runs
+   * against it has to reach that pane and no other: see `PaneChannel.run`.
+   * Not cleared by the background paths, because a pane that takes the
+   * buffer back adopts the state and re-announces itself on its first
+   * dispatch, and a pane that no longer shows the buffer declines the run.
+   */
+  stateOrigin: object | undefined;
 
   constructor(init: {
     id: BufferId;
@@ -286,6 +297,18 @@ interface PaneChannel {
   /** Which pane this is, when the caller said. */
   groupId: GroupId | undefined;
   /**
+   * Run a state command against this pane's own view, for the buffer named.
+   * Null when the pane is not showing it.
+   *
+   * Needed because a `Transaction` is bound to the state it was built from,
+   * and `@codemirror/view` refuses one whose `startState` is not the view's
+   * own. With one file in two panes, `buffer.state` belongs to whichever
+   * pane dispatched last, so a transaction the workspace builds from it can
+   * only ever be handed to that pane. Letting the pane build it instead
+   * keeps the two on the same state by construction.
+   */
+  run: ((id: BufferId, command: StateCommand) => boolean | null) | undefined;
+  /**
    * This pane's cursor **in one named buffer**, asked for rather than pushed.
    *
    * A selection changes on every cursor move, so publishing one would put
@@ -368,6 +391,7 @@ export class WorkspaceService {
       owner?: object;
       groupId?: GroupId;
       readSelection?: (id: BufferId) => SelectionRecord | null;
+      run?: (id: BufferId, command: StateCommand) => boolean | null;
     } = {},
   ): () => void {
     const channel: PaneChannel = {
@@ -375,6 +399,7 @@ export class WorkspaceService {
       owner: options.owner,
       groupId: options.groupId,
       readSelection: options.readSelection,
+      run: options.run,
     };
     this.#viewDispatchers.add(channel);
     return () => this.#viewDispatchers.delete(channel);
@@ -953,6 +978,7 @@ export class WorkspaceService {
     const buffer = this.#map.get(id);
     if (!buffer) return;
     buffer.state = transaction.state;
+    buffer.stateOrigin = origin;
     if (transaction.docChanged) {
       // A transaction that is *itself* a mirror is never forwarded again.
       // The guard belongs here rather than in the panes: a consumer that
@@ -1668,6 +1694,20 @@ export class WorkspaceService {
   #runOnBuffer(id: BufferId, command: StateCommand): boolean {
     const buffer = this.#map.get(id);
     if (!buffer) return false;
+
+    // A pane runs the command against its own view, so the transaction is
+    // built from and dispatched to one state. The pane that produced
+    // `buffer.state` goes first: the depth check in `#stepChangeSet` read
+    // that state's history, so this keeps the check and the undo on the same
+    // pane. Any other pane showing the buffer is a fine second, since its
+    // view is its own start state too. Only a channel without `run` (a test
+    // fake) falls through to the transaction path below.
+    const channels = [...this.#viewDispatchers];
+    const origin = channels.find((channel) => channel.owner === buffer.stateOrigin);
+    for (const channel of origin ? [origin, ...channels.filter((c) => c !== origin)] : channels) {
+      const ran = channel.run?.(id, command);
+      if (ran !== null && ran !== undefined) return ran;
+    }
 
     return command({
       state: buffer.state,

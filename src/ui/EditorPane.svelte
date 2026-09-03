@@ -172,6 +172,14 @@
         // Identifies this pane, so an edit it originated is not sent back.
         owner: view,
         groupId,
+        // A grouped undo runs against this view rather than arriving as a
+        // transaction built elsewhere: with one file in two panes the
+        // workspace holds whichever pane's state dispatched last, and the
+        // view refuses a transaction that does not start from its own.
+        run: (id, command) => {
+          if (!view || id !== currentId) return null;
+          return command(view);
+        },
         // Pulled at save time rather than published: a cursor moves on every
         // keystroke, and only the session ever reads it.
         //
