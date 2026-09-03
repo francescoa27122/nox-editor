@@ -85,6 +85,7 @@ import {
   EXPLAIN_INSTRUCTION,
   ProviderTransport,
   scopeFromSelection,
+  stillOnDisk,
 } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
@@ -3812,6 +3813,24 @@ export class NoxApp {
         },
       },
       {
+        id: 'agents.copyTrail',
+        title: 'Copy the Last Agent Session Trail',
+        category: 'Agents',
+        keywords: ['audit', 'log', 'trail', 'export', 'json', 'clipboard', 'history'],
+        // No `capabilities`, on the same reasoning as `app.copyDiagnostics`:
+        // this reads Nox's own record of what an agent already did and puts
+        // it on the clipboard. The record survives only as long as the
+        // window, which is why it has to be possible to get it out.
+        enabled: () => this.agents.sessions.get().length > 0,
+        run: async (arg) => {
+          // An id from the panel's per-session button, else the newest.
+          const id = typeof arg === 'string' ? arg : this.agents.sessions.get()[0]?.id;
+          const trail = id === undefined ? null : this.agents.exportTrail(id);
+          if (trail === null) return;
+          await this.copyToClipboard(trail, 'the session trail');
+        },
+      },
+      {
         id: 'agents.undoLastSession',
         title: 'Undo the Last Agent Session',
         /**
@@ -3836,12 +3855,18 @@ export class NoxApp {
         run: () => {
           const session = this.agents.sessions.get().find((s) => this.agents.changesBy(s.id).length > 0);
           if (!session) return;
-          const { undone, skipped } = this.agents.undoSession(session.id);
+          const { undone, skipped, onDisk } = this.agents.undoSession(session.id);
+          // Same sentence the panel's button uses: the disk may still hold
+          // the agent's text, and "took back everything" alone hid that.
+          const unsaved = stillOnDisk(onDisk.length);
           if (skipped.length > 0) {
             this.notifications.warn(
               `Took back ${undone.length} of ${undone.length + skipped.length} files`,
-              'The rest have been edited since, so their changes were left alone.',
+              'The rest have been edited since, so their changes were left alone.' +
+                (unsaved ? ` ${unsaved}` : ''),
             );
+          } else if (unsaved) {
+            this.notifications.warn(`Took back everything ${session.label} did in the editor`, unsaved);
           } else {
             this.notifications.success(`Took back everything ${session.label} did`);
           }

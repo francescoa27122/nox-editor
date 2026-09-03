@@ -454,18 +454,27 @@ pub fn nox_lsp_stop(state: State<'_, LspState>, id: String) -> Result<()> {
 /// leave orphans running with nothing left to talk to them.
 #[tauri::command]
 pub fn nox_lsp_stop_all(state: State<'_, LspState>) -> Result<()> {
-    let servers: Vec<Running> = state
-        .0
-        .lock()
-        .map_err(poisoned)?
-        .drain()
-        .map(|(_, server)| server)
-        .collect();
+    state.stop_all()
+}
 
-    for server in servers {
-        stop(server);
+impl LspState {
+    /// Stop every server. Also the exit hook's call in `lib.rs`, for the
+    /// same reason as `AgentState::kill_all`: a quit that skips the
+    /// renderer's `beforeunload` must not leave servers behind.
+    pub fn stop_all(&self) -> Result<()> {
+        let servers: Vec<Running> = self
+            .0
+            .lock()
+            .map_err(poisoned)?
+            .drain()
+            .map(|(_, server)| server)
+            .collect();
+
+        for server in servers {
+            stop(server);
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Dropping stdin closes it, which is how a well-behaved server is asked to

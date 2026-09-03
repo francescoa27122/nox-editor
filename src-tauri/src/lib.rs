@@ -192,8 +192,26 @@ pub fn run() {
             #[cfg(desktop)]
             menu::nox_set_menu,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Nox");
+        .build(tauri::generate_context!())
+        .expect("error while running Nox")
+        .run(|app, event| {
+            // Every child Nox supervises is killed here as well as from the
+            // renderer's `beforeunload`. That handler was the only kill path,
+            // and it belongs to a webview that is not guaranteed to run it on
+            // every way out; `Exit` is the host's own last word, and a quit
+            // that never touched the renderer still passes through it. A
+            // crash does not: the release profile aborts on panic, and no
+            // hook runs after an abort. Tying a child's lifetime to the
+            // host's for that case needs a job object on Windows and a
+            // death signal on Linux, both of which are FFI this crate does
+            // not do yet.
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                let _ = app.state::<agent::AgentState>().kill_all();
+                let _ = app.state::<lsp::LspState>().stop_all();
+                let _ = app.state::<pty::PtyState>().close_all();
+            }
+        });
 }
 
 /// Size and place the main window — for `--geometry`, and for the geometry the
