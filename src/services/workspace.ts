@@ -2108,8 +2108,24 @@ function decode(raw: string, reported: Encoding = 'utf-8'): { doc: string; eol: 
       ? 'utf-8'
       : reported;
   const body = raw.startsWith(BOM) ? raw.slice(BOM.length) : raw;
-  const eol: Eol = body.includes('\r\n') ? '\r\n' : '\n';
-  return { doc: eol === '\r\n' ? body.replace(/\r\n/g, '\n') : body, eol, encoding };
+  const { crlf, lf } = countLineEndings(body);
+  // The majority ending, ties to CRLF. "Any CRLF means CRLF" turned a file
+  // that was mostly LF with one stray Windows line into a whole-file diff on
+  // its next save. Every CRLF is still folded to LF in the document either
+  // way, or a minority CRLF line would keep its `\r` in the text.
+  const eol: Eol = crlf > 0 && crlf >= lf ? '\r\n' : '\n';
+  return { doc: crlf > 0 ? body.replace(/\r\n/g, '\n') : body, eol, encoding };
+}
+
+/** How many lines end in CRLF and how many in a bare LF. One pass, no allocation. */
+function countLineEndings(text: string): { crlf: number; lf: number } {
+  let crlf = 0;
+  let lf = 0;
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+    if (at > 0 && text.charCodeAt(at - 1) === 13) crlf++;
+    else lf++;
+  }
+  return { crlf, lf };
 }
 
 /** The inverse of `decode`. */

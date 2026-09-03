@@ -522,6 +522,39 @@ describe('on-disk form', () => {
     expect(await platform.readTextFile('/work/bom.txt')).toBe('\uFEFFhello\n');
   });
 
+  /**
+   * Guards A3-010: any CRLF at all used to make the whole file CRLF on its
+   * next save, so a file that was mostly LF with one stray Windows line came
+   * back as a whole-file diff. The majority ending wins, and every line is
+   * still normalised to LF in the document whichever way that goes.
+   *
+   * Does not surface "mixed" anywhere: the status bar shows the ending a
+   * save will write, not that the file disagreed with itself.
+   */
+  it('keeps the majority line ending of a mixed file', async () => {
+    const { platform, workspace } = setup();
+    platform.seedFile('/work/mixed.txt', 'a\r\nb\nc\nd\n');
+    const id = (await workspace.open('/work/mixed.txt'))!;
+
+    expect(workspace.textOf(id)).toBe('a\nb\nc\nd\n');
+    expect(workspace.activeSnapshot()?.eol).toBe('\n');
+
+    await workspace.save(id);
+    expect(await platform.readTextFile('/work/mixed.txt')).toBe('a\nb\nc\nd\n');
+  });
+
+  it('still picks CRLF when most lines end that way', async () => {
+    const { platform, workspace } = setup();
+    platform.seedFile('/work/mixed.txt', 'a\r\nb\r\nc\n');
+    const id = (await workspace.open('/work/mixed.txt'))!;
+
+    expect(workspace.textOf(id)).toBe('a\nb\nc\n');
+    expect(workspace.activeSnapshot()?.eol).toBe('\r\n');
+
+    await workspace.save(id);
+    expect(await platform.readTextFile('/work/mixed.txt')).toBe('a\r\nb\r\nc\r\n');
+  });
+
   it('does not add a byte-order mark to a file that had none', async () => {
     const { platform, workspace } = setup();
     const id = (await workspace.open('/work/README.md'))!;
