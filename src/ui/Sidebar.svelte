@@ -12,7 +12,6 @@
   import ReferencesPanel from './ReferencesPanel.svelte';
   import GitPanel from './GitPanel.svelte';
   import Icon, { isIconName, type IconName } from './Icon.svelte';
-  import { problemTotals } from './problems';
 
   /**
    * The sidebar shell.
@@ -25,11 +24,12 @@
 
   const app = useApp();
   const { ui, keymap, agentConfig, agents, commands, lsp } = app;
-  const diagnostics = lsp.diagnostics;
+  const diagnosticsTotals = lsp.diagnosticsTotals;
   const view = ui.sidebarView;
   // The rail's one ambient status: how many errors the project has. An
   // activity rail that shows nothing until clicked is not earning its row.
-  const errorCount = $derived(problemTotals($diagnostics).errors);
+  // A running total (A4-010), not `problemTotals($diagnostics)` re-walked.
+  const errorCount = $derived($diagnosticsTotals.errors);
   const configured = agentConfig.agents;
   const providers = agents.providers;
 

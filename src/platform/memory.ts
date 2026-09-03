@@ -952,7 +952,10 @@ export class MemoryPlatform implements Platform {
 
         totalMatches += matches.length;
         totalFiles += 1;
-        batch.push({ path, matches });
+        // No per-file cap here (A4-005 is the Rust walker's fix): the
+        // browser build's `findMatches` runs over test and dev fixtures, not
+        // the kind of multi-megabyte minified file the cap exists for.
+        batch.push({ path, matches, truncated: false });
 
         if (batch.length >= 20) {
           onBatch(batch);

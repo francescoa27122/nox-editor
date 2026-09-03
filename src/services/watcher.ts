@@ -251,9 +251,13 @@ export class FileWatcherService {
     if (!buffer.isDirty) {
       // Clean buffer: the file on disk is the truth. Reload without a fuss.
       const reloaded = await this.#workspace.reloadFromDisk(id);
-      this.#warned.delete(id);
-      this.#workspace.events.emit('external-change', { id, state: 'modified', reloaded });
-      return;
+      if (reloaded) {
+        this.#warned.delete(id);
+        this.#workspace.events.emit('external-change', { id, state: 'modified', reloaded });
+        return;
+      }
+      // Declined: a keystroke landed while the file was being read, so the
+      // buffer is dirty now and this is the case below after all.
     }
 
     // Dirty buffer: the user's unsaved work always wins until they say

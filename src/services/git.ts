@@ -105,6 +105,19 @@ export class GitService {
   #timers = new Map<BufferId, ReturnType<typeof setTimeout>>();
   /** path -> when its base was last refetched on activation. */
   #refetched = new Map<string, number>();
+  /**
+   * The path `#pathOf` last resolved for a buffer, kept for `#drop` (A4-006).
+   *
+   * `buffer-closed` fires after `workspace.close` has already removed the
+   * buffer from `workspace.buffers` (see `workspace.ts`'s `close`), so by the
+   * time `#drop` runs, `#pathOf(id)` can no longer answer for it — the base
+   * text would sit in `#bases` forever, one entry per path ever opened, since
+   * nothing else ever revisits a path nobody has open. `#pathOf` populates
+   * this on every call that resolves a path, which happens on every document
+   * change the buffer is open for, so it is never stale while the buffer is
+   * still alive.
+   */
+  #lastPathOf = new Map<BufferId, string>();
   #unsubscribes: (() => void)[] = [];
   #started = false;
   #statusInFlight = false;
@@ -316,6 +329,7 @@ export class GitService {
     this.#bases.clear();
     this.#computed.clear();
     this.#refetched.clear();
+    this.#lastPathOf.clear();
     this.hunks.set(new Map());
     this.baseRevision.update((n) => n + 1);
     this.status.set(null);
@@ -337,6 +351,22 @@ export class GitService {
       const next = new Map(current);
       next.delete(id);
       this.hunks.set(next);
+    }
+
+    // #bases and #refetched are keyed by path, not by buffer id, and never
+    // cleared on close (A4-006) — a day-long session opening and closing
+    // thousands of tracked files retained a full second copy of every one of
+    // them forever. `workspace.open` reuses an existing buffer for a path
+    // already open, so no other open buffer can share the path this one is
+    // closing under; the guard is still here because that invariant living
+    // in a different file is not a reason to trust it silently. Nothing
+    // reads this path's base again until it is reopened, at which point
+    // `buffer-opened`'s `#refresh` fetches it fresh.
+    const path = this.#lastPathOf.get(id);
+    this.#lastPathOf.delete(id);
+    if (path && !this.#workspace.buffers.get().some((buffer) => buffer.path === path)) {
+      this.#bases.delete(path);
+      this.#refetched.delete(path);
     }
   }
 
@@ -523,7 +553,9 @@ export class GitService {
   }
 
   #pathOf(id: BufferId): string | null {
-    return this.#workspace.buffers.get().find((b) => b.id === id)?.path ?? null;
+    const path = this.#workspace.buffers.get().find((b) => b.id === id)?.path ?? null;
+    if (path) this.#lastPathOf.set(id, path);
+    return path;
   }
 
   #compute(id: BufferId): void {

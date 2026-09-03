@@ -145,7 +145,7 @@
         }
 
         publishCursor();
-        find.refresh();
+        find.refresh(docChanged);
         if (docChanged) {
           scheduleAutosave();
           // Beside the autosave timer because it is the same shape and the
@@ -173,6 +173,14 @@
         // Identifies this pane, so an edit it originated is not sent back.
         owner: view,
         groupId,
+        // A grouped undo runs against this view rather than arriving as a
+        // transaction built elsewhere: with one file in two panes the
+        // workspace holds whichever pane's state dispatched last, and the
+        // view refuses a transaction that does not start from its own.
+        run: (id, command) => {
+          if (!view || id !== currentId) return null;
+          return command(view);
+        },
         // Pulled at save time rather than published: a cursor moves on every
         // keystroke, and only the session ever reads it.
         //
@@ -387,7 +395,10 @@
 
     publishCursor();
     find.attach(view);
-    find.refresh();
+    // A buffer swap, not an edit or a selection move: always worth a fresh
+    // count, the same as before `refresh()` learned to skip selection-only
+    // dispatches.
+    find.refresh(true);
 
     // Only the focused pane may take the caret; a background pane swapping
     // tabs must not yank focus away from where the user is typing.

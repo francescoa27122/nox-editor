@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parser as jsParser } from '@lezer/javascript';
 import { Text } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
-import { fileSymbols, stickyRows } from '../src/core/symbols';
+import { enclosingSymbols, fileSymbols, stickyRows } from '../src/core/symbols';
 
 const ts = jsParser.configure({ dialect: 'ts' });
 
@@ -23,11 +23,22 @@ const SOURCE = [
   'function after() {}', // 9
 ].join('\n');
 
-/** The rows at `topLine`, as "depth:text" strings. */
+/**
+ * The rows at `topLine`, as "depth:text" strings.
+ *
+ * A4-001: sticky scroll itself now calls `enclosingSymbols`, not
+ * `stickyRows(fileSymbols(...))` (kept below for the direct API tests and the
+ * symbol palette's `createSymbolCache`), so this is what every case in this
+ * `describe` block actually exercises. The two are meant to agree on every
+ * fixture here: that agreement is this suite's regression coverage for the
+ * rewrite, on top of what each individual case already guards.
+ */
 function rowsAt(source: string, topLine: number, max = 5): string[] {
   const doc = Text.of(source.split('\n'));
-  const symbols = fileSymbols(ts.parse(source), doc);
-  return stickyRows(symbols, topLine, doc, max).map((row) => `${row.depth}:${row.text}`);
+  const pos = doc.line(topLine).from;
+  return enclosingSymbols(ts.parse(source), doc, pos, topLine, max).map(
+    (row) => `${row.depth}:${row.text}`,
+  );
 }
 
 describe('what stays pinned while scrolling', () => {

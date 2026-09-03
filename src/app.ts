@@ -184,6 +184,17 @@ export class NoxApp {
   #themeProperties: string[] = [];
   /** Failures already announced, so a republished status does not repeat one. */
   #reportedFailures = new Set<string>();
+  /**
+   * The last string handed to `platform.setWindowTitle` (A4-009).
+   *
+   * `#updateWindowTitle` runs on every document change (`workspace.buffers`
+   * republishes on every keystroke), but the title itself only changes on
+   * the far rarer events that move dirty state, the active file or the root
+   * — so most calls would otherwise be an IPC round trip and a native
+   * `SetWindowText` for text the window already shows. `null` at start,
+   * which cannot equal any real title, so the very first call always sets it.
+   */
+  #lastWindowTitle: string | null = null;
   /** The running servers, and the diagnostics they publish. */
   readonly lsp: LspService;
   readonly terminal: TerminalService;
@@ -912,7 +923,13 @@ export class NoxApp {
     if (active) parts.push(`${active.isDirty ? '● ' : ''}${active.name}`);
     if (root) parts.push(basename(root));
     parts.push('Nox');
-    void this.platform.setWindowTitle(parts.join(' — '));
+    const title = parts.join(' — ');
+    // A4-009: `workspace.buffers` republishes on every keystroke, which calls
+    // this every time, but the title text itself moves far less often — skip
+    // the IPC and native SetWindowText when nothing to show has changed.
+    if (title === this.#lastWindowTitle) return;
+    this.#lastWindowTitle = title;
+    void this.platform.setWindowTitle(title);
   }
 
   // --- Editor access ------------------------------------------------------

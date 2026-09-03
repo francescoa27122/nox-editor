@@ -86,7 +86,11 @@ export function findMatches(text: string, matcher: RegExp): LineMatch[] {
   const lines = text.split('\n');
 
   for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!;
+    const raw = lines[index]!;
+    // Without its `\r`: the Rust side iterates `lines()`, which strips it,
+    // and replace walks this same loop, so a CRLF file has to match the same
+    // way here or `$`-anchored patterns disagree between the two.
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     // A fresh lastIndex per line; the matcher is reused across files.
     matcher.lastIndex = 0;
 

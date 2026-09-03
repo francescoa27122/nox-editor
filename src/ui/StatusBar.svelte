@@ -5,14 +5,16 @@
   import { useApp } from './context';
   import Icon from './Icon.svelte';
   import { activeLanguageStatus, serverStatusLabel, serverStatusTitle } from './lsp-status';
-  import { problemTotals } from './problems';
 
   const app = useApp();
   const { workspace, config, commands, files, jobs, review, ui, lsp, keymap, agentConfig, agents } =
     app;
-  const diagnostics = lsp.diagnostics;
+  // A running total (A4-010), not `problemTotals($diagnostics)` re-walked on
+  // every publish: `lsp.diagnosticsTotals` is kept in step with the map by
+  // the delta each publish makes.
+  const diagnosticsTotals = lsp.diagnosticsTotals;
   const pluginStatus = app.plugins.status.items;
-  const problemCounts = $derived(problemTotals($diagnostics));
+  const problemCounts = $derived($diagnosticsTotals);
 
   /**
    * "Label (⌘⇧M)", or just the label when the command has no binding.
