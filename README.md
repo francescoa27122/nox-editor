@@ -268,20 +268,19 @@ endings, the language, the wrap.
 
 ## Status
 
-**v0.11.** It's young, and it's a personal project rather than a product, but
+**v0.12.** It's young, and it's a personal project rather than a product, but
 it's real software with 2,438 tests and I use it. Expect rough edges. Open an
 issue if you hit one, and run **Copy Diagnostics** from the palette first: it
 puts the version, the platform and what recently went wrong on your clipboard,
 with your home directory stripped out of the paths.
 
-**Landed since 0.11.0 and not in a release yet: blame.** <kbd>Mod ⌥ B</kbd>
-puts who wrote each line beside the line, on demand rather than always on. It
+**Git is complete as of 0.12.0.** It arrived in 0.5.0 with a gutter marking
+what the index doesn't hold yet, a side-by-side or inline diff of the file
+against its base, and a focused panel to stage, unstage, commit and switch
+branches (<kbd>Mod ⇧ G</kbd>). **Blame** finished it: <kbd>Mod ⌥ B</kbd> puts
+who wrote each line beside the line, on demand rather than always on, and it
 annotates what you have *open* rather than what's saved, so a line you just
-typed reads Uncommitted instead of borrowing the name above it.
-
-**Git arrived in 0.5.0.** A gutter marking what the index doesn't hold yet, a
-side-by-side or inline diff of the file against its base, and a focused panel
-to stage, unstage, commit and switch branches (<kbd>Mod ⇧ G</kbd>). Not a Git
+typed reads Uncommitted instead of borrowing the name above it. Still not a Git
 client: no push, pull, rebase or amend, and nothing that can discard your
 working tree.
 

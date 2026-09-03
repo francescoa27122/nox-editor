@@ -6,6 +6,64 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A plugin or an agent can no longer make Nox reach the network without
+  being allowed to.** Reading a file is allowed by default, on the argument
+  that what is read cannot leave your machine without a separate permission,
+  and that second permission was never actually being asked for. So a plugin
+  could read a file it was never questioned about and then ask Nox to send it
+  to a model, also without a question. The five commands that can reach the
+  network now declare it, and it is refused outright for anything that is not
+  you. Nothing about running your own agent changes.
+
+- **A program that prints without ever starting a new line can no longer take
+  Nox down with it.** Anything Nox supervises and reads line by line, which is
+  a language server's diagnostics, an agent, and now a task, was buffered whole
+  until a newline arrived. A build script that pipes something large through
+  `tr -d '\n'` never sends one, so the buffer grew until the process died and
+  took the unsaved work with it, and the search for that newline restarted from
+  the beginning on every read, so it got slower the longer it went on. A line
+  is capped now: past a megabyte it is handed over as it stands and the next
+  one starts.
+
+### Added
+
+- **Tasks.** Your project's own commands, from the palette (**Run Task…**) or
+  <kbd>Mod ⇧ B</kbd> for the last one, with their output kept in a panel.
+  They come from a `tasks.json` you write, and Nox will create one for you with
+  a working example: **Edit Tasks**.
+
+  A task names a program and its arguments, and that is all it can name. There
+  is no shell, so `npm test && npm run lint` is two tasks rather than one, and
+  anything wanting a pipe wants the terminal instead. The reason is the next
+  paragraph.
+
+  **A project can carry its own tasks, in `.nox/tasks.json`, and Nox asks
+  before it runs one.** That file arrives with a repository you cloned, written
+  by whoever wrote the repository, so the first time you ask for one of its
+  tasks Nox shows you exactly what is about to run and waits. Because there is
+  no shell, the line it shows you is the line that executes: nothing gets a
+  second reading after you click. Say yes and it stops asking, until the
+  repository changes what that task runs, which is a new question rather than
+  an approval it inherits. **Forget Approved Tasks** clears them all, and the
+  panel lists what is currently approved.
+
+  Your own tasks never ask. A task of yours takes precedence over a project
+  task with the same name, and the panel says which ones that hid, so a
+  repository cannot quietly take over a name you were already using.
+
+  Stopping one really stops it, including in the moment between asking for a
+  process and getting it. Output keeps the last 5,000 lines with stdout and
+  stderr interleaved in the order they arrived, because a compiler writes its
+  errors to one and its progress to the other and pulling them apart puts the
+  error somewhere other than the step it belongs to.
+
+## [0.12.0] - 2026-08-29
+
+Nox can tell you who wrote a line. Blame was the last thing missing from the
+Git work that landed in 0.5.0, and it completes it.
+
 ### Added
 
 - **Blame.** <kbd>Mod ⌥ B</kbd>, or **Toggle Blame** from the palette or the
@@ -1639,7 +1697,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/francescoa27122/nox-editor/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francescoa27122/nox-editor/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francescoa27122/nox-editor/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/francescoa27122/nox-editor/compare/v0.9.0...v0.9.1

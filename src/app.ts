@@ -30,7 +30,14 @@ import { offsetAt, positionAt } from '@core/lsp-position';
 import { ANCHOR_WINDOW, resolveAnchor } from '@core/anchor';
 import { ENCODING_CHOICES, type Encoding } from '@core/encoding';
 import { formatNoteFile, noteFileName, parseNoteFile } from '@core/note-file';
-import { basename, dirname, join, relative, topLevelPaths } from '@core/path';
+import {
+  basename,
+  containsResolved,
+  dirname,
+  join,
+  relative,
+  topLevelPaths,
+} from '@core/path';
 import { Signal } from '@core/signal';
 import { pathToUri, uriToPath } from '@core/uri';
 import { addCursorAbove, addCursorBelow, goToLine } from '@editor/commands';
@@ -100,6 +107,7 @@ import { SearchService, type MatchPosition } from '@services/search';
 import { MenuService } from '@services/menu';
 import { SessionService } from '@services/session';
 import { TerminalService } from '@services/terminal';
+import { TaskService, TASKS_FILE, workspaceTasksPath } from '@services/tasks';
 import { type SidebarView, UIService } from '@services/ui';
 import { UpdateService } from '@services/updates';
 import { FileWatcherService } from '@services/watcher';
@@ -178,6 +186,8 @@ export class NoxApp {
   /** The running servers, and the diagnostics they publish. */
   readonly lsp: LspService;
   readonly terminal: TerminalService;
+  /** The project's own commands, and what they printed. See `tasks.ts`. */
+  readonly tasks: TaskService;
   /** What git holds for each open file, for the gutter. */
   readonly git: GitService;
   /** The user's own notes — not workspace files. See `notes.ts`. */
@@ -250,6 +260,11 @@ export class NoxApp {
         await this.permissions.require({
           principal,
           capability,
+          // Both, and they are not the same thing. The title is what the
+          // prompt says out loud; the id is what a remembered grant is keyed
+          // on, so that answering about one command does not quietly answer
+          // about its siblings. See `grantKey`.
+          commandId: command.id,
           description: command.title,
           ...(resource ? { resource } : {}),
         });
@@ -321,6 +336,7 @@ export class NoxApp {
       () => this.workspace.rootPath.get(),
       () => this.config.get('terminal.shell'),
     );
+    this.tasks = new TaskService(platform, this.jobs, this.ui);
     this.agents = new AgentRuntime({
       workspace: this.workspace,
       context: this.context,
@@ -390,6 +406,7 @@ export class NoxApp {
     await this.agentConfig.load();
     await this.serverRegistry.load();
     await this.snippets.load();
+    await this.tasks.load(this.workspace.rootPath.get());
     // Before discovery, so `describe` in `loadPlugins` adopts each stored
     // namespace rather than parking it as belonging to nobody.
     await this.pluginSettings.load();
@@ -583,6 +600,10 @@ export class NoxApp {
       // A project's own settings arrive and leave with the project. Closing a
       // folder must not leave its indentation behind.
       void this.config.loadWorkspace(root);
+      // For the same reason, and it matters more here: closing a folder must
+      // not leave its *tasks* behind, or a repository's command would still be
+      // listed after the repository was gone.
+      void this.tasks.load(root);
       this.#updateWindowTitle();
       this.session.schedule();
     });
@@ -594,6 +615,16 @@ export class NoxApp {
       if (!root) return;
       if (!paths.has(workspaceConfigPath(root))) return;
       void this.config.loadWorkspace(root);
+    });
+
+    // The project's tasks, same event and same reasoning. Re-reading does not
+    // re-approve: trust is keyed on the argv, so an edit that changes what a
+    // task runs is a new question by construction. See `taskFingerprint`.
+    this.watcher.onPathsChanged((paths) => {
+      const root = this.workspace.rootPath.get();
+      if (!root) return;
+      if (!paths.has(workspaceTasksPath(root))) return;
+      void this.tasks.load(root);
     });
 
     // A closed tab should not keep its "changed on disk" warning suppressed.
@@ -743,7 +774,7 @@ export class NoxApp {
     /**
      * Config files edited outside Nox.
      *
-     * Three files, and the omissions are deliberate — see
+     * Four files, and the omissions are deliberate — see
      * `classifyConfigChange`. Each reload is idempotent and decides for itself
      * whether anything moved, which is what makes this safe for
      * `plugin-settings.json`, the one of the three Nox writes itself: a
@@ -769,6 +800,16 @@ export class NoxApp {
       if (change.themes) void this.loadThemes();
 
       if (change.pluginSettings) void this.pluginSettings.reload();
+
+      if (change.tasks) {
+        void this.tasks.load(this.workspace.rootPath.get()).then(() => {
+          const error = this.tasks.error.get();
+          // Same reasoning as `snippets.json` above: the tasks that were
+          // working stay listed, and a file being edited elsewhere is exactly
+          // when a silent failure looks like the edit not having worked.
+          if (error) this.notifications.error('tasks.json could not be read', error);
+        });
+      }
     });
 
     this.pluginSettings.damaged.subscribe((damage) => {
@@ -1416,6 +1457,25 @@ export class NoxApp {
    * `AgentPanel.svelte` — which cannot reach this private method — can call
    * the same function instead of re-deriving its own copy.
    */
+  /**
+   * The endpoint a `net.request` decision about an agent is made against.
+   *
+   * Only the *dialog text and the audit line* use it: `isResourceScoped` is
+   * false for `net.request`, so it is not part of a grant key, and
+   * `#isOutsideWorkspace` returns early for anything that is not `fs.*`, so a
+   * URL cannot be mistaken for a path escaping the workspace.
+   *
+   * A process agent has no host to name. It is still gated, because what
+   * leaves the process is the same context either way and where it goes next
+   * is that program's business rather than something Nox can see.
+   */
+  #agentEndpoint(arg?: unknown): string | undefined {
+    const agents = this.#runnableAgents();
+    const named = typeof arg === 'string' ? agents.find((agent) => agent.id === arg) : undefined;
+    const agent = named ?? (agents.length === 1 ? agents[0] : undefined);
+    return agent && agent.kind === 'ollama' ? agent.host : undefined;
+  }
+
   #runnableAgents(): AgentConfig[] {
     return runnableAgents(this.agentConfig.agents.get(), {
       canSpawn: this.platform.capabilities.agentProcesses,
@@ -1577,6 +1637,38 @@ export class NoxApp {
     }
 
     await this.openPaths([join(directory, SNIPPETS_FILE)]);
+  }
+
+  /**
+   * Open the user's `tasks.json` for editing, creating it with examples if
+   * absent.
+   *
+   * The user's, never the project's. Nox authoring a `.nox/tasks.json` would
+   * be Nox helping to write the file the confirmation in `TaskService` exists
+   * to catch, and an editor that offers to create it teaches that the file is
+   * ordinary. Someone who wants one can write it; this command will not.
+   */
+  async openTasksConfig(): Promise<void> {
+    try {
+      await this.tasks.ensureFile();
+    } catch (error) {
+      this.notifications.error(
+        'Could not create tasks.json',
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    const directory = await this.platform.configDir().catch(() => null);
+    if (!directory) {
+      this.notifications.info(
+        'Tasks live in tasks.json',
+        'The browser build keeps settings in the browser, so there is no file to open here.',
+      );
+      return;
+    }
+
+    await this.openPaths([join(directory, TASKS_FILE)]);
   }
 
   /**
@@ -2010,6 +2102,58 @@ export class NoxApp {
    * Single-target commands (rename) use `targetPath`; anything that can
    * sensibly act on many (delete, duplicate, copy path) uses this.
    */
+  /**
+   * The path a permission decision about `arg` is made against.
+   *
+   * **It has to agree with what `run` will act on**, and until a review on
+   * 2026-08-30 it did not. Every explorer command's `resourceFrom` honoured
+   * only a *string* argument and otherwise fell back to `targetPath()`, while
+   * the run bodies pass the same argument to `targetPaths`, which honours an
+   * **array**. So a caller handing over `['/home/you/.ssh/id_rsa']` had its
+   * permission checked against the explorer's lead selection, a path inside
+   * the workspace, and then the command opened, duplicated or deleted the
+   * array instead. `fs.read` is `allow` by policy and the boundary check is
+   * what turns it into a question, so the effect was a plugin or agent reading
+   * any file on disk with no prompt at all.
+   *
+   * When the set has several members the check is made against the first one
+   * **outside** the workspace, because that is the member that decides the
+   * answer: the boundary only ever tightens, so checking an inside path while
+   * an outside path is present is checking the wrong one.
+   */
+  permissionTarget(explicit?: unknown): string | undefined {
+    const request = explicit as { paths?: unknown; target?: unknown } | undefined;
+    // `explorer.moveTo` carries an object rather than a path or a list, and
+    // both halves of it are things the command writes to. Only treated as that
+    // shape when it actually carries one of the two fields: the first version
+    // of this took the branch for *any* object, so `{}` produced an empty set
+    // and then `undefined`, while `run` went on to act on the lead selection.
+    // A request with no resource skips the workspace check entirely
+    // (`permissions.ts`), so that was a hole rather than a cosmetic gap, and
+    // the code it replaced did not have it.
+    const fromRequest =
+      request && typeof request === 'object' && !Array.isArray(request)
+        ? [
+            ...(Array.isArray(request.paths)
+              ? request.paths.filter((path): path is string => typeof path === 'string')
+              : []),
+            ...(typeof request.target === 'string' ? [request.target] : []),
+          ]
+        : [];
+    const named = fromRequest.length > 0 ? fromRequest : this.targetPaths(explicit);
+
+    // Never undefined while the command has something to act on: the fallback
+    // is what `targetPath()` used to provide, and losing it silently widened
+    // every explorer permission from "this path" to "no path named".
+    if (named.length === 0) return this.targetPath() ?? undefined;
+    const root = this.workspace.rootPath.get();
+    if (root) {
+      const outside = named.find((path) => !containsResolved(root, path));
+      if (outside) return outside;
+    }
+    return named[0];
+  }
+
   targetPaths(explicit?: unknown): string[] {
     if (typeof explicit === 'string' && explicit.length > 0) return [explicit];
     if (Array.isArray(explicit) && explicit.length > 0) {
@@ -3024,6 +3168,11 @@ export class NoxApp {
         id: 'search.undoReplace',
         title: 'Undo Last Project Replace',
         category: 'Search',
+        // Writes across every file the replace touched, so the same pair as
+        // `search.replaceAll` and for the same reason, and no `resourceFrom`
+        // for the same reason again: naming the active file would understate
+        // the reach of the grant. Undoing a write is a write.
+        capabilities: ['fs.write', 'buffer.edit'],
         enabled: () => this.search.lastReplace.get() !== null,
         run: () => this.undoProjectReplace(),
       },
@@ -3036,7 +3185,7 @@ export class NoxApp {
 
       {
         id: 'explorer.newFile',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'New File Here…',
         category: 'Explorer',
@@ -3048,7 +3197,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.newFolder',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'New Folder Here…',
         category: 'Explorer',
@@ -3060,7 +3209,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.rename',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.write'],
         title: 'Rename…',
         category: 'Explorer',
@@ -3073,7 +3222,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.duplicate',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'Duplicate',
         category: 'Explorer',
@@ -3086,7 +3235,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.delete',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.delete'],
         title: 'Delete…',
         category: 'Explorer',
@@ -3099,7 +3248,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.openSelection',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.read'],
         title: 'Open Selected Files',
         category: 'Explorer',
@@ -3139,7 +3288,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.moveTo',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.write'],
         title: 'Move to Folder',
         category: 'Explorer',
@@ -3158,7 +3307,7 @@ export class NoxApp {
       },
       {
         id: 'explorer.revealInFileManager',
-        resourceFrom: (arg) => (typeof arg === 'string' ? arg : this.targetPath() ?? undefined),
+        resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['shell.exec'],
         title: 'Reveal in File Manager',
         category: 'Explorer',
@@ -3220,6 +3369,25 @@ export class NoxApp {
         title: 'Reload Window',
         category: 'View',
         keywords: ['refresh', 'restart', 'developer'],
+        /**
+         * `permissions.revoke`, which reads oddly for a command that reloads a
+         * window, and is the capability whose *effect* this has.
+         *
+         * `PermissionService.decisions` and `.grants` are in memory and
+         * nowhere else. A reload destroys the renderer, so dispatching this
+         * erases every standing grant and the entire audit trail that
+         * `AGENT-PLATFORM.md` presents as the record of what an agent was
+         * allowed to do. Until 2026-08-31 it declared nothing, which meant any
+         * plugin could clear that record and the clearing itself would leave
+         * no entry.
+         *
+         * Policy denies `permissions.revoke` outright rather than prompting,
+         * so this is refused for a non-user principal with no dialog, which is
+         * the right answer: "may this plugin restart your editor" is not a
+         * question worth putting on screen when the honest reason to ask is
+         * that it would wipe the log.
+         */
+        capabilities: ['permissions.revoke'],
         // Deliberately unbound. The desktop shell wires no reload of its own,
         // so without this there is no way to get a clean slate short of
         // quitting — which is what makes a stuck-looking window impossible to
@@ -3246,11 +3414,27 @@ export class NoxApp {
         keywords: ['ai', 'session', 'start', 'ask'],
         // Starting a process is the most powerful thing Nox does for someone,
         // so it is a command they run, never something that happens for them.
+        //
+        // **This is the declaration `fs.read: 'allow'` rests on.** The policy
+        // defaults reading open because "context cannot leave the process on
+        // its own, and `net.request` is the gate that matters", and three
+        // documents repeat it. Until 2026-08-31 no command declared
+        // `net.request` at all, so the sentence was an intention: a plugin or
+        // an agent could read a file with no prompt (policy `allow`) and then
+        // dispatch this command to send it to a model, also with no prompt.
+        // The gate exists now, and `net.request` is `deny` by default, so a
+        // non-user principal is refused without a dialog.
+        capabilities: ['net.request'],
+        resourceFrom: (arg) => this.#agentEndpoint(arg),
         enabled: () => this.#runnableAgents().length > 0,
         run: (arg) => this.runAgent(typeof arg === 'string' ? arg : undefined),
       },
       {
         id: 'agents.runOnSelection',
+        // Sends the selection to a model. See `agents.run` for why this is the
+        // declaration the `fs.read` default rests on.
+        capabilities: ['net.request'],
+        resourceFrom: () => this.#agentEndpoint(),
         title: 'Edit Selection with a Model…',
         category: 'Agents',
         keywords: ['ai', 'refactor', 'fix', 'rewrite', 'selection'],
@@ -3262,6 +3446,10 @@ export class NoxApp {
       },
       {
         id: 'agents.askAboutSelection',
+        // Sends the selection to a model. See `agents.run` for why this is the
+        // declaration the `fs.read` default rests on.
+        capabilities: ['net.request'],
+        resourceFrom: () => this.#agentEndpoint(),
         title: 'Ask About Selection…',
         category: 'Agents',
         keywords: ['ai', 'explain', 'what does', 'question', 'selection'],
@@ -3272,6 +3460,10 @@ export class NoxApp {
       },
       {
         id: 'agents.explainSelection',
+        // Sends the selection to a model. See `agents.run` for why this is the
+        // declaration the `fs.read` default rests on.
+        capabilities: ['net.request'],
+        resourceFrom: () => this.#agentEndpoint(),
         title: 'Explain Selection',
         category: 'Agents',
         keywords: ['ai', 'what does this do', 'describe', 'selection'],
@@ -3319,6 +3511,11 @@ export class NoxApp {
         title: 'Reload Plugins',
         category: 'Plugins',
         keywords: ['plugin', 'extension', 'restart'],
+        // `startPluginWorker` starts a process, so this is `shell.exec` even
+        // though nothing here spells a command line. What a plugin *is* was
+        // decided when the user installed it; what this decides is that a new
+        // copy of it gets to run, which is the thing the capability names.
+        capabilities: ['shell.exec'],
         run: async () => {
           // Stop first, then re-discover. `CommandRegistry.register` throws on
           // a duplicate id, so a reload that kept the old registrations would
@@ -3343,6 +3540,9 @@ export class NoxApp {
       {
         id: 'themes.reload',
         title: 'Reload Themes',
+        // No `capabilities`: re-reads Nox's own theme files and repaints.
+        // Nothing is written and no process starts, which is what separates
+        // this from `plugins.reload` and `lsp.reload` next to it.
         category: 'View',
         keywords: ['theme', 'colour', 'color', 'refresh'],
         run: async () => {
@@ -3380,6 +3580,7 @@ export class NoxApp {
       {
         id: 'snippets.reload',
         title: 'Reload Snippets',
+        // No `capabilities`: re-reads `snippets.json` and nothing else.
         category: 'Snippets',
         keywords: ['snippets.json', 'refresh'],
         run: async () => {
@@ -3407,6 +3608,11 @@ export class NoxApp {
         title: 'Reload Language Servers',
         category: 'Language',
         keywords: ['servers.json', 'lsp', 'restart'],
+        // Re-reads `servers.json` and then calls `startLanguageServer` for
+        // each entry, so the same argument as `plugins.reload`: this is what
+        // makes a process run, and the file it reads is one a repository can
+        // ship.
+        capabilities: ['shell.exec'],
         run: async () => {
           const previous = this.serverRegistry.servers.get();
           await this.serverRegistry.load();
@@ -3573,6 +3779,9 @@ export class NoxApp {
       {
         id: 'agents.reloadConfig',
         title: 'Reload Agent Configuration',
+        // No `capabilities`: re-reads `agents.json`. It changes which agents
+        // are *offered*; `agents.run` is what starts one, and that declares
+        // `net.request`.
         category: 'Agents',
         run: async () => {
           await this.agentConfig.load();
@@ -3587,6 +3796,9 @@ export class NoxApp {
       {
         id: 'agents.cancel',
         title: 'Stop the Running Agent',
+        // No `capabilities`, by `tasks.stop`'s argument: stopping is not
+        // starting, and gating it would mean a principal that may not run an
+        // agent may not stop one either.
         category: 'Agents',
         keywords: ['abort', 'kill'],
         enabled: () => this.agents.sessions.get().some((s) => s.status === 'running'),
@@ -3598,6 +3810,22 @@ export class NoxApp {
       {
         id: 'agents.undoLastSession',
         title: 'Undo the Last Agent Session',
+        /**
+         * Two, because `undoSession` does two things: it reverts the buffers
+         * the agent wrote (`buffer.edit`) and it revokes that session's
+         * standing grants (`permissions.revoke`), which is the welding the
+         * Known debt table already records.
+         *
+         * `permissions.revoke` is denied by policy, so in practice this is
+         * refused for any non-user principal, and that is the intended
+         * reading rather than a side effect of the pairing: an agent that can
+         * undo its own session can erase what it did and the record of what
+         * it was allowed to do, in one dispatch.
+         *
+         * No `resourceFrom`: this reverts whichever files that session wrote,
+         * and the active tab need not be one of them.
+         */
+        capabilities: ['buffer.edit', 'permissions.revoke'],
         category: 'View',
         keywords: ['revert', 'take back', 'ai'],
         enabled: () => this.agents.sessions.get().some((s) => this.agents.changesBy(s.id).length > 0),
@@ -3694,6 +3922,7 @@ export class NoxApp {
       {
         id: 'jobs.cancel',
         title: 'Cancel Background Task',
+        // No `capabilities`: same as `tasks.stop` and `agents.cancel`.
         category: 'View',
         keywords: ['stop', 'abort', 'search', 'replace', 'job'],
         // A job with room for exactly one offered here — same as the
@@ -4235,6 +4464,12 @@ export class NoxApp {
         category: 'Terminal',
         keyHint: 'Ctrl+`',
         keywords: ['shell', 'console', 'command line'],
+        // Opening the panel is what starts the shell: `App.svelte` mounts
+        // `TerminalPanel` the first time `terminalOpen` goes true, and the
+        // panel opens a pty. So a command whose body is one `toggle` call is
+        // nonetheless the thing that runs a login shell in the workspace
+        // directory, and `shell.exec` is denied by policy for exactly that.
+        capabilities: ['shell.exec'],
         // Hidden rather than disabled on the browser target: a command that
         // can never run is noise in the palette, not a discovery.
         enabled: () => this.terminal.available,
@@ -4245,6 +4480,10 @@ export class NoxApp {
         title: 'Focus Terminal',
         category: 'Terminal',
         keywords: ['shell', 'console'],
+        // `UIService.focusTerminal` sets `terminalOpen` before it moves focus,
+        // so this opens the panel when it was closed and starts a shell the
+        // same way `terminal.toggle` does. Named "focus" and not exempt for it.
+        capabilities: ['shell.exec'],
         enabled: () => this.terminal.available,
         run: () => this.ui.focusTerminal(),
       },
@@ -4253,12 +4492,108 @@ export class NoxApp {
         title: 'Restart Terminal',
         category: 'Terminal',
         keywords: ['shell', 'new', 'kill'],
+        // Kills the running shell and starts another. The kill half needs no
+        // capability, by `tasks.stop`'s argument; the start half is the whole
+        // of `shell.exec`.
+        capabilities: ['shell.exec'],
         enabled: () => this.terminal.available,
         run: () => {
           // The panel owns the measured size, so it does the restart; this
           // just asks. A command must not guess at geometry.
           this.ui.focusTerminal();
           this.terminal.requestRestart();
+        },
+      },
+
+      // --- Tasks -------------------------------------------------------------
+      {
+        id: 'tasks.run',
+        title: 'Run Task…',
+        category: 'Tasks',
+        keywords: ['task', 'build', 'script', 'npm', 'make', 'run'],
+        // Hidden rather than disabled where nothing can be spawned, the same
+        // way the terminal commands are: a command that can never run is
+        // noise in the palette, not a discovery.
+        enabled: () => this.tasks.available,
+        // The declaration *is* the enforcement. `shell.exec` is denied by
+        // policy for non-user principals, so an agent or a plugin asking Nox
+        // to run a task is refused without a prompt, which is the existing
+        // policy and the right one for "start a program".
+        capabilities: ['shell.exec'],
+        // The task's own id, so a remembered grant could ever be about one
+        // task rather than about running anything. Nothing grants `shell.exec`
+        // today; this is what a resource-scoped grant would key on if one did.
+        resourceFrom: (arg) => (typeof arg === 'string' ? arg : undefined),
+        run: (arg) => {
+          // No argument means "ask me which", which is the palette's job.
+          if (typeof arg !== 'string') {
+            this.ui.overlay.set('task-run');
+            return;
+          }
+          void this.tasks.run(arg);
+        },
+      },
+      {
+        id: 'tasks.runLast',
+        title: 'Run Last Task',
+        category: 'Tasks',
+        keyHint: 'Mod+Shift+B',
+        keywords: ['task', 'again', 'repeat', 'build'],
+        enabled: () => this.tasks.available && this.tasks.lastTaskId.get() !== null,
+        capabilities: ['shell.exec'],
+        resourceFrom: () => this.tasks.lastTaskId.get() ?? undefined,
+        run: () => {
+          const id = this.tasks.lastTaskId.get();
+          if (id) void this.tasks.run(id);
+        },
+      },
+      {
+        id: 'tasks.stop',
+        title: 'Stop Task',
+        category: 'Tasks',
+        keywords: ['task', 'cancel', 'kill', 'abort'],
+        enabled: () => this.tasks.running.get().size > 0,
+        // Stopping is not starting: it needs no capability, and gating it on
+        // one would mean a principal that may not run a task may not stop one
+        // either.
+        run: () => this.tasks.stop(),
+      },
+      {
+        id: 'tasks.show',
+        title: 'Show Tasks',
+        category: 'Tasks',
+        keywords: ['task', 'output', 'panel', 'build'],
+        run: () => this.ui.showTasks(),
+      },
+      {
+        id: 'tasks.edit',
+        title: 'Edit Tasks',
+        category: 'Tasks',
+        keywords: ['task', 'configure', 'tasks.json', 'settings'],
+        // Writes the *user's* file, never the project's. Nox offering to
+        // author a file that arrives with a repository would be Nox helping
+        // to create the thing the confirmation exists to catch. See
+        // `docs/superpowers/specs/2026-08-30-tasks-design.md` §8.
+        capabilities: ['fs.create'],
+        run: () => this.openTasksConfig(),
+      },
+      {
+        id: 'tasks.forgetTrust',
+        title: 'Forget Approved Tasks',
+        category: 'Tasks',
+        keywords: ['task', 'trust', 'revoke', 'forget', 'permission'],
+        // This edits a record of what the user agreed to, which is the whole
+        // argument `permissions.ts` gives for `permissions.revoke` existing.
+        // It was undeclared until a review on 2026-08-30 pointed out that the
+        // same commit had just put a button on it. Denied by policy for a
+        // non-user principal rather than prompted, for the reason revocation
+        // is: asking an agent's user whether the agent may edit the record of
+        // what they agreed to is not a question worth putting on screen.
+        capabilities: ['permissions.revoke'],
+        enabled: () => this.tasks.trusted.get().size > 0,
+        run: () => {
+          this.tasks.forgetTrust();
+          this.notifications.info('Approved tasks forgotten', 'Project tasks will ask again.');
         },
       },
 
@@ -4333,8 +4668,14 @@ export class NoxApp {
         title: 'New Note from Selection',
         category: 'Notes',
         keywords: ['note', 'selection', 'quote', 'anchor', 'annotate'],
-        // No `capabilities`: reads the active buffer and writes a note.
-        // Neither touches the workspace filesystem.
+        // Writes a note, which is a file, so `fs.create` like `notes.new`.
+        // The comment here used to argue the opposite, that a note is not the
+        // workspace filesystem and so needs nothing. That is true of *where*
+        // the file lands and beside the point: `agents.configure` declares
+        // `fs.create` for a file in the same directory, and a rule that
+        // exempts writes by their destination is a rule with a directory-
+        // shaped hole in it.
+        capabilities: ['fs.create'],
         enabled: () => this.#selectionSeed() !== null,
         run: () => this.#newNoteFromSelection(),
       },
@@ -4376,6 +4717,10 @@ export class NoxApp {
         title: 'New Note',
         category: 'Notes',
         keywords: ['note', 'create', 'add'],
+        // Notes are files in the config directory, and a file Nox owns is
+        // still a file. The four writing note commands declare accordingly;
+        // `notes.open` and `notes.focus` move a selection and do not.
+        capabilities: ['fs.create'],
         run: () => {
           this.notes.create();
           this.revealNotes();
@@ -4385,6 +4730,7 @@ export class NoxApp {
         id: 'notes.rename',
         title: 'Rename Note',
         category: 'Notes',
+        capabilities: ['fs.write'],
         enabled: () => this.notes.selectedId.get() !== null,
         run: () => void this.#renameSelectedNote(),
       },
@@ -4393,6 +4739,7 @@ export class NoxApp {
         title: 'Delete Note',
         category: 'Notes',
         keywords: ['remove', 'trash'],
+        capabilities: ['fs.delete'],
         enabled: () => this.notes.selectedId.get() !== null,
         run: () => void this.#deleteSelectedNote(),
       },
@@ -4441,6 +4788,10 @@ export class NoxApp {
       {
         id: 'prefs.reset',
         title: 'Reset All Settings',
+        // Rewrites `settings.json` wholesale. The confirmation dialog is not
+        // the gate: it never says who asked, so a plugin dispatching this
+        // shows the user a question that looks like their own click.
+        capabilities: ['fs.write'],
         category: 'Preferences',
         run: async () => {
           const choice = await this.ui.askToConfirm({
@@ -4485,6 +4836,12 @@ export class NoxApp {
       // --- Application ------------------------------------------------------
       {
         id: 'app.checkForUpdates',
+        // A real outbound request, to a fixed endpoint with no caller-supplied
+        // payload, so this is the mildest of the five. Declared anyway: the
+        // claim being made elsewhere is that nothing programmatic reaches the
+        // network without this capability, and an exception nobody can see is
+        // how that claim stops being true again.
+        capabilities: ['net.request'],
         title: 'Check for Updates…',
         category: 'Application',
         keywords: ['update', 'upgrade', 'version', 'release', 'new'],
@@ -4630,6 +4987,11 @@ export class NoxApp {
       // Terminal. `Ctrl+\`` rather than a Mod chord on purpose: it is the
       // convention on every platform, and ⌘` is already macOS's cycle-windows.
       'Ctrl+`': 'terminal.toggle',
+
+      // Tasks. The last task rather than a picker, because the chord is for
+      // the thing you are doing over and over; choosing is `Run Task…` in the
+      // palette, which is a decision and not a reflex.
+      'Mod+Shift+B': 'tasks.runLast',
 
       // Preferences
       'Mod+,': 'prefs.open',

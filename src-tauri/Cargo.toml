@@ -1,6 +1,6 @@
 [package]
 name = "nox"
-version = "0.11.0"
+version = "0.12.0"
 description = "Nox — a fast, dark, keyboard-first text editor"
 edition = "2021"
 # The lowest rustc the resolved graph compiles with, not the lowest Tauri
