@@ -253,7 +253,7 @@
     <div class="window-controls">
       <button
         class="window-control"
-        onclick={() => void app.platform.minimizeWindow()}
+        onclick={() => void commands.execute('window.minimize')}
         title="Minimise"
         aria-label="Minimise"
       >
@@ -261,7 +261,7 @@
       </button>
       <button
         class="window-control"
-        onclick={() => void app.platform.toggleMaximizeWindow()}
+        onclick={() => void commands.execute('window.toggleMaximize')}
         title={maximized ? 'Restore' : 'Maximise'}
         aria-label={maximized ? 'Restore' : 'Maximise'}
       >
@@ -269,7 +269,7 @@
       </button>
       <button
         class="window-control danger"
-        onclick={() => void app.platform.closeWindow()}
+        onclick={() => void commands.execute('window.close')}
         title="Close"
         aria-label="Close window"
       >

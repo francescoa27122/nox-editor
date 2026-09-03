@@ -4529,6 +4529,44 @@ export class NoxApp {
           await this.copyToClipboard(this.diagnostics.report(this.#environment()), 'diagnostics');
         },
       },
+      // --- Window -----------------------------------------------------------
+      // The three window controls. They exist as commands so the title bar's
+      // buttons go through the same door as every other button and a
+      // `keybindings.json` rule or a plugin can reach them; until 2026-09-02
+      // the bar called the platform directly and these were the only user
+      // actions with no command. Hidden from the palette because the OS and
+      // the title bar already own this chrome, and in the browser build the
+      // platform methods are inert. `category: 'Window'` is deliberately not
+      // in the menu layout: that menu carries the OS's own minimise and
+      // maximise items, and a close entry would claim the accelerator
+      // `file.close` already has (see Known debt).
+      {
+        id: 'window.minimize',
+        title: 'Minimise Window',
+        category: 'Window',
+        keywords: ['minimize', 'minimise', 'window'],
+        hidden: true,
+        run: () => this.platform.minimizeWindow(),
+      },
+      {
+        id: 'window.toggleMaximize',
+        title: 'Maximise or Restore Window',
+        category: 'Window',
+        keywords: ['maximize', 'maximise', 'restore', 'window'],
+        hidden: true,
+        run: async () => {
+          await this.platform.toggleMaximizeWindow();
+        },
+      },
+      {
+        id: 'window.close',
+        title: 'Close Window',
+        category: 'Window',
+        keywords: ['close', 'window', 'quit'],
+        hidden: true,
+        run: () => this.platform.closeWindow(),
+      },
+
     ];
 
     this.commands.registerAll(commands);
