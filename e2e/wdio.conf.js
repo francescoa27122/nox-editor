@@ -11,8 +11,8 @@
  * direction. This can, and it can do it unattended on every pull request.
  *
  * **Plain JavaScript, deliberately**, in a repository that is TypeScript
- * everywhere else. `cargo` is not installed on the development machine, so
- * nothing here can be run locally — every iteration costs a CI round trip.
+ * everywhere else. `cargo` was not installed on the development machine when
+ * this was written, so every iteration cost a CI round trip.
  * A TypeScript loader is one more thing that can fail in that loop for a
  * reason unrelated to what is being tested, bought for type coverage of a
  * hundred lines of test glue. Worth revisiting once the harness has earned

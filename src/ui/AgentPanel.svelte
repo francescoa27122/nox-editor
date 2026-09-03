@@ -1,7 +1,12 @@
 <script lang="ts">
   import { contains, relative } from '@core/path';
   import { runnableAgents } from '@services/agent/config';
-  import type { AgentAction, AgentSessionSnapshot, SessionStatus } from '@services/agent/runtime';
+  import {
+    stillOnDisk,
+    type AgentAction,
+    type AgentSessionSnapshot,
+    type SessionStatus,
+  } from '@services/agent/runtime';
   import { describeCapability, isResourceScoped, type Grant } from '@services/permissions';
   import { useApp } from './context';
   import Icon, { type IconName } from './Icon.svelte';
@@ -101,6 +106,7 @@
     proposal: 'file',
     summary: 'check',
     error: 'warning',
+    elided: 'info',
   };
 
   function describe(action: AgentAction): string {
@@ -120,6 +126,8 @@
         return `${action.description} · ${action.hunks} in ${action.files}`;
       case 'error':
         return action.message;
+      case 'elided':
+        return `${action.count} earlier ${action.count === 1 ? 'action' : 'actions'} dropped`;
     }
   }
 
@@ -136,7 +144,11 @@
         : ` Its ${revoked === 1 ? 'standing permission was' : `${revoked} standing permissions were`}` +
           ' revoked too, so it will be asked again next time.';
 
-    const { undone, skipped } = agents.undoSession(session.id);
+    const { undone, skipped, onDisk } = agents.undoSession(session.id);
+    // Reverted in the buffer, still on disk: said in the toast, because the
+    // dirty marker on the tab is not a message anyone reads as "you shipped
+    // it". The tone follows: this is a warning, not a success.
+    const unsaved = stillOnDisk(onDisk.length);
 
     if (undone.length === 0 && skipped.length === 0) {
       notifications.info(
@@ -158,16 +170,20 @@
     if (skipped.length > 0) {
       notifications.warn(
         `Took back ${undone.length} of ${undone.length + skipped.length} files`,
-        'The rest have been edited since, so their changes were left alone.' + alsoRevoked,
+        'The rest have been edited since, so their changes were left alone.' +
+          (unsaved ? ` ${unsaved}` : '') +
+          alsoRevoked,
       );
       return;
     }
-    notifications.success(
-      `Took back everything ${session.label} did across ${undone.length} ${
-        undone.length === 1 ? 'file' : 'files'
-      }`,
-      alsoRevoked.trim() || undefined,
-    );
+    const everything = `Took back everything ${session.label} did across ${undone.length} ${
+      undone.length === 1 ? 'file' : 'files'
+    }`;
+    if (unsaved) {
+      notifications.warn(`${everything} in the editor`, unsaved + alsoRevoked);
+      return;
+    }
+    notifications.success(everything, alsoRevoked.trim() || undefined);
   }
 </script>
 
@@ -273,6 +289,13 @@
           {#if session.changes > 0}
             <button class="linkish" onclick={() => undo(session)}>Undo session</button>
           {/if}
+          <button
+            class="linkish"
+            onclick={() => void commands.execute('agents.copyTrail', session.id)}
+            title="Copy this session's trail, reads and permission decisions as JSON"
+          >
+            Copy trail
+          </button>
         </div>
 
         {#if expanded === session.id}
@@ -375,7 +398,8 @@
 
   .empty code {
     font-family: var(--nox-font-mono);
-    font-size: 0.92em;
+    /* One step under the prose around it, which is `--nox-fs-sm`. */
+    font-size: var(--nox-fs-xs);
     color: var(--nox-text-bright);
   }
 
@@ -501,7 +525,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--nox-font-mono);
-    font-size: 0.92em;
+    /* One step under the list around it, which is `--nox-fs-xs`. */
+    font-size: var(--nox-fs-2xs);
     color: var(--nox-text-muted);
   }
 

@@ -236,7 +236,8 @@
     border-radius: var(--nox-r-full);
     background: var(--nox-danger);
     color: var(--nox-bg-base);
-    font-size: 9px;
+    /* The smallest step on the scale, up from a 9px that was under it. */
+    font-size: var(--nox-fs-2xs);
     font-weight: var(--nox-fw-semibold);
     line-height: 13px;
     text-align: center;

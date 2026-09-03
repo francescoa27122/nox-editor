@@ -265,6 +265,8 @@ export class MemoryPlatform implements Platform {
   installedUpdate: string | null = null;
   /** Whether `relaunch` was called, for tests. */
   relaunched = false;
+  /** Whether `reloadWindow` was called, for tests. */
+  reloaded = false;
 
   seedUpdate(info: UpdateInfo): void {
     this.#update = info;
@@ -456,6 +458,10 @@ export class MemoryPlatform implements Platform {
 
   async relaunch(): Promise<void> {
     this.relaunched = true;
+  }
+
+  async reloadWindow(): Promise<void> {
+    this.reloaded = true;
   }
 
   async gitStatus(root: string): Promise<string> {

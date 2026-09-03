@@ -85,8 +85,16 @@ interface AgentsFile {
   agents?: unknown;
 }
 
-/** What a fresh `agents.json` says, so the format is self-explaining. */
+/**
+ * What a fresh `agents.json` says, so the format is self-explaining.
+ *
+ * The `note` is the trust warning. JSON has no comments, so it is a key the
+ * loader ignores (`load` reads only `agents`), placed first because the file
+ * is opened for the user to edit and this is the sentence to read before
+ * filling in a `command`.
+ */
 export const AGENTS_TEMPLATE = `{
+  "note": "A process agent is a program running as you, with your privileges and network. Nox sees and logs only what it asks Nox for; its own reads, writes and connections are invisible to Nox. Configure only programs you would run from a shell.",
   "agents": [
     {
       "id": "local",

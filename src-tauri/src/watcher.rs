@@ -110,7 +110,7 @@ fn classify(kind: &EventKind) -> Option<&'static str> {
 }
 
 /// Begin watching `path` recursively, replacing any previous watcher.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_watch(app: AppHandle, state: State<'_, WatcherState>, path: String) -> Result<(), String> {
     let mut guard = state
         .0
@@ -151,6 +151,12 @@ pub fn nox_watch(app: AppHandle, state: State<'_, WatcherState>, path: String) -
 }
 
 /// Stop watching. Safe to call when nothing is being watched.
+///
+/// Deliberately not `(async)`, unlike `nox_watch`. The renderer fires this
+/// without awaiting it and issues the next `nox_watch` straight after
+/// (`platform/tauri.ts`'s disposer), and a sync body runs inline before the
+/// next IPC message is read, so the order holds. Two pool tasks would race,
+/// and the losing order drops the new watcher a moment after it was made.
 #[tauri::command]
 pub fn nox_unwatch(state: State<'_, WatcherState>) -> Result<(), String> {
     let mut guard = state
