@@ -387,4 +387,47 @@ describe.each(themes)('%s', (_theme, tokens) => {
 
     expect(at('--nox-selected')).toBeLessThan(at('--nox-selected-strong'));
   });
+
+  /**
+   * Text painted *on* a wash, which everything above stops short of.
+   *
+   * The flat-surface sweep measures each foreground on six opaque grounds,
+   * and the wash tests ask only whether the wash itself is visible. Neither
+   * asks what happens to a token once a selection sits under it, and that is
+   * a different ground: `--nox-selected` over `--nox-bg-raised` composites to
+   * #313157, on which `--nox-text-muted` measures 3.34:1. That was the quick
+   * open selected row's path and chord, the one row a keyboard user is
+   * looking at. `--nox-text-faint` on the same wash over `--nox-bg-panel`
+   * measured 2.52:1, under the 3:1 the token is licensed for, and that was
+   * the explorer's twisty on a selected row.
+   *
+   * The foreground is read from the component rule rather than restated, so
+   * the day `.row.selected .hint` goes back to muted the table does not keep
+   * asserting a pairing that no longer ships. What this does not catch: a
+   * rule that is missing and lets the flat colour cascade through, which is
+   * how `.detail` and `.twisty` were wrong in the first place. `ruleBody`
+   * throws on a missing rule, so a row here is also a claim the rule exists.
+   */
+  const WASHED_TEXT: { file: string; selector: string; wash: string; surface: string; bar: number }[] = [
+    { file: 'CommandPalette.svelte', selector: '.row.selected .hint', wash: '--nox-selected', surface: '--nox-bg-raised', bar: 4.5 },
+    { file: 'CommandPalette.svelte', selector: '.row.selected .detail', wash: '--nox-selected', surface: '--nox-bg-raised', bar: 4.5 },
+    // Glyphs, not words, so 1.4.11's 3:1 is the bar.
+    { file: 'ExplorerPanel.svelte', selector: '.row.selected .icon', wash: '--nox-selected', surface: '--nox-bg-panel', bar: 3 },
+    { file: 'ExplorerPanel.svelte', selector: '.row.selected .twisty', wash: '--nox-selected', surface: '--nox-bg-panel', bar: 3 },
+  ];
+
+  it.each(WASHED_TEXT)('$file $selector is legible on its wash', ({ file, selector, wash, surface, bar }) => {
+    const source = readFileSync(new URL(`../src/ui/${file}`, import.meta.url), 'utf8');
+    const style = /<style[^>]*>([\s\S]*?)<\/style>/.exec(source)?.[1] ?? '';
+    const colour = /var\(\s*(--[\w-]+)\s*\)/.exec(
+      declarations(ruleBody(uncommented(style), selector)).get('color') ?? '',
+    )?.[1];
+    expect(colour, `${selector} must take its colour from a token`).toBeDefined();
+
+    const ground = composite(resolve(tokens, wash), resolve(tokens, surface));
+    const ratio = contrast(resolve(tokens, colour!), ground);
+    expect(`${colour} on ${wash} over ${surface}: ${ratio.toFixed(2)}`).toBe(
+      `${colour} on ${wash} over ${surface}: ${Math.max(ratio, bar).toFixed(2)}`,
+    );
+  });
 });

@@ -1074,8 +1074,13 @@
     color: var(--nox-text-faint);
   }
 
+  /* The twisty joins the icon on a selected row because the wash changes the
+     ground: faint measures 2.52:1 on it, under the 3:1 a glyph is held to,
+     while accent-dim measures 3.53:1 and is what the icon beside it already
+     wears. Held by tests/token-contrast.test.ts. */
   .row.open .icon,
-  .row.selected .icon {
+  .row.selected .icon,
+  .row.selected .twisty {
     color: var(--nox-accent-dim);
   }
 

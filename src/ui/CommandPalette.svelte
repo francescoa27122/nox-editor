@@ -1196,8 +1196,13 @@
     margin-left: auto;
   }
 
-  .row.selected .hint {
-    color: var(--nox-text-muted);
+  /* The selection wash changes the ground under the row, and muted text on
+     it measures 3.34:1 over the palette's surface. This is the one row the
+     keyboard user is reading, so its path and chord step up to body text:
+     8.08:1, held by tests/token-contrast.test.ts. */
+  .row.selected .hint,
+  .row.selected .detail {
+    color: var(--nox-text);
   }
 
   /* The query, quoted back, is the line that gets read first. */
