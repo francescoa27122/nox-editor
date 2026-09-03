@@ -110,3 +110,79 @@ describe('diffText', () => {
     expect(shape(hunks)).toEqual(['12345 -1 +1']);
   });
 });
+
+/**
+ * A4-003: `myers` used to keep every round's frontier with no limit on how
+ * many rounds it would run, so a whole-file rewrite (D close to N+M) cost
+ * O((N+M)·D) time and O(D·(N+M)) memory — 8,000 lines all different measured
+ * at 1.6 s and 2 GB on this machine before this fix. `MAX_D` (`core/diff.ts`)
+ * now stops the search and falls back to one replacement hunk past that
+ * point, the same shape the empty-side shortcut already returns.
+ */
+describe('diffText past MAX_D, A4-003', () => {
+  /** `lines` lines, none shared between `before` and `after`. */
+  function allDifferent(lines: number): [string, string] {
+    const before: string[] = [];
+    const after: string[] = [];
+    for (let i = 0; i < lines; i++) {
+      before.push(`before line ${i}\n`);
+      after.push(`after line ${i}\n`);
+    }
+    return [before.join(''), after.join('')];
+  }
+
+  it('completes the 8,000-all-different case in well under 200 ms and a bounded amount of memory', () => {
+    const [before, after] = allDifferent(8_000);
+
+    const started = performance.now();
+    const hunks = diffText(before, after);
+    const elapsed = performance.now() - started;
+    const heapAfter = process.memoryUsage().arrayBuffers;
+
+    expect(elapsed, `took ${elapsed.toFixed(1)}ms`).toBeLessThan(200);
+    // Loose on purpose, the way the other memory-shaped checks in this repo
+    // are: the point is "bounded", not a specific byte count, and `v.slice()`
+    // per round means this scales with MAX_D regardless of how the runtime's
+    // allocator happens to lay things out. The unbounded version measured
+    // ~2 GB here; 500 MB is generous headroom above the ~190 MB this fix
+    // actually uses and still catches a cap that stopped capping.
+    expect(heapAfter, `${(heapAfter / 1024 / 1024).toFixed(1)}MB in ArrayBuffers`).toBeLessThan(
+      500 * 1024 * 1024,
+    );
+    // One replacement hunk, the same answer the empty-side shortcut gives:
+    // past MAX_D nothing in the file is worth expressing as fine-grained
+    // hunks.
+    expect(shape(hunks)).toEqual(['0 -8000 +8000']);
+  });
+
+  /**
+   * The output contract must not change for inputs under the cap — the
+   * finding's own requirement. 500 changed lines keeps D well inside
+   * `MAX_D` (1,000), so this is `myers` actually running, not the fallback
+   * above, and it must still find the fine-grained hunks rather than one
+   * wholesale replacement.
+   */
+  it('still finds fine-grained hunks for an edit distance under the cap', () => {
+    const lines = Array.from({ length: 1_000 }, (_, i) => `line ${i}\n`);
+    const before = lines.join('');
+    const after = lines
+      .map((line, i) => (i % 2 === 0 ? line : line.toUpperCase()))
+      .join('');
+
+    const hunks = diffText(before, after);
+    // Every odd line changed, every even line did not: 500 separate
+    // one-line hunks, not one hunk covering the whole file. A rewrite that
+    // wrongly triggered the MAX_D fallback here would collapse this to one
+    // ['0 -1000 +1000'] entry instead.
+    expect(hunks).toHaveLength(500);
+    expect(hunks.every((h) => h.removed.length === 1 && h.added.length === 1)).toBe(true);
+
+    // Byte-identical to what applying the hunks produced before this fix:
+    // rebuilding `after` from `before` plus the hunks still round-trips.
+    const rebuilt = [...before.split(/(?<=\n)/)];
+    for (const hunk of [...hunks].reverse()) {
+      rebuilt.splice(hunk.fromLine, hunk.removed.length, ...hunk.added);
+    }
+    expect(rebuilt.join('')).toBe(after);
+  });
+});

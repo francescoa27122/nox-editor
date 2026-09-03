@@ -77,6 +77,45 @@ describe('the pure layers still scale', () => {
   });
 
   /**
+   * A4-003: `diffLines` used to keep every Myers frontier, so a rewrite where
+   * D sits close to N+M cost O((N+M)·D) time and O(D·(N+M)) memory instead of
+   * scaling with the input — 8,000 lines all different measured at 1.6 s and
+   * 2 GB (`tests/diff.test.ts` pins the wall-clock side of that directly).
+   * `MAX_D` bounds the search, so past it the cost is O(MAX_D·(N+M)): linear
+   * in the input at a fixed constant, which is what this checks the same way
+   * the guard above checks a small edit, over an input that keeps D pinned at
+   * its maximum — every line different — at both sizes, so both runs are
+   * already past the cap and the whole difference is the O(N+M) part.
+   *
+   * Measured over 3 local runs at 8x the input: **3.5x-4.6x**, comfortably
+   * under even the 8x a linear cost would produce, let alone the budget.
+   * Verified: reverting `MAX_D` to `Number.POSITIVE_INFINITY` (the old,
+   * unbounded search) reports **67.3x** and fails this, almost exactly the
+   * ~64x a quadratic implementation predicts; that run took 21.6 s against
+   * this test's 0.7 s with the cap in place.
+   */
+  it('diffs a whole-file rewrite in proportion to the file, once D is capped', () => {
+    const allDifferent = (lines: number): [string, string] => {
+      const before: string[] = [];
+      const after: string[] = [];
+      for (let i = 0; i < lines; i++) {
+        before.push(`before line ${i}\n`);
+        after.push(`after line ${i}\n`);
+      }
+      return [before.join(''), after.join('')];
+    };
+
+    const g = growth(
+      (lines) => allDifferent(lines),
+      ([before, after]) => void diffText(before, after),
+      1_000,
+      8_000,
+    );
+
+    expect(g.ratio, describeGrowth('diffText (rewrite)', g, 24)).toBeLessThan(24);
+  });
+
+  /**
    * Blame output is the largest single string that crosses the IPC boundary
    * in this codebase (every line of a file, plus a header line each, plus a
    * metadata block per commit) and it is parsed in one pass in the
