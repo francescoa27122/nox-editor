@@ -8,6 +8,70 @@ are knowledge.**
 
 ---
 
+## 2026-09-02 - Full-project audit, rated, and 69 findings fixed across seven PRs
+
+Asked for a defensible 1-to-100 rating of Nox backed by a full audit, then
+remediation. Eight parallel read-only audit lanes, five adversarial verifiers
+over every P0 and P1, seven fix branches, seven per-branch verification passes
+and one merged regression pass.
+
+**The number: 59/100 before, 78/100 after.** Categories summed to 64 before; one
+P0 capped the total at 59. No P0 remains, so 5 of the 19 point move is the cap
+lifting rather than new quality. Full rubric and justification in
+`AUDIT/RATING.md` and `AUDIT/RATING-AFTER.md`.
+
+**The P0.** A keystroke typed while a save's write was in flight was reverted
+from the buffer, never written, and the tab marked clean. Not recoverable by
+undo: with the production history extension the keystroke and the whole-document
+replacement join one history event. Reproduced three times independently. A few
+percent per manual save on a fast disk, the normal path under after-delay
+autosave. Fixed in #188.
+
+**Shipped:** 69 findings fixed, every one with a test run failing before and
+passing after. #182 security (6), #183 ship readiness (11), #184 systems (8),
+#185 UI (9), #186 agent (6), #187 features (9), #188 performance (20). All seven
+green on all 11 required checks. 11 Gated findings untouched, written up for a
+decision in `AUDIT/GATED-DECISIONS.md`. 5 Safe findings deliberately left, the
+largest being A2-007, splitting `app.ts`, which is a refactor.
+
+**Verified:** every P0 and P1 fix mutation-checked. Contrast numbers, licence
+rows, action SHAs and the Rust floor all recomputed independently rather than
+taken from reports; one overstated count was caught. Merged regression pass:
+2,770 tests, `test:editor` 12/12, clippy clean, cargo 159/159, and eight core
+flows walked in a real browser with one pre-existing HMR message as the only
+console output.
+
+**Three defects found while fixing, not by the audit:** raising the macOS floor
+to 13.0 exposed two scrims using unprefixed `backdrop-filter`, which Safari
+shipped in 18, so blur failed silently on 13 through 17 (A8-013, fixed).
+`tasks.runLast` shipped in #178 with no test naming it (test added). And a
+features test that edited the active buffer around the live view threw only once
+the performance branch's save formatting routed through that view, which no
+single branch's CI could see.
+
+**The mistake worth keeping.** I audited `54cece6` believing it was the head of
+`main`. It was five PRs behind. Everything was re-derived against `origin/main`
+afterwards and the finding list survived almost intact (0 fixed upstream, 5
+changed, 71 still present), but I had already told Francesco that A7-001 was
+fixed upstream, reading that from a new test file rather than the dispatcher.
+The dispatcher is byte-identical. **Fetch before believing a local ref, and read
+the code a commit changed, not the tests it added.**
+
+**Next: A7-001 is the highest-value open decision.** Upstream closed the twelve
+exploitable instances and pinned the set with a test; the dispatcher rule that
+closes the class is Gated and recommended in `AUDIT/GATED-DECISIONS.md`.
+
+**Blocked:** 11 Gated findings, chiefly A7-001 (the dispatcher rule), A8-001
+(deleting the stray `v0.12.0` tag from the public remote) and A1-001's Gated
+half (file associations and single instance).
+
+**Confidence:** high on the fixes, all mutation-checked and CI-green. Medium on
+the number itself, which is a judgement against a rubric; a reader weighting the
+unsigned builds or the agent boundary harder could argue 74. Low on anything
+about the packaged desktop app, which was never built or walked in this session.
+
+---
+
 ## 2026-08-29 (cloud) - 0.12.0 prepared, and handed over
 
 Blame and the docs pass merged as #174 after CI caught a clippy failure the
