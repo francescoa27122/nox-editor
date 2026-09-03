@@ -32,13 +32,17 @@ import { describe, expect, it } from 'vitest';
 
 /** Every deliberate `cursor: default`, and what makes it not a button. */
 const CURSOR_DEFAULT_USES: Record<string, string> = {
-  // Rows you select rather than press. All six are `<div>`s carrying a
-  // `role`, and all six are the same decision.
+  // Rows you select rather than press. Six are `<div>`s carrying a `role`,
+  // and all of them are the same decision. `TasksPanel` is the exception that
+  // proves the rule rather than one against it: it is a real `<button>`, so
+  // the base rule would have given it a pointer, and it opts out because
+  // clicking it selects a task rather than running one.
   'CommandPalette.svelte .row': 'palette result row',
   'ExplorerPanel.svelte .row': 'file tree row, and a drag source',
   'ProblemsPanel.svelte .row': 'diagnostic row',
   'ReferencesPanel.svelte .row': 'reference row',
   'SearchPanel.svelte .row': 'search result row',
+  'TasksPanel.svelte .row': 'task row: selects, and runs only on double click',
   'TabBar.svelte .tab': 'tab, and a drag source',
 
   // A native control that opens its own popup; the arrow is what every OS

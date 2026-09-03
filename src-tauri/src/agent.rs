@@ -305,12 +305,48 @@ pub fn nox_agent_kill_all(state: State<'_, AgentState>) -> Result<()> {
 /// Bytes still sitting in the decoder when the stream ends — a character
 /// truncated by the agent dying mid-write — are dropped rather than
 /// substituted, which is what happened before too.
+///
+/// **A line is bounded, and the search does not restart.** Both were found by
+/// review on 2026-08-30 and both are about the same case: a child that writes
+/// a great deal and never a newline.
+///
+/// `partial` had no cap, so such a child grew this `String` until the process
+/// died, taking every unsaved buffer with it. And `find('\n')` scanned from
+/// the front on every 8 KiB chunk, so the work was quadratic in what had
+/// arrived: about `n²/8192` byte comparisons, which is roughly 10¹⁴ for a
+/// gigabyte, i.e. a hang well before the memory ran out.
+///
+/// It is not a theoretical shape. `read_lines` is the reader behind agent
+/// stdout, agent stderr and language-server stderr, and since 2026-08-30 also
+/// behind **tasks**, which means a `.nox/tasks.json` the user approved once
+/// can point at a build script whose output is `cat` of something large.
+/// `MAX_OUTPUT_LINES` in the renderer cannot help, because the line never
+/// arrives to be counted.
 #[derive(Default)]
 struct LineStream {
     decoder: Utf8Stream,
     /// The tail of a line whose newline has not arrived yet.
     partial: String,
+    /// How much of `partial` has already been searched for a newline.
+    ///
+    /// Only ever set to `partial.len()` after a fruitless scan, and reset to 0
+    /// whenever a line is drained, so it is always on a character boundary.
+    scanned: usize,
 }
+
+/// The most one line may hold before it is delivered unfinished.
+///
+/// A cut line reaches the consumer as a line, which for the agent protocol
+/// means a JSON parse failure it already handles, and for stderr means a long
+/// diagnostic in two pieces. Both are better than the alternative, which is
+/// the backend dying with the user's unsaved work inside it.
+///
+/// A megabyte because the largest legitimate line here is an agent's protocol
+/// message carrying an edit, and those are measured in kilobytes. Note the
+/// composed bound downstream: `TaskService` keeps 5,000 lines, so a
+/// pathological child can still cost the renderer 5,000 times this. Bounded is
+/// the point rather than small.
+const MAX_LINE_BYTES: usize = 1024 * 1024;
 
 impl LineStream {
     /// Every complete line in this chunk. A trailing partial line is held
@@ -320,14 +356,30 @@ impl LineStream {
         self.partial.push_str(&self.decoder.push(bytes));
 
         let mut lines = Vec::new();
-        // `find` returns the byte index of a one-byte character, so the
-        // inclusive drain always lands on a character boundary.
-        while let Some(end) = self.partial.find('\n') {
+        // Resumed from `scanned` rather than restarted, so a chunk that adds
+        // no newline costs its own length and not the length of everything
+        // buffered so far.
+        while let Some(offset) = self.partial[self.scanned..].find('\n') {
+            let end = self.scanned + offset;
+            // `find` returns the byte index of a one-byte character, so the
+            // inclusive drain always lands on a character boundary.
             let mut line: String = self.partial.drain(..=end).collect();
             line.pop();
             trim_carriage_return(&mut line);
             lines.push(line);
+            self.scanned = 0;
         }
+        self.scanned = self.partial.len();
+
+        // Nothing in this stream is going to end that line. Deliver it as one
+        // and start again, rather than holding it until the process runs the
+        // machine out of memory. No carriage return is trimmed: this is a cut
+        // mid-line, not a line ending, and a `\r` here is content.
+        if self.partial.len() >= MAX_LINE_BYTES {
+            lines.push(std::mem::take(&mut self.partial));
+            self.scanned = 0;
+        }
+
         lines
     }
 
@@ -335,6 +387,7 @@ impl LineStream {
     /// is killed mid-message, still gets that message delivered — as it did
     /// under `BufRead::lines()`.
     fn finish(&mut self) -> Option<String> {
+        self.scanned = 0;
         let mut line = std::mem::take(&mut self.partial);
         trim_carriage_return(&mut line);
         if line.is_empty() {
@@ -548,6 +601,86 @@ mod tests {
         assert_eq!(stream.push(b"{\"type\":"), Vec::<String>::new());
         assert_eq!(stream.push(b"\"done\"}"), Vec::<String>::new());
         assert_eq!(stream.push(b"\n"), vec!["{\"type\":\"done\"}".to_string()]);
+    }
+
+    /// **A child that never writes a newline must not take the process with
+    /// it.**
+    ///
+    /// `partial` was uncapped, so this loop grew a `String` until the backend
+    /// died and every unsaved buffer went with it. Reachable from an approved
+    /// task whose build script `cat`s something large, which is why the tasks
+    /// feature made this worth fixing rather than worth recording.
+    ///
+    /// Asserted as a bound on what is *held*, not on what is emitted: the cut
+    /// line is delivered, so the consumer sees the bytes and the reader keeps
+    /// its memory flat. Without the cap the final assertion is 4 MiB and
+    /// climbing.
+    #[test]
+    fn bounds_a_line_that_never_ends() {
+        let mut stream = LineStream::default();
+        let chunk = vec![b'x'; 8192];
+
+        let mut delivered = 0usize;
+        for _ in 0..512 {
+            for line in stream.push(&chunk) {
+                delivered += line.len();
+            }
+            assert!(
+                stream.partial.len() <= MAX_LINE_BYTES,
+                "held {} bytes, which is more than one line's worth",
+                stream.partial.len()
+            );
+        }
+
+        // 512 chunks of 8 KiB is 4 MiB in, so four full lines came out and the
+        // remainder is still held. Nothing is lost, it is only cut.
+        assert_eq!(delivered + stream.partial.len(), 512 * 8192);
+        assert_eq!(delivered, 4 * MAX_LINE_BYTES);
+    }
+
+    /// The cut is a delivery, not a discard, and the stream carries on
+    /// splitting normally afterwards.
+    #[test]
+    fn keeps_splitting_after_a_line_was_cut() {
+        let mut stream = LineStream::default();
+        stream.push(&vec![b'x'; MAX_LINE_BYTES]);
+
+        assert_eq!(stream.push(b"tail\nnext\n"), vec!["tail".to_string(), "next".to_string()]);
+    }
+
+    /// The scan resumes rather than restarting, which is the other half of the
+    /// same defect: `find` ran from the front of the buffer on every chunk, so
+    /// the work was quadratic in what had arrived rather than linear in what
+    /// was new.
+    ///
+    /// Held as a bound on `scanned` rather than on the clock, because a timing
+    /// assertion on a shared CI runner is a flake waiting to happen. If the
+    /// offset is ever dropped, `scanned` stops tracking `partial.len()` and
+    /// this fails immediately.
+    #[test]
+    fn does_not_rescan_what_it_already_searched() {
+        let mut stream = LineStream::default();
+
+        stream.push(b"no newline here");
+        assert_eq!(stream.scanned, stream.partial.len());
+
+        stream.push(b" and none here either");
+        assert_eq!(stream.scanned, stream.partial.len());
+
+        // A newline resets it, because the indices moved.
+        stream.push(b"\n");
+        assert_eq!(stream.scanned, 0);
+        assert!(stream.partial.is_empty());
+    }
+
+    /// The resumed scan must not miss a newline that lands exactly where the
+    /// previous scan stopped, which is the off-by-one this design invites.
+    #[test]
+    fn finds_a_newline_at_the_resume_point() {
+        let mut stream = LineStream::default();
+
+        assert_eq!(stream.push(b"line"), Vec::<String>::new());
+        assert_eq!(stream.push(b"\n"), vec!["line".to_string()]);
     }
 
     /// The failure this prevents: a Windows agent whose `print` writes CRLF

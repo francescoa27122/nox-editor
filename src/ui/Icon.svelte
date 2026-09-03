@@ -58,6 +58,11 @@
       'M8 10.1a2.1 2.1 0 1 0 0-4.2 2.1 2.1 0 0 0 0 4.2Z M8 1.6l.9 1.6 1.8-.3.5 1.8 1.7.7-.6 1.7.6 1.7-1.7.7-.5 1.8-1.8-.3L8 14.4l-.9-1.6-1.8.3-.5-1.8-1.7-.7.6-1.7-.6-1.7 1.7-.7.5-1.8 1.8.3Z',
     sidebar: 'M2.5 3.5h11v9h-11Z M6.5 3.5v9',
     command: 'M5.5 3.5a1.5 1.5 0 1 0 1.5 1.5v6a1.5 1.5 0 1 0 1.5-1.5H5.5',
+    // Run a task. An outlined triangle rather than a filled one, to stay in
+    // the set's stroke style: filled, beside `command` and `branch` in the
+    // same palette row, it is the only solid mark on screen and reads as a
+    // status dot rather than as a verb.
+    play: 'M5.5 3.6 12.4 8l-6.9 4.4Z',
     dot: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
     warning: 'M8 2.6 14.5 13.4h-13Z M8 6.6v3.2 M8 11.6v.1',
     error: 'M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12Z M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2',

@@ -10,6 +10,7 @@
   import TerminalPanel from './TerminalPanel.svelte';
   import DiffView from './DiffView.svelte';
   import ReviewPanel from './ReviewPanel.svelte';
+  import TasksPanel from './TasksPanel.svelte';
   import Welcome from './Welcome.svelte';
   import Overlays from './Overlays.svelte';
   import Toasts from './Toasts.svelte';
@@ -39,7 +40,38 @@
   // svelte-ignore state_referenced_locally
   const diffOpen = app.ui.diffOpen;
   // svelte-ignore state_referenced_locally
+  const tasksOpen = app.ui.tasksOpen;
+  // svelte-ignore state_referenced_locally
   const welcomeOpen = app.ui.welcomeOpen;
+
+  // svelte-ignore state_referenced_locally
+  const overlay = app.ui.overlay;
+  // svelte-ignore state_referenced_locally
+  const prompt = app.ui.prompt;
+  // svelte-ignore state_referenced_locally
+  const confirm = app.ui.confirm;
+
+  /**
+   * Whether a modal is up, and therefore whether the app behind it is `inert`.
+   *
+   * **This is what makes `aria-modal="true"` true.** Five components declare
+   * it and until 2026-08-31 only the palette handled `Tab`, so in the other
+   * four a keyboard user tabbed straight out of the dialog into the title bar,
+   * the sidebar and the editor behind the scrim, all of which stayed focusable
+   * and stayed announced. `CONTRIBUTING.md` states "Overlays trap focus and
+   * are dismissible with Esc" as a rule; Escape held and the trap did not.
+   *
+   * One attribute here rather than a `Tab` handler in each dialog, and the
+   * reason is that `Overlays` is a **sibling** of `.nox-shell` rather than a
+   * child. So marking the shell inert takes the whole app out of the tab order
+   * and out of the accessibility tree at once, which is what a modal means,
+   * and no future dialog has to remember to do anything.
+   *
+   * The condition is `Overlays`' own, deliberately: if the two ever disagree
+   * the app would be either inert with nothing on top of it, or reachable
+   * behind something claiming to be modal.
+   */
+  const modalOpen = $derived($overlay !== null || $prompt !== null || $confirm !== null);
 
   // svelte-ignore state_referenced_locally
   const terminalOpen = app.ui.terminalOpen;
@@ -107,7 +139,7 @@
   }
 </script>
 
-<div class="nox-shell" class:is-resizing={resizing}>
+<div class="nox-shell" class:is-resizing={resizing} inert={modalOpen}>
   <TitleBar />
 
   <div class="nox-body">
@@ -149,6 +181,8 @@
           <AgentPanel />
         {:else if $diffOpen}
           <DiffView />
+        {:else if $tasksOpen}
+          <TasksPanel />
         {:else if hasBuffers && !$welcomeOpen}
           <EditorArea />
         {:else}

@@ -215,8 +215,14 @@ a handle is a hole in that. Even the log's own `bufferIds` array is copied
 before it leaves.
 
 **Reads are recorded, not gated.** Context cannot leave the process on its
-own. `net.request` is the capability that matters and it is checked, so gating
-reads as well would mean a dialog for every keystroke of an agent's thinking. Instead
+own. `net.request` is the capability that matters, and since 2026-08-31 it is
+genuinely checked: the five commands that can reach the network declare it, and
+it is `deny` by policy for a non-user principal. Before that no command
+declared it at all, so this paragraph described a gate that did not exist, and
+what actually bounded the exposure was `http.rs`'s `is_loopback` refusing any
+non-loopback URL. Both layers are real and they answer different questions, so
+neither is the whole story on its own. Gating reads as well would mean a dialog
+for every keystroke of an agent's thinking. Instead
 `reader(principal)` binds the caller once, so no call site can forget to
 identify itself and the audit trail is complete by construction. The user's
 reads are not recorded, for the same reason their permission decisions are not.
@@ -266,9 +272,21 @@ mid-keystroke is a model they turn off within a day, and a permission layer
 nobody runs protects nothing. Their decisions are not recorded either: "the
 user was allowed to type" would bury the entries an audit is looking for.
 
-**Grants are path-scoped.** Approving a write to `src/app.ts` does not approve
-one to `~/.ssh/config`. Remembered grants key on the resource for `fs.*`, and
-on the capability alone for the rest, which is the granularity each is asked at.
+**Grants are scoped to the question that was asked.** A remembered grant keys
+on the principal, the capability, the **command**, and the resource for `fs.*`
+and `buffer.edit`. So approving a write to `src/app.ts` does not approve one to
+`~/.ssh/config`, and approving **Apply Reviewed Changes** does not approve
+**Replace All in Project**.
+
+Until 2026-08-31 the command was not in that key, and this paragraph defended
+its absence as "the granularity each is asked at". It was not: the dialog has
+always named the command, so a Yes was being stored wider than the question it
+answered. Seven always-enabled commands declare `fs.create` and name no path,
+and they shared one bucket; `review.apply` and `search.replaceAll` shared the
+`buffer.edit` one, which is a project-wide find-and-replace riding in on a
+review the user had actually read. The cost of the narrower key is more
+prompts, and it is the right way round: the cheap alternative was to stop
+naming the command in the dialog, which buys quiet by telling the user less.
 
 **A grant you cannot see is a grant you cannot withdraw.** Everything
 "Allow for this session" remembers is on `PermissionService.grants`, listed in

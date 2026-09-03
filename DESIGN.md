@@ -237,6 +237,15 @@ in `core/theme.ts`. The editor picks it up with no CodeMirror reconfiguration,
 because the CM theme references the same CSS custom properties the chrome
 does. The editor surface and the app chrome physically cannot drift apart.
 
+That last sentence was an aspiration until 2026-08-31. `editor/theme.ts` is
+CSS-in-JS rather than a stylesheet, and `tests/component-css-tokens.test.ts`
+scanned `src/ui` only, so five `rgba()` literals sat in it unnoticed: a
+matching bracket's outline, the non-matching bracket's wash, both search-match
+outlines, and `.cm-selectionMatch`, which had no token at all. A theme
+recolouring `accent` moved the bracket's fill and left its border glacial cyan.
+All five are tokens now, each themeable beside the fill it borders, and that
+suite scans `src/editor` too. It is enforced rather than asserted.
+
 ### Your own, without building Nox
 
 Since 2026-08-28 the same override is a file. Drop a `.json` into the `themes`
@@ -258,7 +267,7 @@ tokens over it as custom properties.
 
 Two limits, and both are deliberate:
 
-- **Colours only.** The 60 tokens a theme may set are the surfaces, states,
+- **Colours only.** The 61 tokens a theme may set are the surfaces, states,
   borders, text, accents, editor colours and the `--nox-syn-*`. Geometry,
   motion, stacking and typography are not themeable. A colour scheme has no
   business resizing the tab bar, and `--nox-dur-*` is zeroed under

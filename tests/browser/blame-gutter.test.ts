@@ -69,6 +69,26 @@ function columnWidth(view: EditorView): number {
   return column.getBoundingClientRect().width;
 }
 
+/**
+ * The gutter columns, named in the order they are actually painted.
+ *
+ * Sorted by measured `left` rather than read off the DOM, which is the point
+ * of asking here rather than in jsdom. DOM order and paint order agree today
+ * because `.cm-gutters` is a flex row, but "the blame column is to the left of
+ * the code" is a claim about the screen, and the way to check a claim about
+ * the screen is to measure the screen. jsdom would return six zeros and sort
+ * them into whatever order they arrived in.
+ */
+function gutterOrder(view: EditorView): string[] {
+  return [...view.dom.querySelectorAll('.cm-gutter')]
+    .map((gutter) => ({
+      name: [...gutter.classList].find((name) => name !== 'cm-gutter') ?? 'unnamed',
+      left: gutter.getBoundingClientRect().left,
+    }))
+    .sort((a, b) => a.left - b.left)
+    .map((gutter) => gutter.name);
+}
+
 function scrollTo(view: EditorView, line: number): void {
   view.dispatch({
     effects: EditorView.scrollIntoView(view.state.doc.line(line).from, { y: 'start' }),
@@ -151,6 +171,63 @@ describe('the blame gutter holds one width', () => {
     for (const entry of entries) {
       expect(entry.scrollWidth).toBeLessThanOrEqual(entry.clientWidth + 1);
     }
+  });
+
+  /**
+   * The other half of what looking at a screenshot found on 2026-08-29, and
+   * the half nothing has held since.
+   *
+   * Blame went in last at first, which put it between the git gutter and the
+   * code: the change bars ended up twenty characters from the lines they
+   * mark, and the line numbers further still. `extensions.ts` fixes it by
+   * listing `blameCompartment` **first**, because `activeGutters` is an
+   * ordered facet, and says so in a comment. A comment is not a test, and
+   * this is a regression that has already happened once.
+   *
+   * The whole sequence rather than just "blame is leftmost", and that is
+   * deliberate brittleness: a seventh gutter's position is a decision
+   * somebody should make on purpose, and a test that names the order is where
+   * they will be told they are making it. `cm-gutter-lint` is CodeMirror's
+   * own, from `lspDiagnosticsExtension`.
+   *
+   * Mutation-checked on 2026-08-31, and the first attempt was wrong in a way
+   * worth writing down. Moving `blameCompartment.of([])` past
+   * `staticExtensions()` changes nothing, because none of those extensions is
+   * a gutter: every other column here comes from `configured`, the
+   * compartments. Move it past *those* and blame lands fifth, between the
+   * change bars and the code, which is the historic defect exactly, and this
+   * fails printing the order it got.
+   */
+  it('puts blame outside every other column, left to right', () => {
+    open = mountEditor(sourceDocument(LINES));
+    showBlame(open.view, blameFor(LINES));
+
+    expect(gutterOrder(open.view)).toEqual([
+      'cm-blameGutter',
+      'cm-lineNumbers',
+      'cm-foldGutter',
+      'cm-provenanceGutter',
+      'cm-gitGutter',
+      'cm-gutter-lint',
+    ]);
+  });
+
+  /**
+   * With blame off, the same order minus its column. Worth its own case
+   * because blame is the one gutter that comes and goes at runtime, so this
+   * is what a reader sees for all the time they are not asking about history,
+   * and nothing else here exercises that configuration.
+   */
+  it('leaves the other columns in the same order when blame is off', () => {
+    open = mountEditor(sourceDocument(LINES));
+
+    expect(gutterOrder(open.view)).toEqual([
+      'cm-lineNumbers',
+      'cm-foldGutter',
+      'cm-provenanceGutter',
+      'cm-gitGutter',
+      'cm-gutter-lint',
+    ]);
   });
 
   /**
