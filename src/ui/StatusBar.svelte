@@ -429,7 +429,7 @@
        invisible in every diff. A CSS escape survives that round trip. */
     content: '\2022';
     color: var(--nox-accent-dim);
-    font-size: 9px;
+    font-size: var(--nox-fs-2xs);
   }
 
   button.item:hover {

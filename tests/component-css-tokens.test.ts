@@ -44,6 +44,18 @@ const styleBlocks = (source: string): string[] =>
 /** Anything a browser reads as a colour that is not a custom property. */
 const LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\(/;
 
+/**
+ * A font size that is a number rather than a `--nox-fs-*` step.
+ *
+ * DESIGN.md's rule names four things a component never hardcodes, and this
+ * test held only the first of them. Five sizes had accumulated outside the
+ * scale: two `9px`, below the smallest step, and three `0.92em`, which is a
+ * size relative to whatever the parent happens to be. Relative units are
+ * caught on purpose: `0.92em` of a parent that moves to another step lands
+ * somewhere the scale does not name.
+ */
+const FONT_SIZE_LITERAL = /\bfont-size:\s*[\d.]/;
+
 const componentDir = new URL('../src/ui/', import.meta.url);
 
 const components = readdirSync(componentDir)
@@ -67,6 +79,29 @@ describe('component CSS', () => {
         // the original file by matching the declaration text back into it.
         for (const line of block.split('\n')) {
           if (!LITERAL.test(line)) continue;
+          const at = source.split('\n').findIndex((l) => l === line);
+          violations.push(`${name}:${at + 1}  ${line.trim()}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * Same sweep, other half of the rule. Kept as its own test so a colour
+   * literal and a size literal are reported as the two different mistakes
+   * they are.
+   */
+  it('sets no font size the scale does not name', () => {
+    const violations: string[] = [];
+
+    for (const name of components) {
+      const source = readFileSync(new URL(name, componentDir), 'utf8');
+
+      for (const block of styleBlocks(source)) {
+        for (const line of block.split('\n')) {
+          if (!FONT_SIZE_LITERAL.test(line)) continue;
           const at = source.split('\n').findIndex((l) => l === line);
           violations.push(`${name}:${at + 1}  ${line.trim()}`);
         }
