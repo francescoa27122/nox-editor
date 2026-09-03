@@ -166,16 +166,19 @@ describe('A8-010: e2e/README.md counts what e2e/specs/ holds', () => {
    * root README is not held here: it is a property of a release artifact,
    * and CONTRIBUTING's Cutting a release checklist is where it is re-read.
    */
-  it('names the spec file count and the it() count', () => {
+  it('gives every spec file a row in its table', () => {
     const specs = join(root, 'e2e', 'specs');
-    const files = readdirSync(specs).filter((name) => name.endsWith('.e2e.js'));
-    let its = 0;
-    for (const file of files) {
-      its += (readFileSync(join(specs, file), 'utf8').match(/^\s*it\(/gm) ?? []).length;
-    }
-    const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+    const files = readdirSync(specs)
+      .filter((name) => name.endsWith('.e2e.js'))
+      .sort();
     const readme = read('e2e', 'README.md');
-    expect(readme).toContain(`${words[files.length]} spec files (${words[its]} \`it\` blocks)`);
+
+    // The table is the part that rots: a spec added without a row is a spec
+    // nobody reading this file knows exists. Checking the rows rather than a
+    // written-out count also survives the count changing, which a sentence
+    // saying "four specs" did not: it was wrong by one when this was written.
+    const missing = files.filter((name) => !readme.includes(`\`${name}\` |`));
+    expect(missing).toEqual([]);
   });
 });
 
