@@ -53,7 +53,7 @@ portable-pty = "0.9"
 # Streaming HTTP for local model servers. No TLS features: this client only
 # ever talks to loopback over plain HTTP, and pulling in native-tls or rustls
 # for a connection to 127.0.0.1 would be a large dependency bought for nothing.
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 futures-util = "0.3"
 # Used by name for the oneshot cancel channel and `select!`. Tauri depends on
 # tokio, but a transitive dependency is not in scope for `tokio::` paths.
