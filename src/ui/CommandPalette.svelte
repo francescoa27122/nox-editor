@@ -4,6 +4,7 @@
   import { basename, dirname, relative } from '@core/path';
   import { fuzzyFilter, fuzzyMatch, fuzzyMatchPath, segmentMatch } from '@core/fuzzy';
   import { createSymbolCache, symbolListState, type SymbolKind } from '@core/symbols';
+  import { taskCommandLine } from '@core/tasks';
   import { cachedLanguage, hasGrammar, hasSymbolStructure } from '@editor/languages';
   import type { Command } from '@services/commands';
   import { formatChord, normalizeChord } from '@services/keymap';
@@ -57,7 +58,16 @@
 
   /** The active mode, which the prefix can change without reopening. */
   const effectiveMode = $derived.by<
-    'commands' | 'files' | 'buffers' | 'line' | 'symbols' | 'branches' | 'notes' | 'actions' | 'languages'
+    | 'commands'
+    | 'files'
+    | 'buffers'
+    | 'line'
+    | 'symbols'
+    | 'branches'
+    | 'notes'
+    | 'actions'
+    | 'languages'
+    | 'tasks'
   >(
     () => {
       // The branch picker is a picker, not the multiplexed palette: no prefix
@@ -73,6 +83,9 @@
       // And again: a dedicated picker, so no prefix may switch it. `C++`
       // starts with nothing special, but `>` is not worth the exception.
       if (mode === 'language') return 'languages';
+      // And again. A task's label is the author's prose, so it may start with
+      // anything a prefix would otherwise claim.
+      if (mode === 'task-run') return 'tasks';
       if (text.startsWith('>')) return 'commands';
       if (text.startsWith('~')) return 'buffers';
       if (text.startsWith(':')) return 'line';
@@ -86,7 +99,8 @@
     effectiveMode === 'branches' ||
     effectiveMode === 'notes' ||
     effectiveMode === 'actions' ||
-    effectiveMode === 'languages'
+    effectiveMode === 'languages' ||
+    effectiveMode === 'tasks'
       ? text.trim()
       : text.slice(1).trim(),
   );
@@ -109,6 +123,8 @@
         return 'Go to a note…';
       case 'actions':
         return 'Choose a fix…';
+      case 'tasks':
+        return 'Run a task…';
       default:
         return 'Search files by name…';
     }
@@ -130,6 +146,8 @@
         return 'note';
       case 'actions':
         return 'lightbulb';
+      case 'tasks':
+        return 'play';
       default:
         return 'search';
     }
@@ -194,6 +212,7 @@
     if (effectiveMode === 'line') return lineRows(term);
     if (effectiveMode === 'symbols') return symbolRows(term);
     if (effectiveMode === 'branches') return branchRows(term);
+    if (effectiveMode === 'tasks') return taskRows(term);
     if (effectiveMode === 'notes') return noteRows(term);
     if (effectiveMode === 'actions') return actionRows(term);
     if (effectiveMode === 'languages') return languageRows(term);
@@ -714,6 +733,39 @@
     return { rows: [...rows, ...scored.map((s) => s.row)], total: 1 + scored.length };
   }
 
+  /**
+   * Every task, the user's and the project's.
+   *
+   * A project task is badged as such *in the picker*, before it is chosen,
+   * rather than only in the dialog `TaskService.run` raises afterwards. The
+   * confirmation is the gate; this is so nobody meets the gate by surprise.
+   */
+  function taskRows(query: string): RowsResult {
+    const scored: { row: Row; score: number }[] = [];
+    for (const task of app.tasks.tasks.get()) {
+      const match =
+        query.length === 0 ? { score: 0, positions: [] as number[] } : fuzzyMatch(query, task.label);
+      if (!match) continue;
+      scored.push({
+        score: match.score,
+        row: {
+          key: `task:${task.id}`,
+          title: task.label,
+          positions: match.positions,
+          icon: 'play',
+          detail: taskCommandLine(task),
+          ...(task.source === 'project' ? { badge: 'project' } : {}),
+          accept: () => {
+            ui.closeOverlay();
+            void commands.execute('tasks.run', task.id);
+          },
+        },
+      });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return { rows: scored.map((entry) => entry.row), total: scored.length };
+  }
+
   /** With an empty query, show recents first — that is what people want. */
   function recentFirst(): string[] {
     const recents = $recentFiles;
@@ -920,6 +972,8 @@
         return 'Titles only here — use the filter box in the Notes panel to search inside a note.';
       case 'actions':
         return 'No action here matches that.';
+      case 'tasks':
+        return 'Tasks come from your own tasks.json, or the project\u2019s .nox/tasks.json.';
       case 'files':
         return 'Try part of the file name, or > for commands and ~ for an open file.';
       default:
