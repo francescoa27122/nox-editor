@@ -29,6 +29,7 @@
   import { mirroredAnnotation } from '@services/transactions';
   import { cursorInfo } from '@editor/commands';
   import {
+    accessibleNameCompartment,
     blameCompartment,
     lspCompartment,
     reconfigureAllEffects,
@@ -211,6 +212,15 @@
       if (id === currentId) syncToBuffer(id, { force: true });
     });
 
+    // Save As is the one way a buffer changes its name without changing
+    // its identity. An event rather than a subscription to `buffers`: that
+    // list is republished on every keystroke, and the name is not.
+    const offSaved = workspace.events.on('saved', ({ id }) => {
+      if (view && id === currentId) {
+        view.dispatch({ effects: accessibleNameCompartment.reconfigure(accessibleName(id)) });
+      }
+    });
+
     const offConfig = config.changed.subscribe((keys) => {
       if (!view || keys.size === 0) return;
       const effects = reconfigureEffects(config.settings.get(), keys);
@@ -219,6 +229,7 @@
 
     return () => {
       offReset();
+      offSaved();
       offConfig();
       offDispatcher();
       offDiagnostics();
@@ -308,6 +319,18 @@
     applyDiagnostics(view, path ? lsp.diagnosticsFor(pathToUri(path)) : []);
   }
 
+  /**
+   * What a screen reader calls the textbox. The file's name, because the
+   * `<section aria-label="Editor">` around it already says what kind of
+   * thing this is and the focused element is the one that gets read: with
+   * no name of its own, CodeMirror's `contentDOM` was announced by its first
+   * line of text.
+   */
+  function accessibleName(id: string) {
+    const name = workspace.buffers.get().find((b) => b.id === id)?.name ?? 'Untitled';
+    return EditorView.contentAttributes.of({ 'aria-label': `${name} editor` });
+  }
+
   function syncToBuffer(id: string | null, options: { force?: boolean } = {}) {
     if (!view) return;
     if (id === currentId && !options.force) return;
@@ -346,6 +369,7 @@
         // `setState` resets every compartment to the state's own
         // configuration, so this is re-applied on each swap rather than once.
         lspCompartment.reconfigure(lspExtensions),
+        accessibleNameCompartment.reconfigure(accessibleName(id)),
       ],
       // `setState` resets the scroll to the top of the document, so without
       // this a tab switch — or a session restored mid-file — lands nowhere

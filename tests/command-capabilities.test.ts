@@ -61,6 +61,16 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
    */
   'stopping something already running': ['agents.cancel', 'jobs.cancel', 'tasks.stop'],
 
+  /**
+   * The window's own chrome. Minimise, maximise and close move or hide a
+   * window; none of them reaches the file system, a process or the network,
+   * and the OS offers all three next to them on every platform, so gating
+   * these would gate nothing a user cannot already do with the title bar.
+   * `window.close` ends the session like `app.quit` does, and the same
+   * reasoning applies: unsaved work is in the session.
+   */
+  'moving the window': ['window.close', 'window.minimize', 'window.toggleMaximize'],
+
   /** Move focus, open an overlay, show a panel. */
   'showing something': [
     'agents.show',

@@ -14,6 +14,7 @@ mod http;
 mod lsp;
 #[cfg(desktop)]
 mod menu;
+mod panic_log;
 mod pty;
 mod search;
 mod watcher;
@@ -41,6 +42,19 @@ pub fn run() {
 
     builder
         .setup(|_app| {
+            // First, before anything that can fail: a panic anywhere in this
+            // process from here on leaves a line in `panic.log` beside
+            // `diagnostics.log`, where Copy Diagnostics picks it up on the
+            // next launch. Without it a release build aborts silently (see
+            // `panic_log.rs`). Here rather than at the top of `run()` because
+            // the config directory is resolved through the app handle.
+            {
+                use tauri::Manager;
+                if let Ok(dir) = _app.path().app_config_dir() {
+                    panic_log::install(dir, fs::dirs_home());
+                }
+            }
+
             // `--geometry WxH+X+Y` — a launch-time window size for repeatable
             // desktop walks. See `geometry.rs` for why it is a test affordance
             // rather than a user feature (a Finder-launched .app gets no argv).

@@ -18,7 +18,9 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::ops::ControlFlow;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -26,7 +28,7 @@ use std::os::windows::process::CommandExt;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::pty::Utf8Stream;
+use crate::pty::{coalesce, Utf8Stream};
 
 /// Suppresses the console window Windows would otherwise give a
 /// console-subsystem child of a GUI process. `winbase.h`'s value; not worth a
@@ -48,6 +50,16 @@ struct Running {
 struct LinePayload {
     id: String,
     line: String,
+}
+
+/// A burst of stdout lines in one event. One event per line was one
+/// main-thread hop per `print`, which a chatty agent turns into thousands;
+/// `pty::coalesce` says how they are batched. The renderer unpacks them in
+/// order (`platform/tauri.ts`), so nothing above it sees a batch.
+#[derive(Clone, Serialize)]
+struct LinesPayload {
+    id: String,
+    lines: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -115,41 +127,63 @@ pub fn nox_agent_spawn(
 
     let child = Arc::new(Mutex::new(child));
 
-    // stdout: one line, one message.
+    // stdout: one line, one message. Two threads, as for a terminal in
+    // `pty.rs`: the reader splits lines and hands them over, and the emitter
+    // batches a burst of them into one event, then reaps the child once the
+    // reader is done so the exit event stays behind the last line.
+    let (sender, receiver) = channel::<String>();
+    std::thread::spawn(move || {
+        // Read through `read_lines` rather than `BufRead::lines()`,
+        // because that turns one non-UTF-8 byte into the end of the
+        // conversation.
+        read_lines(stdout, |line| {
+            if !worth_emitting(&line) {
+                return ControlFlow::Continue(());
+            }
+            // A failed send means the emitter has stopped, which means the
+            // window is gone; nothing to recover, and no reason to go on
+            // reading.
+            if sender.send(line).is_ok() {
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(())
+            }
+        });
+    });
     {
         let app = app.clone();
         let id = id.clone();
         let child = Arc::clone(&child);
         std::thread::spawn(move || {
-            // Read through `read_lines` rather than `BufRead::lines()`,
-            // because that turns one non-UTF-8 byte into the end of the
-            // conversation.
-            read_lines(stdout, |line| {
-                if !worth_emitting(&line) {
-                    return ControlFlow::Continue(());
-                }
-                // A failed emit means the window is gone; nothing to recover,
-                // and no reason to go on reading.
-                if emit_line(&app, "nox://agent-line", &id, line) {
-                    ControlFlow::Continue(())
-                } else {
-                    ControlFlow::Break(())
-                }
-            });
+            coalesce(
+                receiver,
+                |line| line.len(),
+                |lines| {
+                    let payload = LinesPayload {
+                        id: id.clone(),
+                        lines,
+                    };
+                    // A failed emit means the window is gone.
+                    if app.emit("nox://agent-line", payload).is_ok() {
+                        ControlFlow::Continue(())
+                    } else {
+                        ControlFlow::Break(())
+                    }
+                },
+            );
 
             // stdout closing is the earliest reliable sign the agent is done.
             // Reaping here also stops the child becoming a zombie when nobody
             // calls `kill`.
-            let code = child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.wait().ok())
-                .and_then(|status| status.code());
+            let code =
+                wait_unlocked(&child, |child| child.try_wait()).and_then(|status| status.code());
 
-            // Forget it, or the id stays registered for the life of the app
-            // and spawning under it again is refused as "already running" —
-            // which is exactly what happens after the window reloads and the
-            // renderer's counter starts over.
+            // Forget it: the entry is stale now the child is gone. Left in place,
+            // a later `kill` for this id would act on a dead child, `kill_all` would
+            // iterate it, and the registry would grow by one for every agent that
+            // ever ran. A reload cannot collide on the id, whatever this comment
+            // once said: `platform/tauri.ts` puts a per-load token in every id, so
+            // a fresh renderer never reuses one.
             if let Some(state) = app.try_state::<AgentState>() {
                 if let Ok(mut agents) = state.0.lock() {
                     agents.remove(&id);
@@ -191,6 +225,14 @@ pub fn nox_agent_spawn(
 
 /// Send one line to an agent's stdin. The newline is added here so a caller
 /// cannot half-send a message by forgetting it.
+///
+/// Stays a plain `#[tauri::command]` on purpose, with `nox_lsp_send` and
+/// `nox_pty_write`. A sync body runs to completion before the next IPC
+/// message is read, so two sends issued back to back reach the agent in that
+/// order whether or not the caller awaited the first. `stdio.ts` does await
+/// each one today; the guarantee is kept here so a caller that stops doing so
+/// cannot swap two lines. Under `(async)` each send would be its own pool
+/// task racing for the registry lock.
 #[tauri::command]
 pub fn nox_agent_send(state: State<'_, AgentState>, id: String, line: String) -> Result<()> {
     let mut agents = state.0.lock().map_err(poisoned)?;
@@ -416,6 +458,45 @@ pub fn read_lines(mut source: impl Read, mut on_line: impl FnMut(String) -> Cont
     // did under `BufRead::lines()`.
     if let Some(line) = stream.finish() {
         let _ = on_line(line);
+    }
+}
+
+/// How often a reader thread asks whether a child that has closed its stdout
+/// has also exited. Only ever paid by a child that keeps running after its
+/// output stops, which is nothing on the ordinary path: a process that exits
+/// is reaped on the first poll.
+const REAP_POLL: Duration = Duration::from_millis(25);
+
+/// Wait for a child to exit without holding its mutex for the wait.
+///
+/// The one reaper behind every reader thread Nox supervises: agents here, and
+/// the servers and terminals in `lsp.rs` and `pty.rs`. It exists because
+/// `child.lock().wait()` holds the lock for as long as the wait takes, and a
+/// child that closes its stdout but keeps running, a daemonising agent or a
+/// server that redirects its output after startup, parks the reader there.
+/// Every later `kill` for that id then blocks on the same lock, on the thread
+/// that draws the window, until the child decides to exit on its own; the
+/// `*_all` variants iterate every entry, so one such child held quit. Polling
+/// `try_wait` with the lock released between polls is what lets a `kill` get
+/// in between two polls.
+///
+/// Generic over the child type because `pty.rs` supervises a
+/// `portable_pty::Child`, not a `std::process::Child`; the caller hands over
+/// the one line that differs.
+pub fn wait_unlocked<C, S>(
+    child: &Mutex<C>,
+    mut try_wait: impl FnMut(&mut C) -> std::io::Result<Option<S>>,
+) -> Option<S> {
+    loop {
+        let polled = match child.lock() {
+            Ok(mut guard) => try_wait(&mut guard),
+            Err(_) => return None,
+        };
+        match polled {
+            Ok(Some(status)) => return Some(status),
+            Ok(None) => std::thread::sleep(REAP_POLL),
+            Err(_) => return None,
+        }
     }
 }
 
@@ -712,5 +793,57 @@ mod tests {
         assert!(!worth_emitting(""));
         assert!(!worth_emitting("   "));
         assert!(worth_emitting("{}"));
+    }
+
+    /// The failure this prevents: `kill` blocking on the child's mutex behind
+    /// a reaper that took it for the whole of `wait()`. A child that closed
+    /// its stdout and kept running put the reader thread into `wait()` with
+    /// the lock held, and every later kill for that id parked the thread that
+    /// draws the window until the child chose to exit. The reaper has to poll
+    /// with the lock released between polls, so a kill gets in.
+    ///
+    /// A real long-lived child rather than a fake, because the property is
+    /// about a lock held across a blocking syscall. What it does not catch:
+    /// the reader threads in `nox_agent_spawn`, `lsp.rs` and `pty.rs`, which
+    /// need a Tauri application around them; they call this same function.
+    #[test]
+    fn a_kill_gets_in_while_the_reaper_is_waiting() {
+        use std::time::Instant;
+
+        let mut command = if cfg!(windows) {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.arg("30");
+            c
+        };
+        let child = command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn a long-lived child");
+        let child = Arc::new(Mutex::new(child));
+
+        let reaper = {
+            let child = Arc::clone(&child);
+            std::thread::spawn(move || wait_unlocked(&child, |child| child.try_wait()))
+        };
+        // Let the reaper reach its wait before the kill arrives, which is the
+        // ordering that used to deadlock the kill.
+        std::thread::sleep(REAP_POLL * 2);
+
+        let started = Instant::now();
+        child.lock().expect("child lock").kill().expect("kill the child");
+        let waited = started.elapsed();
+
+        let status = reaper.join().expect("reaper thread");
+        assert!(status.is_some(), "the reaper must see the exit the kill caused");
+        assert!(
+            waited < Duration::from_secs(5),
+            "kill waited {waited:?} for a lock the reaper should not have been holding"
+        );
     }
 }

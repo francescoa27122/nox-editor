@@ -4,9 +4,12 @@ on:
   push:
     tags: ['v*']
 
-# The release job uploads assets to the tag's release.
+# Read-only at the top. The build job alone gets write, below, because it
+# is the one that uploads assets to the tag's release; the gate has no
+# business with a token that can. Every action is pinned by commit SHA for
+# the reason ci.yml gives: a tag can be moved, a SHA cannot.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # A tag is a promise. Check it before spending twenty minutes on binaries
@@ -20,8 +23,8 @@ jobs:
     outputs:
       notes: ${{ steps.notes.outputs.body }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -125,10 +128,26 @@ jobs:
       - run: npm run check
       - run: npm test
 
+      # The same check ci.yml runs, for a hole CI cannot close: this workflow
+      # fires on any v* tag, not only on a commit main has already checked,
+      # so a tag on a branch could build four installers from a lockfile
+      # cargo rewrote in passing. Ten seconds here against twenty minutes of
+      # binaries. The build jobs pass --locked too, so an unlocked graph
+      # cannot reach a bundle even if this step is ever removed.
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+      - name: Check the lockfile is current
+        working-directory: src-tauri
+        run: cargo metadata --format-version 1 --locked > /dev/null
+
   build:
     name: ${{ matrix.label }}
     needs: gate
     runs-on: ${{ matrix.os }}
+    # tauri-action creates the draft release and uploads the bundles to it.
+    permissions:
+      contents: write
     strategy:
       # One platform failing should not deny the others a binary — a partial
       # release beats no release, and the draft shows exactly what's missing.
@@ -193,7 +212,7 @@ jobs:
       # on. See `docs/superpowers/specs/2026-08-22-apple-signing-design.md`.
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # The Azure apt mirror behind these runners intermittently degrades in a
       # way apt cannot detect: every request still succeeds, but each one takes
@@ -205,7 +224,7 @@ jobs:
       # inside the action bounds the cost of a cold cache on a bad day.
       - name: Cache apt archives
         if: matrix.os == 'ubuntu-22.04'
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/apt-archives
           key: apt-jammy-patchelf-${{ hashFiles('.github/actions/linux-build-deps/action.yml') }}
@@ -220,16 +239,17 @@ jobs:
         # long before this does.
         timeout-minutes: 20
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
           key: ${{ matrix.target }}
@@ -325,7 +345,7 @@ jobs:
 
           echo "Apple signing configured: this macOS build will be signed and notarized."
 
-      - uses: tauri-apps/tauri-action@v1
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -344,7 +364,10 @@ jobs:
           # fails when they disagree: these are a string, not a manifest.
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }} ${{ steps.updater.outputs.args }}
+          # Everything after `--` goes to cargo. --locked refuses to build
+          # from a Cargo.lock that does not describe Cargo.toml, which is the
+          # release-time half of the gate's lockfile check above.
+          args: ${{ matrix.args }} ${{ steps.updater.outputs.args }} -- --locked
           releaseBody: |
             ${{ needs.gate.outputs.notes }}
 

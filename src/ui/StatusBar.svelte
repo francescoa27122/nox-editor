@@ -423,9 +423,13 @@
      smallest thing that says whose it is without a second row of chrome.
   */
   .item.plugin::before {
-    content: '2';
+    /* Written as a CSS escape rather than the character. The bullet shipped
+       once as U+0082 followed by a literal "2", which is what `\2022` becomes
+       when a tool reads `\202` as an octal escape, and the control byte was
+       invisible in every diff. A CSS escape survives that round trip. */
+    content: '\2022';
     color: var(--nox-accent-dim);
-    font-size: 9px;
+    font-size: var(--nox-fs-2xs);
   }
 
   button.item:hover {

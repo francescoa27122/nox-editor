@@ -23,11 +23,13 @@ use std::sync::{Arc, Mutex};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::agent::read_lines;
+use crate::agent::{read_lines, wait_unlocked};
 
 /// Suppresses the console window Windows would otherwise give a
 /// console-subsystem child of a GUI process. `winbase.h`'s value; not worth a
@@ -74,6 +76,16 @@ pub struct MessageStream {
     buffer: Vec<u8>,
 }
 
+/// The largest body `MessageStream` will wait for: 256 MiB.
+///
+/// A `Content-Length` is a promise about bytes that have not arrived yet, so
+/// without a ceiling one corrupt or hostile header parks the reader waiting
+/// for gigabytes that never come, and nothing reports it. The number is far
+/// above anything the protocol produces (a full-workspace diagnostics push
+/// or a large completion list is single-digit megabytes) and far below the
+/// range where the offset arithmetic could wrap.
+pub const MAX_BODY_BYTES: usize = 256 * 1024 * 1024;
+
 impl MessageStream {
     /// Take some bytes; return every complete message they finished.
     ///
@@ -113,17 +125,30 @@ impl MessageStream {
                 return Err("lsp: message with no Content-Length".to_string());
             };
 
+            if length > MAX_BODY_BYTES {
+                return Err(format!("lsp: Content-Length {length} is above the {MAX_BODY_BYTES} byte limit"));
+            }
+
+            // `checked_add`, not `+`: a length near `usize::MAX` parses, and
+            // in release the sum wrapped to a small number, the check below
+            // passed on it, and the slice panicked on a thread outside any
+            // Tauri catch. With `panic = "abort"` that was the whole editor.
+            // The cap above makes this unreachable today; it stays because
+            // the cap is a policy and this is the arithmetic.
             let body_start = header_end + 4;
-            if self.buffer.len() < body_start + length {
+            let Some(body_end) = body_start.checked_add(length) else {
+                return Err(format!("lsp: Content-Length {length} out of range"));
+            };
+            if self.buffer.len() < body_end {
                 return Ok(out); // Body still arriving.
             }
 
-            let body = &self.buffer[body_start..body_start + length];
+            let body = &self.buffer[body_start..body_end];
             let message = String::from_utf8(body.to_vec())
                 .map_err(|_| "lsp: body was not utf-8".to_string())?;
             out.push(message);
 
-            self.buffer.drain(..body_start + length);
+            self.buffer.drain(..body_end);
         }
     }
 }
@@ -150,18 +175,26 @@ pub fn frame(message: &str) -> Vec<u8> {
 
 /// Start the server process, with the pipes it needs.
 ///
-/// On Windows a second attempt goes through `cmd /C`. Most language servers
-/// are installed by npm, which puts a `.cmd` shim on `PATH` rather than an
-/// executable — `typescript-language-server` is one, and it is the command the
-/// `servers.json` template ships. `CreateProcess`, which `Command` uses, runs
-/// `.exe` and not `.cmd`, so the direct attempt fails with "program not found"
-/// for exactly the configuration Nox recommends.
+/// On Windows a second attempt resolves the command to a file. Most language
+/// servers are installed by npm, which puts a `.cmd` shim on `PATH` rather
+/// than an executable: `typescript-language-server` is one, and it is the
+/// command the `servers.json` template ships. `Command` looks for `.exe` and
+/// not `.cmd`, so the direct attempt fails with "program not found" for
+/// exactly the configuration Nox recommends.
 ///
-/// Direct first, so a real executable never goes through a shell: `cmd /C`
-/// re-splits its command line on spaces, and a server installed under
-/// `C:\Program Files` would break in a way that reports the wrong cause.
+/// The second attempt used to be `cmd /C <command> <args...>`, and `cmd`
+/// re-parses that line: `&`, `|` and `%VAR%` inside an argument were shell
+/// syntax, which contradicted the crate-wide rule that nothing goes through
+/// a shell. Now `resolve_shim` finds the file the shell would have found and
+/// it is spawned as the program. A `.cmd` still cannot run without
+/// `cmd.exe`, but the standard library owns that step: given a program
+/// ending in `.bat` or `.cmd` it builds the `cmd.exe /c` line itself, quoting
+/// every argument on its own and refusing any it cannot make safe (its
+/// BatBadBut mitigation). Nothing here concatenates user text.
+///
+/// Direct first, so a real executable never goes near `cmd.exe` at all.
 fn spawn_server(command: &str, args: &[String], cwd: Option<&str>) -> std::io::Result<Child> {
-    fn build(program: &str, args: &[String], cwd: Option<&str>) -> Command {
+    fn build(program: impl AsRef<std::ffi::OsStr>, args: &[String], cwd: Option<&str>) -> Command {
         let mut builder = Command::new(program);
         builder
             .args(args)
@@ -186,23 +219,66 @@ fn spawn_server(command: &str, args: &[String], cwd: Option<&str>) -> std::io::R
 
     let direct = build(command, args, cwd).spawn();
 
-    // Any failure retries, not only `NotFound`. A bare command that PATH only
-    // resolves to a `.cmd` fails as NotFound, but an *absolute* path to one
-    // that exists fails differently — `CreateProcess` rejects it as not a
-    // valid executable — and someone writing a full path into `servers.json`
-    // is at least as likely as someone relying on PATH.
+    // Any failure retries, not only `NotFound`: the resolver decides whether
+    // there is a file worth a second attempt, and returns nothing for a
+    // command that already names its extension.
     #[cfg(windows)]
     if direct.is_err() {
-        let mut shell_args = vec!["/C".to_string(), command.to_string()];
-        shell_args.extend_from_slice(args);
-        if let Ok(child) = build("cmd", &shell_args, cwd).spawn() {
-            return Ok(child);
+        let path: Vec<PathBuf> = std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default();
+        if let Some(shim) = resolve_shim(command, &path, cwd.map(Path::new)) {
+            if let Ok(child) = build(&shim, args, cwd).spawn() {
+                return Ok(child);
+            }
         }
-        // The shell could not start it either, so the first error is the one
+        // The shim could not start either, so the first error is the one
         // worth reporting: it names the command the user actually wrote.
     }
 
     direct
+}
+
+/// The file the old `cmd /C` fallback would have run for `command`, or
+/// `None`. `<command>.exe`, `.cmd` and `.bat` are tried in that order, beside
+/// the name when it carries a directory (a relative one against the server's
+/// `cwd`, which is where a `node_modules/.bin/...` entry in `servers.json`
+/// points), and on each entry of `path` when it is bare.
+///
+/// Two deliberate differences from the shell. A command that already has an
+/// extension gets nothing: the direct spawn tried exactly that file, and
+/// `Command` runs a `.cmd` named in full on its own. And a bare name is
+/// never taken from the working directory, which `cmd` searches first: the
+/// working directory is the workspace, and a repository must not be able to
+/// supply the language server for itself by shipping
+/// `typescript-language-server.cmd` at its root.
+#[cfg(windows)]
+fn resolve_shim(command: &str, path: &[PathBuf], cwd: Option<&Path>) -> Option<PathBuf> {
+    let given = Path::new(command);
+    if given.extension().is_some() {
+        return None;
+    }
+
+    let has_directory = given.parent().is_some_and(|p| !p.as_os_str().is_empty());
+    let bases: Vec<PathBuf> = if has_directory {
+        let base = match cwd {
+            Some(cwd) if given.is_relative() => cwd.join(given),
+            _ => given.to_path_buf(),
+        };
+        vec![base]
+    } else {
+        path.iter().map(|dir| dir.join(given)).collect()
+    };
+
+    for base in bases {
+        for extension in ["exe", "cmd", "bat"] {
+            let candidate = base.with_extension(extension);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 /// Start a language server. `id` is chosen by the renderer so replies can be
@@ -292,17 +368,18 @@ pub fn nox_lsp_start(
 
             // stdout closing is the earliest reliable sign the server is done.
             // Reaping here also stops the child becoming a zombie when nobody
-            // calls `stop`.
-            let code = child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.wait().ok())
-                .and_then(|status| status.code());
+            // calls `stop`. Polled with the lock released between polls, so a
+            // `stop` for a server that closed stdout and kept running does not
+            // block behind this; `wait_unlocked` says why.
+            let code =
+                wait_unlocked(&child, |child| child.try_wait()).and_then(|status| status.code());
 
-            // Forget it, or the id stays registered for the life of the app and
-            // starting under it again is refused as "already running" — which
-            // is exactly what happens after the window reloads and the
-            // renderer's counter starts over.
+            // Forget it: the entry is stale now the child is gone. Left in place,
+            // a later `stop` for this id would act on a dead child, `stop_all` would
+            // iterate it, and the registry would grow by one for every server that
+            // ever ran. A reload cannot collide on the id, whatever this comment
+            // once said: `platform/tauri.ts` puts a per-load token in every id, so
+            // a fresh renderer never reuses one.
             if let Some(state) = app.try_state::<LspState>() {
                 if let Ok(mut servers) = state.0.lock() {
                     servers.remove(&id);
@@ -343,6 +420,12 @@ pub fn nox_lsp_start(
 
 /// Send one message. The framing is added here so a caller cannot half-send a
 /// message by computing its length on the wrong side of the encoding.
+///
+/// Stays a plain `#[tauri::command]` on purpose. `didChange` notifications are
+/// fired without being awaited, and a sync body runs to completion before the
+/// next IPC message is read, which is what keeps their versions in order.
+/// Under `(async)` two sends would race for the registry lock and a version
+/// could go backwards at the server.
 #[tauri::command]
 pub fn nox_lsp_send(state: State<'_, LspState>, id: String, message: String) -> Result<()> {
     let mut servers = state.0.lock().map_err(poisoned)?;
@@ -545,6 +628,54 @@ mod tests {
         assert!(stream.push(b"Content-Length: abc\r\n\r\n{}").is_err());
     }
 
+    /// Guards A6-001: a length that parses but cannot be added to the body
+    /// offset. In release `body_start + length` wrapped, the "still arriving"
+    /// test passed on the wrapped value, and the slice panicked; the reader
+    /// thread is outside any Tauri catch and the release profile is
+    /// `panic = "abort"`, so one header from a language server took the
+    /// whole editor down. `Err` is the framing-lost path the reader already
+    /// reports and stops on. This catches the header alone; it does not
+    /// exercise the thread that would have died.
+    #[test]
+    fn errors_on_a_length_that_overflows_the_body_offset() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n{{}}", usize::MAX);
+        assert!(stream.push(header.as_bytes()).is_err());
+    }
+
+    /// The other edge of the same band. This header is 40 bytes, so a length
+    /// of `usize::MAX - 39` is the smallest value whose sum with the body
+    /// offset wraps to exactly zero, and one less than it merely waits for a
+    /// body that never comes. Pinned separately because an off-by-one in the
+    /// guard would let this one through while the `usize::MAX` case passed.
+    #[test]
+    fn errors_on_a_length_that_overflows_by_exactly_one() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n{{}}", usize::MAX - 39);
+        assert_eq!(header.find("{}"), Some(40), "the test assumes a 40-byte header");
+        assert!(stream.push(header.as_bytes()).is_err());
+    }
+
+    /// A length that does not overflow but could never be satisfied. Before
+    /// the cap this returned `Ok(empty)` and the reader waited forever for
+    /// gigabytes that were never coming; a corrupt header now ends the
+    /// session with a reason instead of a silent hang.
+    #[test]
+    fn errors_on_a_length_above_the_body_cap() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n", MAX_BODY_BYTES + 1);
+        assert!(stream.push(header.as_bytes()).is_err());
+    }
+
+    /// The cap is inclusive: a body exactly at the limit is still a body
+    /// worth waiting for, so the boundary is a wait rather than an error.
+    #[test]
+    fn a_length_at_the_body_cap_still_waits_for_its_body() {
+        let mut stream = MessageStream::default();
+        let header = format!("Content-Length: {}\r\n\r\n", MAX_BODY_BYTES);
+        assert!(stream.push(header.as_bytes()).unwrap().is_empty());
+    }
+
     #[test]
     fn tolerates_a_content_type_header_beside_the_length() {
         // Servers are permitted to send one, and several do.
@@ -556,5 +687,99 @@ mod tests {
 
         let mut stream = MessageStream::default();
         assert_eq!(stream.push(&bytes).unwrap(), vec![body.to_string()]);
+    }
+
+    /// A scratch directory that removes itself, the same shape `fs.rs` and
+    /// `git.rs` hand-roll.
+    #[cfg(windows)]
+    struct Scratch(PathBuf);
+
+    #[cfg(windows)]
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir().join(format!("nox-{name}-{stamp}"));
+            std::fs::create_dir_all(&dir).expect("scratch dir");
+            Self(dir)
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Guards A6-008: the resolver stands in for `cmd /C`'s own lookup, so
+    /// it must find what the shell found (a `.cmd` beside a
+    /// directory-qualified command, or on PATH for a bare one) and nothing
+    /// the shell should not have (the working directory, which a repository
+    /// controls).
+    #[cfg(windows)]
+    #[test]
+    fn resolves_a_shim_the_way_the_shell_would_minus_the_working_directory() {
+        let scratch = Scratch::new("lsp-resolve");
+        let bin = scratch.0.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("tsserver.cmd"), "@echo off\r\n").unwrap();
+        std::fs::write(bin.join("both.exe"), "").unwrap();
+        std::fs::write(bin.join("both.cmd"), "@echo off\r\n").unwrap();
+        let workspace = scratch.0.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("tsserver.cmd"), "@echo off\r\n").unwrap();
+
+        let path = vec![bin.clone()];
+        // Bare, on PATH.
+        assert_eq!(
+            resolve_shim("tsserver", &path, Some(&workspace)),
+            Some(bin.join("tsserver.cmd"))
+        );
+        // The executable wins over the shim beside it.
+        assert_eq!(resolve_shim("both", &path, Some(&workspace)), Some(bin.join("both.exe")));
+        // Directory-qualified: looked up beside the name, not on PATH.
+        assert_eq!(
+            resolve_shim(&bin.join("tsserver").to_string_lossy(), &[], None),
+            Some(bin.join("tsserver.cmd"))
+        );
+        // Relative and directory-qualified: against the server's cwd.
+        assert_eq!(
+            resolve_shim("bin\\tsserver", &[], Some(&scratch.0)),
+            Some(bin.join("tsserver.cmd"))
+        );
+        // An extension means the direct spawn already tried that exact file.
+        assert_eq!(resolve_shim("tsserver.cmd", &path, Some(&workspace)), None);
+        // A bare name is never taken from the working directory: PATH only.
+        assert_eq!(resolve_shim("tsserver", &[], Some(&workspace)), None);
+    }
+
+    /// Guards A6-008 end to end: the old fallback was `cmd /C <command>
+    /// <args...>`, and `cmd` re-parses that line, so `&` in an argument ran
+    /// a second command. The shim is now spawned as the program itself, and
+    /// the standard library's batch-file quoting (its BatBadBut mitigation)
+    /// carries every argument through intact. What this does not cover is
+    /// an argument the library refuses to quote at all, which surfaces as a
+    /// spawn error rather than a shell command, and that is the point.
+    #[cfg(windows)]
+    #[test]
+    fn a_cmd_shim_receives_its_arguments_verbatim() {
+        let scratch = Scratch::new("lsp-shim");
+        std::fs::write(scratch.0.join("shim.cmd"), "@echo off\r\necho %1 %2\r\n").unwrap();
+        let command = scratch.0.join("shim").to_string_lossy().into_owned();
+
+        let child = spawn_server(&command, &["a&b".to_string(), "c d".to_string()], None)
+            .expect("the shim spawns");
+        let output = child.wait_with_output().expect("the shim finishes");
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("a&b") && stdout.contains("c d"), "got {stdout:?}");
+        assert!(
+            output.stderr.is_empty(),
+            "stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }

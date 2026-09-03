@@ -1,0 +1,47 @@
+# Dependency drift was found only when someone looked: npm audit showed three
+# moderate dev-dependency advisories at the 2026-09 audit and nothing had
+# said so. Weekly, on one day, so the PRs arrive as a batch rather than a
+# trickle, and grouped so a CodeMirror bump is one PR rather than twenty.
+#
+# The two version manifests must keep agreeing with each other and with
+# tauri.conf.json (the release gate refuses a tag when they do not), which
+# Dependabot never touches: it bumps dependencies, not the crate's own
+# version.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      codemirror:
+        patterns:
+          - '@codemirror/*'
+          - '@lezer/*'
+      tauri:
+        patterns:
+          - '@tauri-apps/*'
+      storybook:
+        patterns:
+          - '@storybook/*'
+          - storybook
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      tauri:
+        patterns:
+          - tauri
+          - tauri-*
+
+  # Pinned by commit SHA in the workflows (see ci.yml); Dependabot moves the
+  # SHA and the version comment beside it together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
