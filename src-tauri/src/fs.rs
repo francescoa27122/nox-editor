@@ -419,9 +419,7 @@ pub fn nox_reveal(path: String) -> Result<()> {
 /// `name` is rejected if it contains separators — config keys are bare
 /// filenames, and treating them otherwise would be a path-traversal hole.
 pub(crate) fn config_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf> {
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
-        return Err(format!("io: invalid config name {name}"));
-    }
+    check_config_name(name)?;
 
     let dir = app
         .path()
@@ -433,6 +431,28 @@ pub(crate) fn config_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf>
     }
 
     Ok(dir.join(name))
+}
+
+/// The guard `config_path` applies, split out so it can be tested without an
+/// `AppHandle`.
+///
+/// `:` is refused as well as the separators because on Windows `Path::join`
+/// replaces the base when the argument carries a drive prefix, and
+/// `C:evil.json` carries one with no separator in it: it names a file
+/// relative to the process's current directory on drive C, not one in the
+/// config directory. A leading `.` is refused because nothing Nox writes
+/// starts with one, and `.` alone would name the directory itself.
+fn check_config_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.starts_with('.')
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains(':')
+        || name.contains("..")
+    {
+        return Err(format!("io: invalid config name {name}"));
+    }
+    Ok(())
 }
 
 /// Where settings, session and `agents.json` live.
@@ -726,5 +746,24 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&real).unwrap(), r#"{"version":2}"#);
         assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    }
+
+    /// Guards A6-004: on Windows `Path::join` replaces the base when the
+    /// argument carries a drive prefix, and `C:evil.json` carries one with no
+    /// separator in it, so the separator check let it through and the
+    /// "config file" resolved against the process's current directory on
+    /// drive C. Rejecting `:` outright is platform-independent, so this test
+    /// proves the same thing on Linux and macOS, where `Path::join` would
+    /// not have misbehaved. Every caller today passes a fixed literal or a
+    /// generated `<word>-<n>.txt`, so this is defence in depth, and the
+    /// accepted set is pinned here to keep that true.
+    #[test]
+    fn config_names_are_bare_filenames() {
+        for name in ["settings.json", "unsaved-3.txt", "note-12.txt", "settings.damaged.json", "diagnostics.log"] {
+            assert!(check_config_name(name).is_ok(), "{name} should be accepted");
+        }
+        for name in ["", "C:evil.json", "C:", "../x.json", "..", "a/b.json", "a\\b.json", ".hidden", "."] {
+            assert!(check_config_name(name).is_err(), "{name:?} should be rejected");
+        }
     }
 }
