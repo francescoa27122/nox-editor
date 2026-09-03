@@ -30,6 +30,7 @@
       $overlay === 'code-action' ||
       $overlay === 'note-open' ||
       $overlay === 'language' ||
+      $overlay === 'task-run' ||
       $overlay === 'recent',
   );
 
