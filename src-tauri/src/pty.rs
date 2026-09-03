@@ -337,18 +337,27 @@ pub fn nox_pty_close(state: State<'_, PtyState>, id: String) -> Result<()> {
 /// not leave orphaned shells running with nothing attached to them.
 #[tauri::command]
 pub fn nox_pty_close_all(state: State<'_, PtyState>) -> Result<()> {
-    let sessions: Vec<Session> = state
-        .0
-        .lock()
-        .map_err(poisoned)?
-        .drain()
-        .map(|(_, session)| session)
-        .collect();
+    state.close_all()
+}
 
-    for session in sessions {
-        stop(session);
+impl PtyState {
+    /// Close every terminal. Also the exit hook's call in `lib.rs`, for the
+    /// same reason as `AgentState::kill_all`: a quit that skips the
+    /// renderer's `beforeunload` must not leave shells behind.
+    pub fn close_all(&self) -> Result<()> {
+        let sessions: Vec<Session> = self
+            .0
+            .lock()
+            .map_err(poisoned)?
+            .drain()
+            .map(|(_, session)| session)
+            .collect();
+
+        for session in sessions {
+            stop(session);
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn stop(session: Session) {

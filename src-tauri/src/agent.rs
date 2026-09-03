@@ -226,21 +226,35 @@ pub fn nox_agent_kill(state: State<'_, AgentState>, id: String) -> Result<()> {
 /// leave orphans running with nothing left to talk to them.
 #[tauri::command]
 pub fn nox_agent_kill_all(state: State<'_, AgentState>) -> Result<()> {
-    let agents: Vec<Running> = state
-        .0
-        .lock()
-        .map_err(poisoned)?
-        .drain()
-        .map(|(_, agent)| agent)
-        .collect();
+    state.kill_all()
+}
 
-    for agent in agents {
-        drop(agent.stdin);
-        if let Ok(mut child) = agent.child.lock() {
-            let _ = child.kill();
+impl AgentState {
+    /// Stop every agent and forget it.
+    ///
+    /// A method rather than the body of the command above because it has two
+    /// callers: the renderer, on reload, and the exit hook in `lib.rs`, which
+    /// runs when the event loop ends. The renderer's `beforeunload` was the
+    /// only kill path before, so a quit that never ran it left every agent
+    /// running as the user, with the workspace as cwd and nobody reading its
+    /// stdout. `Child` does not kill on drop, and nothing here made it.
+    pub fn kill_all(&self) -> Result<()> {
+        let agents: Vec<Running> = self
+            .0
+            .lock()
+            .map_err(poisoned)?
+            .drain()
+            .map(|(_, agent)| agent)
+            .collect();
+
+        for agent in agents {
+            drop(agent.stdin);
+            if let Ok(mut child) = agent.child.lock() {
+                let _ = child.kill();
+            }
         }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Splits a child process's output into lines, surviving bytes that are not
@@ -389,6 +403,69 @@ fn poisoned<T>(_: T) -> String {
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::time::{Duration, Instant};
+
+    /// A child that ignores its stdin and would run for half a minute, so
+    /// the only way it ends inside the deadline below is being killed.
+    fn long_running_child() -> Child {
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = Command::new("ping");
+            command.args(["-n", "30", "127.0.0.1"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("sleep");
+            command.arg("30");
+            command
+        };
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("a child to supervise")
+    }
+
+    /// The failure this prevents: an agent outliving Nox. `kill_all` is what
+    /// the exit hook in `lib.rs` calls, and this proves it ends a child that
+    /// would not end on its own and forgets it. What it does not prove is
+    /// that the hook fires: `RunEvent::Exit` needs a running event loop,
+    /// which a unit test does not have, so that half is read, not run.
+    #[test]
+    fn kill_all_ends_a_child_that_would_not_end_on_its_own() {
+        let mut child = long_running_child();
+        let stdin = child.stdin.take().expect("piped stdin");
+        let child = Arc::new(Mutex::new(child));
+        let state = AgentState::default();
+        state.0.lock().unwrap().insert(
+            "t".to_string(),
+            Running {
+                child: Arc::clone(&child),
+                stdin,
+            },
+        );
+
+        state.kill_all().expect("kill_all");
+
+        // `kill` returns before the process has necessarily gone, so poll.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(Some(_)) = child.lock().unwrap().try_wait() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the child is still running after kill_all"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(
+            state.0.lock().unwrap().is_empty(),
+            "a killed agent must be forgotten, or its id is refused next time"
+        );
+    }
 
     /// The failure this prevents: one byte that is not UTF-8 on an agent's
     /// stdout ending the reader loop for good. `BufRead::lines()` — what this
