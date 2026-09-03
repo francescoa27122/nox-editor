@@ -178,6 +178,52 @@ describe('saving', () => {
   });
 
   /**
+   * Guards A3-009. Save As onto a path another tab already had open left two
+   * buffers on one file, each recording its own `diskMtime`, so each save
+   * silently wrote its text over the other's with no conflict prompt. A
+   * clean other tab is closed, since its text is on disk and about to be
+   * replaced by what the user just confirmed in the OS dialog.
+   */
+  it('saveAs onto a path another clean tab has open closes that tab', async () => {
+    const { platform, workspace } = setup();
+    const readme = (await workspace.open('/work/README.md'))!;
+    const main = (await workspace.open('/work/src/main.ts'))!;
+
+    expect(await workspace.saveAs(main, '/work/README.md')).toBe(true);
+
+    expect(await platform.readTextFile('/work/README.md')).toBe('const x = 1;\n');
+    const open = workspace.buffers.get();
+    expect(open.map((b) => b.id)).toEqual([main]);
+    expect(open[0]?.path).toBe('/work/README.md');
+    expect(workspace.get(readme)).toBeUndefined();
+  });
+
+  /**
+   * A dirty other tab is refused rather than closed: the OS dialog asked
+   * about the file, not about that tab's unsaved edits, and closing it would
+   * throw them away without anyone having said so.
+   */
+  it('saveAs refuses a path another tab has open with unsaved changes', async () => {
+    const { platform, workspace } = setup();
+    const errors: string[] = [];
+    workspace.events.on('error', (event) => errors.push(event.message));
+    const readme = (await workspace.open('/work/README.md'))!;
+    workspace.applyTransaction(
+      readme,
+      workspace.stateOf(readme)!.update({ changes: { from: 0, insert: 'mine ' } }),
+    );
+    const main = (await workspace.open('/work/src/main.ts'))!;
+
+    expect(await workspace.saveAs(main, '/work/README.md')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(await platform.readTextFile('/work/README.md')).toBe('# Hello\n');
+    expect(workspace.get(main)?.path).toBe('/work/src/main.ts');
+    expect(workspace.textOf(readme)).toBe('mine # Hello\n');
+    expect(workspace.buffers.get()).toHaveLength(2);
+  });
+
+  /**
    * Guards A3-001: a keystroke typed while the write was in flight used to be
    * reverted by the whole-document replacement `save` made afterwards, and
    * the buffer then reported clean, so the character was on disk nowhere and

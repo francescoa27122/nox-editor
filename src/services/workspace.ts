@@ -1178,6 +1178,18 @@ export class WorkspaceService {
     const buffer = this.#map.get(id);
     if (!buffer) return false;
 
+    // The path may already be open in another tab. Two buffers on one file
+    // would each save their own text over the other's with no conflict
+    // prompt, since each records its own `diskMtime`. A clean one is closed
+    // once the write lands: its text is on disk, and the user has just told
+    // the OS dialog to replace it. A dirty one is refused, because the dialog
+    // asked about the file, not about that tab's unsaved edits.
+    const other = this.findByPath(path);
+    if (other && other.id !== id && other.isDirty) {
+      this.#fail(`${basename(path)} is open with unsaved changes.`, 'Save or close that tab first.');
+      return false;
+    }
+
     const previousPath = buffer.path;
     const previousName = buffer.name;
     const previousLanguage = buffer.language;
@@ -1194,6 +1206,10 @@ export class WorkspaceService {
       this.#sync();
       return false;
     }
+
+    // Re-checked after the write: an edit could have landed in that tab
+    // during it, and closing then would take the edit with it.
+    if (other && other.id !== id && !other.isDirty) this.close(other.id, { force: true });
 
     // The grammar may have changed with the extension; the view rebuilds.
     if (previousLanguage.id !== buffer.language.id) {
