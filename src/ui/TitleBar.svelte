@@ -429,6 +429,33 @@
     margin-left: var(--nox-sp-1);
   }
 
+  /*
+    The narrow window, where the menu bar has to be given room.
+
+    At the 640px minimum the menu bar's titles need 281px, and the breadcrumb
+    has already collapsed to nothing. In the browser build the bar was left
+    261px, and on Windows, where the three drawn controls take 124px more,
+    131px. Spacing alone cannot close the second gap: halving this bar's gap
+    and the title padding together recovers about 60px. So the palette
+    trigger drops its label and chord too and keeps its icon and `title`,
+    the way a toolbar collapses, which is worth about 110px. Measured in
+    `tests/browser/menu-bar-fit.test.ts` for both cases.
+  */
+  @media (max-width: 800px) {
+    .nox-titlebar {
+      gap: var(--nox-sp-3);
+    }
+
+    .palette-trigger span,
+    .palette-trigger kbd {
+      display: none;
+    }
+
+    .palette-trigger {
+      padding-inline: var(--nox-sp-3);
+    }
+  }
+
   .icon-button {
     display: grid;
     place-items: center;
