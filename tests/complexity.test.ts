@@ -1,9 +1,12 @@
+import { parser as jsParser } from '@lezer/javascript';
+import { Text } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { diffText } from '../src/core/diff';
 import { parseGitBlame } from '../src/core/git-blame';
 import { fuzzyFilter } from '../src/core/fuzzy';
 import { buildSearchRegex, findMatches } from '../src/core/search-match';
 import { computeReplacements } from '../src/core/replace';
+import { enclosingSymbols } from '../src/core/symbols';
 import { objectSpans, unfence } from '../src/services/agent/ollama';
 import {
   blamePorcelain,
@@ -206,6 +209,50 @@ describe('the pure layers still scale', () => {
    * would not have grown to 24x at 8x the input, it would have timed the
    * suite out. This one is a canary rather than a stopwatch.
    */
+  /**
+   * A4-001: sticky scroll used to derive its pinned rows from `fileSymbols`,
+   * a walk over the *whole* parsed tree, on every keystroke. What the panel
+   * actually needs is the chain of declarations enclosing one position, which
+   * `enclosingSymbols` gets by walking `.parent` from that position instead —
+   * a cost bounded by nesting depth, not document length. `sourceFile` nests
+   * two deep (a class, then a method) at any size, so this input's nesting
+   * does not grow with `lines` the way the six guards above's inputs do; the
+   * claim here is closer to flat than to linear, which is why this test uses
+   * its own tighter budget rather than the file's shared 24x.
+   *
+   * Measured locally: `enclosingSymbols` **0.8x-1.0x** at 16x the input (it
+   * does not grow at all, within noise); the walk it replaced, `stickyRows(
+   * fileSymbols(...))` over the same fixture and position, measured
+   * **17.4x-19.4x** — tracking the document, as A4-001 found by reading the
+   * code. A budget of 4 sits well above the flat implementation's noise and
+   * well below the old one's near-linear growth, so this fails on the
+   * regression this exists to catch and would not have failed on the
+   * complexity claim `stickyRows` alone still makes (that one is still
+   * guarded structurally: it only ever seees rows that fit in `max`).
+   */
+  it('pins sticky rows in proportion to nesting depth, not document length', () => {
+    const ts = jsParser.configure({ dialect: 'ts' });
+
+    const g = growth(
+      (lines) => {
+        const source = sourceFile(lines);
+        const doc = Text.of(source.split('\n'));
+        const tree = ts.parse(source);
+        // Three quarters of the way in, so both sizes measure a position deep
+        // inside the generated classes rather than the empty tail `sourceFile`
+        // pads with once it has enough lines.
+        const pos = Math.floor(doc.length * 0.75);
+        const topLine = doc.lineAt(pos).number;
+        return { doc, tree, pos, topLine } as const;
+      },
+      ({ doc, tree, pos, topLine }) => void enclosingSymbols(tree, doc, pos, topLine, 5),
+      2_000,
+      32_000,
+    );
+
+    expect(g.ratio, describeGrowth('enclosingSymbols', g, 4)).toBeLessThan(4);
+  });
+
   it('survives an unclosed fence with a long whitespace tail', () => {
     const g = growth(
       (size) => '```json\n' + ' '.repeat(size),
