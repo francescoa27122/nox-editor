@@ -78,6 +78,7 @@ import {
   EXPLAIN_INSTRUCTION,
   ProviderTransport,
   scopeFromSelection,
+  stillOnDisk,
 } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
@@ -3622,12 +3623,18 @@ export class NoxApp {
         run: () => {
           const session = this.agents.sessions.get().find((s) => this.agents.changesBy(s.id).length > 0);
           if (!session) return;
-          const { undone, skipped } = this.agents.undoSession(session.id);
+          const { undone, skipped, onDisk } = this.agents.undoSession(session.id);
+          // Same sentence the panel's button uses: the disk may still hold
+          // the agent's text, and "took back everything" alone hid that.
+          const unsaved = stillOnDisk(onDisk.length);
           if (skipped.length > 0) {
             this.notifications.warn(
               `Took back ${undone.length} of ${undone.length + skipped.length} files`,
-              'The rest have been edited since, so their changes were left alone.',
+              'The rest have been edited since, so their changes were left alone.' +
+                (unsaved ? ` ${unsaved}` : ''),
             );
+          } else if (unsaved) {
+            this.notifications.warn(`Took back everything ${session.label} did in the editor`, unsaved);
           } else {
             this.notifications.success(`Took back everything ${session.label} did`);
           }

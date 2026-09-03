@@ -288,6 +288,30 @@ export function scopeFromSelection(
   return { bufferId, fromLine: range.fromLine - 1, toLine: range.toLine - 1 };
 }
 
+/**
+ * What to tell the user when an undo left the agent's text on disk.
+ *
+ * One sentence shared by the panel's button and the palette command, so the
+ * two cannot describe the same outcome differently. Null when there is
+ * nothing to say, which is the common case. The failure this exists for: a
+ * user who applied, saved, pressed Undo, read "Took back everything", closed
+ * Nox and shipped the agent's edit, because the toast never mentioned the
+ * disk and the tab's dirty marker was the only hint.
+ */
+export function stillOnDisk(count: number): string | null {
+  if (count === 0) return null;
+  if (count === 1) {
+    return (
+      'One of them had been saved since, so its file on disk still holds the ' +
+      "agent's version until you save it again."
+    );
+  }
+  return (
+    `${count} of them had been saved since, so their files on disk still hold the ` +
+    "agent's version until you save them again."
+  );
+}
+
 export interface SessionOptions {
   /** Shown as the agent's name. Defaults to the transport's handshake. */
   label?: string;
@@ -654,15 +678,31 @@ export class AgentRuntime {
    * Newest first, because a set applied later may sit on top of an earlier one
    * in the same buffer's history and would refuse to be taken back out of
    * order — which `undoChangeSet` reports rather than forcing.
+   *
+   * `onDisk` names the undone buffers whose file still holds the agent's
+   * text: a save adds no history event, so after Save the set is still on
+   * top and the undo succeeds in the buffer while the disk keeps what was
+   * saved. A buffer that was clean going into the undo is exactly that case.
+   * Reported rather than saved over, because writing a file is not what a
+   * button marked Undo does; the toast says so instead.
    */
-  undoSession(sessionId: string): { undone: BufferId[]; skipped: BufferId[] } {
+  undoSession(sessionId: string): { undone: BufferId[]; skipped: BufferId[]; onDisk: BufferId[] } {
     const undone: BufferId[] = [];
     const skipped: BufferId[] = [];
+    const onDisk: BufferId[] = [];
 
     for (const changeSetId of this.changesBy(sessionId)) {
+      const clean = new Set(
+        (this.#workspace.log.get(changeSetId)?.bufferIds ?? []).filter(
+          (bufferId) => this.#workspace.get(bufferId)?.isDirty === false,
+        ),
+      );
       const outcome = this.#workspace.undoChangeSet(changeSetId);
       undone.push(...outcome.undone);
       skipped.push(...outcome.skipped);
+      for (const bufferId of outcome.undone) {
+        if (clean.has(bufferId) && !onDisk.includes(bufferId)) onDisk.push(bufferId);
+      }
     }
 
     this.#permissions.forgetSession({
@@ -671,7 +711,7 @@ export class AgentRuntime {
       label: sessionId,
     });
     this.#publish();
-    return { undone, skipped };
+    return { undone, skipped, onDisk };
   }
 
   /**
