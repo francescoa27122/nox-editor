@@ -101,6 +101,14 @@
 
   /* --- Accents ---------------------------------------------------------- */
   --nox-accent: #7dd3e0; /* glacial cyan — moonlight on water */
+  /* The primary button's hover. Referenced by `base.css` since the button
+     family was unified and declared nowhere until 2026-08-30, so the rule
+     fell back to `--nox-accent` (the resting colour) and the app's four
+     primary buttons answered the mouse with nothing. The same shape as the
+     `--nox-border-subtle` bug recorded above: an undefined custom property
+     fails silently, which is why `tests/token-definitions.test.ts` now holds
+     every `var(--nox-*)` reference to this file. */
+  --nox-accent-bright: #a3e3ec;
   --nox-accent-dim: #4b8e99;
   --nox-accent-glow: rgba(125, 211, 224, 0.22);
   --nox-violet: #8b7df5; /* twilight — selection, active spine */
@@ -139,6 +147,28 @@
   --nox-plugin-highlight: rgba(125, 211, 224, 0.14);
   --nox-search-match: rgba(227, 179, 65, 0.22);
   --nox-search-match-active: rgba(227, 179, 65, 0.45);
+
+  /* The five below moved here from `editor/theme.ts` on 2026-08-31, where
+     they were `rgba()` literals in CSS-in-JS that no theme could reach. The
+     visible symptom was a half-themed editor: a theme recolouring `accent`
+     moved a matching bracket's fill and left its outline glacial cyan, and
+     `.cm-selectionMatch` had no token at all. Each is the resting token it
+     belongs to at a different alpha, and each is themeable beside that
+     resting form, which is the rule `token-definitions.test.ts` pins for
+     `accent`/`accent-bright`.
+
+     Written as `rgba()` and not `color-mix()` even though every one is
+     exactly its base colour at an alpha, which would express the
+     relationship rather than restate it. `TerminalPanel` reads tokens off
+     the document with `getPropertyValue` and hands them to xterm, and a
+     custom property returns its *specified* text, so a `color-mix()` here
+     reaches a consumer that is not a CSS engine and cannot parse it. Values
+     in this file have a second audience. */
+  --nox-selection-match: rgba(125, 211, 224, 0.11);
+  --nox-match-bracket-outline: rgba(125, 211, 224, 0.4);
+  --nox-nonmatching-bracket: rgba(240, 97, 109, 0.12);
+  --nox-search-match-outline: rgba(227, 179, 65, 0.32);
+  --nox-search-match-active-outline: rgba(227, 179, 65, 0.7);
 
   /* --- Syntax ------------------------------------------------------------ */
   --nox-syn-keyword: #8b7df5;

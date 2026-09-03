@@ -29,6 +29,7 @@
       $overlay === 'git-branch' ||
       $overlay === 'code-action' ||
       $overlay === 'note-open' ||
+      $overlay === 'task-run' ||
       $overlay === 'language',
   );
 

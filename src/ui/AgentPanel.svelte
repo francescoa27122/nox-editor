@@ -66,6 +66,22 @@
     return isResourceScoped(grant.capability) ? 'any file' : 'anywhere';
   }
 
+  /**
+   * Which command the grant is confined to, in the title the prompt used.
+   *
+   * Shown since 2026-08-31, when grants stopped being keyed on the capability
+   * alone. Without it the list under-reports in the direction that matters:
+   * two rows reading "edit what is open / any file" would look like one
+   * duplicated grant rather than two different commands, and the whole reason
+   * the key narrowed is that those two are not interchangeable.
+   *
+   * Falls back to the id, and then to nothing, because a grant is only
+   * required to carry what the question carried.
+   */
+  function viaOf(grant: Grant): string {
+    return grant.description ?? grant.commandId ?? '';
+  }
+
   const STATUS: Record<SessionStatus, { label: string; tone: string }> = {
     running: { label: 'Working', tone: 'accent' },
     'awaiting-review': { label: 'Awaiting review', tone: 'warn' },
@@ -272,8 +288,10 @@
             {:else}
               <ul>
                 {#each held as grant (grant.key)}
+                  {@const via = viaOf(grant)}
                   <li>
                     <span>{describeCapability(grant.capability)}</span>
+                    {#if via}<span class="via">via {via}</span>{/if}
                     <code>{coversOf(grant)}</code>
                   </li>
                 {/each}
@@ -469,6 +487,14 @@
     /* The standing grants are the one thing on this panel that is still live,
        so they read at the warning colour the refused-action rows use. */
     color: var(--nox-warning);
+  }
+
+  /* Secondary to the capability, which is the thing being granted, but ahead
+     of the path in the reading order the prompt used: what, then by which
+     command, then where. */
+  .grants .via {
+    flex: none;
+    color: var(--nox-text-muted);
   }
 
   .grants code {

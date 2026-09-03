@@ -51,6 +51,7 @@ const EVERY_KIND: Record<OverlayKind, string> = {
   'git-branch': '.palette',
   'code-action': '.palette',
   'note-open': '.palette',
+  'task-run': '.palette',
   language: '.palette',
   settings: '.settings',
   keybindings: '.keys',
