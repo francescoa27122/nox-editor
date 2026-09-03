@@ -317,4 +317,21 @@
     background: var(--nox-hover);
     color: var(--nox-text-bright);
   }
+
+  /*
+    Yielding is the right trade, but it has a cost the `.menu-bar` comment
+    only hints at: at the 640px minimum the bar was 20px narrower than its
+    titles (a `scrollWidth` of 281 against a `clientWidth` of 261), so
+    "Tools" was clipped to "To" with no scrollbar to say there was more.
+    Tightening the title padding one step recovers 32px, and
+    `TitleBar.svelte` gives back more at the same breakpoint;
+    `tests/browser/menu-bar-fit.test.ts` holds the result in a browser that
+    has layout. Last in the file on purpose: it ties `.menu-title` above on
+    specificity and has to win on order.
+  */
+  @media (max-width: 800px) {
+    .menu-title {
+      padding-inline: var(--nox-sp-2);
+    }
+  }
 </style>

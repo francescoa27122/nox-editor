@@ -375,7 +375,8 @@
 
   .empty code {
     font-family: var(--nox-font-mono);
-    font-size: 0.92em;
+    /* One step under the prose around it, which is `--nox-fs-sm`. */
+    font-size: var(--nox-fs-xs);
     color: var(--nox-text-bright);
   }
 
@@ -501,7 +502,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--nox-font-mono);
-    font-size: 0.92em;
+    /* One step under the list around it, which is `--nox-fs-xs`. */
+    font-size: var(--nox-fs-2xs);
     color: var(--nox-text-muted);
   }
 

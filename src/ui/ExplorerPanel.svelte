@@ -4,6 +4,7 @@
   import { FOLDER_STATUS_LABEL, rollUpLetters, rollUpPaths } from '@core/folder-marks';
   import { canMoveInto, dirname, join, separatorOf } from '@core/path';
   import { rootLabel, type FlatNode } from '@services/filetree';
+  import { formatChord, platformIsMac } from '@services/keymap';
   import { useApp } from './context';
   import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
   import Icon from './Icon.svelte';
@@ -490,7 +491,10 @@
         {
           id: 'explorer.delete',
           label: many ? `Delete ${count} Items…` : 'Delete…',
-          hint: '⌫',
+          // The tree handles both keys (see `onKeydown`); the hint names the
+          // one each platform's users reach for, spelled the way the keymap
+          // spells every other chord in this menu.
+          hint: formatChord(platformIsMac ? 'backspace' : 'delete'),
           danger: true,
         },
         {
@@ -1074,8 +1078,13 @@
     color: var(--nox-text-faint);
   }
 
+  /* The twisty joins the icon on a selected row because the wash changes the
+     ground: faint measures 2.52:1 on it, under the 3:1 a glyph is held to,
+     while accent-dim measures 3.53:1 and is what the icon beside it already
+     wears. Held by tests/token-contrast.test.ts. */
   .row.open .icon,
-  .row.selected .icon {
+  .row.selected .icon,
+  .row.selected .twisty {
     color: var(--nox-accent-dim);
   }
 
