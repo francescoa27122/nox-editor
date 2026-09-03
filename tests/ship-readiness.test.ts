@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -96,5 +96,46 @@ describe('A8-005: third-party notices', () => {
     const licence = join(dirname(join(root, 'src-tauri', 'tauri.conf.json')), config.bundle.licenseFile ?? '');
     expect(existsSync(licence)).toBe(true);
     expect(read('README.md')).toContain('](THIRD-PARTY-NOTICES.md)');
+  });
+});
+
+describe('A8-006: the macOS floor matches the CSS the app is drawn with', () => {
+  /** Every file under `src/`, because a stylesheet can live in a component. */
+  function* walk(dir: string): Generator<string> {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) yield* walk(path);
+      else yield path;
+    }
+  }
+
+  /**
+   * `color-mix()` is the whole value of twenty background, border and
+   * text-decoration declarations, and an engine that cannot parse it drops
+   * each one: the diff view loses its add and remove tints, the review panel
+   * its hunk colouring. WebKit gained it in Safari 16.2, which ships with
+   * macOS 13. A floor below that is a packaging claim the CSS cannot keep.
+   *
+   * What this does not catch: a newer CSS feature with a higher floor. It
+   * holds the one the audit found; add the next one here when it arrives.
+   */
+  it('declares at least macOS 13 while any stylesheet uses color-mix()', () => {
+    let usesColorMix = false;
+    for (const file of walk(join(root, 'src'))) {
+      if (!/\.(css|svelte)$/.test(file)) continue;
+      if (readFileSync(file, 'utf8').includes('color-mix(')) {
+        usesColorMix = true;
+        break;
+      }
+    }
+    expect(usesColorMix).toBe(true);
+
+    const config = JSON.parse(read('src-tauri', 'tauri.conf.json')) as {
+      bundle: { macOS: { minimumSystemVersion: string } };
+    };
+    const major = Number(config.bundle.macOS.minimumSystemVersion.split('.')[0]);
+    expect(major).toBeGreaterThanOrEqual(13);
+    // And the README says so, in the section a downloader reads.
+    expect(read('README.md')).toMatch(/macOS 13 or newer/);
   });
 });

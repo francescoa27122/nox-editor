@@ -50,7 +50,9 @@ xattr -dr com.apple.quarantine /Applications/Nox.app
 
 You will need that command. Nox is ad-hoc signed rather than signed with an
 Apple Developer ID, so macOS quarantines it on download and calls it
-*"damaged"*. That sounds like a corrupt download. The file is fine.
+*"damaged"*. That sounds like a corrupt download. The file is fine. Nox needs
+macOS 13 or newer: the WebKit in older versions cannot draw the colours the
+diff and review views are made of.
 
 Linux packages are built on Ubuntu 22.04, so they need glibc 2.35 or newer.
 There is no AppImage.
