@@ -121,12 +121,16 @@ in the Agents panel. You can check what happened rather than trust it.
 Run **Configure Agents** from the command palette. Nox creates the file for
 you, fills it with a working example, and opens it. Point the example at an
 [Ollama](https://ollama.com) server, save, and you're done. There's no account,
-no API key, and no telemetry.
+no API key, and no telemetry. Nox makes one network request of its own: ten
+seconds after launch it fetches the release feed from GitHub to learn whether
+a newer version exists. The address is fixed, so the request carries nothing
+about you or your install, and finding a newer version only shows a toast.
+**Check for Updates on Launch** in Settings turns it off.
 
-The model runs on your own machine and Nox will only talk to your own machine.
-That limit lives in the part of the app a web page has no way to reach, so it
-isn't a setting that can be flipped by accident or by a page you happened to
-open.
+The model runs on your own machine, and the model integration will only talk
+to your own machine. That limit lives in the part of the app a web page has
+no way to reach, so it isn't a setting that can be flipped by accident or by
+a page you happened to open.
 
 **It reads and it proposes. It cannot run commands.** That isn't a switch you
 left off. Nox has no way to express "run this" to an agent yet.

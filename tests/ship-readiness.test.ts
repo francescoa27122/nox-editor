@@ -139,3 +139,21 @@ describe('A8-006: the macOS floor matches the CSS the app is drawn with', () => 
     expect(read('README.md')).toMatch(/macOS 13 or newer/);
   });
 });
+
+describe('A8-007: the README names the one outbound call and the setting that stops it', () => {
+  /**
+   * The README used to say Nox "will only talk to your own machine" while
+   * the updater fetched GitHub's release feed ten seconds after launch. The
+   * sentence that replaced it names the setting by its label, so this reads
+   * the label out of the schema rather than repeating it: rename the
+   * setting and the README goes stale here rather than in a bug report.
+   */
+  it('quotes the current label of workbench.checkForUpdates', () => {
+    const schema = read('src', 'services', 'config', 'schema.ts');
+    const block = /'workbench\.checkForUpdates': bool\(true, \{\s*label: '([^']+)'/.exec(schema);
+    expect(block?.[1]).toBeDefined();
+    const readme = read('README.md');
+    expect(readme).toContain(`**${block?.[1]}**`);
+    expect(readme).not.toContain('Nox will only talk to your own machine');
+  });
+});
