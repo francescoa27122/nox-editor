@@ -12,7 +12,8 @@
 //! **Output is a byte stream, not lines.** A prompt — `$ ` — has no trailing
 //! newline. Line-buffered reads, as in `agent.rs`, would hold it back until
 //! the user typed something, so the terminal would look frozen at the moment
-//! it is actually ready. Chunks are forwarded the instant they arrive.
+//! it is actually ready. A chunk that follows a quiet spell is forwarded the
+//! instant it arrives; a burst is batched, and `coalesce` says how.
 //!
 //! **A read boundary falls anywhere, including mid-character.** A UTF-8
 //! sequence split across two reads must not arrive as two broken ones, so
@@ -20,11 +21,16 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::ops::ControlFlow;
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::agent::wait_unlocked;
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -105,6 +111,78 @@ impl Utf8Stream {
         }
 
         out
+    }
+}
+
+/// Once an event has gone out, hold what arrives next for at most this long
+/// before the next one. One frame: a burst costs the webview at most sixty
+/// events a second per session, and typing never notices, because a
+/// keystroke's echo arrives long after the previous event went out.
+pub const COALESCE_INTERVAL: Duration = Duration::from_millis(16);
+/// ...or send the batch as soon as this much is pending, whichever is first,
+/// so a firehose becomes a stream of bounded events rather than one huge one.
+pub const COALESCE_BYTES: usize = 64 * 1024;
+
+/// Turn a stream of chunks into one event per burst.
+///
+/// The reader threads used to `emit` every chunk the instant it was read.
+/// Each emit serialises JSON and posts a script evaluation to the webview's
+/// main thread, and nothing throttled it, so `cat` of a large file or a
+/// verbose build queued tens of thousands of main-thread hops and the editor
+/// stopped responding until they drained. `search.rs` batches for the same
+/// reason; this is the same idea for the streaming processes.
+///
+/// The rule is a rate limit, not a delay. The first chunk after a quiet spell
+/// goes out at once, so a prompt or a keystroke's echo pays nothing. A chunk
+/// arriving within `COALESCE_INTERVAL` of the last event is held, joined with
+/// whatever else arrives before the interval is up or `COALESCE_BYTES` is
+/// pending, and sent as one event. Order is the channel's order. When the
+/// sender goes away, whatever is held goes out and the function returns, so
+/// the caller can emit its exit event knowing it follows the last data.
+///
+/// `emit` returns `Break` when there is nowhere left to put an event, the
+/// window being gone, and the loop ends there. Dropping the receiver is what
+/// then tells the reader thread to stop: its next `send` fails.
+///
+/// Generic over the chunk so `agent.rs` can batch lines with the same code,
+/// with `size_of` supplying the byte count the cap is measured in.
+pub fn coalesce<T>(
+    source: Receiver<T>,
+    size_of: impl Fn(&T) -> usize,
+    mut emit: impl FnMut(Vec<T>) -> ControlFlow<()>,
+) {
+    let mut last_emit: Option<Instant> = None;
+    loop {
+        let Ok(first) = source.recv() else { return };
+        let mut pending = size_of(&first);
+        let mut batch = vec![first];
+        let mut disconnected = false;
+
+        if let Some(last) = last_emit {
+            let deadline = last + COALESCE_INTERVAL;
+            while pending < COALESCE_BYTES {
+                let now = Instant::now();
+                if now >= deadline {
+                    break;
+                }
+                match source.recv_timeout(deadline - now) {
+                    Ok(chunk) => {
+                        pending += size_of(&chunk);
+                        batch.push(chunk);
+                    }
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if emit(batch).is_break() || disconnected {
+            return;
+        }
+        last_emit = Some(Instant::now());
     }
 }
 
@@ -217,52 +295,70 @@ pub fn nox_pty_open(
     })?;
 
     let child = Arc::clone(&session.child);
+    // Two threads per terminal. The reader does nothing but read and decode,
+    // so it is never the one waiting on the webview; the emitter turns what
+    // the reader produced into one event per burst (`coalesce` says why) and
+    // reaps the child once the reader is done, which keeps the exit event
+    // behind the last of the data.
+    let (sender, receiver) = channel::<String>();
+    std::thread::spawn(move || {
+        let mut decoder = Utf8Stream::default();
+        let mut buffer = [0u8; 8192];
+
+        loop {
+            match reader.read(&mut buffer) {
+                // EOF: the last handle to the slave closed, so the program
+                // is gone.
+                Ok(0) => break,
+                Ok(count) => {
+                    let data = decoder.push(&buffer[..count]);
+                    if data.is_empty() {
+                        continue;
+                    }
+                    // A failed send means the emitter has stopped, which
+                    // means the window is gone.
+                    if sender.send(data).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
     {
         let app = app.clone();
         let id = id.clone();
         std::thread::spawn(move || {
-            let mut decoder = Utf8Stream::default();
-            let mut buffer = [0u8; 8192];
-
-            loop {
-                match reader.read(&mut buffer) {
-                    // EOF: the last handle to the slave closed, so the program
-                    // is gone.
-                    Ok(0) => break,
-                    Ok(count) => {
-                        let data = decoder.push(&buffer[..count]);
-                        if data.is_empty() {
-                            continue;
-                        }
-                        // A failed emit means the window is gone.
-                        if app
-                            .emit(
-                                "nox://pty-data",
-                                DataPayload {
-                                    id: id.clone(),
-                                    data,
-                                },
-                            )
-                            .is_err()
-                        {
-                            break;
-                        }
+            coalesce(
+                receiver,
+                |data| data.len(),
+                |batch| {
+                    let payload = DataPayload {
+                        id: id.clone(),
+                        data: batch.concat(),
+                    };
+                    // A failed emit means the window is gone.
+                    if app.emit("nox://pty-data", payload).is_ok() {
+                        ControlFlow::Continue(())
+                    } else {
+                        ControlFlow::Break(())
                     }
-                    Err(_) => break,
-                }
-            }
+                },
+            );
 
             // Reaping here stops the child becoming a zombie when nobody calls
-            // close, exactly as in `agent.rs`.
-            let code = child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.wait().ok())
+            // close, exactly as in `agent.rs`, and with the same reaper: a
+            // shell that closed the pty but left a background job running
+            // must not hold the lock `close` needs.
+            let code = wait_unlocked(&child, |child| child.try_wait())
                 .map(|status| status.exit_code() as i32);
 
-            // Forget it, or the id stays registered for the life of the app and
-            // opening under it again is refused as "already open" — which is
-            // what happens after a reload restarts the renderer's counter.
+            // Forget it: the entry is stale now the child is gone. Left in place,
+            // a later `close` for this id would act on a dead child, `close_all` would
+            // iterate it, and the registry would grow by one for every terminal that
+            // ever ran. A reload cannot collide on the id, whatever this comment
+            // once said: `platform/tauri.ts` puts a per-load token in every id, so
+            // a fresh renderer never reuses one.
             if let Some(state) = app.try_state::<PtyState>() {
                 if let Ok(mut sessions) = state.0.lock() {
                     sessions.remove(&id);
@@ -282,6 +378,11 @@ pub fn nox_pty_open(
 /// Raw, with no newline added — unlike `nox_agent_send`. Keystrokes are what
 /// arrives here, and a terminal distinguishes Return from Ctrl-C from an
 /// arrow key by the exact bytes it is given.
+///
+/// Stays a plain `#[tauri::command]` on purpose. Keystrokes are sent without
+/// being awaited, and a sync body runs to completion before the next IPC
+/// message is read, so they reach the shell in the order they were typed.
+/// Under `(async)` each would be its own pool task and two could swap.
 #[tauri::command]
 pub fn nox_pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<()> {
     let mut sessions = state.0.lock().map_err(poisoned)?;
@@ -368,12 +469,122 @@ fn poisoned<T>(_: T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Only `read_until` uses these, and it is `#[cfg(unix)]` — the pty tests
-    // that need a real shell do not run on Windows. Ungated, this import was
-    // dead on the Windows leg: `cargo test` printed the warning and passed
-    // anyway, so it sat there until Clippy's `-D warnings` made it a failure.
-    #[cfg(unix)]
-    use std::time::{Duration, Instant};
+    /// The failure this prevents: one webview event per read. `cat` of a
+    /// large file or a verbose build produced tens of thousands of
+    /// main-thread emits and the editor stopped responding until they had
+    /// drained. A burst has to arrive as a few events, in order, with nothing
+    /// dropped and the tail delivered once the sender is gone.
+    ///
+    /// What it does not catch: how the webview copes with the events it does
+    /// get. There is still no acknowledgement from xterm back to Rust.
+    #[test]
+    fn joins_a_burst_into_fewer_events_without_reordering() {
+        let (sender, receiver) = channel();
+        let chunks: Vec<String> = (0..200).map(|i| format!("chunk-{i};")).collect();
+        let expected = chunks.concat();
+        std::thread::spawn(move || {
+            for chunk in chunks {
+                sender.send(chunk).expect("the emitter is still listening");
+            }
+        });
+
+        let mut events = Vec::new();
+        coalesce(
+            receiver,
+            |chunk: &String| chunk.len(),
+            |batch| {
+                events.push(batch.concat());
+                ControlFlow::Continue(())
+            },
+        );
+
+        assert_eq!(events.concat(), expected, "every byte, in the order it was read");
+        assert!(events.len() < 200, "200 chunks became {} events", events.len());
+    }
+
+    /// A batch stops growing at the byte budget, so a firehose becomes a
+    /// stream of bounded events rather than one enormous one the webview
+    /// parses in a single go. Everything is queued before the loop starts,
+    /// which makes the split deterministic: the first chunk goes out alone
+    /// (nothing has been emitted yet), then pairs up to the cap, then the
+    /// remainder.
+    #[test]
+    fn caps_a_batch_at_the_byte_budget() {
+        let (sender, receiver) = channel();
+        let chunk = "x".repeat(COALESCE_BYTES / 2 + 1);
+        for _ in 0..6 {
+            sender.send(chunk.clone()).expect("the emitter is still listening");
+        }
+        drop(sender);
+
+        let mut sizes = Vec::new();
+        coalesce(
+            receiver,
+            |chunk: &String| chunk.len(),
+            |batch| {
+                sizes.push(batch.concat().len());
+                ControlFlow::Continue(())
+            },
+        );
+
+        let c = chunk.len();
+        assert_eq!(sizes, vec![c, 2 * c, 2 * c, c]);
+    }
+
+    /// The first chunk after a quiet spell goes out at once. A prompt has no
+    /// trailing newline and nothing follows it until the user types, so a
+    /// coalescer that waited for company would show a terminal that looks
+    /// frozen at the moment it is ready, the failure the module comment warns
+    /// about.
+    #[test]
+    fn a_lone_chunk_is_not_held_back_for_company() {
+        let (sender, receiver) = channel();
+        let (seen_sender, seen) = channel();
+        let emitter = std::thread::spawn(move || {
+            coalesce(
+                receiver,
+                |chunk: &String| chunk.len(),
+                |batch| {
+                    seen_sender.send(batch.concat()).expect("the test is still waiting");
+                    ControlFlow::Continue(())
+                },
+            );
+        });
+
+        sender.send("$ ".to_string()).expect("the emitter is running");
+        let prompt = seen
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the prompt must arrive while the sender is still open");
+        assert_eq!(prompt, "$ ");
+
+        drop(sender);
+        emitter.join().expect("emitter thread");
+    }
+
+    /// `Break` from the emitter is the window going away. The loop ends, and
+    /// dropping the receiver is what stops the reader thread: its next send
+    /// fails, so it does not spin through megabytes with nowhere to put them.
+    #[test]
+    fn stops_reading_when_the_emitter_breaks() {
+        let (sender, receiver) = channel();
+        sender.send("a".to_string()).expect("the emitter is listening");
+
+        let mut events = 0;
+        coalesce(
+            receiver,
+            |chunk: &String| chunk.len(),
+            |_| {
+                events += 1;
+                ControlFlow::Break(())
+            },
+        );
+
+        assert_eq!(events, 1);
+        assert!(
+            sender.send("b".to_string()).is_err(),
+            "the receiver must be gone once the emitter broke"
+        );
+    }
 
     #[test]
     fn decodes_plain_text_in_one_piece() {

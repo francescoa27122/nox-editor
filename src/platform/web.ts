@@ -60,6 +60,11 @@ export class WebPlatform extends MemoryPlatform {
     return DEMO_ROOT;
   }
 
+  /** A browser tab can reload itself, which is the one thing the fake cannot. */
+  override async reloadWindow(): Promise<void> {
+    globalThis.location.reload();
+  }
+
   override async readConfigFile(name: string): Promise<string | null> {
     try {
       return globalThis.localStorage?.getItem(CONFIG_PREFIX + name) ?? null;
