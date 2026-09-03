@@ -195,10 +195,24 @@ describe('view commands', () => {
 
 describe('workspace and file commands', () => {
   it('file.saveAll writes every dirty buffer', async () => {
-    const { app, platform, ids } = await pane({ [A]: 'a', [B]: 'b' });
+    const { app, platform, ids, view } = await pane({ [A]: 'a', [B]: 'b' });
     for (const id of ids) {
       const state = app.workspace.stateOf(id)!;
-      app.workspace.applyTransaction(id, state.update({ changes: { from: 0, insert: 'x' } }));
+      const transaction = state.update({ changes: { from: 0, insert: 'x' } });
+      // `ids[0]` (A) is the pane's active buffer, so `buffer.state` for it is
+      // only ever advanced by the view's own dispatch (see
+      // `applyTransaction`'s doc comment: "the view dispatches here"). Calling
+      // `applyTransaction` on it directly, as the loop does for the
+      // background buffer B, desyncs `buffer.state` from what the mounted
+      // `EditorView` actually shows — a state no production path can reach,
+      // since `apply()` and `save()`'s formatting step both trust that
+      // equivalence when they route a change through `#dispatchToView`. That
+      // desync is exactly what made `save()`'s insertFinalNewline dispatch
+      // throw `RangeError: Invalid change range 2 to 2 (in doc of length 1)`
+      // here: it applied a change computed against A's edited state to a view
+      // still showing the one-character original.
+      if (id === ids[0]) view.dispatch(transaction);
+      else app.workspace.applyTransaction(id, transaction);
     }
     await app.commands.execute('file.saveAll');
     expect(await platform.readTextFile(A)).toBe('xa\n');
