@@ -209,6 +209,31 @@ describe('what the menu contains', () => {
     });
   });
 
+  /**
+   * The failure this prevents, found by the 2026-09 audit (A1-003): the
+   * drawn menu dropped every predefined item and put nothing in its place,
+   * so a Windows or Linux user had no Cut, Copy or Paste under Edit, no About
+   * or Exit under Nox, and no Full Screen under View. Those are Nox commands
+   * now, and off macOS the menu has to list them where the system items
+   * would have been.
+   */
+  it('lists the commands behind the system items where there is no system', () => {
+    const app = new NoxApp(new MemoryPlatform());
+    const menuFor = (label: string) => {
+      const node = app.menu
+        .describe()
+        .find((n): n is Extract<MenuNode, { kind: 'submenu' }> =>
+          n.kind === 'submenu' && n.label === label,
+        );
+      if (!node) throw new Error(`no ${label} menu`);
+      return commandIds(node.items);
+    };
+
+    expect(menuFor('Edit')).toEqual(expect.arrayContaining(['edit.cut', 'edit.copy', 'edit.paste']));
+    expect(menuFor('Nox')).toEqual(expect.arrayContaining(['app.about', 'app.quit']));
+    expect(menuFor('View')).toContain('view.toggleFullscreen');
+  });
+
   /** Hidden commands are hidden from the palette; a menu is no different. */
   it('omits hidden commands', () => {
     const app = new NoxApp(new MemoryPlatform());

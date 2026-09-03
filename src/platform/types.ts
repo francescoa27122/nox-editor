@@ -701,6 +701,13 @@ export interface Platform {
   toggleMaximizeWindow(): Promise<boolean>;
 
   /**
+   * Enter fullscreen, or leave it when already there. Resolves to the new
+   * state. For the drawn menu's Full Screen item: macOS gets a predefined one
+   * from the system, and everywhere else nothing could ask for it.
+   */
+  toggleFullscreen(): Promise<boolean>;
+
+  /**
    * Close the window the way the OS would — running the close handler, so
    * unsaved work is still persisted. Not `destroy`, which skips it.
    */

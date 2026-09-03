@@ -903,6 +903,46 @@ export class NoxApp {
   }
 
   /**
+   * Cut and Copy through the browser's own command with the editor focused,
+   * so CodeMirror's handlers do the work: they know about multiple ranges and
+   * take the whole line when nothing is selected, and a second copy of that
+   * rule here would drift from the keyboard path. Only the drawn menu
+   * dispatches these; macOS leaves them to the responder chain.
+   */
+  #editorClipboard(kind: 'cut' | 'copy'): boolean {
+    return this.#runEditor((view) => {
+      view.focus();
+      return typeof document.execCommand === 'function' && document.execCommand(kind);
+    });
+  }
+
+  /**
+   * Paste is the one clipboard verb a page cannot issue through
+   * `execCommand`: Chromium refuses it from script. Read the clipboard
+   * instead and hand the text to the editor as the paste it would have been.
+   */
+  async #pasteIntoEditor(): Promise<boolean> {
+    const view = this.view.get();
+    if (!view) return false;
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      this.notifications.error('Could not read the clipboard.');
+      return false;
+    }
+    if (text.length > 0) {
+      view.dispatch({
+        ...view.state.replaceSelection(text),
+        userEvent: 'input.paste',
+        scrollIntoView: true,
+      });
+    }
+    view.focus();
+    return true;
+  }
+
+  /**
    * Undo or redo, taking a multi-file change set back as one step.
    *
    * A project-wide replace is one action to the user, so it should cost one
@@ -3823,6 +3863,37 @@ export class NoxApp {
         enabled: editorEnabled,
         run: () => this.#step('redo'),
       },
+      // The clipboard three exist for the drawn menu on Windows and Linux.
+      // On macOS `COVERED_BY_SYSTEM_ITEMS` keeps them out of the menu, where
+      // the predefined items act on whatever has focus.
+      {
+        id: 'edit.cut',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        capabilities: ['buffer.edit'],
+        title: 'Cut',
+        keyHint: 'Mod+X',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#editorClipboard('cut'),
+      },
+      {
+        id: 'edit.copy',
+        title: 'Copy',
+        keyHint: 'Mod+C',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#editorClipboard('copy'),
+      },
+      {
+        id: 'edit.paste',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        capabilities: ['buffer.edit'],
+        title: 'Paste',
+        keyHint: 'Mod+V',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#pasteIntoEditor(),
+      },
       {
         id: 'edit.selectAll',
         title: 'Select All',
@@ -4168,6 +4239,18 @@ export class NoxApp {
           this.config.set('workbench.showStatusBar', !this.config.get('workbench.showStatusBar')),
       },
       {
+        id: 'view.toggleFullscreen',
+        title: 'Toggle Full Screen',
+        category: 'View',
+        keywords: ['fullscreen', 'full screen', 'window'],
+        // Awaited, not voided: the drawn menu on macOS never lists this (the
+        // predefined item does), and the title bar hears the change through
+        // `onFullscreenChange` rather than from the return value.
+        run: async () => {
+          await this.platform.toggleFullscreen();
+        },
+      },
+      {
         id: 'view.toggleWordWrap',
         title: 'Toggle Word Wrap',
         category: 'View',
@@ -4507,6 +4590,21 @@ export class NoxApp {
 
       // --- Application ------------------------------------------------------
       {
+        id: 'app.about',
+        title: 'About Nox',
+        category: 'Application',
+        keywords: ['version', 'help', 'info'],
+        // A notification rather than a panel: the one thing About has to
+        // answer is "which version is this", and the diagnostics report
+        // already carries the rest for anyone filing an issue.
+        run: () => {
+          this.notifications.info(
+            `Nox ${__APP_VERSION__}`,
+            'A fast, dark, keyboard-first text editor.',
+          );
+        },
+      },
+      {
         id: 'app.checkForUpdates',
         title: 'Check for Updates…',
         category: 'Application',
@@ -4547,6 +4645,16 @@ export class NoxApp {
         run: async () => {
           await this.copyToClipboard(this.diagnostics.report(this.#environment()), 'diagnostics');
         },
+      },
+      {
+        id: 'app.quit',
+        title: 'Exit',
+        category: 'Application',
+        keywords: ['quit', 'close', 'window'],
+        // Through the close request, not `destroy`: the close handler is
+        // what writes the session, and Exit must lose no more than the X
+        // button does.
+        run: () => this.platform.closeWindow(),
       },
     ];
 

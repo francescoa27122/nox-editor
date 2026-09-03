@@ -313,6 +313,13 @@ export class TauriPlatform implements Platform {
     await getCurrentWindow().close();
   }
 
+  async toggleFullscreen(): Promise<boolean> {
+    const window = getCurrentWindow();
+    const next = !(await window.isFullscreen());
+    await window.setFullscreen(next);
+    return next;
+  }
+
   async onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void> {
     const window = getCurrentWindow();
     handler(await window.isMaximized());

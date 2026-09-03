@@ -1161,6 +1161,14 @@ export class MemoryPlatform implements Platform {
     return false;
   }
 
+  /** What the window would report; there is none, so a flag stands in. */
+  fullscreen = false;
+
+  async toggleFullscreen(): Promise<boolean> {
+    this.fullscreen = !this.fullscreen;
+    return this.fullscreen;
+  }
+
   async closeWindow(): Promise<void> {}
 
   async onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void> {
