@@ -5171,8 +5171,10 @@ export class NoxApp {
       'Mod+Alt+N': 'notes.open',
       // Bare F10 is free: all three existing F10 handlers require Shift, and
       // `editor-context-menu.test.ts` asserts an unmodified F10 is left
-      // alone. Alt-mnemonics were the alternative and collide — `Alt+G` is
-      // already `nav.goToLine` off macOS, which is the Go menu's own letter.
+      // alone. Alt-mnemonics were the alternative, and A5-003 is the decision
+      // about whether to add them; `Alt+G` stopped being `nav.goToLine` off
+      // macOS with A1-007, so that collision is gone but the decision is not
+      // this binding's to take.
       'F10': 'menubar.focus',
       // The problems list is the panel most worth a hotkey, and ⌘⇧M is the
       // convention everywhere. References keeps no chord of its own: its
@@ -5198,15 +5200,17 @@ export class NoxApp {
       // Edit
       'Mod+F': 'edit.find',
       'Mod+Alt+F': 'edit.replace',
-      'Mod+G': 'edit.findNext',
+      // Find Next is `F3` on every platform, and `Mod+G` as well on macOS
+      // only. See the Go to Line binding below `bindAll` for why the two
+      // differ (A1-007).
       F3: 'edit.findNext',
       // `Mod+Shift+G` used to be here, and is now the Git panel — see the
       // sidebar block above. Find Previous keeps `Shift+F3`, which is the
       // symmetric half of `F3` and so leaves that pair whole; what it costs
-      // is the shifted half of the `Mod+G` pair, and that is the whole price
-      // of the trade. One line of `keybindings.json` takes it back for anyone
-      // who wants it, which is the difference between removing a binding here
-      // and removing it from an editor that cannot be rebound.
+      // is the shifted half of macOS's `⌘G` pair, and that is the whole
+      // price of the trade. One line of `keybindings.json` takes it back for
+      // anyone who wants it, which is the difference between removing a
+      // binding here and removing it from an editor that cannot be rebound.
       'Shift+F3': 'edit.findPrevious',
       'Mod+Shift+L': 'edit.selectAllMatches',
       // ⌘⇧[ / ⌘⇧] already switch tabs, so folding takes the ⌥ variants.
@@ -5244,9 +5248,20 @@ export class NoxApp {
       'Mod+Alt+K': 'prefs.keybindings',
     });
 
-    // Go to Line: ⌃G matches macOS convention without colliding with ⌘G
-    // (Find Next). On Windows and Linux ⌃G is already Find Next, so use ⌥G.
-    this.keymap.bind(platformIsMac ? 'Ctrl+G' : 'Alt+G', 'nav.goToLine');
+    // Go to Line takes ⌃G everywhere, which is one chord that satisfies both
+    // conventions at once: on macOS it is the platform's own, and on Windows
+    // and Linux `Ctrl+G` is what VS Code, Sublime, Notepad++, gedit and Kate
+    // all give it (A1-007). It used to be ⌥G off macOS, which is Nox's own
+    // invention and appears in no other editor, and the reason was that
+    // `Mod+G` had taken `Ctrl+G` there for Find Next.
+    //
+    // So Find Next gives it up off macOS and keeps `F3`, which is the
+    // platform's chord for Find Next and was already bound beside it, with
+    // `Shift+F3` still Find Previous. Nothing is left unbound. On macOS ⌘G
+    // is still Find Next and ⌃G is still Go to Line, so nothing moves there
+    // at all, and the two bindings are separate chords rather than one.
+    this.keymap.bind('Ctrl+G', 'nav.goToLine');
+    if (platformIsMac) this.keymap.bind('Mod+G', 'edit.findNext');
 
     // ⌘1…⌘9 jump to a tab by position.
     for (let index = 0; index < 9; index++) {
