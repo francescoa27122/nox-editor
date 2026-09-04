@@ -228,6 +228,117 @@ describe('the read log', () => {
   });
 });
 
+describe('the workspace boundary on reads', () => {
+  /**
+   * A project, plus a file the user has open from outside it.
+   *
+   * `.env` because that is the case the boundary exists for: Nox opens
+   * anything you point it at, and until 2026-09-03 an agent got whatever was
+   * in a tab. The file is opened last, so it is also the active one, which is
+   * what the opening brief would otherwise have quoted from.
+   */
+  async function withOutsideFile() {
+    const fixture = await setup();
+    fixture.platform.seedFile('/elsewhere/.env', 'API_KEY=hunter2\n');
+    fixture.context.setViewportProvider(() => ({ from: 1, to: 5 }));
+    const inside = (await fixture.workspace.open('/w/src/main.ts'))!;
+    const outside = (await fixture.workspace.open('/elsewhere/.env'))!;
+    return { ...fixture, inside, outside };
+  }
+
+  it('refuses a buffer outside the root, and logs the refusal', async () => {
+    const { context, outside } = await withOutsideFile();
+    const reader = context.reader(agent);
+
+    expect(reader.bufferText(outside)).toBeNull();
+    expect(reader.selection(outside)).toBeNull();
+    expect(reader.viewport(outside)).toBeNull();
+
+    // Logged rather than silent. The Agents panel renders these rows, and a
+    // refusal that leaves no trace looks exactly like a read that never
+    // happened, which is the one reading an audit must not have to guess at.
+    expect(context.reads.get().map((read) => [read.method, read.target, read.refused])).toEqual([
+      ['bufferText', outside, true],
+      ['selection', outside, true],
+      ['viewport', outside, true],
+    ]);
+  });
+
+  it('still answers for a buffer inside the root', async () => {
+    const { context, inside } = await withOutsideFile();
+    const reader = context.reader(agent);
+
+    expect(reader.bufferText(inside, { lines: { from: 1, to: 1 } })).toBe('const a = 1;');
+    expect(reader.viewport(inside)).toEqual({ from: 1, to: 5 });
+    expect(context.reads.get().every((read) => read.refused === undefined)).toBe(true);
+  });
+
+  it('lists only the files inside the root, and no active one outside it', async () => {
+    const { context, inside, outside } = await withOutsideFile();
+    const reader = context.reader(agent);
+
+    expect(reader.openBuffers().map((buffer) => buffer.id)).toEqual([inside]);
+    // Null rather than the id: handing back an id every other method refuses
+    // would point an agent at a file and then deny it in the same breath.
+    expect(reader.activeBuffer()).toBe(null);
+    // The service under the reader is unchanged; the boundary is the reader's.
+    expect(context.openBuffers().map((buffer) => buffer.id)).toEqual([inside, outside]);
+  });
+
+  it('does not narrow what the user sees', async () => {
+    const { context, outside } = await withOutsideFile();
+    const reader = context.reader({ kind: 'user' });
+
+    expect(reader.openBuffers()).toHaveLength(2);
+    expect(reader.bufferText(outside)).toBe('API_KEY=hunter2\n');
+    expect(context.reads.get()).toEqual([]);
+  });
+
+  it('resolves the path rather than comparing its prefix', async () => {
+    // The `contains` / `containsResolved` distinction, and why the boundary
+    // asks the second one: this path reads as being under `/w` and the OS
+    // resolves it somewhere else entirely. `MemoryPlatform` normalises for
+    // storage while the buffer keeps the path it was opened by, which is the
+    // shape a traversal arrives in.
+    //
+    // What this does NOT cover is a symlink inside the root pointing out of
+    // it: `MemoryPlatform` models no links, `containsResolved` resolves `..`
+    // and not links, and the renderer has no real-path capability to ask with.
+    // That hole is open, and ARCHITECTURE.md §7 says so.
+    const { platform, workspace, context } = await setup();
+    platform.seedFile('/secrets/id_rsa', 'PRIVATE\n');
+    const id = (await workspace.open('/w/../secrets/id_rsa'))!;
+
+    expect(workspace.get(id)!.path).toBe('/w/../secrets/id_rsa');
+    expect(context.inScope(id)).toBe(false);
+    expect(context.reader(agent).bufferText(id)).toBe(null);
+  });
+
+  it('reads an untitled buffer, which is outside nothing', async () => {
+    const { workspace, context } = await setup();
+    const id = workspace.newUntitled({ content: 'scratch\n' });
+
+    expect(context.inScope(id)).toBe(true);
+    expect(context.reader(agent).bufferText(id)).toBe('scratch\n');
+  });
+
+  it('has no boundary to apply when no folder is open', async () => {
+    // The same answer `PermissionService` gives `fs.*` in this state, and the
+    // reason it is not stricter: Nox opens with no folder and a scratch
+    // buffer, and an agent that could read nothing there would be broken for
+    // the session most people start in. What still bounds it is that every
+    // buffer reachable here is one the user opened by hand.
+    const platform = new MemoryPlatform();
+    platform.seedFile('/elsewhere/.env', 'API_KEY=hunter2\n');
+    const workspace = new WorkspaceService(platform, () => history());
+    const context = new ContextService(workspace, new FileTreeService(platform));
+    const id = (await workspace.open('/elsewhere/.env'))!;
+
+    expect(workspace.rootPath.get()).toBe(null);
+    expect(context.reader(agent).bufferText(id)).toBe('API_KEY=hunter2\n');
+  });
+});
+
 describe('an agent, end to end', () => {
   /**
    * The whole platform in one test: read through the context API, propose a

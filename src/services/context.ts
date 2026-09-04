@@ -1,3 +1,4 @@
+import { containsResolved } from '@core/path';
 import { Signal } from '@core/signal';
 import type { FileTreeService } from './filetree';
 import type { Principal } from './permissions';
@@ -15,14 +16,23 @@ import type { BufferId, Encoding, Eol, ExternalState, WorkspaceService } from '.
  *    `Signal`. A caller that could reach a buffer could mutate it, and every
  *    mutation is supposed to go through `workspace.apply` under the
  *    permission model. A read API that leaks a handle is a hole in that.
- * 2. **Reading is not gated, but it is recorded.** Context cannot leave the
- *    process on its own — `net.request` is the capability that matters, and
- *    it is checked by the five commands that can reach the network. It was
- *    declared by none of them until 2026-08-31, which made this sentence an
- *    intention rather than a fact; `tests/net-request-gate.test.ts` is what
- *    stops it becoming one again. Prompting per read would mean a dialog for every
- *    keystroke of an agent's thinking, so instead every read by a non-user
- *    principal lands in `reads`.
+ * 2. **Reading is bounded by the workspace, and recorded.** A non-user
+ *    principal reads the buffers inside the open folder and nothing else, so
+ *    a `.env` or an `~/.aws/credentials` the user happens to have in a tab is
+ *    not part of what Nox hands a program. The boundary is the one
+ *    `PermissionService` already applies to `fs.*`, asked with the same
+ *    `containsResolved`, because two definitions of "inside the workspace"
+ *    would be a rule nobody could state. `inScope` below is the whole of it.
+ *
+ *    Within that bound reads are recorded rather than prompted: a dialog per
+ *    read would be a dialog for every keystroke of an agent's thinking, so
+ *    every read by a non-user principal lands in `reads`, refusals included.
+ *    This used to rest on "context cannot leave the process on its own",
+ *    which was never true of a stdio agent. That is another process with its
+ *    own network, and `net.request` gates Nox's commands, not it. The
+ *    capability is still real and still worth having
+ *    (`tests/net-request-gate.test.ts` stops it lapsing again); it just
+ *    bounds what an in-process caller can send, not what an agent can.
  *
  * See AGENT-PLATFORM.md §2.5.
  */
@@ -118,6 +128,15 @@ export interface ContextRead {
   method: string;
   target?: string;
   at: number;
+  /**
+   * Set when the read was refused for asking about a buffer outside the root.
+   *
+   * Recorded rather than dropped, because "the agent tried to read the file
+   * you have open outside the project" is exactly what an audit is looking
+   * for, and a refusal that leaves no trace is indistinguishable from a read
+   * that never happened.
+   */
+  refused?: true;
 }
 
 /** Where a buffer is scrolled to, when it is on screen at all. */
@@ -158,15 +177,54 @@ export class ContextService {
   }
 
   /** @internal — called by `ContextReader`. */
-  record(principal: Principal, method: string, target?: string): void {
+  record(principal: Principal, method: string, target?: string, refused = false): void {
     // The user's reads are not recorded, for the same reason their permission
     // decisions are not: it would bury what an audit is looking for.
     if (principal.kind === 'user') return;
     this.reads.update((current) =>
-      [...current, { principal, method, at: Date.now(), ...(target ? { target } : {}) }].slice(
-        -READ_LOG_LIMIT,
-      ),
+      [
+        ...current,
+        {
+          principal,
+          method,
+          at: Date.now(),
+          ...(target ? { target } : {}),
+          ...(refused ? { refused: true as const } : {}),
+        },
+      ].slice(-READ_LOG_LIMIT),
     );
+  }
+
+  /**
+   * Whether a buffer is inside the boundary a non-user principal reads within.
+   *
+   * Three cases, and only the last refuses:
+   *
+   * - **No path.** An untitled buffer is not outside anything, and refusing it
+   *   would leave an agent with nothing to read in the state Nox opens in:
+   *   no folder, one scratch buffer.
+   * - **No folder open.** There is no boundary to be outside of, which is the
+   *   answer `PermissionService` already gives `fs.*` in that state. What
+   *   still bounds a reader is that everything reachable here is a buffer the
+   *   user opened by hand.
+   * - **A path outside the root.** Refused, including a file that is already
+   *   open. What the boundary is about is what Nox hands a program, and a
+   *   credentials file in a tab is the case that motivated it.
+   *
+   * `containsResolved` rather than `contains`, for the reason that function
+   * records: `<root>/../secrets/.env` reads as being under the root and is
+   * not. What neither resolves is a symlink, so a link inside the root
+   * pointing out of it is still readable. Closing that wants a real-path
+   * capability the renderer does not have, and the permission layer has the
+   * same gap for `fs.*`, so it is one known limit of one boundary rather than
+   * a second quieter one. ARCHITECTURE.md §7 carries it.
+   */
+  inScope(id: BufferId): boolean {
+    const path = this.#workspace.get(id)?.path ?? null;
+    if (path === null) return true;
+    const root = this.#workspace.rootPath.get();
+    if (!root) return true;
+    return containsResolved(root, path);
   }
 
   // --- The reads themselves ------------------------------------------------
@@ -331,27 +389,60 @@ export class ContextReader {
     return this.#principal;
   }
 
+  /**
+   * Whether this principal may read `id`.
+   *
+   * The user is exempt, for the same reason their reads are not logged: this
+   * bounds what Nox hands a program, and it is not a restriction on the person
+   * who opened the file. Every other principal, agent and plugin alike, gets
+   * the workspace boundary, because "which program is asking" is not what the
+   * question turns on.
+   */
+  #mayRead(id: BufferId): boolean {
+    return this.#principal.kind === 'user' || this.#context.inScope(id);
+  }
+
+  /** Record a refused read and answer with nothing. */
+  #refuse(method: string, id: BufferId): null {
+    this.#context.record(this.#principal, method, id, true);
+    return null;
+  }
+
   openBuffers(): BufferSummary[] {
     this.#context.record(this.#principal, 'openBuffers');
-    return this.#context.openBuffers();
+    const open = this.#context.openBuffers();
+    // Filtered rather than refused: a listing is not about one buffer, so
+    // there is nothing to answer `null` to. Omitting the out-of-root ones is
+    // also what keeps the opening brief honest, since `AgentRuntime` builds it
+    // from this listing and so cannot name, or quote a selection from, a file
+    // the reader would refuse the text of a moment later.
+    return open.filter((buffer) => this.#mayRead(buffer.id));
   }
 
   activeBuffer(): BufferId | null {
     this.#context.record(this.#principal, 'activeBuffer');
-    return this.#context.activeBuffer();
+    const id = this.#context.activeBuffer();
+    // Null, not the id: an id handed out here is one `bufferText` refuses, and
+    // pointing an agent at a buffer it may not read is worse than saying there
+    // is no active one.
+    if (id !== null && !this.#mayRead(id)) return null;
+    return id;
   }
 
   bufferText(id: BufferId, options?: TextOptions): string | null {
+    if (!this.#mayRead(id)) return this.#refuse('bufferText', id);
     this.#context.record(this.#principal, 'bufferText', id);
     return this.#context.bufferText(id, options);
   }
 
   selection(id: BufferId): SelectionInfo | null {
+    if (!this.#mayRead(id)) return this.#refuse('selection', id);
     this.#context.record(this.#principal, 'selection', id);
     return this.#context.selection(id);
   }
 
   viewport(id: BufferId): LineRange | null {
+    if (!this.#mayRead(id)) return this.#refuse('viewport', id);
     this.#context.record(this.#principal, 'viewport', id);
     return this.#context.viewport(id);
   }
