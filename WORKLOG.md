@@ -8,6 +8,54 @@ are knowledge.**
 
 ---
 
+## 2026-09-03 - A1-001 Gated half: single instance, then file associations
+
+Gated decision 3 approved: both halves, single instance first, because the
+session-overwrite risk is the sharper edge and associations make it worse.
+Branch `gated/file-opening`, two commits, not pushed.
+
+**Shipped:** `tauri-plugin-single-instance` registered first in
+`src-tauri/src/lib.rs`; a second launch's argv goes through
+`launch::second_instance_paths`, the same filter the first launch uses, and
+`raise_main_window` unminimises, shows and focuses. Exempt: the `wdio` debug
+binary and any launch carrying `--geometry`, both harnesses, argued at the call
+site and in `ARCHITECTURE.md`. Then `bundle.fileAssociations` in
+`src-tauri/tauri.conf.json`: three entries, 57 extensions, all derived from
+`src/core/languages.ts`, held there by `tests/ship-readiness.test.ts`.
+
+**Verified:** Windows, against the debug binary. A second launch naming a file
+exited 0, one process survived, and its window title gained the probe file:
+`si-probe.txt - <workspace> - Nox`. A `--geometry` launch alongside it gave two
+processes. The
+config was checked against `node_modules/@tauri-apps/cli/config.schema.json`
+rather than assumed, and the new tests were disproved by injecting an unknown
+key and an unknown extension: both failed, both pass restored. `npm test`
+2,775 passed, `check` 0 errors, `lint` 0 errors, `build` clean, clippy 0 on
+both feature configurations, `cargo test` 160 passed.
+
+**The finding that changed the design.** The generated `installer.nsi` shows
+Tauri's NSIS calling `APP_ASSOCIATE`, which writes `Software\Classes\.<ext>`
+itself: on Windows an install makes Nox the *default* opener, backing the old
+value up for the uninstaller. `rank` is `LSHandlerRank` and macOS-only, so
+there is no offer-only mode on Windows. `.html`, `.htm` and `.xhtml` were
+dropped for that reason, and `name` was changed to `Nox.<Something>` because
+Windows uses it as the ProgID and Tauri defaults it to `ext[0]`.
+
+**Next:** open the PR and wait for CI, in particular the three e2e legs. The
+exemption should mean they never see the plugin, but that is reasoning, not a
+measurement, and CI is the only place it can be measured.
+
+**Blocked:** the packaged installers. Only the NSIS script was read, on
+Windows; nobody has run the installer or seen a macOS `Info.plist` with these
+entries. macOS and Linux association behaviour is entirely unverified here.
+
+**Confidence:** high on single instance, which was driven end to end on
+Windows. Medium on associations: the block is schema-valid and reaches the
+Windows installer script correctly, and what a machine does after that
+installer runs has not been observed.
+
+---
+
 ## 2026-09-02 - Full-project audit, rated, and 69 findings fixed across seven PRs
 
 Asked for a defensible 1-to-100 rating of Nox backed by a full audit, then

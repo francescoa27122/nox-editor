@@ -57,6 +57,40 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "fileAssociations": [
+      {
+        "ext": ["txt", "text", "log"],
+        "name": "Nox.PlainText",
+        "description": "Plain text",
+        "mimeType": "text/plain",
+        "role": "Editor",
+        "rank": "Default"
+      },
+      {
+        "ext": [
+          "ts", "mts", "cts", "tsx", "js", "mjs", "cjs", "jsx",
+          "css", "scss", "sass", "svelte", "vue",
+          "py", "pyi", "pyw", "rb", "php", "lua",
+          "rs", "go", "c", "h", "cc", "cpp", "cxx", "hpp", "hh",
+          "java", "cs", "kt", "kts", "swift",
+          "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1",
+          "sql", "yml", "yaml", "toml", "ini", "cfg", "properties",
+          "dockerfile"
+        ],
+        "name": "Nox.SourceCode",
+        "description": "Source code",
+        "mimeType": "text/plain",
+        "role": "Editor",
+        "rank": "Default"
+      },
+      {
+        "ext": ["json", "jsonc", "md", "markdown", "mdx", "xml"],
+        "name": "Nox.StructuredText",
+        "description": "Structured text",
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ],
     "macOS": {
       "minimumSystemVersion": "13.0"
     }

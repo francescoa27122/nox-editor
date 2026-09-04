@@ -1835,6 +1835,45 @@ The exemption is `cfg!`, not `#[cfg]`. Compiling the registration out leaves
 `enqueue_second_instance` with no caller, and `-D warnings` turns that into a
 dead-code error in the one configuration CI never runs clippy over.
 
+### The file types the installers claim, and how loudly
+
+`bundle.fileAssociations` in `tauri.conf.json` is three entries rather than
+thirty: plain text, source code, and the structured formats another tool also
+makes. The extensions come from `core/languages.ts` and nowhere else, and
+`tests/ship-readiness.test.ts` fails if the block ever claims one the editor
+cannot name, because an association is a promise that the status bar and the
+highlighter keep.
+
+**`rank` is a macOS lever only, and Windows has no equivalent.** That is worth
+knowing before reading the block as humble. On macOS `role` becomes
+`CFBundleTypeRole` and `rank` becomes `LSHandlerRank`, so `Editor` plus
+`Alternate` says "Nox can edit this, but do not prefer it". On Windows the
+generated `installer.nsi` calls `APP_ASSOCIATE`, which writes
+`Software\Classes\.<ext>` itself: an install makes Nox the default opener for
+every extension named, backing the previous value up under
+`<ProgID>_backup` for the uninstaller to put back. There is no offer-only
+setting to choose.
+
+That asymmetry is what decides the list. Claiming `.rs` or `.py` is what every
+editor's installer does and is reversible. Claiming `.html` is taking a
+double-click away from the browser, which is what the user meant by it, so
+`.html`, `.htm` and `.xhtml` are not claimed at all even though Nox highlights
+them; nor is `.svg`, which is an image everywhere else, or `.plist`, which is
+often not text. `.json`, `.md` and `.xml` are claimed at `Alternate`, which is
+as quiet as the two platforms between them allow.
+
+**`name` is the Windows ProgID as well as `CFBundleTypeName`.** Tauri defaults
+it to `ext[0]`, which would put a registry key called `txt` in
+`Software\Classes`, so all three are spelled `Nox.<Something>` and a test
+holds them to it.
+
+There is no per-association icon: the schema in
+`@tauri-apps/cli/config.schema.json` has no such property, and every
+association takes the app icon through `DefaultIcon` on Windows. That schema
+is what the test validates against, read out of the installed CLI, because a
+key Tauri does not recognise is not an error. It is a claim that silently
+never reaches an installer.
+
 ### Long panels are windowed, and each publishes its own row height
 
 The explorer and the search results both render flat, uniform-height row
