@@ -269,6 +269,20 @@ export class NoxApp {
     // command, so this single check covers everything a plugin or agent could
     // ask for — and the user never reaches it.
     this.commands.setGuard(async (command, principal, resource) => {
+      // A non-user principal may only run a command that says what it does.
+      // An absent `capabilities` means "nothing with a side effect", which is
+      // a claim nobody verifies, so an agent or a plugin reaching a command
+      // whose author forgot is refused rather than waved through. Refusing
+      // costs an agent workflow until the declaration is added; allowing costs
+      // an unlogged write. `tests/command-capabilities.test.ts` keeps the set
+      // of commands this refuses visible and grouped by why.
+      if (!command.capabilities?.length) {
+        this.permissions.refuseUndeclared({
+          principal,
+          commandId: command.id,
+          description: command.title,
+        });
+      }
       for (const capability of command.capabilities ?? []) {
         await this.permissions.require({
           principal,
