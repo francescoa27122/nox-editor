@@ -78,12 +78,13 @@ These follow from macOS and from Nox, and stay true as tooling changes.
 | Fact | Consequence |
 |---|---|
 | `/Applications/Nox.app` shares bundle id `dev.nox.editor` | `open -a Nox` launches **that**, not your build. Always launch by executable path. |
+| Nox is single-instance, and `--geometry` is the exemption | Any other launch forwards its argv to a Nox that is already running and exits at once. The walk recipe keeps its own process because the flag is on it. Drop the flag with another Nox open and you get no window, no `nox: geometry` line, and the running copy raised instead. |
 | Three coordinate spaces exist at once | Physical pixels, logical points, and whatever size your screenshot tool hands back, all different. **Derive the ratio, never assume 2x.** Anchor on the `nox: geometry` line instead of measuring an image. |
 | `scripts/window-id.swift` prints a window **number**, not bounds | It is a handle for `screencapture -l <id>`, not a measuring tape. It needs no accessibility permission, which is its value. |
 | `devUrl` is hardcoded to port 1420 but `vite.config.ts` sets `strictPort: false` | A second `npm run dev` silently takes 1421 while `tauri dev` loads whatever already owns 1420, so you can drive one checkout's renderer believing it is another's. Kill stray vite processes before any walk. |
 | The release bundle has no devtools | `Cargo.toml` declares `tauri = { features = [] }`. For exact layout numbers use `npm run app`, since debug enables devtools. It is the same `platform.id === 'tauri'` and CSS layout cannot differ by optimisation level. |
 | AppleScript `set {position, size}` on one line returns `-10003` | Use `--geometry`. If you must use AppleScript, set position and size in separate calls. |
-| Window geometry is never persisted | Every launch is `tauri.conf.json`'s size, centred. A walk that depends on last run's window is not repeatable. |
+| Window geometry **is** persisted, to `window.json` beside the session (`window_state.rs`) | A walk that depends on last run's window is not repeatable. `--geometry` beats the remembered value and records nothing, so pass it and the file is left alone. |
 | macOS draws traffic lights over the overlay title bar | `TitleBar.svelte`'s inset is gated on `platform.id === 'tauri'`, which **no test and no browser session can ever produce**. Only a walk sees it. |
 
 ## Proving you are driving the build you just made

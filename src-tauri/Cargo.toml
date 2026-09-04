@@ -32,6 +32,13 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 # One call: relaunch after an install. The capability grants restart only.
 tauri-plugin-process = "2"
+# One Nox per machine. Without it, opening two files from the OS gives two
+# windows sharing one `session.json`, and whichever quits last wins: the
+# second window's tabs silently replace the first's. The plugin hands the
+# second launch's argv to the first instead, which is what turns a file
+# association into a new tab rather than a new editor. See `lib.rs` for the
+# one build that deliberately does not register it.
+tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Raw notify rather than a debouncer crate: coalescing lives in the renderer

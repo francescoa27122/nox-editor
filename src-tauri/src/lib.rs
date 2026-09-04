@@ -26,6 +26,41 @@ mod window_state;
 pub fn run() {
     let builder = tauri::Builder::default();
 
+    // One Nox. A second launch hands its argv to the running instance and
+    // exits, so double-clicking two associated files gives two tabs rather
+    // than two windows that share one `session.json` and overwrite each
+    // other's tabs on quit. Registered before any other plugin, because the
+    // second instance leaves through `std::process::exit` inside this
+    // plugin's setup and everything registered earlier would have initialised
+    // for nothing.
+    //
+    // **Two launches are exempt, and both are harnesses rather than users:**
+    //
+    // - The `wdio` debug binary, which is the only thing the e2e suite ever
+    //   runs. That suite starts the binary once per spec file in sequence,
+    //   and a launch arriving before the previous process has released the
+    //   lock would `exit(0)` instead of opening a WebDriver session. On Linux
+    //   the plugin also unwraps the session D-Bus address, which a CI runner
+    //   under `xvfb-run` need not have at all. Same shape as the gate below:
+    //   the harness build is the one that behaves differently.
+    // - A `--geometry` launch. That flag exists for desktop walks, which
+    //   start a freshly built Nox beside whatever is already installed under
+    //   the same bundle identifier. Forwarding its argv to the installed copy
+    //   would silently make the walk measure the wrong binary, which is the
+    //   one failure `geometry.rs` exists to prevent.
+    //
+    // `cfg!` rather than the `#[cfg]` the wdio gate below uses: compiling the
+    // registration out entirely leaves `launch::enqueue_second_instance` with
+    // no caller, and `-D warnings` turns that into a dead-code error in the
+    // one configuration CI does not run clippy over.
+    let builder = if wants_single_instance() {
+        builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            launch::enqueue_second_instance(app, argv, cwd);
+        }))
+    } else {
+        builder
+    };
+
     // The end-to-end harness drives the packaged app through a WebDriver
     // server living inside it. **Two gates, deliberately.** The `wdio` feature
     // decides whether the crate is compiled at all — see `Cargo.toml` for why
@@ -226,6 +261,16 @@ pub fn run() {
                 let _ = app.state::<pty::PtyState>().close_all();
             }
         });
+}
+
+/// Whether this launch should claim the single-instance lock, and so refuse
+/// to become a second Nox. The two exemptions are argued for at the call site.
+///
+/// Not a pure function of the build: `--geometry` is read from argv, which is
+/// why this is a function rather than a `const`.
+fn wants_single_instance() -> bool {
+    !cfg!(all(feature = "wdio", debug_assertions))
+        && geometry::geometry_from_args(std::env::args()).is_none()
 }
 
 /// Size and place the main window — for `--geometry`, and for the geometry the

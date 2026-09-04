@@ -1800,6 +1800,90 @@ asynchronous on macOS, so a read-back taken that early reports where the window
 *used to be*. Since that is usually the centred default, the remembered
 position would creep back to centre one launch at a time.
 
+### One Nox per machine, and the two launches exempt from it
+
+`tauri-plugin-single-instance` is registered first in `lib.rs`. A second launch
+hands its argv and working directory to the running instance and exits, and the
+callback feeds both through `launch::second_instance_paths`, which is the same
+filter the first launch's own argv goes through. So `nox notes.txt` typed at a
+running Nox opens a tab, not a window.
+
+**The reason is `session.json`, not tidiness.** Two windows share one session
+file, and whichever quits last writes it: the second window's tabs replace the
+first's, silently, including tabs with unsaved text. That is a data-loss path
+rather than an annoyance, and it is the reason this landed before file
+associations rather than after, since an association turns "two Nox windows"
+from something you have to ask for into something a double-click produces.
+
+Raising the window is part of the contract. `launch::raise_main_window`
+unminimises, shows and focuses, in that order and all best effort: from the
+outside the second launch *is* the click, and a click that appears to do
+nothing gets clicked again.
+
+**Two launches are exempt, and both are harnesses.** The `wdio` debug binary,
+because the e2e suite starts it once per spec file in sequence and a launch
+arriving before the previous process released the lock would exit rather than
+open a WebDriver session (and because the plugin's Linux path unwraps the
+session D-Bus address, which a runner under `xvfb-run` need not have). And any
+launch carrying `--geometry`, because that flag exists for desktop walks, which
+start a freshly built Nox beside whatever is installed under the same bundle
+identifier: forwarding the walk's argv to the installed copy would make the
+walk measure the wrong binary, which is the single failure `geometry.rs` was
+written to prevent.
+
+The exemption is `cfg!`, not `#[cfg]`. Compiling the registration out leaves
+`enqueue_second_instance` with no caller, and `-D warnings` turns that into a
+dead-code error in the one configuration CI never runs clippy over.
+
+### The file types the installers claim, and how loudly
+
+`bundle.fileAssociations` in `tauri.conf.json` is three entries rather than
+thirty: plain text, source code, and the structured formats another tool also
+makes. The extensions come from `core/languages.ts` and nowhere else, and
+`tests/ship-readiness.test.ts` fails if the block ever claims one the editor
+cannot name, because an association is a promise that the status bar and the
+highlighter keep.
+
+**`rank` is a macOS lever only, and Windows has no equivalent.** That is worth
+knowing before reading the block as humble. On macOS `role` becomes
+`CFBundleTypeRole` and `rank` becomes `LSHandlerRank`, so `Editor` plus
+`Alternate` says "Nox can edit this, but do not prefer it". On Windows the
+generated `installer.nsi` calls `APP_ASSOCIATE`, which writes
+`Software\Classes\.<ext>` itself: an install makes Nox the default opener for
+every extension named, backing the previous value up under
+`<ProgID>_backup` for the uninstaller to put back. There is no offer-only
+setting to choose.
+
+That asymmetry is what decides the list, and it is the *list* that answers the
+question `rank` cannot. Claiming `.rs` or `.py` is what every editor's installer
+does and is reversible. Claiming `.html` is taking a double-click away from the
+browser, which is what the user meant by it, so `.html`, `.htm` and `.xhtml` are
+not claimed at all even though Nox highlights them; nor is `.svg`, which is an
+image everywhere else, or `.plist`, which is often not text.
+
+**The data and config formats are unclaimed for the same reason** (2026-09-04).
+`.json`, `.jsonc`, `.md`, `.markdown`, `.mdx`, `.xml`, `.yml`, `.yaml`,
+`.toml`, `.ini`, `.cfg` and `.properties` were first claimed at `Alternate`, on
+the reading that `Alternate` made the claim quiet. It does not: it is quiet on
+macOS and silent on Windows, where the install takes the default regardless.
+Those are the formats most likely to have an opener their owner picked
+deliberately, so taking it without asking is the complaint this list exists to
+avoid. What is left is plain text and programming languages: 45 extensions in
+two groups, both `Default`, because on the one platform that reads `rank` there
+is now nothing left in the list worth ranking below it.
+
+**`name` is the Windows ProgID as well as `CFBundleTypeName`.** Tauri defaults
+it to `ext[0]`, which would put a registry key called `txt` in
+`Software\Classes`, so all three are spelled `Nox.<Something>` and a test
+holds them to it.
+
+There is no per-association icon: the schema in
+`@tauri-apps/cli/config.schema.json` has no such property, and every
+association takes the app icon through `DefaultIcon` on Windows. That schema
+is what the test validates against, read out of the installed CLI, because a
+key Tauri does not recognise is not an error. It is a claim that silently
+never reaches an installer.
+
 ### Long panels are windowed, and each publishes its own row height
 
 The explorer and the search results both render flat, uniform-height row

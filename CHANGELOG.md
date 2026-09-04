@@ -29,6 +29,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Open a file from your desktop.** The installers register Nox for plain
+  text and for the code it highlights, so a `.txt`, a `.rs` or a `.py` opens
+  in Nox from Explorer, Finder or your file manager. Typing `nox notes.txt` at
+  a prompt already worked and still does.
+
+  **Data and config files are left alone**, along with `.html`, `.svg` and
+  `.plist`. A `.json`, a `.md` or a `.yml` usually already opens in something
+  you chose, and on Windows an install cannot politely offer: it takes the
+  default. So Nox does not ask for those, and stays one **Open With** away.
+
+- **A second file opens as a tab, not a second Nox.** Two Nox windows share
+  one session file, and whichever you quit last overwrote the other's tabs,
+  including tabs with unsaved text. A launch that arrives while Nox is running
+  now hands its files to the window you already have and brings it to the
+  front.
+
 - **Tasks.** Your project's own commands, from the palette (**Run Task…**) or
   <kbd>Mod ⇧ B</kbd> for the last one, with their output kept in a panel.
   They come from a `tasks.json` you write, and Nox will create one for you with

@@ -1,5 +1,7 @@
-//! Paths the OS hands to Nox: `nox notes.txt` on the command line, and on
-//! macOS a file opened through Finder once the app is running.
+//! Paths the OS hands to Nox: `nox notes.txt` on the command line, a file
+//! opened through Finder on macOS once the app is running, and the argv of a
+//! second launch that `tauri-plugin-single-instance` handed over instead of
+//! letting it start a window of its own.
 //!
 //! The paths are **buffered and pulled, never pushed**. Argv exists before the
 //! webview has booted, and a macOS `Opened` event can arrive before it too, so
@@ -9,9 +11,13 @@
 //! renderer (an empty `nox://open-request` event) to ask again. One buffer,
 //! one drain, so a path is never delivered twice and never dropped.
 //!
-//! Registering file associations and forwarding a second instance's argv to
-//! the first are deliberately not here: both change what an installer records
-//! and what a second launch does, and are decided separately.
+//! All three arrivals converge on [`enqueue`], and the two that carry argv
+//! converge on [`paths_from_args`]. That is deliberate: a second launch that
+//! filtered its arguments differently from the first would open a file called
+//! `800x600` in a running window.
+//!
+//! Where the plugin is registered, and the two launches exempt from it, is in
+//! `lib.rs`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -85,6 +91,45 @@ pub fn enqueue<R: Runtime>(app: &AppHandle<R>, paths: Vec<String>) {
 pub fn enqueue_argv<R: Runtime>(app: &AppHandle<R>) {
     let cwd = std::env::current_dir().unwrap_or_default();
     enqueue(app, paths_from_args(std::env::args(), &cwd, |path| path.exists()));
+}
+
+/// The paths a second launch is asking for, given the argv and working
+/// directory `tauri-plugin-single-instance` forwarded.
+///
+/// A free function beside [`enqueue_second_instance`], which needs an
+/// `AppHandle` and so cannot be driven from a unit test. This is the whole of
+/// the rule, and the whole of the rule is that there is no second rule.
+pub fn second_instance_paths(
+    argv: Vec<String>,
+    cwd: &str,
+    exists: impl Fn(&Path) -> bool,
+) -> Vec<String> {
+    paths_from_args(argv, Path::new(cwd), exists)
+}
+
+/// A second launch, handed over rather than allowed to open a window of its
+/// own. Queues whatever it named and brings the running window forward.
+///
+/// The window is raised whether or not anything was queued: from the outside
+/// this launch *is* the click, and a click that appears to do nothing is
+/// answered by clicking again.
+pub fn enqueue_second_instance<R: Runtime>(app: &AppHandle<R>, argv: Vec<String>, cwd: String) {
+    enqueue(app, second_instance_paths(argv, &cwd, |path| path.exists()));
+    raise_main_window(app);
+}
+
+/// Bring the one window to the front, best effort at every step.
+///
+/// `unminimize` first: a minimised window can be shown and focused and still
+/// not be on screen. Nothing here is propagated, because the paths are already
+/// queued by the time it runs and a window that refuses to raise is a worse
+/// outcome to turn into a failure than to live with.
+fn raise_main_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 /// The one run event this module cares about. On macOS a Finder "Open With",
@@ -164,6 +209,35 @@ mod tests {
             path.ends_with("present.txt")
         });
         assert_eq!(found, vec![under(&cwd, "present.txt")]);
+    }
+
+    /// The single-instance seam. A second launch's argv reaches the running
+    /// window through the same filter the first launch used, so `--geometry`
+    /// and its value, every other flag and every path that is not there are
+    /// dropped exactly once.
+    ///
+    /// The equality assertion is the point, not the literal one: a copy of
+    /// the filter that drifted would still pass a hand-written expectation
+    /// written at the same moment as the copy.
+    ///
+    /// What it does not catch: the plugin handing over argv in a shape this
+    /// never sees. The Windows transport joins the arguments with `|` and
+    /// splits on it again, which is safe only because `|` cannot appear in a
+    /// Windows path.
+    #[test]
+    fn a_second_launch_is_filtered_like_the_first() {
+        let cwd = cwd();
+        let cwd_text = cwd.to_string_lossy().into_owned();
+        let argv = args(&["nox", "--geometry", "800x600", "--verbose", "missing.txt", "notes.txt"]);
+        let real = |path: &Path| !path.ends_with("missing.txt");
+
+        let second = second_instance_paths(argv.clone(), &cwd_text, real);
+        assert_eq!(second, vec![under(&cwd, "notes.txt")]);
+        assert_eq!(second, paths_from_args(argv, &cwd, real));
+
+        // A bare relaunch names nothing, which must queue nothing: the window
+        // is raised by `enqueue_second_instance` rather than by a path.
+        assert!(second_instance_paths(args(&["nox"]), &cwd_text, all_exist).is_empty());
     }
 
     #[test]
