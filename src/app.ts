@@ -85,6 +85,7 @@ import {
   EXPLAIN_INSTRUCTION,
   ProviderTransport,
   scopeFromSelection,
+  stillOnDisk,
 } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
@@ -183,6 +184,17 @@ export class NoxApp {
   #themeProperties: string[] = [];
   /** Failures already announced, so a republished status does not repeat one. */
   #reportedFailures = new Set<string>();
+  /**
+   * The last string handed to `platform.setWindowTitle` (A4-009).
+   *
+   * `#updateWindowTitle` runs on every document change (`workspace.buffers`
+   * republishes on every keystroke), but the title itself only changes on
+   * the far rarer events that move dirty state, the active file or the root
+   * — so most calls would otherwise be an IPC round trip and a native
+   * `SetWindowText` for text the window already shows. `null` at start,
+   * which cannot equal any real title, so the very first call always sets it.
+   */
+  #lastWindowTitle: string | null = null;
   /** The running servers, and the diagnostics they publish. */
   readonly lsp: LspService;
   readonly terminal: TerminalService;
@@ -382,8 +394,9 @@ export class NoxApp {
   }
 
   /**
-   * `platform` is injectable so a test can run the real boot sequence over
-   * `MemoryPlatform`; `main.ts` passes nothing and gets the runtime's own.
+   * Construct and boot. `platform` is for tests, which hand in a
+   * `MemoryPlatform` to run the real boot sequence headless; the app itself
+   * never passes one.
    */
   static async create(platform?: Platform): Promise<NoxApp> {
     const app = new NoxApp(platform ?? (await createPlatform()));
@@ -400,10 +413,6 @@ export class NoxApp {
     await this.diagnostics.start();
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
-    // Before the session restores a root: the subscription above fires on
-    // that restore, but boot's own `files.setRoot` below should already see
-    // the project's excludes.
-    await this.config.loadWorkspace(this.workspace.rootPath.get());
     // After the constructor, so `#registerKeybindings` has already recorded
     // the defaults these rules are layered over.
     await this.keymap.loadUserRules();
@@ -436,7 +445,12 @@ export class NoxApp {
       }
     }
 
-    await this.files.setRoot(this.workspace.rootPath.get());
+    // No `files.setRoot`, `watcher.start` or `config.loadWorkspace` here: the
+    // `rootPath` subscription in `#wireServices` runs all three the moment a
+    // root is restored or opened above, and it is the only caller. Boot used
+    // to call the first and the last a second time, which walked the project
+    // twice on every launch; a workspace `excludeFromExplorer` that arrives
+    // after the first walk re-walks through `files.setExcludes`.
     await this.#listenForExternalDrops();
     // After the session restore, so a file named on the command line opens as
     // a tab on top of the restored ones rather than being buried under them.
@@ -929,7 +943,13 @@ export class NoxApp {
     if (active) parts.push(`${active.isDirty ? '● ' : ''}${active.name}`);
     if (root) parts.push(basename(root));
     parts.push('Nox');
-    void this.platform.setWindowTitle(parts.join(' — '));
+    const title = parts.join(' — ');
+    // A4-009: `workspace.buffers` republishes on every keystroke, which calls
+    // this every time, but the title text itself moves far less often — skip
+    // the IPC and native SetWindowText when nothing to show has changed.
+    if (title === this.#lastWindowTitle) return;
+    this.#lastWindowTitle = title;
+    void this.platform.setWindowTitle(title);
   }
 
   // --- Editor access ------------------------------------------------------
@@ -1563,7 +1583,9 @@ export class NoxApp {
     // startup plugins and killed them a moment later, and nothing brought them
     // back short of Reload Plugins. Found by walking the packaged build on
     // 2026-08-29; the teardown it was reaching for is a *reload* concern and
-    // now lives in `dispose()`, which is what a reload actually runs.
+    // now lives in `dispose()`, which `reloadWindow` runs and waits for
+    // before the page goes away. A bare `location.reload()` would run none
+    // of it, which is how every reload used to orphan the servers.
     if (!root) return;
     if (!this.platform.capabilities.languageServers) return;
     await this.lsp.start();
@@ -3478,10 +3500,7 @@ export class NoxApp {
         // session. In-memory state does not — agent sessions and the
         // transaction log start again — so this stays off the keyboard where
         // it cannot be hit by accident.
-        run: () => {
-          this.notifications.info('Reloading…');
-          globalThis.location.reload();
-        },
+        run: () => this.reloadWindow(),
       },
       {
         id: 'agents.show',
@@ -3891,6 +3910,24 @@ export class NoxApp {
         },
       },
       {
+        id: 'agents.copyTrail',
+        title: 'Copy the Last Agent Session Trail',
+        category: 'Agents',
+        keywords: ['audit', 'log', 'trail', 'export', 'json', 'clipboard', 'history'],
+        // No `capabilities`, on the same reasoning as `app.copyDiagnostics`:
+        // this reads Nox's own record of what an agent already did and puts
+        // it on the clipboard. The record survives only as long as the
+        // window, which is why it has to be possible to get it out.
+        enabled: () => this.agents.sessions.get().length > 0,
+        run: async (arg) => {
+          // An id from the panel's per-session button, else the newest.
+          const id = typeof arg === 'string' ? arg : this.agents.sessions.get()[0]?.id;
+          const trail = id === undefined ? null : this.agents.exportTrail(id);
+          if (trail === null) return;
+          await this.copyToClipboard(trail, 'the session trail');
+        },
+      },
+      {
         id: 'agents.undoLastSession',
         title: 'Undo the Last Agent Session',
         /**
@@ -3915,12 +3952,18 @@ export class NoxApp {
         run: () => {
           const session = this.agents.sessions.get().find((s) => this.agents.changesBy(s.id).length > 0);
           if (!session) return;
-          const { undone, skipped } = this.agents.undoSession(session.id);
+          const { undone, skipped, onDisk } = this.agents.undoSession(session.id);
+          // Same sentence the panel's button uses: the disk may still hold
+          // the agent's text, and "took back everything" alone hid that.
+          const unsaved = stillOnDisk(onDisk.length);
           if (skipped.length > 0) {
             this.notifications.warn(
               `Took back ${undone.length} of ${undone.length + skipped.length} files`,
-              'The rest have been edited since, so their changes were left alone.',
+              'The rest have been edited since, so their changes were left alone.' +
+                (unsaved ? ` ${unsaved}` : ''),
             );
+          } else if (unsaved) {
+            this.notifications.warn(`Took back everything ${session.label} did in the editor`, unsaved);
           } else {
             this.notifications.success(`Took back everything ${session.label} did`);
           }
@@ -5022,6 +5065,44 @@ export class NoxApp {
         // button does.
         run: () => this.platform.closeWindow(),
       },
+      // --- Window -----------------------------------------------------------
+      // The three window controls. They exist as commands so the title bar's
+      // buttons go through the same door as every other button and a
+      // `keybindings.json` rule or a plugin can reach them; until 2026-09-02
+      // the bar called the platform directly and these were the only user
+      // actions with no command. Hidden from the palette because the OS and
+      // the title bar already own this chrome, and in the browser build the
+      // platform methods are inert. `category: 'Window'` is deliberately not
+      // in the menu layout: that menu carries the OS's own minimise and
+      // maximise items, and a close entry would claim the accelerator
+      // `file.close` already has (see Known debt).
+      {
+        id: 'window.minimize',
+        title: 'Minimise Window',
+        category: 'Window',
+        keywords: ['minimize', 'minimise', 'window'],
+        hidden: true,
+        run: () => this.platform.minimizeWindow(),
+      },
+      {
+        id: 'window.toggleMaximize',
+        title: 'Maximise or Restore Window',
+        category: 'Window',
+        keywords: ['maximize', 'maximise', 'restore', 'window'],
+        hidden: true,
+        run: async () => {
+          await this.platform.toggleMaximizeWindow();
+        },
+      },
+      {
+        id: 'window.close',
+        title: 'Close Window',
+        category: 'Window',
+        keywords: ['close', 'window', 'quit'],
+        hidden: true,
+        run: () => this.platform.closeWindow(),
+      },
+
     ];
 
     this.commands.registerAll(commands);
@@ -5784,6 +5865,28 @@ export class NoxApp {
     return false;
   }
 
+  /**
+   * Reload Window, teardown first and navigation second.
+   *
+   * A bare `location.reload()` replaces the renderer and nothing else: the
+   * language servers, plugin workers and pending flushes belong to the page
+   * that started them, and the host does not stop what a page started. Until
+   * 2026-09-02 the command was exactly that bare reload, so every reload
+   * started a fresh set of servers beside the orphaned old one, and two
+   * comments claimed otherwise. `dispose()` is the one place that stops the
+   * servers and awaits the flushes, so it runs here and is waited for.
+   * `finally`, because a teardown that fails must still reload: the
+   * alternative is a half-disposed app with no way out short of quitting.
+   */
+  async reloadWindow(): Promise<void> {
+    this.notifications.info('Reloading…');
+    try {
+      await this.dispose();
+    } finally {
+      await this.platform.reloadWindow();
+    }
+  }
+
   async dispose(): Promise<void> {
     this.#disposeDropListener?.();
     this.#disposeDropListener = null;
@@ -5801,8 +5904,9 @@ export class NoxApp {
     // Notes first: settings and session each have an on-disk original to
     // fall back on if their flush is lost, but a note does not.
     // Before the flushes: a reload does not kill the processes the renderer
-    // started, so without this every reload leaves a server orphaned with
-    // nothing left to talk to it.
+    // started, which is why `reloadWindow` runs this and waits for it. Without
+    // that, every reload left a server orphaned with nothing left to talk to
+    // it.
     await this.lsp.stop();
     await this.platform.stopAllLanguageServers().catch(() => undefined);
     // The plugins' half of the same sentence: a reload does not kill what the

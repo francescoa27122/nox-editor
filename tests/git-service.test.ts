@@ -97,6 +97,37 @@ describe('the git service', () => {
     expect(app.git.hunks.get().has(id)).toBe(false);
   });
 
+  /**
+   * A4-006: `#bases` is keyed by path, not by buffer id, and closing used to
+   * clear every *other* per-buffer map (`hunks`, `#computed`, `#timers`,
+   * blame) but never this one — a day-long session opening and closing
+   * thousands of tracked files retained a full second copy of every one of
+   * them, forever. `baseFor` is the only public window onto the map:
+   * `undefined` means "never fetched", which is indistinguishable from
+   * "fetched, then forgotten" from outside, so this pins the forgetting by
+   * checking that a *reopen* pays for a fresh fetch rather than serving the
+   * stale entry `refreshStatus`/`#refresh` would otherwise still find.
+   */
+  it('forgets a closed file base rather than keeping it for the rest of the session', async () => {
+    const id = await openSeeded('one\nTWO\nthree\n');
+    expect(app.git.baseFor(FILE)).toBe(BASE);
+
+    app.workspace.close(id, { force: true });
+    expect(app.git.baseFor(FILE), 'forgotten on close, not merely unread').toBeUndefined();
+
+    // The index moved while the file was closed - a stage made elsewhere.
+    // A stale #bases entry would mean the reopened buffer is diffed against
+    // the wrong text; forgetting the base is what makes the reopen the one
+    // thing that goes and asks git again.
+    platform.seedGitBase(FILE, 'one\nTWO\nCHANGED\n');
+    const reopened = (await app.workspace.open(FILE))!;
+    await vi.runAllTimersAsync();
+
+    expect(app.git.baseFor(FILE)).toBe('one\nTWO\nCHANGED\n');
+    const entry = app.git.hunks.get().get(reopened)!;
+    expect(entry.hunks).toEqual([{ fromLine: 2, removed: ['CHANGED\n'], added: ['three\n'] }]);
+  });
+
   it('skips a base past the size guard', async () => {
     const id = await openSeeded('x\n', 'y\n'.repeat(MAX_DIFF_BYTES / 2 + 1));
     expect(app.git.hunks.get().has(id)).toBe(false);

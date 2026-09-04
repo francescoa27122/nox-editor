@@ -137,6 +137,36 @@
     }
   });
 
+  /**
+   * What the dialog is called. A screen reader hears this before anything
+   * else, and "Command palette" for every mode told a user nothing about
+   * whether the picker that just opened wanted a file, a line or a branch.
+   * Derived from the effective mode, not the opening one, because the
+   * prefixes switch modes without reopening.
+   */
+  const dialogLabel = $derived.by(() => {
+    switch (effectiveMode) {
+      case 'languages':
+        return 'Set language';
+      case 'commands':
+        return 'Command palette';
+      case 'buffers':
+        return 'Switch to an open file';
+      case 'line':
+        return 'Go to line';
+      case 'symbols':
+        return 'Go to symbol';
+      case 'branches':
+        return 'Switch branch';
+      case 'notes':
+        return 'Go to note';
+      case 'actions':
+        return 'Code actions';
+      default:
+        return 'Go to file';
+    }
+  });
+
   const modeIcon = $derived.by<IconName>(() => {
     switch (effectiveMode) {
       case 'commands':
@@ -1076,7 +1106,7 @@
   }
 </script>
 
-<div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+<div class="palette" role="dialog" aria-modal="true" aria-label={dialogLabel}>
   <div class="input-row">
     <Icon name={modeIcon} size={15} class="mode-icon" />
     <input
@@ -1092,8 +1122,17 @@
       aria-activedescendant={rows[selected] ? `nox-row-${selected}` : undefined}
     />
     {#if rows.length > 0 && effectiveMode !== 'line'}
-      <!-- Honest about the display caps: a sliced list says so. -->
-      <span class="result-count">
+      <!-- Honest about the display caps: a sliced list says so. The label
+           carries the noun the visible number leaves out, and `status` makes
+           it a polite live region so a screen reader hears the count change
+           as the query narrows rather than a bare "158" once. -->
+      <span
+        class="result-count"
+        role="status"
+        aria-label={total === rows.length
+          ? `${total} ${total === 1 ? 'result' : 'results'}`
+          : `first ${rows.length} of ${total} results`}
+      >
         {total === rows.length ? rows.length : `first ${rows.length} of ${total}`}
       </span>
     {/if}
@@ -1304,8 +1343,13 @@
     margin-left: auto;
   }
 
-  .row.selected .hint {
-    color: var(--nox-text-muted);
+  /* The selection wash changes the ground under the row, and muted text on
+     it measures 3.34:1 over the palette's surface. This is the one row the
+     keyboard user is reading, so its path and chord step up to body text:
+     8.08:1, held by tests/token-contrast.test.ts. */
+  .row.selected .hint,
+  .row.selected .detail {
+    color: var(--nox-text);
   }
 
   /* The query, quoted back, is the line that gets read first. */

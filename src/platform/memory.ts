@@ -265,6 +265,8 @@ export class MemoryPlatform implements Platform {
   installedUpdate: string | null = null;
   /** Whether `relaunch` was called, for tests. */
   relaunched = false;
+  /** Whether `reloadWindow` was called, for tests. */
+  reloaded = false;
 
   seedUpdate(info: UpdateInfo): void {
     this.#update = info;
@@ -456,6 +458,10 @@ export class MemoryPlatform implements Platform {
 
   async relaunch(): Promise<void> {
     this.relaunched = true;
+  }
+
+  async reloadWindow(): Promise<void> {
+    this.reloaded = true;
   }
 
   async gitStatus(root: string): Promise<string> {
@@ -946,7 +952,10 @@ export class MemoryPlatform implements Platform {
 
         totalMatches += matches.length;
         totalFiles += 1;
-        batch.push({ path, matches });
+        // No per-file cap here (A4-005 is the Rust walker's fix): the
+        // browser build's `findMatches` runs over test and dev fixtures, not
+        // the kind of multi-megabyte minified file the cap exists for.
+        batch.push({ path, matches, truncated: false });
 
         if (batch.length >= 20) {
           onBatch(batch);

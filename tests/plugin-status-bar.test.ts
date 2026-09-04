@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import StatusBar from '../src/ui/StatusBar.svelte';
 import { flush, mountComponent, type Mounted } from './support/component';
@@ -117,5 +118,41 @@ describe('where plugin items sit', () => {
     // Nox's own first, always. A plugin appearing mid-session must not move
     // the controls that were already under the pointer.
     expect(plugin).toBeGreaterThan(core);
+  });
+});
+
+describe('the mark that says whose item it is', () => {
+  /**
+   * What this guards: the `::before` on `.item.plugin` shipped with a
+   * corrupted glyph. The bytes on disk were C2 82 32, which is U+0082 (a C1
+   * control character that paints as nothing) followed by an ASCII "2", so
+   * every plugin readout rendered as "2 Ready". Nothing caught it because
+   * `tests/plugin-status.test.ts` checks the store and the tests above check
+   * the text the plugin set, and a pseudo-element's `content` is in neither.
+   *
+   * Read from the component's source rather than from the mounted DOM: jsdom
+   * does not compute pseudo-elements, so `textContent` of the rendered item
+   * never carried the mark, corrupted or not, and a DOM assertion here would
+   * have passed before the fix. What this does not catch: a mark that is a
+   * legitimate character but the wrong one.
+   */
+  it('is a real glyph, not a control character or a digit', () => {
+    const source = readFileSync('src/ui/StatusBar.svelte', 'utf8');
+    const rule = /\.item\.plugin::before\s*\{([^}]*)\}/.exec(source);
+    expect(rule, 'the plugin mark rule must exist').not.toBeNull();
+    const content = /content:\s*'([^']*)'/.exec(rule![1]!)?.[1];
+    expect(content, 'the rule must set `content`').toBeDefined();
+
+    // Decode CSS escapes the way the browser will, so `'\2022'` is judged as
+    // the bullet it produces, not as the digits it is written with.
+    const decoded = content!.replace(/\\([0-9a-fA-F]{1,6})\s?/g, (_, hex: string) =>
+      String.fromCodePoint(parseInt(hex, 16)),
+    );
+    const codePoints = [...decoded].map((c) => c.codePointAt(0)!);
+
+    expect(codePoints.length).toBeGreaterThan(0);
+    // C0 and C1 controls: they paint as nothing, which is how the corruption hid.
+    expect(codePoints.filter((cp) => cp < 0x20 || (cp >= 0x7f && cp <= 0x9f))).toEqual([]);
+    expect(decoded).not.toMatch(/[0-9]/);
   });
 });

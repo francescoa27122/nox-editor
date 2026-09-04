@@ -513,7 +513,12 @@
               />
               <span class="name">{label.name}</span>
               {#if label.folder}<span class="folder">{label.folder}</span>{/if}
-              <span class="count">{file.matches.length}</span>
+              <span
+                class="count"
+                title={file.truncated
+                  ? 'More matches than shown in this file'
+                  : undefined}>{file.matches.length}{file.truncated ? '+' : ''}</span
+              >
               {#if $replaceMode}
                 <button
                   class="row-action"

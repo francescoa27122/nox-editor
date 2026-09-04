@@ -79,6 +79,16 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
    */
   'ending the session': ['app.quit'],
 
+  /**
+   * The window's own chrome. Minimise, maximise and close move or hide a
+   * window; none of them reaches the file system, a process or the network,
+   * and the OS offers all three next to them on every platform, so gating
+   * these would gate nothing a user cannot already do with the title bar.
+   * `window.close` ends the session like `app.quit` does, and the same
+   * reasoning applies: unsaved work is in the session.
+   */
+  'moving the window': ['window.close', 'window.minimize', 'window.toggleMaximize'],
+
   /** Move focus, open an overlay, show a panel. */
   'showing something': [
     'agents.show',
@@ -188,8 +198,14 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
    * Put something on the clipboard that the user is already looking at.
    * `file.revealInExplorer` reveals in **Nox's** explorer, not the OS file
    * manager, so it reaches nothing outside the window either.
+   *
+   * `agents.copyTrail` is here for the same reason `app.copyDiagnostics` is:
+   * it copies out Nox's own record of what an agent already did, which the
+   * Agents panel is displaying at the time. It reads no file and sends
+   * nothing.
    */
   'copying what is already on screen': [
+    'agents.copyTrail',
     'app.copyDiagnostics',
     'explorer.copyPath',
     'explorer.copyRelativePath',

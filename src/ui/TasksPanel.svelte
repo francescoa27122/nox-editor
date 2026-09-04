@@ -451,6 +451,7 @@
      for prose code. Without it this fell back to the UA's own monospace. */
   .tasks :global(code) {
     font-family: var(--nox-font-mono);
-    font-size: 0.92em;
+    /* One step under the prose around it, which is `--nox-fs-sm`. */
+    font-size: var(--nox-fs-xs);
   }
 </style>
