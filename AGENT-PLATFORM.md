@@ -267,6 +267,18 @@ or the app state. The dispatcher cannot know which file `file.save` is about to
 write, but the command can, and without it a grant could only ever be
 "may write files", which is not a question worth asking.
 
+**A command that declares nothing is refused.** An absent `capabilities` means
+"nothing with a side effect", and nothing verifies that claim: a `run` function
+cannot be asked whether it reaches the OS. Until 2026-09-03 the guard was
+skipped for such a command, so the unverified claim *was* the enforcement, and
+a security review found twelve side-effecting commands making it falsely. A
+non-user principal now gets a `PermissionError` and a decision-log entry
+sourced `undeclared`, which reads differently from a policy denial on purpose.
+The cost is that an agent cannot reach a genuinely harmless command either,
+`review.show` or `nav.goToLine`; the benefit is that the next command whose
+author forgets costs an agent workflow rather than an unlogged file write.
+`tests/command-capabilities.test.ts` keeps the refused set written down.
+
 **The user is exempt, and not even logged.** A model that can interrupt a human
 mid-keystroke is a model they turn off within a day, and a permission layer
 nobody runs protects nothing. Their decisions are not recorded either: "the

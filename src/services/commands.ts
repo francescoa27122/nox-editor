@@ -78,6 +78,12 @@ export interface ResolvedCommand extends Command {
  *
  * A function rather than a service dependency: the registry stays free of any
  * knowledge of the permission model, and a test can install its own.
+ *
+ * It is consulted for **every** command, including one that declares no
+ * capabilities, and deciding about that case is part of a guard's job rather
+ * than the registry's. The registry cannot decide it: it has no policy, no
+ * prompter and nowhere to write the decision down. `NoxApp`'s guard refuses,
+ * through `PermissionService.refuseUndeclared`.
  */
 export type CommandGuard = (
   command: Command,
@@ -197,7 +203,14 @@ export class CommandRegistry {
     if (command.enabled && !command.enabled()) return false;
 
     const principal = options.principal;
-    if (this.#guard && principal && principal.kind !== 'user' && command.capabilities?.length) {
+    // Every command reaches the guard, not only one that declares something.
+    // Until 2026-09-03 an empty `capabilities` skipped the check, which turned
+    // "this command declares nothing" into "this command needs no permission"
+    // for agents and plugins. That is a claim the registry cannot check, and a
+    // security review found twelve commands making it falsely: the class was
+    // open even after those twelve were fixed, because the thirteenth would
+    // reopen it silently. Now a missing declaration fails closed instead.
+    if (this.#guard && principal && principal.kind !== 'user') {
       await this.#guard(command, principal, command.resourceFrom?.(arg));
     }
 
