@@ -30,8 +30,8 @@ autosave. Fixed in #188.
 **Shipped:** 69 findings fixed, every one with a test run failing before and
 passing after. #182 security (6), #183 ship readiness (11), #184 systems (8),
 #185 UI (9), #186 agent (6), #187 features (9), #188 performance (20). All seven
-green on all 11 required checks. 11 Gated findings untouched, written up for a
-decision in `AUDIT/GATED-DECISIONS.md`. 5 Safe findings deliberately left, the
+green on all 11 required checks, and all seven merged. 11 Gated findings
+untouched, written up for a decision in `AUDIT/GATED-DECISIONS.md`. 5 Safe findings deliberately left, the
 largest being A2-007, splitting `app.ts`, which is a refactor.
 
 **Verified:** every P0 and P1 fix mutation-checked. Contrast numbers, licence
