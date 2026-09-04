@@ -76,6 +76,7 @@ end-to-end harness and never into a release, so it is not listed.
 | tauri-build | 2.6.3 | Apache-2.0 OR MIT | <https://github.com/tauri-apps/tauri> |
 | tauri-plugin-dialog | 2.7.2 | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> |
 | tauri-plugin-process | 2.3.1 | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> |
+| tauri-plugin-single-instance | 2.4.4 | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> |
 | tauri-plugin-updater | 2.10.1 | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> |
 | tokio | 1.53.1 | MIT | <https://github.com/tokio-rs/tokio> |
 | trash | 5.2.6 | MIT | <https://github.com/ArturKovacs/trash> |

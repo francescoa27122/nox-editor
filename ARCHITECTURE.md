@@ -1800,6 +1800,41 @@ asynchronous on macOS, so a read-back taken that early reports where the window
 *used to be*. Since that is usually the centred default, the remembered
 position would creep back to centre one launch at a time.
 
+### One Nox per machine, and the two launches exempt from it
+
+`tauri-plugin-single-instance` is registered first in `lib.rs`. A second launch
+hands its argv and working directory to the running instance and exits, and the
+callback feeds both through `launch::second_instance_paths`, which is the same
+filter the first launch's own argv goes through. So `nox notes.txt` typed at a
+running Nox opens a tab, not a window.
+
+**The reason is `session.json`, not tidiness.** Two windows share one session
+file, and whichever quits last writes it: the second window's tabs replace the
+first's, silently, including tabs with unsaved text. That is a data-loss path
+rather than an annoyance, and it is the reason this landed before file
+associations rather than after, since an association turns "two Nox windows"
+from something you have to ask for into something a double-click produces.
+
+Raising the window is part of the contract. `launch::raise_main_window`
+unminimises, shows and focuses, in that order and all best effort: from the
+outside the second launch *is* the click, and a click that appears to do
+nothing gets clicked again.
+
+**Two launches are exempt, and both are harnesses.** The `wdio` debug binary,
+because the e2e suite starts it once per spec file in sequence and a launch
+arriving before the previous process released the lock would exit rather than
+open a WebDriver session (and because the plugin's Linux path unwraps the
+session D-Bus address, which a runner under `xvfb-run` need not have). And any
+launch carrying `--geometry`, because that flag exists for desktop walks, which
+start a freshly built Nox beside whatever is installed under the same bundle
+identifier: forwarding the walk's argv to the installed copy would make the
+walk measure the wrong binary, which is the single failure `geometry.rs` was
+written to prevent.
+
+The exemption is `cfg!`, not `#[cfg]`. Compiling the registration out leaves
+`enqueue_second_instance` with no caller, and `-D warnings` turns that into a
+dead-code error in the one configuration CI never runs clippy over.
+
 ### Long panels are windowed, and each publishes its own row height
 
 The explorer and the search results both render flat, uniform-height row
