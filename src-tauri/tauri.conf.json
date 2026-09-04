@@ -74,7 +74,7 @@
           "rs", "go", "c", "h", "cc", "cpp", "cxx", "hpp", "hh",
           "java", "cs", "kt", "kts", "swift",
           "sh", "bash", "zsh", "fish", "ps1", "psm1", "psd1",
-          "sql", "yml", "yaml", "toml", "ini", "cfg", "properties",
+          "sql",
           "dockerfile"
         ],
         "name": "Nox.SourceCode",
@@ -82,13 +82,6 @@
         "mimeType": "text/plain",
         "role": "Editor",
         "rank": "Default"
-      },
-      {
-        "ext": ["json", "jsonc", "md", "markdown", "mdx", "xml"],
-        "name": "Nox.StructuredText",
-        "description": "Structured text",
-        "role": "Editor",
-        "rank": "Alternate"
       }
     ],
     "macOS": {

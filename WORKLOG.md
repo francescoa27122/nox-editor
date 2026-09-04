@@ -20,8 +20,12 @@ Branch `gated/file-opening`, two commits, not pushed.
 `raise_main_window` unminimises, shows and focuses. Exempt: the `wdio` debug
 binary and any launch carrying `--geometry`, both harnesses, argued at the call
 site and in `ARCHITECTURE.md`. Then `bundle.fileAssociations` in
-`src-tauri/tauri.conf.json`: three entries, 57 extensions, all derived from
-`src/core/languages.ts`, held there by `tests/ship-readiness.test.ts`.
+`src-tauri/tauri.conf.json`: two entries, 45 extensions, all derived from
+`src/core/languages.ts`, held there by `tests/ship-readiness.test.ts`. It was
+three entries and 57 until reading the generated installer showed that a
+Windows install takes the default rather than offering, at which point the data
+and config formats were cut: `Alternate` expresses nothing off macOS, so the
+list is the only lever there is.
 
 **Verified:** Windows, against the debug binary. A second launch naming a file
 exited 0, one process survived, and its window title gained the probe file:

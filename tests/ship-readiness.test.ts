@@ -298,15 +298,21 @@ describe('A1-001: the file types the installers claim', () => {
     // type on Windows, and the installer writes whichever it reaches last.
     expect(new Set(claimed).size).toBe(claimed.length);
     // The floor: an editor that cannot be offered a .txt is not an editor.
-    for (const ext of ['txt', 'md', 'json', 'rs', 'ts']) expect(claimed).toContain(ext);
+    for (const ext of ['txt', 'rs', 'ts']) expect(claimed).toContain(ext);
   });
 
   /**
-   * The decision this pins, from AUDIT/GATED-DECISIONS.md §3: be an option,
-   * not a default. `role` is `Editor` everywhere, because Nox edits every
-   * file it opens and a `Viewer` would be a lie. `rank` is what varies, and
-   * the formats another application makes are `Alternate` so macOS offers
-   * Nox without preferring it.
+   * `role` is `Editor` everywhere, because Nox edits every file it opens and
+   * a `Viewer` would be a lie.
+   *
+   * **`rank` cannot express the decision this was meant to pin.** The gated
+   * decision asked to be an option rather than a default, and `rank` is
+   * `LSHandlerRank`, which only macOS reads: on Windows `APP_ASSOCIATE`
+   * writes `Software\Classes\.<ext>` outright, so an install is a claim to
+   * be the default and there is no setting that softens it. What answers the
+   * decision on Windows is therefore the *list*, not the rank, which is why
+   * the data and config formats below are unclaimed rather than `Alternate`.
+   * `Owner` stays refused because nothing here is a format Nox invented.
    */
   it('offers itself as an editor, and never outranks the tool that owns a format', () => {
     const rankOf = new Map<string, string>();
@@ -314,9 +320,6 @@ describe('A1-001: the file types the installers claim', () => {
       expect(entry.role).toBe('Editor');
       expect(entry.rank).not.toBe('Owner');
       for (const ext of entry.ext as string[]) rankOf.set(ext, entry.rank as string);
-    }
-    for (const ext of ['json', 'md', 'markdown', 'xml']) {
-      expect(rankOf.get(ext)).toBe('Alternate');
     }
 
     // Deliberately unclaimed, though `languages.ts` knows every one of them.
@@ -327,7 +330,14 @@ describe('A1-001: the file types the installers claim', () => {
     // is often not text at all, and `.webmanifest` is a `.json` by another
     // name that nobody goes looking for an editor for.
     const claimed = new Set((associations ?? []).flatMap((entry) => entry.ext as string[]));
-    for (const ext of ['html', 'htm', 'xhtml', 'svg', 'plist', 'webmanifest']) {
+    // The data and config formats join them, cut on 2026-09-04 once reading
+    // the generated installer showed a Windows install takes the default
+    // rather than offering: `.json`, `.md` and a `.yml` usually already have
+    // an opener their owner chose, and taking it silently is the complaint
+    // this list exists to avoid. Plain text and programming languages stay.
+    for (const ext of ['html', 'htm', 'xhtml', 'svg', 'plist', 'webmanifest',
+                       'json', 'jsonc', 'md', 'markdown', 'mdx', 'xml',
+                       'yml', 'yaml', 'toml', 'ini', 'cfg', 'properties']) {
       expect(claimed.has(ext)).toBe(false);
     }
   });

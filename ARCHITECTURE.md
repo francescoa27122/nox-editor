@@ -1854,13 +1854,23 @@ every extension named, backing the previous value up under
 `<ProgID>_backup` for the uninstaller to put back. There is no offer-only
 setting to choose.
 
-That asymmetry is what decides the list. Claiming `.rs` or `.py` is what every
-editor's installer does and is reversible. Claiming `.html` is taking a
-double-click away from the browser, which is what the user meant by it, so
-`.html`, `.htm` and `.xhtml` are not claimed at all even though Nox highlights
-them; nor is `.svg`, which is an image everywhere else, or `.plist`, which is
-often not text. `.json`, `.md` and `.xml` are claimed at `Alternate`, which is
-as quiet as the two platforms between them allow.
+That asymmetry is what decides the list, and it is the *list* that answers the
+question `rank` cannot. Claiming `.rs` or `.py` is what every editor's installer
+does and is reversible. Claiming `.html` is taking a double-click away from the
+browser, which is what the user meant by it, so `.html`, `.htm` and `.xhtml` are
+not claimed at all even though Nox highlights them; nor is `.svg`, which is an
+image everywhere else, or `.plist`, which is often not text.
+
+**The data and config formats are unclaimed for the same reason** (2026-09-04).
+`.json`, `.jsonc`, `.md`, `.markdown`, `.mdx`, `.xml`, `.yml`, `.yaml`,
+`.toml`, `.ini`, `.cfg` and `.properties` were first claimed at `Alternate`, on
+the reading that `Alternate` made the claim quiet. It does not: it is quiet on
+macOS and silent on Windows, where the install takes the default regardless.
+Those are the formats most likely to have an opener their owner picked
+deliberately, so taking it without asking is the complaint this list exists to
+avoid. What is left is plain text and programming languages: 45 extensions in
+two groups, both `Default`, because on the one platform that reads `rank` there
+is now nothing left in the list worth ranking below it.
 
 **`name` is the Windows ProgID as well as `CFBundleTypeName`.** Tauri defaults
 it to `ext[0]`, which would put a registry key called `txt` in
