@@ -14,6 +14,7 @@ import {
 } from '@codemirror/commands';
 import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
+import { resolveIndentation } from '@core/indentation';
 import { languageById } from '@core/languages';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
 import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
@@ -246,8 +247,10 @@ export class NoxApp {
     this.keymap = new KeymapService(this.commands, platform);
     // Buffers are created with the current settings and no grammar; the
     // grammar is reconfigured in once it resolves. See EditorPane.
-    this.workspace = new WorkspaceService(platform, () =>
-      buildExtensions(this.config.settings.get()),
+    this.workspace = new WorkspaceService(platform, (args) =>
+      // The detected indentation comes back through the factory args so a
+      // buffer opened from a tab-indented file is built with tabs (A1-004).
+      buildExtensions(this.config.settings.get(), args.indent),
     );
     this.files = new FileTreeService(platform);
     this.watcher = new FileWatcherService(
@@ -4542,8 +4545,30 @@ export class NoxApp {
         title: 'Toggle Tabs and Spaces',
         category: 'View',
         keywords: ['indent', 'indentation', 'tab size', 'whitespace'],
-        run: () =>
-          this.config.set('editor.insertSpaces', !this.config.get('editor.insertSpaces')),
+        // Per file when there is a file, because detection is per file
+        // (A1-004): a control that flipped the global preference would leave
+        // the status bar reading whatever this buffer was detected as, and
+        // the click would look like it had done nothing. With no buffer open
+        // there is nothing to override, so it moves the default instead,
+        // which is the only thing the words can mean there.
+        run: () => {
+          const fallback = {
+            insertSpaces: this.config.get('editor.insertSpaces'),
+            tabSize: this.config.get('editor.tabSize'),
+          };
+          const active = this.workspace.activeSnapshot();
+          if (!active) {
+            this.config.set('editor.insertSpaces', !fallback.insertSpaces);
+            return;
+          }
+          const current = resolveIndentation(active.indent, fallback);
+          // The width is carried across rather than re-read: switching to
+          // tabs is not also a request to change the number beside them.
+          this.workspace.setIndentation(active.id, {
+            insertSpaces: !current.insertSpaces,
+            tabSize: current.tabSize,
+          });
+        },
       },
       {
         id: 'view.toggleLineNumbers',
