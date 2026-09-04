@@ -214,18 +214,32 @@ go through `workspace.apply` under the permission model; a read API that leaks
 a handle is a hole in that. Even the log's own `bufferIds` array is copied
 before it leaves.
 
-**Reads are recorded, not gated.** Context cannot leave the process on its
-own. `net.request` is the capability that matters, and since 2026-08-31 it is
-genuinely checked: the five commands that can reach the network declare it, and
-it is `deny` by policy for a non-user principal. Before that no command
-declared it at all, so this paragraph described a gate that did not exist, and
-what actually bounded the exposure was `http.rs`'s `is_loopback` refusing any
-non-loopback URL. Both layers are real and they answer different questions, so
-neither is the whole story on its own. Gating reads as well would mean a dialog
-for every keystroke of an agent's thinking. Instead
-`reader(principal)` binds the caller once, so no call site can forget to
-identify itself and the audit trail is complete by construction. The user's
-reads are not recorded, for the same reason their permission decisions are not.
+**Reads are bounded by the workspace, and recorded.** The bound is the open
+folder: `ContextService.inScope` refuses a non-user principal any buffer whose
+path is outside the root, `openBuffers` omits those buffers from the listing
+the opening brief is built from, and the runtime answers `permission-denied`
+rather than the empty-looking `null` the reader hands back. So a `.env` or an
+`~/.aws/credentials` the user has open in a tab is not part of what Nox hands a
+program, even though the user can read it perfectly well. Untitled buffers are
+in scope (they are outside nothing), and so is everything when no folder is
+open, which is the same answer `PermissionService` gives `fs.*` in that state.
+The one known hole is a symlink inside the root pointing out of it:
+`containsResolved` resolves `..` and not links, and the renderer has no
+real-path capability to ask with. ARCHITECTURE.md §7 carries it.
+
+Until 2026-09-03 this paragraph said instead that context cannot leave the
+process on its own, and that was never true of a stdio agent: that is another
+process with its own network, and `net.request` gates Nox's commands rather
+than it. The capability is real and worth having, and since 2026-08-31 it is
+genuinely checked (the five commands that can reach the network declare it,
+`deny` by policy for a non-user principal, with `tests/net-request-gate.test.ts`
+holding it there); it just answers a different question than this one.
+
+Within the bound, gating each read would mean a dialog for every keystroke of
+an agent's thinking. Instead `reader(principal)` binds the caller once, so no
+call site can forget to identify itself and the audit trail is complete by
+construction, refusals included. The user's reads are not recorded, for the
+same reason their permission decisions are not.
 
 **Everything is synchronous**, including `workspaceTree`, which the sketch had
 going through `Platform`. It is built from the quick-open index instead, so it

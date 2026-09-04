@@ -109,6 +109,18 @@
     elided: 'info',
   };
 
+  /**
+   * Rows the trail should show as a refusal, whatever turned them down.
+   *
+   * A refused read and a refused command are the same thing to the person
+   * reading the panel, so they get the same styling. Split out of the template
+   * because the condition stopped being one expression when reads joined it.
+   */
+  function isRefused(action: AgentAction): boolean {
+    if (action.kind === 'command') return !action.granted;
+    return action.kind === 'read' && action.refused === true;
+  }
+
   function describe(action: AgentAction): string {
     switch (action.kind) {
       case 'instruction':
@@ -117,7 +129,10 @@
       case 'summary':
         return action.text;
       case 'read':
-        return action.target ? `${action.method} (${action.target})` : action.method;
+        return (
+          (action.target ? `${action.method} (${action.target})` : action.method) +
+          (action.refused ? ' (refused: outside the workspace folder)' : '')
+        );
       case 'brief':
         return `Opening brief carried the ${action.detail}`;
       case 'command':
@@ -328,7 +343,7 @@
           </section>
           <ol class="trail">
             {#each session.actions as action, index (index)}
-              <li class:refused={action.kind === 'command' && !action.granted}>
+              <li class:refused={isRefused(action)}>
                 <Icon name={ICONS[action.kind]} size={10} />
                 <span>{describe(action)}</span>
               </li>
