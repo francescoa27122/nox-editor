@@ -104,6 +104,19 @@ export class DocumentSync {
 
     for (const buffer of buffers) {
       if (buffer.path === null) continue; // Untitled: no URI to give a server.
+      // A buffer over `LARGE_FILE_BYTES` is never announced to a server at
+      // all (A4-004). The other option, didOpen once and then no didChange,
+      // is the dishonest one: the server holds a copy that silently goes
+      // stale from the first keystroke, and every diagnostic it publishes
+      // afterwards lands on a line that has moved while looking entirely
+      // plausible, which is the same failure full-text sync exists to
+      // prevent. A document the server was never told about cannot drift.
+      //
+      // Deliberately before `seen.add`: a buffer that crosses the line on an
+      // external reload is already open at the server, and falling through to
+      // the loop below sends it a didClose. That is the honest end of the
+      // conversation rather than an abandoned one.
+      if (buffer.isLarge) continue;
       seen.add(buffer.id);
 
       const known = this.#open.get(buffer.id);

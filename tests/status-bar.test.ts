@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { NoxApp } from '../src/app';
 import { MemoryPlatform } from '../src/platform/memory';
+import { LARGE_FILE_BYTES } from '../src/services/workspace';
 import StatusBar from '../src/ui/StatusBar.svelte';
 import { flush, mountComponent } from './support/component';
 
@@ -53,6 +54,10 @@ function item(container: HTMLElement, text: string): HTMLButtonElement {
   expect(found, `no status-bar item starting with "${text}"`).toBeDefined();
   return found as HTMLButtonElement;
 }
+
+/** Every item's visible text, buttons and static readouts alike. */
+const labels = (container: HTMLElement) =>
+  [...container.querySelectorAll('.item')].map((item) => (item.textContent ?? '').trim());
 
 const click = (element: HTMLElement) =>
   element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -212,6 +217,31 @@ describe('the status bar', () => {
     click(item(container, 'Terminal'));
     flush();
     expect(app.ui.terminalOpen.get()).toBe(false);
+  });
+
+  /**
+   * Large-file mode has to be visible or it reads as a broken editor
+   * (A4-004). No squiggles, no gutter marks and a slower backup, with nothing
+   * on screen saying why, is indistinguishable from the language server
+   * having died.
+   *
+   * A readout rather than a button, unlike its neighbours in that corner:
+   * there is no action to offer, since the mode follows from the file's size
+   * and is not a setting.
+   */
+  it('names large-file mode, and only for the file that is in it', async () => {
+    const platform = new MemoryPlatform();
+    platform.mkdirp('/w');
+    platform.seedFile('/w/huge.ts', 'x\n'.repeat(LARGE_FILE_BYTES / 2 + 1));
+    const { app, container } = await mountBar(platform, '/w/huge.ts');
+
+    expect(labels(container)).toContain('Large file');
+
+    // The same bar, an ordinary file: gone. Switching tabs is what proves it
+    // is a property of the buffer rather than of the window.
+    await app.workspace.open('/w/a.ts');
+    flush();
+    expect(labels(container)).not.toContain('Large file');
   });
 
   /**
