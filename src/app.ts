@@ -228,6 +228,7 @@ export class NoxApp {
   });
 
   #disposeDropListener: (() => void) | null = null;
+  #disposeOpenListener: (() => void) | null = null;
   #disposeCloseListener: (() => void) | null = null;
   #disposeRejectionListener: (() => void) | null = null;
   /**
@@ -451,6 +452,9 @@ export class NoxApp {
     // twice on every launch; a workspace `excludeFromExplorer` that arrives
     // after the first walk re-walks through `files.setExcludes`.
     await this.#listenForExternalDrops();
+    // After the session restore, so a file named on the command line opens as
+    // a tab on top of the restored ones rather than being buried under them.
+    await this.#listenForOpenRequests();
     await this.#listenForClose();
     await this.#installMenu();
     this.#applyTheme();
@@ -491,6 +495,22 @@ export class NoxApp {
     } catch (error) {
       // Drag-and-drop is a convenience; failing to wire it must not stop boot.
       console.warn('[nox] external file drop unavailable:', error);
+    }
+  }
+
+  /**
+   * A path the OS handed to Nox (`nox notes.txt`, or Finder on macOS) follows
+   * the same rule as a drop: a file becomes a tab, a lone folder becomes the
+   * workspace. Same door on purpose, so the two entry points cannot drift.
+   */
+  async #listenForOpenRequests(): Promise<void> {
+    try {
+      this.#disposeOpenListener = await this.platform.onOpenRequested((paths) => {
+        void this.openDroppedPaths(paths);
+      });
+    } catch (error) {
+      // Like the drop listener: a convenience whose wiring must not stop boot.
+      console.warn('[nox] open requests from the OS unavailable:', error);
     }
   }
 
@@ -941,6 +961,46 @@ export class NoxApp {
     const handled = command(view);
     view.focus();
     return handled;
+  }
+
+  /**
+   * Cut and Copy through the browser's own command with the editor focused,
+   * so CodeMirror's handlers do the work: they know about multiple ranges and
+   * take the whole line when nothing is selected, and a second copy of that
+   * rule here would drift from the keyboard path. Only the drawn menu
+   * dispatches these; macOS leaves them to the responder chain.
+   */
+  #editorClipboard(kind: 'cut' | 'copy'): boolean {
+    return this.#runEditor((view) => {
+      view.focus();
+      return typeof document.execCommand === 'function' && document.execCommand(kind);
+    });
+  }
+
+  /**
+   * Paste is the one clipboard verb a page cannot issue through
+   * `execCommand`: Chromium refuses it from script. Read the clipboard
+   * instead and hand the text to the editor as the paste it would have been.
+   */
+  async #pasteIntoEditor(): Promise<boolean> {
+    const view = this.view.get();
+    if (!view) return false;
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      this.notifications.error('Could not read the clipboard.');
+      return false;
+    }
+    if (text.length > 0) {
+      view.dispatch({
+        ...view.state.replaceSelection(text),
+        userEvent: 'input.paste',
+        scrollIntoView: true,
+      });
+    }
+    view.focus();
+    return true;
   }
 
   /**
@@ -2930,6 +2990,18 @@ export class NoxApp {
         run: () => this.openFileDialog(),
       },
       {
+        id: 'file.openRecent',
+        title: 'Open Recent…',
+        category: 'File',
+        keywords: ['recent', 'history', 'previous', 'folder', 'project'],
+        // No `capabilities`: this opens a picker. The open itself happens
+        // when a row is chosen, on the same path a click in the explorer
+        // takes.
+        enabled: () =>
+          this.workspace.recentFolders.get().length + this.workspace.recentFiles.get().length > 0,
+        run: () => this.ui.openOverlay('recent'),
+      },
+      {
         id: 'file.openFolder',
         capabilities: ['workspace.open'],
         title: 'Open Folder…',
@@ -3208,12 +3280,19 @@ export class NoxApp {
         run: () => this.search.collapseAll(),
       },
 
+      // Hidden, like `explorer.moveTo`: the explorer's context menu dispatches
+      // these two by id with the clicked path as the argument, and that is
+      // their whole job. Listed beside `file.newInFolder` and `file.newFolder`
+      // they were a second New File / New Folder pair in the File menu whose
+      // difference (tree selection versus active file's folder) no title
+      // stated.
       {
         id: 'explorer.newFile',
         resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'New File Here…',
         category: 'Explorer',
+        hidden: true,
         enabled: this.#hasFolder,
         run: async (arg) => {
           const directory = await this.#targetDirectory(arg);
@@ -3226,6 +3305,7 @@ export class NoxApp {
         capabilities: ['fs.create'],
         title: 'New Folder Here…',
         category: 'Explorer',
+        hidden: true,
         enabled: this.#hasFolder,
         run: async (arg) => {
           const directory = await this.#targetDirectory(arg);
@@ -3425,7 +3505,7 @@ export class NoxApp {
       {
         id: 'agents.show',
         title: 'Show Agents',
-        category: 'View',
+        category: 'Agents',
         keywords: ['sessions', 'audit', 'history', 'ai'],
         run: () => this.ui.showAgents(),
       },
@@ -3866,7 +3946,7 @@ export class NoxApp {
          * and the active tab need not be one of them.
          */
         capabilities: ['buffer.edit', 'permissions.revoke'],
-        category: 'View',
+        category: 'Agents',
         keywords: ['revert', 'take back', 'ai'],
         enabled: () => this.agents.sessions.get().some((s) => this.agents.changesBy(s.id).length > 0),
         run: () => {
@@ -4075,6 +4155,37 @@ export class NoxApp {
         enabled: editorEnabled,
         run: () => this.#step('redo'),
       },
+      // The clipboard three exist for the drawn menu on Windows and Linux.
+      // On macOS `COVERED_BY_SYSTEM_ITEMS` keeps them out of the menu, where
+      // the predefined items act on whatever has focus.
+      {
+        id: 'edit.cut',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        capabilities: ['buffer.edit'],
+        title: 'Cut',
+        keyHint: 'Mod+X',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#editorClipboard('cut'),
+      },
+      {
+        id: 'edit.copy',
+        title: 'Copy',
+        keyHint: 'Mod+C',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#editorClipboard('copy'),
+      },
+      {
+        id: 'edit.paste',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        capabilities: ['buffer.edit'],
+        title: 'Paste',
+        keyHint: 'Mod+V',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#pasteIntoEditor(),
+      },
       {
         id: 'edit.selectAll',
         title: 'Select All',
@@ -4195,17 +4306,6 @@ export class NoxApp {
         keywords: ['expand all'],
         enabled: editorEnabled,
         run: () => this.#runEditor(unfoldAll),
-      },
-      {
-        id: 'edit.foldLevel',
-        title: 'Fold to Level…',
-        category: 'Edit',
-        hidden: true,
-        enabled: editorEnabled,
-        run: (arg) => {
-          const level = Number(arg);
-          if (Number.isFinite(level) && level > 0) this.#runEditor(foldToLevel(level));
-        },
       },
       {
         id: 'edit.toggleComment',
@@ -4418,6 +4518,18 @@ export class NoxApp {
         category: 'View',
         run: () =>
           this.config.set('workbench.showStatusBar', !this.config.get('workbench.showStatusBar')),
+      },
+      {
+        id: 'view.toggleFullscreen',
+        title: 'Toggle Full Screen',
+        category: 'View',
+        keywords: ['fullscreen', 'full screen', 'window'],
+        // Awaited, not voided: the drawn menu on macOS never lists this (the
+        // predefined item does), and the title bar hears the change through
+        // `onFullscreenChange` rather than from the return value.
+        run: async () => {
+          await this.platform.toggleFullscreen();
+        },
       },
       {
         id: 'view.toggleWordWrap',
@@ -4881,6 +4993,21 @@ export class NoxApp {
 
       // --- Application ------------------------------------------------------
       {
+        id: 'app.about',
+        title: 'About Nox',
+        category: 'Application',
+        keywords: ['version', 'help', 'info'],
+        // A notification rather than a panel: the one thing About has to
+        // answer is "which version is this", and the diagnostics report
+        // already carries the rest for anyone filing an issue.
+        run: () => {
+          this.notifications.info(
+            `Nox ${__APP_VERSION__}`,
+            'A fast, dark, keyboard-first text editor.',
+          );
+        },
+      },
+      {
         id: 'app.checkForUpdates',
         // A real outbound request, to a fixed endpoint with no caller-supplied
         // payload, so this is the mildest of the five. Declared anyway: the
@@ -4927,6 +5054,16 @@ export class NoxApp {
         run: async () => {
           await this.copyToClipboard(this.diagnostics.report(this.#environment()), 'diagnostics');
         },
+      },
+      {
+        id: 'app.quit',
+        title: 'Exit',
+        category: 'Application',
+        keywords: ['quit', 'close', 'window'],
+        // Through the close request, not `destroy`: the close handler is
+        // what writes the session, and Exit must lose no more than the X
+        // button does.
+        run: () => this.platform.closeWindow(),
       },
       // --- Window -----------------------------------------------------------
       // The three window controls. They exist as commands so the title bar's
@@ -5753,6 +5890,8 @@ export class NoxApp {
   async dispose(): Promise<void> {
     this.#disposeDropListener?.();
     this.#disposeDropListener = null;
+    this.#disposeOpenListener?.();
+    this.#disposeOpenListener = null;
     this.#disposeCloseListener?.();
     this.#disposeCloseListener = null;
     this.#disposeRejectionListener?.();

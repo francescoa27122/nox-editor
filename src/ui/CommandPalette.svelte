@@ -35,6 +35,7 @@
   const fileIndex = files.fileIndex;
   const buffers = workspace.buffers;
   const recentFiles = workspace.recentFiles;
+  const recentFolders = workspace.recentFolders;
   const rootPath = workspace.rootPath;
   const commandVersion = commands.version;
 
@@ -67,6 +68,7 @@
     | 'notes'
     | 'actions'
     | 'languages'
+    | 'recent'
     | 'tasks'
   >(
     () => {
@@ -83,6 +85,8 @@
       // And again: a dedicated picker, so no prefix may switch it. `C++`
       // starts with nothing special, but `>` is not worth the exception.
       if (mode === 'language') return 'languages';
+      // A picker over paths, and a path may start with anything.
+      if (mode === 'recent') return 'recent';
       // And again. A task's label is the author's prose, so it may start with
       // anything a prefix would otherwise claim.
       if (mode === 'task-run') return 'tasks';
@@ -100,6 +104,7 @@
     effectiveMode === 'notes' ||
     effectiveMode === 'actions' ||
     effectiveMode === 'languages' ||
+    effectiveMode === 'recent' ||
     effectiveMode === 'tasks'
       ? text.trim()
       : text.slice(1).trim(),
@@ -123,6 +128,8 @@
         return 'Go to a note…';
       case 'actions':
         return 'Choose a fix…';
+      case 'recent':
+        return 'Open a recent folder or file…';
       case 'tasks':
         return 'Run a task…';
       default:
@@ -246,6 +253,7 @@
     if (effectiveMode === 'notes') return noteRows(term);
     if (effectiveMode === 'actions') return actionRows(term);
     if (effectiveMode === 'languages') return languageRows(term);
+    if (effectiveMode === 'recent') return recentRows(term);
     return fileRows(term);
   });
   const rows = $derived(result.rows);
@@ -535,6 +543,50 @@
     // `total` is capped by the 4000-candidate scoring break above, so on a
     // huge index it is a lower bound — still far more honest than the slice.
     return { rows: scored.slice(0, 100).map((s) => s.row), total: scored.length };
+  }
+
+  /**
+   * Recent folders, then recent files, each most recent first.
+   *
+   * Folders lead because switching project is the case quick-open cannot
+   * serve at all: it indexes the folder that is open, and a folder that is
+   * not open is not in it. Both lists are already capped by the workspace,
+   * so nothing here is sliced. With no query the order is left alone, for
+   * the reason `bufferRows` gives.
+   */
+  function recentRows(query: string): RowsResult {
+    const root = $rootPath;
+    const scored: { row: Row; score: number; order: number }[] = [];
+
+    const push = (path: string, kind: 'folder' | 'file', order: number) => {
+      const name = basename(path);
+      const match = query.length === 0 ? { score: 0, positions: [] } : fuzzyMatch(query, name);
+      if (!match) return;
+      const detail = kind === 'folder' ? dirname(path) : dirname(root ? relative(root, path) : path);
+      scored.push({
+        score: match.score,
+        order,
+        row: {
+          key: `${kind}:${path}`,
+          title: name,
+          positions: match.positions,
+          icon: kind,
+          ...(detail && detail !== '.' ? { detail } : {}),
+          ...(kind === 'folder' ? { hint: 'Folder' } : {}),
+          accept: () => {
+            ui.closeOverlay();
+            if (kind === 'folder') void app.openFolderDialogFor(path);
+            else void workspace.open(path);
+          },
+        },
+      });
+    };
+
+    $recentFolders.forEach((path, order) => push(path, 'folder', order));
+    $recentFiles.forEach((path, order) => push(path, 'file', $recentFolders.length + order));
+
+    scored.sort((a, b) => b.score - a.score || a.order - b.order);
+    return { rows: scored.map((s) => s.row), total: scored.length };
   }
 
   /**
@@ -1002,6 +1054,8 @@
         return 'Titles only here — use the filter box in the Notes panel to search inside a note.';
       case 'actions':
         return 'No action here matches that.';
+      case 'recent':
+        return 'Only folders and files opened before are listed — try Go to File for the rest.';
       case 'tasks':
         return 'Tasks come from your own tasks.json, or the project\u2019s .nox/tasks.json.';
       case 'files':

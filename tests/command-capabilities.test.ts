@@ -62,6 +62,24 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
   'stopping something already running': ['agents.cancel', 'jobs.cancel', 'tasks.stop'],
 
   /**
+   * Reading the selection out to the clipboard. `edit.cut` and `edit.paste`
+   * are not here: both write the buffer and declare `buffer.edit`. Copy takes
+   * nothing and changes nothing, and there is no clipboard capability to
+   * declare, which is worth knowing rather than reading as an omission.
+   */
+  'copying the selection': ['edit.copy'],
+
+  /**
+   * Ending the session. Filed here rather than declared because the
+   * vocabulary has no capability for the app's own lifecycle: the nearest,
+   * `shell.exec`, would be a lie about what this does. Unsaved work survives
+   * in the session exactly as it does for the closing group above, so the
+   * cost of an unwanted quit is interruption rather than loss. **A capability
+   * for lifecycle is a real gap**, and this row is the place it shows.
+   */
+  'ending the session': ['app.quit'],
+
+  /**
    * The window's own chrome. Minimise, maximise and close move or hide a
    * window; none of them reaches the file system, a process or the network,
    * and the OS offers all three next to them on every platform, so gating
@@ -75,7 +93,9 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
   'showing something': [
     'agents.show',
     'answers.focus',
+    'app.about',
     'app.showWelcome',
+    'file.openRecent',
     'explorer.collapseAll',
     'explorer.selectAll',
     'git.focus',
@@ -98,6 +118,7 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
     'notes.open',
     'prefs.keybindings',
     'prefs.open',
+    'view.toggleFullscreen',
     'problems.focus',
     'references.focus',
     'review.show',
@@ -125,7 +146,6 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
     'edit.findPrevious',
     'edit.fold',
     'edit.foldAll',
-    'edit.foldLevel',
     'edit.foldLevel1',
     'edit.foldLevel2',
     'edit.foldLevel3',

@@ -525,6 +525,16 @@ export interface Platform {
   onExternalFileDrop(handler: (event: ExternalDropEvent) => void): Promise<() => void>;
 
   /**
+   * Observe paths the OS asks Nox to open: the positional arguments of the
+   * launch (`nox notes.txt`), and on macOS a file handed to the running app
+   * by Finder. Delivered once each; a path queued before anyone subscribed
+   * arrives on subscription. Files and folders alike, so the handler applies
+   * the same rule as a drop. Returns a disposer; platforms with no OS to
+   * hear from may never call the handler.
+   */
+  onOpenRequested(handler: (paths: readonly string[]) => void): Promise<() => void>;
+
+  /**
    * Run `handler` when the user closes the window, before it goes away.
    *
    * The window waits for the returned promise, which is the whole point: the
@@ -691,6 +701,13 @@ export interface Platform {
 
   /** Maximise, or restore when already maximised. Resolves to the new state. */
   toggleMaximizeWindow(): Promise<boolean>;
+
+  /**
+   * Enter fullscreen, or leave it when already there. Resolves to the new
+   * state. For the drawn menu's Full Screen item: macOS gets a predefined one
+   * from the system, and everywhere else nothing could ask for it.
+   */
+  toggleFullscreen(): Promise<boolean>;
 
   /**
    * Close the window the way the OS would — running the close handler, so

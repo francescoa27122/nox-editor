@@ -994,6 +994,23 @@ export class MemoryPlatform implements Platform {
     return () => {};
   }
 
+  #openHandlers = new Set<(paths: readonly string[]) => void>();
+
+  async onOpenRequested(handler: (paths: readonly string[]) => void): Promise<() => void> {
+    this.#openHandlers.add(handler);
+    return () => {
+      this.#openHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Seam: what the OS would do when it hands Nox a path, at launch or later.
+   * Tests only; a browser tab is never handed one.
+   */
+  requestOpen(paths: readonly string[]): void {
+    for (const handler of [...this.#openHandlers]) handler(paths);
+  }
+
   /**
    * There is no window to close under Vitest, but the parameter stays: it is
    * the contract `WebPlatform` overrides with the browser's unload signal.
@@ -1151,6 +1168,14 @@ export class MemoryPlatform implements Platform {
 
   async toggleMaximizeWindow(): Promise<boolean> {
     return false;
+  }
+
+  /** What the window would report; there is none, so a flag stands in. */
+  fullscreen = false;
+
+  async toggleFullscreen(): Promise<boolean> {
+    this.fullscreen = !this.fullscreen;
+    return this.fullscreen;
   }
 
   async closeWindow(): Promise<void> {}

@@ -11,6 +11,7 @@ mod fs;
 mod geometry;
 mod git;
 mod http;
+mod launch;
 mod lsp;
 #[cfg(desktop)]
 mod menu;
@@ -54,6 +55,11 @@ pub fn run() {
                     panic_log::install(dir, fs::dirs_home());
                 }
             }
+            // `nox notes.txt`: queue the positional paths now, while the
+            // webview is still booting, and let the renderer collect them
+            // once it is listening. See `launch.rs` for why they are pulled
+            // rather than pushed.
+            launch::enqueue_argv(_app.handle());
 
             // `--geometry WxH+X+Y` — a launch-time window size for repeatable
             // desktop walks. See `geometry.rs` for why it is a test affordance
@@ -140,7 +146,9 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
         .manage(http::HttpState::default())
+        .manage(launch::LaunchState::default())
         .invoke_handler(tauri::generate_handler![
+            launch::nox_launch_paths,
             fs::nox_home_dir,
             fs::nox_read_text_file,
             fs::nox_read_encoded_file,
@@ -194,7 +202,13 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running Nox")
+        // `build` then `run` rather than the one-call `run`: only this form
+        // sees run events, and both handlers below need them. macOS delivers a
+        // file opened from Finder as a run event rather than as argv, and the
+        // host's own `Exit` is the last word a quit passes through.
         .run(|app, event| {
+            launch::handle_run_event(app, &event);
+
             // Every child Nox supervises is killed here as well as from the
             // renderer's `beforeunload`. That handler was the only kill path,
             // and it belongs to a webview that is not guaranteed to run it on
