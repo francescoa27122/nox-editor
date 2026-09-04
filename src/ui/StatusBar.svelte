@@ -333,6 +333,24 @@
         {active.eol === '\r\n' ? 'CRLF' : 'LF'}
       </button>
 
+      <!-- Why a squiggle, a gutter mark or a fresh backup is missing on this
+           file. Without it the mode is indistinguishable from the editor
+           being broken, which is the whole reason it is on screen.
+
+           Static rather than a button, unlike its neighbours: there is no
+           action to offer. The mode follows from the file's size, it is not a
+           setting, and the way out of it is a smaller file. A control that
+           looked live and did nothing is the defect the language item below
+           was fixed for. -->
+      {#if active.isLarge}
+        <span
+          class="item static"
+          title="Large file: no language server, no gutter diff, and unsaved work backed up less often"
+        >
+          Large file
+        </span>
+      {/if}
+
       <!--
         One control, two facts: whether a grammar is installed and whether a
         language server is. Both are "something this file could have and does

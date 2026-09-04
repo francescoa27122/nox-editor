@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NoxApp } from '../src/app';
 import { MemoryPlatform } from '../src/platform/memory';
 import { MAX_BLAME_BYTES, MAX_DIFF_BYTES } from '../src/services/git';
+import { LARGE_FILE_BYTES } from '../src/services/workspace';
 
 /**
  * GitService over a real workspace and a MemoryPlatform with seeded bases.
@@ -501,6 +502,58 @@ describe('the blame gutter´s service half', () => {
 
     expect(spy).toHaveBeenCalledTimes(2);
     expect(spy.mock.calls[1]![1]).toBe(app.workspace.textOf(id));
+  });
+
+  /**
+   * Large files (A4-004): no gutter for a buffer over `LARGE_FILE_BYTES`.
+   *
+   * Read what this actually pins, because the obvious half of it has no
+   * teeth. `MAX_DIFF_BYTES` is 2 MB, so a 5 MB buffer had no hunks before
+   * this change either: asserting the empty map passes with the threshold
+   * removed. What is new is that neither whole-file copy is *made* any more.
+   * `gitFileBase` brought the base back across the IPC hop and `textOf` was a
+   * whole-document `toString`, both before anything checked a size, and the
+   * call count is the assertion with the mutation behind it.
+   */
+  it('fetches no base and reads no text for a buffer over the large-file threshold', async () => {
+    const huge = 'x\n'.repeat(Math.ceil((LARGE_FILE_BYTES + 1) / 2));
+    platform.seedFile('/w/huge.ts', huge);
+    platform.seedGitBase('/w/huge.ts', 'one\n');
+    await app.workspace.openFolder('/w');
+
+    const base = vi.spyOn(platform, 'gitFileBase');
+    const text = vi.spyOn(app.workspace, 'textOf');
+    const id = (await app.workspace.open('/w/huge.ts'))!;
+    await vi.runAllTimersAsync();
+
+    expect(app.git.hunks.get().has(id)).toBe(false);
+    expect(base).not.toHaveBeenCalled();
+    expect(text.mock.calls.filter((call) => call[0] === id)).toEqual([]);
+  });
+
+  /**
+   * The regression that matters more than the feature, and the inverse of the
+   * assertion above: at the threshold the file is not over it, so the base is
+   * fetched exactly as it always was. `LARGE_FILE_BYTES` itself is not large,
+   * so this pins the comparison too.
+   */
+  it('still fetches the base for a buffer exactly at the large-file threshold', async () => {
+    const at = 'x\n'.repeat(LARGE_FILE_BYTES / 2);
+    platform.seedFile('/w/big.ts', at);
+    platform.seedGitBase('/w/big.ts', 'one\n');
+    await app.workspace.openFolder('/w');
+
+    const base = vi.spyOn(platform, 'gitFileBase');
+    const id = (await app.workspace.open('/w/big.ts'))!;
+    await vi.runAllTimersAsync();
+
+    expect(app.workspace.stateOf(id)!.doc.length).toBe(LARGE_FILE_BYTES);
+    expect(app.workspace.activeSnapshot()?.isLarge).toBe(false);
+    expect(base).toHaveBeenCalledWith('/w/big.ts');
+    // No hunks all the same: `MAX_DIFF_BYTES` refuses the diff at 2 MB, and
+    // always did. That is the line this threshold sits above so it takes
+    // nothing away.
+    expect(app.git.hunks.get().has(id)).toBe(false);
   });
 
   /**

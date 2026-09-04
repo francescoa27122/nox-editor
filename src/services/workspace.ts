@@ -121,6 +121,32 @@ const EXACT_DIRTY_LIMIT = 2_000_000;
  */
 export const MAX_FILE_BYTES = 64 * 1024 * 1024;
 
+/**
+ * Above this, a buffer opens in large-file mode: no language server sync, no
+ * git gutter diff, and unsaved-work backups on a slower clock. The file still
+ * opens and still edits. What is switched off is the per-change work whose
+ * cost is the whole document (A4-004).
+ *
+ * **Measured 2026-09-03**, Node 22, best of five, over synthetic source text.
+ * The cost that sets the number is not the rope walk but what happens to the
+ * string afterwards. `doc.toString()` plus the `JSON.stringify` every IPC hop
+ * pays costs 1.4 ms at 1 MB, 4.9 ms at 5 MB, 10.0 ms at 10 MB and 20.9 ms at
+ * 20 MB, and Rust then copies it again on the other side. Three consumers read
+ * the whole document on each pause in typing (the language server, the session
+ * backup, the gutter's diff), so 5 MB is the last size at which one of them
+ * still fits inside a 16 ms frame.
+ *
+ * It sits above `MAX_DIFF_BYTES` (2 MB, `git.ts`) on purpose, so the threshold
+ * takes away no gutter diff anyone gets today: at that size the diff was
+ * already refused, just after the copy had been paid for.
+ *
+ * A constant and not a setting, deliberately. A number measured once is worth
+ * more than a number every user has to choose, and a preference would owe an
+ * answer to "why is this file different from that one" that the status-bar
+ * item gives for free.
+ */
+export const LARGE_FILE_BYTES = 5 * 1024 * 1024;
+
 export interface StateFactoryArgs {
   doc: string;
   languageId: string;
@@ -145,6 +171,8 @@ export interface BufferSnapshot {
   eol: Eol;
   encoding: Encoding;
   externalState: ExternalState;
+  /** Whether this buffer is in large-file mode. See `LARGE_FILE_BYTES`. */
+  isLarge: boolean;
   /**
    * `Buffer.revision`, published so it can be *subscribed to*.
    *
@@ -170,6 +198,17 @@ class Buffer {
   savedEol: Eol;
   changeCount = 0;
   savedChangeCount = 0;
+  /**
+   * Whether this buffer is in large-file mode. See `LARGE_FILE_BYTES`.
+   *
+   * Read from the document the buffer was given rather than from the file's
+   * size on disk, so an untitled buffer and a restored backup are judged the
+   * same way a file is. Decided once here and re-decided only where the whole
+   * document is replaced, never on the typing path: a mode that could flip
+   * mid-edit would have to take a language server's copy of the document with
+   * it, and `doc.length` being O(1) is not a reason to ask per keystroke.
+   */
+  isLarge: boolean;
   /**
    * Monotonic counter, bumped on every change to the document.
    *
@@ -216,6 +255,7 @@ class Buffer {
     this.state = init.state;
     this.savedDoc = init.state.doc;
     this.savedEol = init.eol;
+    this.isLarge = init.state.doc.length > LARGE_FILE_BYTES;
   }
 
   get isUntitled(): boolean {
@@ -247,6 +287,7 @@ class Buffer {
       eol: this.eol,
       encoding: this.encoding,
       externalState: this.externalState,
+      isLarge: this.isLarge,
       revision: this.revision,
     };
   }
@@ -488,6 +529,17 @@ export class WorkspaceService {
 
   textOf(id: BufferId): string | undefined {
     return this.#map.get(id)?.state.doc.toString();
+  }
+
+  /**
+   * Whether this buffer is in large-file mode. See `LARGE_FILE_BYTES`.
+   *
+   * A method as well as a snapshot field because the services that act on it
+   * hold a buffer id rather than a snapshot, and asking through the published
+   * list would mean a scan per call.
+   */
+  isLarge(id: BufferId): boolean {
+    return this.#map.get(id)?.isLarge ?? false;
   }
 
   hasUnsavedChanges(): boolean {
@@ -1345,6 +1397,11 @@ export class WorkspaceService {
     const buffer = this.#map.get(id);
     if (!buffer) return false;
     if (buffer.state.doc.toString() === text) return false;
+    // The other way a buffer arrives at its content: an external reload, and
+    // session restore putting a backup back on a file that was deleted. Both
+    // mean "this is a different document now", so the large-file decision is
+    // remade here, before the edit publishes the snapshot that carries it.
+    buffer.isLarge = text.length > LARGE_FILE_BYTES;
     return this.applyEdits(id, [{ from: 0, to: buffer.state.doc.length, insert: text }]);
   }
 
