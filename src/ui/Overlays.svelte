@@ -29,8 +29,9 @@
       $overlay === 'git-branch' ||
       $overlay === 'code-action' ||
       $overlay === 'note-open' ||
+      $overlay === 'language' ||
       $overlay === 'task-run' ||
-      $overlay === 'language',
+      $overlay === 'recent',
   );
 
   function onScrimClick(event: MouseEvent) {
@@ -74,6 +75,10 @@
     justify-content: center;
     padding: var(--nox-sp-7);
     background: var(--nox-scrim);
+    /* Prefixed first: Safari shipped the unprefixed property in 18, and this
+       app's floor is macOS 13, so 13 through 17 need the -webkit- spelling
+       or the scrim loses its blur silently. */
+    -webkit-backdrop-filter: blur(2px);
     backdrop-filter: blur(2px);
     animation: scrim-in var(--nox-dur-base) var(--nox-ease);
   }

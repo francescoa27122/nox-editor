@@ -1,9 +1,12 @@
+import { parser as jsParser } from '@lezer/javascript';
+import { Text } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { diffText } from '../src/core/diff';
 import { parseGitBlame } from '../src/core/git-blame';
 import { fuzzyFilter } from '../src/core/fuzzy';
 import { buildSearchRegex, findMatches } from '../src/core/search-match';
 import { computeReplacements } from '../src/core/replace';
+import { enclosingSymbols } from '../src/core/symbols';
 import { objectSpans, unfence } from '../src/services/agent/ollama';
 import {
   blamePorcelain,
@@ -71,6 +74,45 @@ describe('the pure layers still scale', () => {
     );
 
     expect(g.ratio, describeGrowth('diffText', g, 24)).toBeLessThan(24);
+  });
+
+  /**
+   * A4-003: `diffLines` used to keep every Myers frontier, so a rewrite where
+   * D sits close to N+M cost O((N+M)·D) time and O(D·(N+M)) memory instead of
+   * scaling with the input — 8,000 lines all different measured at 1.6 s and
+   * 2 GB (`tests/diff.test.ts` pins the wall-clock side of that directly).
+   * `MAX_D` bounds the search, so past it the cost is O(MAX_D·(N+M)): linear
+   * in the input at a fixed constant, which is what this checks the same way
+   * the guard above checks a small edit, over an input that keeps D pinned at
+   * its maximum — every line different — at both sizes, so both runs are
+   * already past the cap and the whole difference is the O(N+M) part.
+   *
+   * Measured over 3 local runs at 8x the input: **3.5x-4.6x**, comfortably
+   * under even the 8x a linear cost would produce, let alone the budget.
+   * Verified: reverting `MAX_D` to `Number.POSITIVE_INFINITY` (the old,
+   * unbounded search) reports **67.3x** and fails this, almost exactly the
+   * ~64x a quadratic implementation predicts; that run took 21.6 s against
+   * this test's 0.7 s with the cap in place.
+   */
+  it('diffs a whole-file rewrite in proportion to the file, once D is capped', () => {
+    const allDifferent = (lines: number): [string, string] => {
+      const before: string[] = [];
+      const after: string[] = [];
+      for (let i = 0; i < lines; i++) {
+        before.push(`before line ${i}\n`);
+        after.push(`after line ${i}\n`);
+      }
+      return [before.join(''), after.join('')];
+    };
+
+    const g = growth(
+      (lines) => allDifferent(lines),
+      ([before, after]) => void diffText(before, after),
+      1_000,
+      8_000,
+    );
+
+    expect(g.ratio, describeGrowth('diffText (rewrite)', g, 24)).toBeLessThan(24);
   });
 
   /**
@@ -206,6 +248,50 @@ describe('the pure layers still scale', () => {
    * would not have grown to 24x at 8x the input, it would have timed the
    * suite out. This one is a canary rather than a stopwatch.
    */
+  /**
+   * A4-001: sticky scroll used to derive its pinned rows from `fileSymbols`,
+   * a walk over the *whole* parsed tree, on every keystroke. What the panel
+   * actually needs is the chain of declarations enclosing one position, which
+   * `enclosingSymbols` gets by walking `.parent` from that position instead —
+   * a cost bounded by nesting depth, not document length. `sourceFile` nests
+   * two deep (a class, then a method) at any size, so this input's nesting
+   * does not grow with `lines` the way the six guards above's inputs do; the
+   * claim here is closer to flat than to linear, which is why this test uses
+   * its own tighter budget rather than the file's shared 24x.
+   *
+   * Measured locally: `enclosingSymbols` **0.8x-1.0x** at 16x the input (it
+   * does not grow at all, within noise); the walk it replaced, `stickyRows(
+   * fileSymbols(...))` over the same fixture and position, measured
+   * **17.4x-19.4x** — tracking the document, as A4-001 found by reading the
+   * code. A budget of 4 sits well above the flat implementation's noise and
+   * well below the old one's near-linear growth, so this fails on the
+   * regression this exists to catch and would not have failed on the
+   * complexity claim `stickyRows` alone still makes (that one is still
+   * guarded structurally: it only ever seees rows that fit in `max`).
+   */
+  it('pins sticky rows in proportion to nesting depth, not document length', () => {
+    const ts = jsParser.configure({ dialect: 'ts' });
+
+    const g = growth(
+      (lines) => {
+        const source = sourceFile(lines);
+        const doc = Text.of(source.split('\n'));
+        const tree = ts.parse(source);
+        // Three quarters of the way in, so both sizes measure a position deep
+        // inside the generated classes rather than the empty tail `sourceFile`
+        // pads with once it has enough lines.
+        const pos = Math.floor(doc.length * 0.75);
+        const topLine = doc.lineAt(pos).number;
+        return { doc, tree, pos, topLine } as const;
+      },
+      ({ doc, tree, pos, topLine }) => void enclosingSymbols(tree, doc, pos, topLine, 5),
+      2_000,
+      32_000,
+    );
+
+    expect(g.ratio, describeGrowth('enclosingSymbols', g, 4)).toBeLessThan(4);
+  });
+
   it('survives an unclosed fence with a long whitespace tail', () => {
     const g = growth(
       (size) => '```json\n' + ' '.repeat(size),

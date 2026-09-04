@@ -11,9 +11,11 @@ mod fs;
 mod geometry;
 mod git;
 mod http;
+mod launch;
 mod lsp;
 #[cfg(desktop)]
 mod menu;
+mod panic_log;
 mod pty;
 mod search;
 mod watcher;
@@ -41,6 +43,24 @@ pub fn run() {
 
     builder
         .setup(|_app| {
+            // First, before anything that can fail: a panic anywhere in this
+            // process from here on leaves a line in `panic.log` beside
+            // `diagnostics.log`, where Copy Diagnostics picks it up on the
+            // next launch. Without it a release build aborts silently (see
+            // `panic_log.rs`). Here rather than at the top of `run()` because
+            // the config directory is resolved through the app handle.
+            {
+                use tauri::Manager;
+                if let Ok(dir) = _app.path().app_config_dir() {
+                    panic_log::install(dir, fs::dirs_home());
+                }
+            }
+            // `nox notes.txt`: queue the positional paths now, while the
+            // webview is still booting, and let the renderer collect them
+            // once it is listening. See `launch.rs` for why they are pulled
+            // rather than pushed.
+            launch::enqueue_argv(_app.handle());
+
             // `--geometry WxH+X+Y` — a launch-time window size for repeatable
             // desktop walks. See `geometry.rs` for why it is a test affordance
             // rather than a user feature (a Finder-launched .app gets no argv).
@@ -126,7 +146,9 @@ pub fn run() {
         .manage(pty::PtyState::default())
         .manage(lsp::LspState::default())
         .manage(http::HttpState::default())
+        .manage(launch::LaunchState::default())
         .invoke_handler(tauri::generate_handler![
+            launch::nox_launch_paths,
             fs::nox_home_dir,
             fs::nox_read_text_file,
             fs::nox_read_encoded_file,
@@ -178,8 +200,32 @@ pub fn run() {
             #[cfg(desktop)]
             menu::nox_set_menu,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Nox");
+        .build(tauri::generate_context!())
+        .expect("error while running Nox")
+        // `build` then `run` rather than the one-call `run`: only this form
+        // sees run events, and both handlers below need them. macOS delivers a
+        // file opened from Finder as a run event rather than as argv, and the
+        // host's own `Exit` is the last word a quit passes through.
+        .run(|app, event| {
+            launch::handle_run_event(app, &event);
+
+            // Every child Nox supervises is killed here as well as from the
+            // renderer's `beforeunload`. That handler was the only kill path,
+            // and it belongs to a webview that is not guaranteed to run it on
+            // every way out; `Exit` is the host's own last word, and a quit
+            // that never touched the renderer still passes through it. A
+            // crash does not: the release profile aborts on panic, and no
+            // hook runs after an abort. Tying a child's lifetime to the
+            // host's for that case needs a job object on Windows and a
+            // death signal on Linux, both of which are FFI this crate does
+            // not do yet.
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                let _ = app.state::<agent::AgentState>().kill_all();
+                let _ = app.state::<lsp::LspState>().stop_all();
+                let _ = app.state::<pty::PtyState>().close_all();
+            }
+        });
 }
 
 /// Size and place the main window — for `--geometry`, and for the geometry the

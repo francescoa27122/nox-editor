@@ -313,6 +313,13 @@ export class TauriPlatform implements Platform {
     await getCurrentWindow().close();
   }
 
+  async toggleFullscreen(): Promise<boolean> {
+    const window = getCurrentWindow();
+    const next = !(await window.isFullscreen());
+    await window.setFullscreen(next);
+    return next;
+  }
+
   async onMaximizeChange(handler: (maximized: boolean) => void): Promise<() => void> {
     const window = getCurrentWindow();
     handler(await window.isMaximized());
@@ -397,6 +404,10 @@ export class TauriPlatform implements Platform {
     await processRelaunch();
   }
 
+  async reloadWindow(): Promise<void> {
+    globalThis.location.reload();
+  }
+
   /**
    * OS-level drag and drop. This is the reason the desktop build can accept a
    * dropped file at all: the webview's own HTML5 drop event hands over a
@@ -422,6 +433,25 @@ export class TauriPlatform implements Platform {
       }
     });
 
+    return () => unlisten();
+  }
+
+  /**
+   * The Rust side buffers what the OS handed it and only pokes the renderer
+   * (an empty `nox://open-request`) when more arrives, so this drains on
+   * subscription and again on every poke. Same buffer both times, which is
+   * what keeps a path that arrived before the webview booted from being lost
+   * and one that arrived after from being delivered twice.
+   */
+  async onOpenRequested(handler: (paths: readonly string[]) => void): Promise<() => void> {
+    const drain = async () => {
+      const paths = await invoke<string[]>('nox_launch_paths');
+      if (paths.length > 0) handler(paths);
+    };
+    const unlisten = await listen<null>('nox://open-request', () => {
+      void drain();
+    });
+    await drain();
     return () => unlisten();
   }
 
@@ -635,10 +665,15 @@ export class TauriPlatform implements Platform {
     // Listeners are attached *before* the spawn: a process that writes on its
     // first tick would otherwise have its handshake dropped on the floor.
     const unlisten = await Promise.all([
-      listen<{ id: string; line: string }>('nox://agent-line', (event) => {
+      // Lines arrive batched, one event per burst rather than per line, so a
+      // chatty agent costs one main-thread hop per burst. Unpacked here, in
+      // order, so nothing above the platform sees a batch.
+      listen<{ id: string; lines: string[] }>('nox://agent-line', (event) => {
         if (event.payload.id !== id) return;
-        if (lineHandlers.length === 0) bufferedLines.push(event.payload.line);
-        else for (const handler of lineHandlers) handler(event.payload.line);
+        for (const line of event.payload.lines) {
+          if (lineHandlers.length === 0) bufferedLines.push(line);
+          else for (const handler of lineHandlers) handler(line);
+        }
       }),
       listen<{ id: string; line: string }>('nox://agent-stderr', (event) => {
         if (event.payload.id !== id) return;

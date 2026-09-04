@@ -6,7 +6,9 @@ import {
   FLUSH_MS,
   LOG_FILE,
   MAX_LINES,
+  PANIC_FILE,
   formatEntry,
+  lastEntry,
   redactHome,
 } from '../src/services/diagnostics';
 
@@ -81,6 +83,18 @@ describe('formatEntry', () => {
   });
 });
 
+describe('lastEntry', () => {
+  /** An entry is one unindented line plus the indented lines under it. */
+  it('returns the final unindented line and its continuation lines', () => {
+    expect(lastEntry(['a', '    a1', 'b', '    b1', '    b2'])).toEqual(['b', '    b1', '    b2']);
+    expect(lastEntry(['only'])).toEqual(['only']);
+    expect(lastEntry([])).toEqual([]);
+    // A file that opens mid-entry (a cap that cut the head off) still yields
+    // what is there rather than nothing.
+    expect(lastEntry(['    orphan'])).toEqual(['    orphan']);
+  });
+});
+
 describe('DiagnosticsService', () => {
   let platform: MemoryPlatform;
 
@@ -121,6 +135,45 @@ describe('DiagnosticsService', () => {
     expect(report).toContain('from the session before');
     expect(report).toContain('-- this session --');
     expect(report).toContain('from this one');
+  });
+
+  /**
+   * A8-002. The host process writes `panic.log` from its panic hook, because
+   * `diagnostics.log` is the renderer's and the renderer dies with the
+   * process. Only the last entry is carried: the report is for a bug about
+   * the crash that just happened, and the file keeps its own history.
+   *
+   * What this does not catch: the Rust side writing a shape this cannot
+   * parse. `panic_log.rs` has its own test for the shape, and the two are
+   * held together by the indented continuation line both sides use.
+   */
+  it('carries the last host panic into the report', async () => {
+    await platform.writeConfigFile(
+      PANIC_FILE,
+      [
+        '2026-09-01T10:00:00Z  panic    an earlier crash',
+        '    at src/pty.rs:10:1',
+        '2026-09-02T10:00:00Z  panic    watcher gave up on /home/ada/project',
+        '    at src/watcher.rs:42:7',
+        '',
+      ].join('\n'),
+    );
+    const diagnostics = new DiagnosticsService(platform, fixedClock());
+    await diagnostics.start();
+
+    const report = diagnostics.report({ Nox: '0.11.0' });
+    expect(report).toContain('-- last host panic --');
+    expect(report).toContain('watcher gave up on ~/project');
+    expect(report).toContain('    at src/watcher.rs:42:7');
+    expect(report).not.toContain('an earlier crash');
+    expect(report.indexOf('-- last host panic --')).toBeLessThan(report.indexOf('-- this session --'));
+  });
+
+  it('says nothing about host panics when there have been none', async () => {
+    const diagnostics = new DiagnosticsService(platform, fixedClock());
+    await diagnostics.start();
+
+    expect(diagnostics.report({ Nox: '0.11.0' })).not.toContain('host panic');
   });
 
   it('reports something rather than nothing when no failure has happened', async () => {

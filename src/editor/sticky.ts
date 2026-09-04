@@ -1,7 +1,7 @@
 import { syntaxTree } from '@codemirror/language';
 import type { Extension } from '@codemirror/state';
 import { EditorView, showPanel, type Panel, type ViewUpdate } from '@codemirror/view';
-import { createSymbolCache, stickyRows, type StickyRow } from '@core/symbols';
+import { enclosingSymbols, type StickyRow } from '@core/symbols';
 
 /**
  * Sticky scroll.
@@ -23,8 +23,7 @@ import { createSymbolCache, stickyRows, type StickyRow } from '@core/symbols';
 const MAX_ROWS = 5;
 
 /**
- * Each mounted panel's own DOM and symbol cache, keyed by the view that owns
- * it.
+ * Each mounted panel's own DOM, keyed by the view that owns it.
  *
  * The panel (`showPanel`) and the scroll hook (`stickyScrollHook`, below) are
  * two separate extensions, each invoked by CodeMirror with whatever view is
@@ -35,10 +34,7 @@ const MAX_ROWS = 5;
  * cleanup beyond `Panel.destroy`: a `WeakMap` drops a view's entry on its own
  * once nothing else references the view.
  */
-const panelState = new WeakMap<
-  EditorView,
-  { dom: HTMLElement; symbolsFor: ReturnType<typeof createSymbolCache> }
->();
+const panelState = new WeakMap<EditorView, { dom: HTMLElement }>();
 
 /**
  * The document line at the very top of the visible scroll area.
@@ -101,14 +97,10 @@ function rowDOM(view: EditorView, row: StickyRow): HTMLButtonElement {
  *
  * A write phase: builds DOM from state already in hand, reads no layout.
  */
-function paint(
-  view: EditorView,
-  dom: HTMLElement,
-  symbolsFor: ReturnType<typeof createSymbolCache>,
-  topLine: number,
-): void {
-  const symbols = symbolsFor(syntaxTree(view.state), view.state.doc);
-  const rows = stickyRows(symbols, topLine, view.state.doc, MAX_ROWS);
+function paint(view: EditorView, dom: HTMLElement, topLine: number): void {
+  const doc = view.state.doc;
+  const pos = doc.line(topLine).from;
+  const rows = enclosingSymbols(syntaxTree(view.state), doc, pos, topLine, MAX_ROWS);
 
   // Emptying rather than swapping the constructor: `showPanel`'s contract
   // closes a panel when its constructor stops being provided, and doing that
@@ -149,11 +141,7 @@ function paint(
  * of ordinary scrolling. A `requestMeasure` request runs regardless of any
  * of that.
  */
-function scheduleMeasure(
-  view: EditorView,
-  dom: HTMLElement,
-  symbolsFor: ReturnType<typeof createSymbolCache>,
-): void {
+function scheduleMeasure(view: EditorView, dom: HTMLElement): void {
   view.requestMeasure({
     // Requests sharing a key collapse to the last one scheduled — `dom`
     // uniquely identifies this panel, so a constructor call, an `update`
@@ -161,7 +149,7 @@ function scheduleMeasure(
     // three times.
     key: dom,
     read: topVisibleLine,
-    write: (topLine, v) => paint(v, dom, symbolsFor, topLine),
+    write: (topLine, v) => paint(v, dom, topLine),
   });
 }
 
@@ -170,34 +158,28 @@ function stickyPanelConstructor(view: EditorView): Panel {
   dom.className = 'nox-sticky-scroll';
 
   // Per view, not module-level. `EditorArea.svelte` allows several editor
-  // groups open side by side, each with its own view, so a single shared
-  // slot thrashes: pane A's scroll evicts pane B's cached parse and vice
-  // versa, forcing a full re-walk on essentially every scroll in a split
-  // view — the exact case the cache exists to avoid. Measured on
-  // `src/app.ts` (2,690 lines, 67 symbols), that walk (`fileSymbols`, what
-  // the cache guards) costs ~1.378 ms, against ~0.012 ms for `stickyRows`
-  // (the filter over its output) — about 115× more, and entirely avoidable.
-  // One cache per view keeps each pane's hits intact regardless of what the
-  // other panes are showing, at the cost of one extra closure per view,
-  // which is free.
+  // groups open side by side, each with its own view, so the scroll hook
+  // below needs a way to find *this* view's panel dom rather than assuming
+  // there is only ever one view alive.
   //
-  // The same cache still misses on every keystroke regardless of pane
-  // count: `createSymbolCache` keys on tree identity, and every edit
-  // produces a new tree, so `docChanged` is a guaranteed miss and pays the
-  // full ~1.378 ms walk on the most latency-sensitive path in the editor.
-  // Left alone deliberately rather than debounced — it is one walk inside a
-  // 16 ms frame, and typing already triggers a parse of its own, so this is
-  // not new cost on that path, only cost already being paid twice over.
-  const symbolsFor = createSymbolCache();
-  panelState.set(view, { dom, symbolsFor });
-  scheduleMeasure(view, dom, symbolsFor);
+  // A4-001: this used to also hold a per-view symbol cache, because `paint`
+  // walked the whole parsed tree (`fileSymbols`) and the cache was the only
+  // thing standing between that and a fresh walk on every scroll. `docChanged`
+  // was a guaranteed miss regardless, so typing still paid the full walk:
+  // ~1.4 ms at 2,690 lines, and the audit measured it at 8-37 ms on files in
+  // the tens of thousands of lines, on the most latency-sensitive path in the
+  // editor. `paint` now calls `enclosingSymbols`, which walks upward from the
+  // top visible line's own position through `.parent` — a cost bounded by
+  // nesting depth, not document size — so there is nothing left worth caching.
+  panelState.set(view, { dom });
+  scheduleMeasure(view, dom);
 
   return {
     dom,
     top: true,
     update(update: ViewUpdate) {
       if (update.docChanged || update.viewportMoved || update.geometryChanged) {
-        scheduleMeasure(update.view, dom, symbolsFor);
+        scheduleMeasure(update.view, dom);
       }
     },
     destroy() {
@@ -217,7 +199,7 @@ function stickyScrollHook(): Extension {
   return EditorView.domEventHandlers({
     scroll(_event, view) {
       const state = panelState.get(view);
-      if (state) scheduleMeasure(view, state.dom, state.symbolsFor);
+      if (state) scheduleMeasure(view, state.dom);
     },
   });
 }

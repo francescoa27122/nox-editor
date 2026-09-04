@@ -1,6 +1,8 @@
 import { EditorSelection } from '@codemirror/state';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { Encoding } from '../src/core/encoding';
 import { MemoryPlatform } from '../src/platform/memory';
+import type { EncodedText } from '../src/platform/types';
 import { WorkspaceService } from '../src/services/workspace';
 
 /**
@@ -174,7 +176,218 @@ describe('saving', () => {
     expect(await workspace.saveAs(id, '/nonexistent/dir/x.md')).toBe(false);
     expect(workspace.activeSnapshot()?.path).toBe('/work/README.md');
   });
+
+  /**
+   * Guards A3-009. Save As onto a path another tab already had open left two
+   * buffers on one file, each recording its own `diskMtime`, so each save
+   * silently wrote its text over the other's with no conflict prompt. A
+   * clean other tab is closed, since its text is on disk and about to be
+   * replaced by what the user just confirmed in the OS dialog.
+   */
+  it('saveAs onto a path another clean tab has open closes that tab', async () => {
+    const { platform, workspace } = setup();
+    const readme = (await workspace.open('/work/README.md'))!;
+    const main = (await workspace.open('/work/src/main.ts'))!;
+
+    expect(await workspace.saveAs(main, '/work/README.md')).toBe(true);
+
+    expect(await platform.readTextFile('/work/README.md')).toBe('const x = 1;\n');
+    const open = workspace.buffers.get();
+    expect(open.map((b) => b.id)).toEqual([main]);
+    expect(open[0]?.path).toBe('/work/README.md');
+    expect(workspace.get(readme)).toBeUndefined();
+  });
+
+  /**
+   * A dirty other tab is refused rather than closed: the OS dialog asked
+   * about the file, not about that tab's unsaved edits, and closing it would
+   * throw them away without anyone having said so.
+   */
+  it('saveAs refuses a path another tab has open with unsaved changes', async () => {
+    const { platform, workspace } = setup();
+    const errors: string[] = [];
+    workspace.events.on('error', (event) => errors.push(event.message));
+    const readme = (await workspace.open('/work/README.md'))!;
+    workspace.applyTransaction(
+      readme,
+      workspace.stateOf(readme)!.update({ changes: { from: 0, insert: 'mine ' } }),
+    );
+    const main = (await workspace.open('/work/src/main.ts'))!;
+
+    expect(await workspace.saveAs(main, '/work/README.md')).toBe(false);
+
+    expect(errors).toHaveLength(1);
+    expect(await platform.readTextFile('/work/README.md')).toBe('# Hello\n');
+    expect(workspace.get(main)?.path).toBe('/work/src/main.ts');
+    expect(workspace.textOf(readme)).toBe('mine # Hello\n');
+    expect(workspace.buffers.get()).toHaveLength(2);
+  });
+
+  /**
+   * Guards A3-001: a keystroke typed while the write was in flight used to be
+   * reverted by the whole-document replacement `save` made afterwards, and
+   * the buffer then reported clean, so the character was on disk nowhere and
+   * not reachable by undo either (the replacement merged with the keystroke
+   * into one history event). The write is held open so the keystroke lands
+   * exactly in that window, which `MemoryPlatform` normally closes on the next
+   * microtask.
+   *
+   * Does not catch the double-save variant (two `save` calls in flight at
+   * once), which has no gate here.
+   */
+  it('keeps a keystroke typed while the write is in flight, and stays dirty by it', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/alpha.txt', 'alpha\n');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/alpha.txt'))!;
+    const type = (text: string) =>
+      workspace.applyTransaction(
+        id,
+        workspace.stateOf(id)!.update({ changes: { from: 0, insert: text } }),
+      );
+
+    type('A');
+    const gate = platform.holdWrite('/work/alpha.txt');
+    const saving = workspace.save(id, { insertFinalNewline: true });
+    await gate.started;
+    type('B');
+    gate.release();
+    expect(await saving).toBe(true);
+
+    // The write carried what the document said when the save began.
+    expect(await platform.readTextFile('/work/alpha.txt')).toBe('Aalpha\n');
+    // The keystroke that arrived during it is still in the buffer, and the
+    // buffer is dirty by exactly that keystroke.
+    expect(workspace.textOf(id)).toBe('BAalpha\n');
+    expect(workspace.activeSnapshot()?.isDirty).toBe(true);
+  });
+
+  it('still applies the formatting when nothing was typed during the write', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/tail.txt', 'a');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/tail.txt'))!;
+
+    const gate = platform.holdWrite('/work/tail.txt');
+    const saving = workspace.save(id, { insertFinalNewline: true });
+    await gate.started;
+    gate.release();
+    expect(await saving).toBe(true);
+
+    expect(await platform.readTextFile('/work/tail.txt')).toBe('a\n');
+    expect(workspace.textOf(id)).toBe('a\n');
+    expect(workspace.activeSnapshot()?.isDirty).toBe(false);
+  });
 });
+
+describe('reloading from disk', () => {
+  /**
+   * Guards A3-007: a reload decided for a clean buffer used to replace the
+   * document with the disk text after its read resolved, whatever had been
+   * typed in between, and marked the buffer clean. The keystroke was still
+   * in undo history, but nothing said a reload had happened, so the user was
+   * more likely to retype it than to undo. The read is held open so the
+   * keystroke lands inside it.
+   *
+   * Does not drive the watcher: it checks `isDirty` once before calling this
+   * and now falls through to its dirty-buffer path when the reload declines,
+   * which `tests/watcher.test.ts` would be the place to hold.
+   */
+  it('refuses to overwrite a keystroke typed while the read is in flight', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/alpha.txt', 'alpha\n');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/alpha.txt'))!;
+
+    platform.seedFile('/work/alpha.txt', 'rewritten\n');
+    const gate = platform.holdRead('/work/alpha.txt');
+    const reloading = workspace.reloadFromDisk(id);
+    await gate.started;
+    workspace.applyTransaction(
+      id,
+      workspace.stateOf(id)!.update({ changes: { from: 0, insert: 'X' } }),
+    );
+    gate.release();
+
+    expect(await reloading).toBe(false);
+    expect(workspace.textOf(id)).toBe('Xalpha\n');
+    const snapshot = workspace.activeSnapshot()!;
+    expect(snapshot.isDirty).toBe(true);
+    // The disk still differs, and the buffer says so, exactly as it would
+    // had the keystroke come first.
+    expect(snapshot.externalState).toBe('modified');
+  });
+
+  it('still reloads when nothing was typed during the read', async () => {
+    const platform = new GatedPlatform();
+    platform.seedFile('/work/alpha.txt', 'alpha\n');
+    const workspace = new WorkspaceService(platform, () => []);
+    const id = (await workspace.open('/work/alpha.txt'))!;
+
+    platform.seedFile('/work/alpha.txt', 'rewritten\n');
+    const gate = platform.holdRead('/work/alpha.txt');
+    const reloading = workspace.reloadFromDisk(id);
+    await gate.started;
+    gate.release();
+
+    expect(await reloading).toBe(true);
+    expect(workspace.textOf(id)).toBe('rewritten\n');
+    expect(workspace.activeSnapshot()?.isDirty).toBe(false);
+  });
+});
+
+/**
+ * Holds one `writeEncodedFile` or `readEncodedFile` call open so a test can
+ * act while it is genuinely in flight. `started` resolves the instant the
+ * call is reached, and it proceeds only once `release()` is called. The same
+ * shape `tests/notes.test.ts` uses for config writes.
+ */
+class GatedPlatform extends MemoryPlatform {
+  #writes = new Map<string, { markStarted: () => void; blocked: Promise<void> }>();
+  #reads = new Map<string, { markStarted: () => void; blocked: Promise<void> }>();
+
+  holdWrite(path: string): { started: Promise<void>; release: () => void } {
+    return hold(this.#writes, path);
+  }
+
+  holdRead(path: string): { started: Promise<void>; release: () => void } {
+    return hold(this.#reads, path);
+  }
+
+  override async writeEncodedFile(path: string, contents: string, encoding: Encoding): Promise<void> {
+    await pass(this.#writes, path);
+    await super.writeEncodedFile(path, contents, encoding);
+  }
+
+  override async readEncodedFile(path: string, encoding?: Encoding): Promise<EncodedText> {
+    await pass(this.#reads, path);
+    return super.readEncodedFile(path, encoding);
+  }
+}
+
+type Gate = { markStarted: () => void; blocked: Promise<void> };
+
+function hold(gates: Map<string, Gate>, path: string): { started: Promise<void>; release: () => void } {
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  gates.set(path, { markStarted, blocked });
+  return { started, release };
+}
+
+/** Wait at the gate for `path`, if one is set, and consume it. */
+async function pass(gates: Map<string, Gate>, path: string): Promise<void> {
+  const gate = gates.get(path);
+  if (!gate) return;
+  gates.delete(path);
+  gate.markStarted();
+  await gate.blocked;
+}
 
 describe('tabs', () => {
   it('inserts new tabs after the active one', async () => {
@@ -307,6 +520,39 @@ describe('on-disk form', () => {
 
     await workspace.save(id);
     expect(await platform.readTextFile('/work/bom.txt')).toBe('\uFEFFhello\n');
+  });
+
+  /**
+   * Guards A3-010: any CRLF at all used to make the whole file CRLF on its
+   * next save, so a file that was mostly LF with one stray Windows line came
+   * back as a whole-file diff. The majority ending wins, and every line is
+   * still normalised to LF in the document whichever way that goes.
+   *
+   * Does not surface "mixed" anywhere: the status bar shows the ending a
+   * save will write, not that the file disagreed with itself.
+   */
+  it('keeps the majority line ending of a mixed file', async () => {
+    const { platform, workspace } = setup();
+    platform.seedFile('/work/mixed.txt', 'a\r\nb\nc\nd\n');
+    const id = (await workspace.open('/work/mixed.txt'))!;
+
+    expect(workspace.textOf(id)).toBe('a\nb\nc\nd\n');
+    expect(workspace.activeSnapshot()?.eol).toBe('\n');
+
+    await workspace.save(id);
+    expect(await platform.readTextFile('/work/mixed.txt')).toBe('a\nb\nc\nd\n');
+  });
+
+  it('still picks CRLF when most lines end that way', async () => {
+    const { platform, workspace } = setup();
+    platform.seedFile('/work/mixed.txt', 'a\r\nb\r\nc\n');
+    const id = (await workspace.open('/work/mixed.txt'))!;
+
+    expect(workspace.textOf(id)).toBe('a\nb\nc\n');
+    expect(workspace.activeSnapshot()?.eol).toBe('\r\n');
+
+    await workspace.save(id);
+    expect(await platform.readTextFile('/work/mixed.txt')).toBe('a\r\nb\r\nc\r\n');
   });
 
   it('does not add a byte-order mark to a file that had none', async () => {

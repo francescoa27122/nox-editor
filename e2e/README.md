@@ -75,6 +75,7 @@ well under a second each.
 | `menu-bar.e2e.js` | The in-window bar opens, switches between menus and closes. Guards `7389643`, where the click-away layer covered the titles and sliding between menus had never once worked. |
 | `terminal.e2e.js` | A real pty, a real shell, a command typed and its output read back, and the session surviving a hidden panel. `MemoryPlatform.openTerminal` throws, so no suite under `tests/` can run a shell at all. |
 | `walk.e2e.js` | Three items the 2026-08-20 hand walk marked UNSEEN: the destructive confirm's focus, the line-ending item, the sidebar chord. |
+| `modal-focus.e2e.js` | Focus cannot reach the shell behind a modal, driven by `focus()` against a real focus implementation. jsdom implements `inert` as a property with none of its behaviour, so no suite under `tests/` can check the trap itself. |
 
 ## Typing into xterm
 
@@ -112,7 +113,7 @@ mistake for a long time before it looks like a dead end.
 
 ## Solved: the ten seconds per command
 
-Four specs used to take **six minutes**. They now take **575 ms** on Linux and
+The specs used to take **six minutes**. They now take **575 ms** on Linux and
 **666 ms** on Windows. The `findElement` underneath had always taken 4 ms.
 
 The cost was `TauriWorkerService.beforeCommand`, which runs
@@ -165,6 +166,6 @@ Two things worth knowing about the shape of that gate:
 
 ## Still to do
 
-- **More specs.** Four is a smoke test, and the 2026-08-20 walk left twelve
+- **More specs.** Five is a smoke test, and the 2026-08-20 walk left twelve
   items UNSEEN. They are cheap now — a run is under a second, so the cost of a
   spec is writing it rather than waiting for it.

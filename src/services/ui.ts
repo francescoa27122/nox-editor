@@ -25,6 +25,10 @@ export type OverlayKind =
   // and three unions sharing a member name makes a bare string literal
   // ambiguous at every call site.
   | 'note-open'
+  // Recent folders and files, the picker behind File > Open Recent. A
+  // dedicated mode rather than quick-open's empty query: that only orders
+  // the index by recency, and lists no folder at all.
+  | 'recent'
   // Not 'tasks': `SidebarView` has no tasks view, but the command id is
   // `tasks.run` and naming the overlay after the *action* keeps the two from
   // reading as the same thing at a call site.

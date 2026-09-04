@@ -29,6 +29,7 @@
   import { mirroredAnnotation } from '@services/transactions';
   import { cursorInfo } from '@editor/commands';
   import {
+    accessibleNameCompartment,
     blameCompartment,
     lspCompartment,
     reconfigureAllEffects,
@@ -119,6 +120,8 @@
     onGitGutterClick.of(() => void app.commands.execute('git.showDiff')),
   ];
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The buffer `autosaveTimer` was armed for; see `scheduleAutosave`. */
+  let autosaveTarget: string | null = null;
 
   onMount(() => {
     if (!host) return;
@@ -144,7 +147,7 @@
         }
 
         publishCursor();
-        find.refresh();
+        find.refresh(docChanged);
         if (docChanged) {
           scheduleAutosave();
           // Beside the autosave timer because it is the same shape and the
@@ -172,6 +175,14 @@
         // Identifies this pane, so an edit it originated is not sent back.
         owner: view,
         groupId,
+        // A grouped undo runs against this view rather than arriving as a
+        // transaction built elsewhere: with one file in two panes the
+        // workspace holds whichever pane's state dispatched last, and the
+        // view refuses a transaction that does not start from its own.
+        run: (id, command) => {
+          if (!view || id !== currentId) return null;
+          return command(view);
+        },
         // Pulled at save time rather than published: a cursor moves on every
         // keystroke, and only the session ever reads it.
         //
@@ -211,6 +222,15 @@
       if (id === currentId) syncToBuffer(id, { force: true });
     });
 
+    // Save As is the one way a buffer changes its name without changing
+    // its identity. An event rather than a subscription to `buffers`: that
+    // list is republished on every keystroke, and the name is not.
+    const offSaved = workspace.events.on('saved', ({ id }) => {
+      if (view && id === currentId) {
+        view.dispatch({ effects: accessibleNameCompartment.reconfigure(accessibleName(id)) });
+      }
+    });
+
     const offConfig = config.changed.subscribe((keys) => {
       if (!view || keys.size === 0) return;
       const effects = reconfigureEffects(config.settings.get(), keys);
@@ -219,6 +239,7 @@
 
     return () => {
       offReset();
+      offSaved();
       offConfig();
       offDispatcher();
       offDiagnostics();
@@ -308,10 +329,26 @@
     applyDiagnostics(view, path ? lsp.diagnosticsFor(pathToUri(path)) : []);
   }
 
+  /**
+   * What a screen reader calls the textbox. The file's name, because the
+   * `<section aria-label="Editor">` around it already says what kind of
+   * thing this is and the focused element is the one that gets read: with
+   * no name of its own, CodeMirror's `contentDOM` was announced by its first
+   * line of text.
+   */
+  function accessibleName(id: string) {
+    const name = workspace.buffers.get().find((b) => b.id === id)?.name ?? 'Untitled';
+    return EditorView.contentAttributes.of({ 'aria-label': `${name} editor` });
+  }
+
   function syncToBuffer(id: string | null, options: { force?: boolean } = {}) {
     if (!view) return;
     if (id === currentId && !options.force) return;
 
+    // Leaving a buffer ends the pause its autosave was waiting for. Saving it
+    // now rather than letting the timer run keeps the promise for exactly the
+    // buffer the user just left, which is the one a stale timer used to skip.
+    if (id !== currentId) flushAutosave();
     currentId = id;
     if (!id) return;
 
@@ -346,6 +383,7 @@
         // `setState` resets every compartment to the state's own
         // configuration, so this is re-applied on each swap rather than once.
         lspCompartment.reconfigure(lspExtensions),
+        accessibleNameCompartment.reconfigure(accessibleName(id)),
       ],
       // `setState` resets the scroll to the top of the document, so without
       // this a tab switch — or a session restored mid-file — lands nowhere
@@ -363,7 +401,10 @@
 
     publishCursor();
     find.attach(view);
-    find.refresh();
+    // A buffer swap, not an edit or a selection move: always worth a fresh
+    // count, the same as before `refresh()` learned to skip selection-only
+    // dispatches.
+    find.refresh(true);
 
     // Only the focused pane may take the caret; a background pane swapping
     // tabs must not yank focus away from where the user is typing.
@@ -387,14 +428,33 @@
   function scheduleAutosave() {
     const mode = config.get('files.autoSave');
     if (mode !== 'afterDelay') return;
+    // Captured now, not read when the timer fires: the timer outlives a tab
+    // switch, and `currentId` by then is whichever buffer the pane moved to.
+    const id = currentId;
+    if (!id) return;
     if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTarget = id;
     autosaveTimer = setTimeout(() => {
       autosaveTimer = null;
-      const id = currentId;
-      const buffer = id ? workspace.buffers.get().find((b) => b.id === id) : null;
-      // Never auto-prompt a Save As dialog behind the user's back.
-      if (id && buffer?.isDirty && !buffer.isUntitled) void app.save(id);
+      autosaveTarget = null;
+      autosaveIfDirty(id);
     }, config.get('files.autoSaveDelay'));
+  }
+
+  /** Run a pending after-delay save now instead of when its timer fires. */
+  function flushAutosave() {
+    if (!autosaveTimer) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    const id = autosaveTarget;
+    autosaveTarget = null;
+    if (id) autosaveIfDirty(id);
+  }
+
+  function autosaveIfDirty(id: string) {
+    const buffer = workspace.buffers.get().find((b) => b.id === id);
+    // Never auto-prompt a Save As dialog behind the user's back.
+    if (buffer?.isDirty && !buffer.isUntitled) void app.save(id);
   }
 
   function onBlur() {

@@ -28,6 +28,15 @@ export interface DiagnosticEntry {
 export const LOG_FILE = 'diagnostics.log';
 
 /**
+ * What the host process leaves when it panics. Written by the Rust panic
+ * hook (`src-tauri/src/panic_log.rs`), never by this service: the renderer
+ * dies with the process, so this is the one record of a crash that
+ * `diagnostics.log` cannot hold. Read here, so Copy Diagnostics on the next
+ * launch carries the last entry.
+ */
+export const PANIC_FILE = 'panic.log';
+
+/**
  * Lines kept, in memory and on disk.
  *
  * A *line* bound rather than an entry bound, because an entry carrying a
@@ -91,12 +100,26 @@ export function formatEntry(entry: DiagnosticEntry): string {
   return `${head}\n    ${entry.detail.split('\n').join('\n    ')}`;
 }
 
+/**
+ * The last entry in a log written in `formatEntry`'s shape: the final
+ * unindented line and every indented continuation line under it. Only the
+ * last one is carried into a report, because the report is about the crash
+ * that just happened and the file keeps its own history.
+ */
+export function lastEntry(lines: readonly string[]): string[] {
+  let start = lines.length - 1;
+  while (start > 0 && /^\s/.test(lines[start] ?? '')) start -= 1;
+  return lines.slice(Math.max(start, 0));
+}
+
 export class DiagnosticsService {
   #platform: Platform;
   #now: () => number;
   #entries: DiagnosticEntry[] = [];
   /** Lines an earlier session left behind. Already redacted when written. */
   #carried: string[] = [];
+  /** The host's last panic, if it has ever had one. Redacted by the hook. */
+  #panic: string[] = [];
   #home: string | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #started = false;
@@ -138,6 +161,16 @@ export class DiagnosticsService {
       // next flush overwrites it, and saying so would be the editor
       // complaining about its own bookkeeping.
     }
+
+    try {
+      const raw = await this.#platform.readConfigFile(PANIC_FILE);
+      if (raw) {
+        this.#panic = lastEntry(raw.split('\n').filter((line) => line.trim().length > 0));
+      }
+    } catch {
+      // Same reasoning: a crash record that cannot be read is not a second
+      // failure worth reporting.
+    }
   }
 
   /** Record a failure. Never throws, and never awaits. */
@@ -173,6 +206,12 @@ export class DiagnosticsService {
    */
   report(header: Record<string, string>): string {
     const lines: string[] = Object.entries(header).map(([key, value]) => `${key}: ${value}`);
+
+    // First, above the renderer's own history: when the host has crashed,
+    // that is the failure the report is being copied for.
+    if (this.#panic.length > 0) {
+      lines.push('', '-- last host panic --', ...this.#panic);
+    }
 
     if (this.#carried.length > 0) {
       lines.push('', '-- earlier sessions --', ...this.#carried);

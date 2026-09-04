@@ -85,6 +85,7 @@ import {
   EXPLAIN_INSTRUCTION,
   ProviderTransport,
   scopeFromSelection,
+  stillOnDisk,
 } from '@services/agent/runtime';
 import { StdioTransport } from '@services/agent/stdio';
 import { ContextService } from '@services/context';
@@ -183,6 +184,17 @@ export class NoxApp {
   #themeProperties: string[] = [];
   /** Failures already announced, so a republished status does not repeat one. */
   #reportedFailures = new Set<string>();
+  /**
+   * The last string handed to `platform.setWindowTitle` (A4-009).
+   *
+   * `#updateWindowTitle` runs on every document change (`workspace.buffers`
+   * republishes on every keystroke), but the title itself only changes on
+   * the far rarer events that move dirty state, the active file or the root
+   * — so most calls would otherwise be an IPC round trip and a native
+   * `SetWindowText` for text the window already shows. `null` at start,
+   * which cannot equal any real title, so the very first call always sets it.
+   */
+  #lastWindowTitle: string | null = null;
   /** The running servers, and the diagnostics they publish. */
   readonly lsp: LspService;
   readonly terminal: TerminalService;
@@ -216,6 +228,7 @@ export class NoxApp {
   });
 
   #disposeDropListener: (() => void) | null = null;
+  #disposeOpenListener: (() => void) | null = null;
   #disposeCloseListener: (() => void) | null = null;
   #disposeRejectionListener: (() => void) | null = null;
   /**
@@ -380,9 +393,13 @@ export class NoxApp {
     this.#registerKeybindings();
   }
 
-  static async create(): Promise<NoxApp> {
-    const platform = await createPlatform();
-    const app = new NoxApp(platform);
+  /**
+   * Construct and boot. `platform` is for tests, which hand in a
+   * `MemoryPlatform` to run the real boot sequence headless; the app itself
+   * never passes one.
+   */
+  static async create(platform?: Platform): Promise<NoxApp> {
+    const app = new NoxApp(platform ?? (await createPlatform()));
     await app.#boot();
     return app;
   }
@@ -396,10 +413,6 @@ export class NoxApp {
     await this.diagnostics.start();
     this.homeDir.set(await this.platform.homeDir());
     await this.config.load();
-    // Before the session restores a root: the subscription above fires on
-    // that restore, but boot's own `files.setRoot` below should already see
-    // the project's excludes.
-    await this.config.loadWorkspace(this.workspace.rootPath.get());
     // After the constructor, so `#registerKeybindings` has already recorded
     // the defaults these rules are layered over.
     await this.keymap.loadUserRules();
@@ -432,8 +445,16 @@ export class NoxApp {
       }
     }
 
-    await this.files.setRoot(this.workspace.rootPath.get());
+    // No `files.setRoot`, `watcher.start` or `config.loadWorkspace` here: the
+    // `rootPath` subscription in `#wireServices` runs all three the moment a
+    // root is restored or opened above, and it is the only caller. Boot used
+    // to call the first and the last a second time, which walked the project
+    // twice on every launch; a workspace `excludeFromExplorer` that arrives
+    // after the first walk re-walks through `files.setExcludes`.
     await this.#listenForExternalDrops();
+    // After the session restore, so a file named on the command line opens as
+    // a tab on top of the restored ones rather than being buried under them.
+    await this.#listenForOpenRequests();
     await this.#listenForClose();
     await this.#installMenu();
     this.#applyTheme();
@@ -474,6 +495,22 @@ export class NoxApp {
     } catch (error) {
       // Drag-and-drop is a convenience; failing to wire it must not stop boot.
       console.warn('[nox] external file drop unavailable:', error);
+    }
+  }
+
+  /**
+   * A path the OS handed to Nox (`nox notes.txt`, or Finder on macOS) follows
+   * the same rule as a drop: a file becomes a tab, a lone folder becomes the
+   * workspace. Same door on purpose, so the two entry points cannot drift.
+   */
+  async #listenForOpenRequests(): Promise<void> {
+    try {
+      this.#disposeOpenListener = await this.platform.onOpenRequested((paths) => {
+        void this.openDroppedPaths(paths);
+      });
+    } catch (error) {
+      // Like the drop listener: a convenience whose wiring must not stop boot.
+      console.warn('[nox] open requests from the OS unavailable:', error);
     }
   }
 
@@ -906,7 +943,13 @@ export class NoxApp {
     if (active) parts.push(`${active.isDirty ? '● ' : ''}${active.name}`);
     if (root) parts.push(basename(root));
     parts.push('Nox');
-    void this.platform.setWindowTitle(parts.join(' — '));
+    const title = parts.join(' — ');
+    // A4-009: `workspace.buffers` republishes on every keystroke, which calls
+    // this every time, but the title text itself moves far less often — skip
+    // the IPC and native SetWindowText when nothing to show has changed.
+    if (title === this.#lastWindowTitle) return;
+    this.#lastWindowTitle = title;
+    void this.platform.setWindowTitle(title);
   }
 
   // --- Editor access ------------------------------------------------------
@@ -918,6 +961,46 @@ export class NoxApp {
     const handled = command(view);
     view.focus();
     return handled;
+  }
+
+  /**
+   * Cut and Copy through the browser's own command with the editor focused,
+   * so CodeMirror's handlers do the work: they know about multiple ranges and
+   * take the whole line when nothing is selected, and a second copy of that
+   * rule here would drift from the keyboard path. Only the drawn menu
+   * dispatches these; macOS leaves them to the responder chain.
+   */
+  #editorClipboard(kind: 'cut' | 'copy'): boolean {
+    return this.#runEditor((view) => {
+      view.focus();
+      return typeof document.execCommand === 'function' && document.execCommand(kind);
+    });
+  }
+
+  /**
+   * Paste is the one clipboard verb a page cannot issue through
+   * `execCommand`: Chromium refuses it from script. Read the clipboard
+   * instead and hand the text to the editor as the paste it would have been.
+   */
+  async #pasteIntoEditor(): Promise<boolean> {
+    const view = this.view.get();
+    if (!view) return false;
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      this.notifications.error('Could not read the clipboard.');
+      return false;
+    }
+    if (text.length > 0) {
+      view.dispatch({
+        ...view.state.replaceSelection(text),
+        userEvent: 'input.paste',
+        scrollIntoView: true,
+      });
+    }
+    view.focus();
+    return true;
   }
 
   /**
@@ -1500,7 +1583,9 @@ export class NoxApp {
     // startup plugins and killed them a moment later, and nothing brought them
     // back short of Reload Plugins. Found by walking the packaged build on
     // 2026-08-29; the teardown it was reaching for is a *reload* concern and
-    // now lives in `dispose()`, which is what a reload actually runs.
+    // now lives in `dispose()`, which `reloadWindow` runs and waits for
+    // before the page goes away. A bare `location.reload()` would run none
+    // of it, which is how every reload used to orphan the servers.
     if (!root) return;
     if (!this.platform.capabilities.languageServers) return;
     await this.lsp.start();
@@ -2905,6 +2990,18 @@ export class NoxApp {
         run: () => this.openFileDialog(),
       },
       {
+        id: 'file.openRecent',
+        title: 'Open Recent…',
+        category: 'File',
+        keywords: ['recent', 'history', 'previous', 'folder', 'project'],
+        // No `capabilities`: this opens a picker. The open itself happens
+        // when a row is chosen, on the same path a click in the explorer
+        // takes.
+        enabled: () =>
+          this.workspace.recentFolders.get().length + this.workspace.recentFiles.get().length > 0,
+        run: () => this.ui.openOverlay('recent'),
+      },
+      {
         id: 'file.openFolder',
         capabilities: ['workspace.open'],
         title: 'Open Folder…',
@@ -3183,12 +3280,19 @@ export class NoxApp {
         run: () => this.search.collapseAll(),
       },
 
+      // Hidden, like `explorer.moveTo`: the explorer's context menu dispatches
+      // these two by id with the clicked path as the argument, and that is
+      // their whole job. Listed beside `file.newInFolder` and `file.newFolder`
+      // they were a second New File / New Folder pair in the File menu whose
+      // difference (tree selection versus active file's folder) no title
+      // stated.
       {
         id: 'explorer.newFile',
         resourceFrom: (arg) => this.permissionTarget(arg),
         capabilities: ['fs.create'],
         title: 'New File Here…',
         category: 'Explorer',
+        hidden: true,
         enabled: this.#hasFolder,
         run: async (arg) => {
           const directory = await this.#targetDirectory(arg);
@@ -3201,6 +3305,7 @@ export class NoxApp {
         capabilities: ['fs.create'],
         title: 'New Folder Here…',
         category: 'Explorer',
+        hidden: true,
         enabled: this.#hasFolder,
         run: async (arg) => {
           const directory = await this.#targetDirectory(arg);
@@ -3395,15 +3500,12 @@ export class NoxApp {
         // session. In-memory state does not — agent sessions and the
         // transaction log start again — so this stays off the keyboard where
         // it cannot be hit by accident.
-        run: () => {
-          this.notifications.info('Reloading…');
-          globalThis.location.reload();
-        },
+        run: () => this.reloadWindow(),
       },
       {
         id: 'agents.show',
         title: 'Show Agents',
-        category: 'View',
+        category: 'Agents',
         keywords: ['sessions', 'audit', 'history', 'ai'],
         run: () => this.ui.showAgents(),
       },
@@ -3808,6 +3910,24 @@ export class NoxApp {
         },
       },
       {
+        id: 'agents.copyTrail',
+        title: 'Copy the Last Agent Session Trail',
+        category: 'Agents',
+        keywords: ['audit', 'log', 'trail', 'export', 'json', 'clipboard', 'history'],
+        // No `capabilities`, on the same reasoning as `app.copyDiagnostics`:
+        // this reads Nox's own record of what an agent already did and puts
+        // it on the clipboard. The record survives only as long as the
+        // window, which is why it has to be possible to get it out.
+        enabled: () => this.agents.sessions.get().length > 0,
+        run: async (arg) => {
+          // An id from the panel's per-session button, else the newest.
+          const id = typeof arg === 'string' ? arg : this.agents.sessions.get()[0]?.id;
+          const trail = id === undefined ? null : this.agents.exportTrail(id);
+          if (trail === null) return;
+          await this.copyToClipboard(trail, 'the session trail');
+        },
+      },
+      {
         id: 'agents.undoLastSession',
         title: 'Undo the Last Agent Session',
         /**
@@ -3826,18 +3946,24 @@ export class NoxApp {
          * and the active tab need not be one of them.
          */
         capabilities: ['buffer.edit', 'permissions.revoke'],
-        category: 'View',
+        category: 'Agents',
         keywords: ['revert', 'take back', 'ai'],
         enabled: () => this.agents.sessions.get().some((s) => this.agents.changesBy(s.id).length > 0),
         run: () => {
           const session = this.agents.sessions.get().find((s) => this.agents.changesBy(s.id).length > 0);
           if (!session) return;
-          const { undone, skipped } = this.agents.undoSession(session.id);
+          const { undone, skipped, onDisk } = this.agents.undoSession(session.id);
+          // Same sentence the panel's button uses: the disk may still hold
+          // the agent's text, and "took back everything" alone hid that.
+          const unsaved = stillOnDisk(onDisk.length);
           if (skipped.length > 0) {
             this.notifications.warn(
               `Took back ${undone.length} of ${undone.length + skipped.length} files`,
-              'The rest have been edited since, so their changes were left alone.',
+              'The rest have been edited since, so their changes were left alone.' +
+                (unsaved ? ` ${unsaved}` : ''),
             );
+          } else if (unsaved) {
+            this.notifications.warn(`Took back everything ${session.label} did in the editor`, unsaved);
           } else {
             this.notifications.success(`Took back everything ${session.label} did`);
           }
@@ -4029,6 +4155,37 @@ export class NoxApp {
         enabled: editorEnabled,
         run: () => this.#step('redo'),
       },
+      // The clipboard three exist for the drawn menu on Windows and Linux.
+      // On macOS `COVERED_BY_SYSTEM_ITEMS` keeps them out of the menu, where
+      // the predefined items act on whatever has focus.
+      {
+        id: 'edit.cut',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        capabilities: ['buffer.edit'],
+        title: 'Cut',
+        keyHint: 'Mod+X',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#editorClipboard('cut'),
+      },
+      {
+        id: 'edit.copy',
+        title: 'Copy',
+        keyHint: 'Mod+C',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#editorClipboard('copy'),
+      },
+      {
+        id: 'edit.paste',
+        resourceFrom: () => this.workspace.activeSnapshot()?.path ?? undefined,
+        capabilities: ['buffer.edit'],
+        title: 'Paste',
+        keyHint: 'Mod+V',
+        category: 'Edit',
+        enabled: editorEnabled,
+        run: () => this.#pasteIntoEditor(),
+      },
       {
         id: 'edit.selectAll',
         title: 'Select All',
@@ -4149,17 +4306,6 @@ export class NoxApp {
         keywords: ['expand all'],
         enabled: editorEnabled,
         run: () => this.#runEditor(unfoldAll),
-      },
-      {
-        id: 'edit.foldLevel',
-        title: 'Fold to Level…',
-        category: 'Edit',
-        hidden: true,
-        enabled: editorEnabled,
-        run: (arg) => {
-          const level = Number(arg);
-          if (Number.isFinite(level) && level > 0) this.#runEditor(foldToLevel(level));
-        },
       },
       {
         id: 'edit.toggleComment',
@@ -4372,6 +4518,18 @@ export class NoxApp {
         category: 'View',
         run: () =>
           this.config.set('workbench.showStatusBar', !this.config.get('workbench.showStatusBar')),
+      },
+      {
+        id: 'view.toggleFullscreen',
+        title: 'Toggle Full Screen',
+        category: 'View',
+        keywords: ['fullscreen', 'full screen', 'window'],
+        // Awaited, not voided: the drawn menu on macOS never lists this (the
+        // predefined item does), and the title bar hears the change through
+        // `onFullscreenChange` rather than from the return value.
+        run: async () => {
+          await this.platform.toggleFullscreen();
+        },
       },
       {
         id: 'view.toggleWordWrap',
@@ -4835,6 +4993,21 @@ export class NoxApp {
 
       // --- Application ------------------------------------------------------
       {
+        id: 'app.about',
+        title: 'About Nox',
+        category: 'Application',
+        keywords: ['version', 'help', 'info'],
+        // A notification rather than a panel: the one thing About has to
+        // answer is "which version is this", and the diagnostics report
+        // already carries the rest for anyone filing an issue.
+        run: () => {
+          this.notifications.info(
+            `Nox ${__APP_VERSION__}`,
+            'A fast, dark, keyboard-first text editor.',
+          );
+        },
+      },
+      {
         id: 'app.checkForUpdates',
         // A real outbound request, to a fixed endpoint with no caller-supplied
         // payload, so this is the mildest of the five. Declared anyway: the
@@ -4882,6 +5055,54 @@ export class NoxApp {
           await this.copyToClipboard(this.diagnostics.report(this.#environment()), 'diagnostics');
         },
       },
+      {
+        id: 'app.quit',
+        title: 'Exit',
+        category: 'Application',
+        keywords: ['quit', 'close', 'window'],
+        // Through the close request, not `destroy`: the close handler is
+        // what writes the session, and Exit must lose no more than the X
+        // button does.
+        run: () => this.platform.closeWindow(),
+      },
+      // --- Window -----------------------------------------------------------
+      // The three window controls. They exist as commands so the title bar's
+      // buttons go through the same door as every other button and a
+      // `keybindings.json` rule or a plugin can reach them; until 2026-09-02
+      // the bar called the platform directly and these were the only user
+      // actions with no command. Hidden from the palette because the OS and
+      // the title bar already own this chrome, and in the browser build the
+      // platform methods are inert. `category: 'Window'` is deliberately not
+      // in the menu layout: that menu carries the OS's own minimise and
+      // maximise items, and a close entry would claim the accelerator
+      // `file.close` already has (see Known debt).
+      {
+        id: 'window.minimize',
+        title: 'Minimise Window',
+        category: 'Window',
+        keywords: ['minimize', 'minimise', 'window'],
+        hidden: true,
+        run: () => this.platform.minimizeWindow(),
+      },
+      {
+        id: 'window.toggleMaximize',
+        title: 'Maximise or Restore Window',
+        category: 'Window',
+        keywords: ['maximize', 'maximise', 'restore', 'window'],
+        hidden: true,
+        run: async () => {
+          await this.platform.toggleMaximizeWindow();
+        },
+      },
+      {
+        id: 'window.close',
+        title: 'Close Window',
+        category: 'Window',
+        keywords: ['close', 'window', 'quit'],
+        hidden: true,
+        run: () => this.platform.closeWindow(),
+      },
+
     ];
 
     this.commands.registerAll(commands);
@@ -5644,9 +5865,33 @@ export class NoxApp {
     return false;
   }
 
+  /**
+   * Reload Window, teardown first and navigation second.
+   *
+   * A bare `location.reload()` replaces the renderer and nothing else: the
+   * language servers, plugin workers and pending flushes belong to the page
+   * that started them, and the host does not stop what a page started. Until
+   * 2026-09-02 the command was exactly that bare reload, so every reload
+   * started a fresh set of servers beside the orphaned old one, and two
+   * comments claimed otherwise. `dispose()` is the one place that stops the
+   * servers and awaits the flushes, so it runs here and is waited for.
+   * `finally`, because a teardown that fails must still reload: the
+   * alternative is a half-disposed app with no way out short of quitting.
+   */
+  async reloadWindow(): Promise<void> {
+    this.notifications.info('Reloading…');
+    try {
+      await this.dispose();
+    } finally {
+      await this.platform.reloadWindow();
+    }
+  }
+
   async dispose(): Promise<void> {
     this.#disposeDropListener?.();
     this.#disposeDropListener = null;
+    this.#disposeOpenListener?.();
+    this.#disposeOpenListener = null;
     this.#disposeCloseListener?.();
     this.#disposeCloseListener = null;
     this.#disposeRejectionListener?.();
@@ -5659,8 +5904,9 @@ export class NoxApp {
     // Notes first: settings and session each have an on-disk original to
     // fall back on if their flush is lost, but a note does not.
     // Before the flushes: a reload does not kill the processes the renderer
-    // started, so without this every reload leaves a server orphaned with
-    // nothing left to talk to it.
+    // started, which is why `reloadWindow` runs this and waits for it. Without
+    // that, every reload left a server orphaned with nothing left to talk to
+    // it.
     await this.lsp.stop();
     await this.platform.stopAllLanguageServers().catch(() => undefined);
     // The plugins' half of the same sentence: a reload does not kill what the

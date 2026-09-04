@@ -69,6 +69,8 @@ export class FileWatcherService {
 
   #unwatch: Unwatch | null = null;
   #root: string | null = null;
+  /** The `start` in flight, so the next one waits for it instead of racing it. */
+  #starting: Promise<void> = Promise.resolve();
 
   #pathListeners = new Set<(paths: ReadonlySet<string>) => void>();
   #pendingPaths = new Set<string>();
@@ -92,8 +94,24 @@ export class FileWatcherService {
     this.#notifications = notifications;
   }
 
-  /** Watch `root`, replacing any previous watch. Null stops watching. */
+  /**
+   * Watch `root`, replacing any previous watch. Null stops watching.
+   *
+   * Chained rather than merely guarded. The guard below only sees a start
+   * that has finished, so two calls inside one platform round trip both ran
+   * the whole body: two platform watches were registered, the first disposer
+   * was overwritten and its watch leaked for the life of the window. Running
+   * each start after the previous one also hands the platform the roots in
+   * the order they were chosen, which its replace-the-previous-watch contract
+   * depends on now that `nox_watch` runs off the main thread.
+   */
   async start(root: string | null): Promise<void> {
+    const run = this.#starting.then(() => this.#start(root));
+    this.#starting = run.catch(() => undefined);
+    return run;
+  }
+
+  async #start(root: string | null): Promise<void> {
     if (root === this.#root && this.#unwatch) return;
     this.stop();
     if (!root || !this.#platform.capabilities.fileWatching) return;
@@ -233,9 +251,13 @@ export class FileWatcherService {
     if (!buffer.isDirty) {
       // Clean buffer: the file on disk is the truth. Reload without a fuss.
       const reloaded = await this.#workspace.reloadFromDisk(id);
-      this.#warned.delete(id);
-      this.#workspace.events.emit('external-change', { id, state: 'modified', reloaded });
-      return;
+      if (reloaded) {
+        this.#warned.delete(id);
+        this.#workspace.events.emit('external-change', { id, state: 'modified', reloaded });
+        return;
+      }
+      // Declined: a keystroke landed while the file was being read, so the
+      // buffer is dirty now and this is the case below after all.
     }
 
     // Dirty buffer: the user's unsaved work always wins until they say

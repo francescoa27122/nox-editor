@@ -3,7 +3,11 @@ name = "nox"
 version = "0.12.0"
 description = "Nox — a fast, dark, keyboard-first text editor"
 edition = "2021"
-rust-version = "1.77"
+# The lowest rustc the resolved graph compiles with, not the lowest Tauri
+# asks for (1.77.2): ignore 0.4.33, plist 1.10.0 and darling 0.23.0 in
+# Cargo.lock each declare 1.88, and a floor below theirs is a promise no
+# build could keep. Re-derive with `cargo metadata` when the lock moves.
+rust-version = "1.88"
 default-run = "nox"
 
 [lib]

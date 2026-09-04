@@ -53,6 +53,7 @@ const EVERY_KIND: Record<OverlayKind, string> = {
   'note-open': '.palette',
   'task-run': '.palette',
   language: '.palette',
+  recent: '.palette',
   settings: '.settings',
   keybindings: '.keys',
 };

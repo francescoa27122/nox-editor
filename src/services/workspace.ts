@@ -6,7 +6,7 @@ import {
   type Extension,
   type StateCommand,
   type StateEffect,
-  type Text,
+  Text,
   type Transaction,
   type TransactionSpec,
 } from '@codemirror/state';
@@ -186,6 +186,17 @@ class Buffer {
    */
   diskMtime = 0;
   externalState: ExternalState = 'none';
+  /**
+   * The pane whose view produced `state`, when one did.
+   *
+   * With one file in two panes each view keeps its own `EditorState`, and
+   * `state` is whichever dispatched last. A command the workspace runs
+   * against it has to reach that pane and no other: see `PaneChannel.run`.
+   * Not cleared by the background paths, because a pane that takes the
+   * buffer back adopts the state and re-announces itself on its first
+   * dispatch, and a pane that no longer shows the buffer declines the run.
+   */
+  stateOrigin: object | undefined;
 
   constructor(init: {
     id: BufferId;
@@ -286,6 +297,18 @@ interface PaneChannel {
   /** Which pane this is, when the caller said. */
   groupId: GroupId | undefined;
   /**
+   * Run a state command against this pane's own view, for the buffer named.
+   * Null when the pane is not showing it.
+   *
+   * Needed because a `Transaction` is bound to the state it was built from,
+   * and `@codemirror/view` refuses one whose `startState` is not the view's
+   * own. With one file in two panes, `buffer.state` belongs to whichever
+   * pane dispatched last, so a transaction the workspace builds from it can
+   * only ever be handed to that pane. Letting the pane build it instead
+   * keeps the two on the same state by construction.
+   */
+  run: ((id: BufferId, command: StateCommand) => boolean | null) | undefined;
+  /**
    * This pane's cursor **in one named buffer**, asked for rather than pushed.
    *
    * A selection changes on every cursor move, so publishing one would put
@@ -341,9 +364,17 @@ export class WorkspaceService {
    * buffer's current one is how grouped undo knows whether a set is still the
    * next thing to be taken back — rather than keeping a second history and
    * hoping it stays in step with CodeMirror's.
+   *
+   * The depth alone is not identity. CodeMirror trims history above 100
+   * events, back to 101 once it passes 120, so the depth cycles through the
+   * same twenty values for as long as the user keeps typing, and a recorded
+   * depth recurs with some later edit on top. `doc` is the document the set
+   * left behind: the set is on top only when the depth matches *and* the
+   * document is that one again. Shares structure with the live `Text`, so
+   * it is a reference, not a copy.
    */
-  #undoIndex = new Map<BufferId, { id: ChangeSetId; depth: number }[]>();
-  #redoIndex = new Map<BufferId, { id: ChangeSetId; depth: number }[]>();
+  #undoIndex = new Map<BufferId, { id: ChangeSetId; depth: number; doc: Text }[]>();
+  #redoIndex = new Map<BufferId, { id: ChangeSetId; depth: number; doc: Text }[]>();
 
   constructor(platform: Platform, createState: StateFactory) {
     this.#platform = platform;
@@ -368,6 +399,7 @@ export class WorkspaceService {
       owner?: object;
       groupId?: GroupId;
       readSelection?: (id: BufferId) => SelectionRecord | null;
+      run?: (id: BufferId, command: StateCommand) => boolean | null;
     } = {},
   ): () => void {
     const channel: PaneChannel = {
@@ -375,6 +407,7 @@ export class WorkspaceService {
       owner: options.owner,
       groupId: options.groupId,
       readSelection: options.readSelection,
+      run: options.run,
     };
     this.#viewDispatchers.add(channel);
     return () => this.#viewDispatchers.delete(channel);
@@ -527,6 +560,45 @@ export class WorkspaceService {
     buffer.diskMtime = mtime;
     this.#insert(buffer);
     this.#pushRecentFile(path);
+    this.events.emit('buffer-opened', { id: buffer.id });
+    return buffer.id;
+  }
+
+  /**
+   * Open a path whose file is gone, holding `content` as unsaved work.
+   *
+   * Session restore's case: the user edited a file, quit, and something
+   * removed the file before the next launch (a branch switch, a stash, a
+   * regenerated directory). While Nox runs the watcher keeps such a tab open
+   * and marked `deleted`; across a restart the tab used to be dropped without
+   * a word. The buffer starts empty, which is what the disk now says, and
+   * takes the text as a real edit: it is dirty, undo reaches the empty
+   * document, and saving recreates the file exactly as it does for a deletion
+   * the watcher saw.
+   */
+  openDeleted(path: string, content: string, options: { encoding?: Encoding } = {}): BufferId {
+    const existing = this.findByPath(path);
+    if (existing) {
+      this.setActive(existing.id);
+      return existing.id;
+    }
+
+    const language = detectLanguage(path);
+    const buffer = new Buffer({
+      id: this.#mintId(),
+      path,
+      name: basename(path),
+      language,
+      eol: '\n',
+      encoding: options.encoding,
+      state: EditorState.create({
+        doc: '',
+        extensions: this.#createState({ doc: '', languageId: language.id }),
+      }),
+    });
+    buffer.externalState = 'deleted';
+    this.#insert(buffer);
+    this.replaceContents(buffer.id, content);
     this.events.emit('buffer-opened', { id: buffer.id });
     return buffer.id;
   }
@@ -686,16 +758,28 @@ export class WorkspaceService {
     if (id) this.setActive(id);
   }
 
-  /** Reorder tabs, used by drag-and-drop in the tab strip. */
-  moveTab(id: BufferId, toIndex: number, targetGroupId?: GroupId): void {
-    const from = this.#groupOf(id);
+  /**
+   * Reorder tabs, used by drag-and-drop in the tab strip.
+   *
+   * `fromGroupId` says which pane the tab leaves when the buffer is shown in
+   * more than one; without it the first pane showing it is assumed, which is
+   * the wrong one for a move out of the copy.
+   */
+  moveTab(id: BufferId, toIndex: number, targetGroupId?: GroupId, fromGroupId?: GroupId): void {
+    const from = this.#groupOf(id, fromGroupId);
     if (!from) return;
     const to = targetGroupId ? this.#group(targetGroupId) : from;
     if (!to) return;
 
     from.order.splice(from.order.indexOf(id), 1);
-    const clamped = Math.max(0, Math.min(to.order.length, toIndex));
-    to.order.splice(clamped, 0, id);
+    // A pane already showing the buffer takes the move as a close here plus
+    // an activate there. A tab cannot be shown twice in one pane (see
+    // `mirrorInto`): the keyed tab strip throws on the duplicate id and stops
+    // updating.
+    if (!to.order.includes(id)) {
+      const clamped = Math.max(0, Math.min(to.order.length, toIndex));
+      to.order.splice(clamped, 0, id);
+    }
 
     if (from !== to) {
       // Dragging the last tab out of a group takes the group with it.
@@ -788,7 +872,11 @@ export class WorkspaceService {
 
     const index = this.#groups.indexOf(group);
     const neighbour = this.#groups[index === 0 ? 1 : index - 1]!;
-    neighbour.order.push(...group.order);
+    // Only what the neighbour is not already showing: a file open in both
+    // panes would otherwise become two tabs in one, which the keyed tab strip
+    // refuses to render. The active tab is fine either way, since the id is
+    // in the neighbour whichever branch it took.
+    neighbour.order.push(...group.order.filter((id) => !neighbour.order.includes(id)));
     if (group.activeId) neighbour.activeId = group.activeId;
 
     this.#removeGroup(id);
@@ -826,7 +914,9 @@ export class WorkspaceService {
       this.splitEditor();
       return;
     }
-    this.moveTab(id, target.order.length, target.id);
+    // From *this* pane, named: the buffer may be showing in both, and the
+    // default lookup finds the first pane rather than the active one.
+    this.moveTab(id, target.order.length, target.id, source.id);
   }
 
   #group(id: GroupId): EditorGroup | undefined {
@@ -896,6 +986,7 @@ export class WorkspaceService {
     const buffer = this.#map.get(id);
     if (!buffer) return;
     buffer.state = transaction.state;
+    buffer.stateOrigin = origin;
     if (transaction.docChanged) {
       // A transaction that is *itself* a mirror is never forwarded again.
       // The guard belongs here rather than in the panes: a consumer that
@@ -970,9 +1061,31 @@ export class WorkspaceService {
     const buffer = this.#map.get(id);
     if (!buffer || buffer.path === null) return false;
 
-    let text = buffer.state.doc.toString();
-    if (options.trimTrailingWhitespace) text = text.replace(/[ \t]+$/gm, '');
-    if (options.insertFinalNewline && text.length > 0 && !text.endsWith('\n')) text += '\n';
+    // What the save is writing, captured before the await below. A keystroke
+    // can land while the write is in flight, and the document after the
+    // await is then not the document that went to disk. Everything past the
+    // write compares against these, never against the live state.
+    const written = buffer.state.doc;
+    const writtenCount = buffer.changeCount;
+
+    // The formatting as targeted changes, never one replacement of the whole
+    // document: CodeMirror maps a position strictly inside a replaced range
+    // to its start, so the replacement sent every cursor to offset 0, and the
+    // `buffer-reset` that followed cost the pane its scroll position too.
+    // Applied as changes, everything outside the edited spans maps through
+    // untouched and the pane needs no reset at all.
+    const formatting: { from: number; to?: number; insert?: string }[] = [];
+    let text = written.toString();
+    if (options.trimTrailingWhitespace) {
+      for (const match of text.matchAll(/[ \t]+$/gm)) {
+        formatting.push({ from: match.index, to: match.index + match[0].length });
+      }
+      text = text.replace(/[ \t]+$/gm, '');
+    }
+    if (options.insertFinalNewline && text.length > 0 && !text.endsWith('\n')) {
+      formatting.push({ from: written.length, insert: '\n' });
+      text += '\n';
+    }
 
     const onDisk = encode(text, buffer.eol, buffer.encoding);
 
@@ -986,21 +1099,32 @@ export class WorkspaceService {
       return false;
     }
 
-    // Formatting on save changes the document, so push it back into the state
-    // as a real transaction — the user can undo it.
-    if (text !== buffer.state.doc.toString()) {
-      const transaction = buffer.state.update({
-        changes: { from: 0, to: buffer.state.doc.length, insert: text },
-        scrollIntoView: false,
-      });
-      buffer.state = transaction.state;
-      buffer.changeCount++;
-      buffer.revision++;
-      this.events.emit('buffer-reset', { id });
-    }
+    if (buffer.changeCount !== writtenCount) {
+      // The user typed during the write. The document is theirs now, and
+      // replacing it with what was written would revert those keystrokes,
+      // which was the failure here: the revert merged with the keystroke into
+      // one history event, so undo could not reach the text either. The
+      // formatting is skipped (the next save applies it), and the buffer is
+      // dirty by exactly the edits that arrived: `savedDoc` is the text that
+      // actually reached the disk, and the count is the one it was made at.
+      buffer.savedDoc = Text.of(text.split('\n'));
+      buffer.savedChangeCount = writtenCount;
+    } else {
+      // Formatting on save changes the document, so push it back into the
+      // state as a real transaction — the user can undo it. Through the live
+      // view where there is one, as a reload does, so the selection maps.
+      if (formatting.length > 0) {
+        const spec: TransactionSpec = { changes: formatting, scrollIntoView: false };
+        if (!this.#dispatchToView(id, spec)) {
+          buffer.state = buffer.state.update(spec).state;
+          buffer.changeCount++;
+          buffer.revision++;
+        }
+      }
 
-    buffer.savedDoc = buffer.state.doc;
-    buffer.savedChangeCount = buffer.changeCount;
+      buffer.savedDoc = buffer.state.doc;
+      buffer.savedChangeCount = buffer.changeCount;
+    }
     buffer.savedEol = buffer.eol;
     buffer.externalState = 'none';
 
@@ -1054,6 +1178,18 @@ export class WorkspaceService {
     const buffer = this.#map.get(id);
     if (!buffer) return false;
 
+    // The path may already be open in another tab. Two buffers on one file
+    // would each save their own text over the other's with no conflict
+    // prompt, since each records its own `diskMtime`. A clean one is closed
+    // once the write lands: its text is on disk, and the user has just told
+    // the OS dialog to replace it. A dirty one is refused, because the dialog
+    // asked about the file, not about that tab's unsaved edits.
+    const other = this.findByPath(path);
+    if (other && other.id !== id && other.isDirty) {
+      this.#fail(`${basename(path)} is open with unsaved changes.`, 'Save or close that tab first.');
+      return false;
+    }
+
     const previousPath = buffer.path;
     const previousName = buffer.name;
     const previousLanguage = buffer.language;
@@ -1070,6 +1206,10 @@ export class WorkspaceService {
       this.#sync();
       return false;
     }
+
+    // Re-checked after the write: an edit could have landed in that tab
+    // during it, and closing then would take the edit with it.
+    if (other && other.id !== id && !other.isDirty) this.close(other.id, { force: true });
 
     // The grammar may have changed with the extension; the view rebuilds.
     if (previousLanguage.id !== buffer.language.id) {
@@ -1095,6 +1235,12 @@ export class WorkspaceService {
     // way they are being read. Passing one adopts it for every later save.
     const charset = readAs ?? buffer.encoding;
 
+    // The document this reload was decided against. The read below is an
+    // IPC round trip, and a keystroke can land inside it; replacing the
+    // document afterwards would take that keystroke with it and call the
+    // result clean. Same shape as `apply`'s `baseRevisions` check.
+    const revision = buffer.revision;
+
     let raw: string;
     let mtime = 0;
     try {
@@ -1108,6 +1254,14 @@ export class WorkspaceService {
       return false;
     }
 
+    if (buffer.revision !== revision) {
+      // The user typed while the file was being read. Their edit wins, as it
+      // would have had it come first: the buffer is marked so the next save
+      // meets the conflict prompt, and the disk text is left for then.
+      this.markExternalState(id, 'modified');
+      return false;
+    }
+
     // A rewrite can change the line endings or add a BOM; the buffer should
     // follow the file rather than keep asserting what it used to be.
     // The charset is the one the buffer already has, not one re-inferred
@@ -1118,7 +1272,8 @@ export class WorkspaceService {
     buffer.savedEol = eol;
     buffer.encoding = encoding;
 
-    if (doc === buffer.state.doc.toString()) {
+    const before = buffer.state.doc.toString();
+    if (doc === before) {
       // Identical content: record the new mtime and leave the document alone
       // rather than pushing a no-op onto the undo stack.
       buffer.diskMtime = mtime;
@@ -1128,7 +1283,7 @@ export class WorkspaceService {
     }
 
     const spec: TransactionSpec = {
-      changes: { from: 0, to: buffer.state.doc.length, insert: doc },
+      changes: minimalChange(before, doc),
       scrollIntoView: false,
     };
 
@@ -1418,7 +1573,7 @@ export class WorkspaceService {
       }
 
       const stack = this.#undoIndex.get(bufferId) ?? [];
-      stack.push({ id, depth: undoDepth(buffer.state) });
+      stack.push({ id, depth: undoDepth(buffer.state), doc: buffer.state.doc });
       this.#undoIndex.set(bufferId, stack);
       // Any new edit invalidates whatever was waiting to be redone.
       this.#redoIndex.delete(bufferId);
@@ -1517,7 +1672,7 @@ export class WorkspaceService {
     const index = direction === 'undo' ? this.#undoIndex : this.#redoIndex;
     const depthOf = direction === 'undo' ? undoDepth : redoDepth;
     const top = index.get(buffer.id)?.at(-1);
-    if (!top || depthOf(buffer.state) !== top.depth) return null;
+    if (!top || !onTop(buffer.state, top, depthOf)) return null;
 
     const entry = this.log.get(top.id);
     return entry && entry.bufferIds.length > 1 ? top.id : null;
@@ -1546,7 +1701,7 @@ export class WorkspaceService {
       // The set has to still be on top of this buffer's history. Comparing
       // CodeMirror's own depth is what makes that check honest — it accounts
       // for edits, undos and redos we never saw.
-      if (!buffer || !top || top.id !== id || depthBefore(buffer.state) !== top.depth) {
+      if (!buffer || !top || top.id !== id || !onTop(buffer.state, top, depthBefore)) {
         skipped.push(bufferId);
         continue;
       }
@@ -1558,7 +1713,7 @@ export class WorkspaceService {
 
       stack!.pop();
       const target = to.get(bufferId) ?? [];
-      target.push({ id, depth: depthAfter(buffer.state) });
+      target.push({ id, depth: depthAfter(buffer.state), doc: buffer.state.doc });
       to.set(bufferId, target);
       undone.push(bufferId);
     }
@@ -1577,6 +1732,20 @@ export class WorkspaceService {
   #runOnBuffer(id: BufferId, command: StateCommand): boolean {
     const buffer = this.#map.get(id);
     if (!buffer) return false;
+
+    // A pane runs the command against its own view, so the transaction is
+    // built from and dispatched to one state. The pane that produced
+    // `buffer.state` goes first: the depth check in `#stepChangeSet` read
+    // that state's history, so this keeps the check and the undo on the same
+    // pane. Any other pane showing the buffer is a fine second, since its
+    // view is its own start state too. Only a channel without `run` (a test
+    // fake) falls through to the transaction path below.
+    const channels = [...this.#viewDispatchers];
+    const origin = channels.find((channel) => channel.owner === buffer.stateOrigin);
+    for (const channel of origin ? [origin, ...channels.filter((c) => c !== origin)] : channels) {
+      const ran = channel.run?.(id, command);
+      if (ran !== null && ran !== undefined) return ran;
+    }
 
     return command({
       state: buffer.state,
@@ -1939,14 +2108,80 @@ function decode(raw: string, reported: Encoding = 'utf-8'): { doc: string; eol: 
       ? 'utf-8'
       : reported;
   const body = raw.startsWith(BOM) ? raw.slice(BOM.length) : raw;
-  const eol: Eol = body.includes('\r\n') ? '\r\n' : '\n';
-  return { doc: eol === '\r\n' ? body.replace(/\r\n/g, '\n') : body, eol, encoding };
+  const { crlf, lf } = countLineEndings(body);
+  // The majority ending, ties to CRLF. "Any CRLF means CRLF" turned a file
+  // that was mostly LF with one stray Windows line into a whole-file diff on
+  // its next save. Every CRLF is still folded to LF in the document either
+  // way, or a minority CRLF line would keep its `\r` in the text.
+  const eol: Eol = crlf > 0 && crlf >= lf ? '\r\n' : '\n';
+  return { doc: crlf > 0 ? body.replace(/\r\n/g, '\n') : body, eol, encoding };
+}
+
+/** How many lines end in CRLF and how many in a bare LF. One pass, no allocation. */
+function countLineEndings(text: string): { crlf: number; lf: number } {
+  let crlf = 0;
+  let lf = 0;
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+    if (at > 0 && text.charCodeAt(at - 1) === 13) crlf++;
+    else lf++;
+  }
+  return { crlf, lf };
 }
 
 /** The inverse of `decode`. */
 function encode(doc: string, eol: Eol, encoding: Encoding): string {
   const body = eol === '\r\n' ? doc.replace(/\n/g, '\r\n') : doc;
   return encoding === 'utf-8-bom' ? BOM + body : body;
+}
+
+/**
+ * The one change that turns `before` into `after`, trimmed to the span that
+ * actually differs.
+ *
+ * A reload used to replace `[0, length)` with the new text, and CodeMirror
+ * maps every position strictly inside a replaced range to its start, so the
+ * cursor landed at offset 0 on every external rewrite while the viewport
+ * stayed where it was. Trimming the common prefix and suffix keeps every
+ * cursor, fold and mark outside the rewritten span exactly where it was; one
+ * inside it lands at the start of what changed, the nearest position that
+ * still means anything. A line diff would place those better, but this is
+ * one linear pass with no allocation, which is what makes it safe on a file
+ * at the size limit.
+ */
+function minimalChange(before: string, after: string): { from: number; to: number; insert: string } {
+  const shortest = Math.min(before.length, after.length);
+  let prefix = 0;
+  while (prefix < shortest && before.charCodeAt(prefix) === after.charCodeAt(prefix)) prefix++;
+  let suffix = 0;
+  while (
+    suffix < shortest - prefix &&
+    before.charCodeAt(before.length - 1 - suffix) === after.charCodeAt(after.length - 1 - suffix)
+  ) {
+    suffix++;
+  }
+  // Never cut between the halves of a surrogate pair: the boundary is not a
+  // position a cursor can sit at, and both strings hold the same half there.
+  if (prefix > 0 && (before.charCodeAt(prefix - 1) & 0xfc00) === 0xd800) prefix--;
+  if (suffix > 0 && (before.charCodeAt(before.length - suffix) & 0xfc00) === 0xdc00) suffix--;
+  return { from: prefix, to: before.length - suffix, insert: after.slice(prefix, after.length - suffix) };
+}
+
+/**
+ * Whether a change set's index entry is the next thing this history would
+ * hand back. See `#undoIndex` for why the depth alone is not enough.
+ *
+ * The identity check comes first because it is the common case for free: a
+ * selection-only transaction keeps the same `Text`. An edit that was then
+ * undone rebuilds an equal document under a new object, which is what `eq`
+ * is for. It walks the text, and it runs on an undo rather than a keystroke.
+ */
+function onTop(
+  state: EditorState,
+  entry: { depth: number; doc: Text },
+  depthOf: (state: EditorState) => number,
+): boolean {
+  if (depthOf(state) !== entry.depth) return false;
+  return state.doc === entry.doc || state.doc.eq(entry.doc);
 }
 
 /**

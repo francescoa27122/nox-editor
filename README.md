@@ -23,7 +23,7 @@ noticing it.
 
 It is **not** a VS Code clone. It has its own design language, its own
 shortcuts where they can be better, and a deliberately small surface area. It
-is also about 4 MB, and it starts instantly.
+is also about 5 MB, and it starts instantly.
 
 I built it to find out what an editor looks like if you take two things
 seriously from the first line of code: **never losing someone's work**, and
@@ -50,7 +50,9 @@ xattr -dr com.apple.quarantine /Applications/Nox.app
 
 You will need that command. Nox is ad-hoc signed rather than signed with an
 Apple Developer ID, so macOS quarantines it on download and calls it
-*"damaged"*. That sounds like a corrupt download. The file is fine.
+*"damaged"*. That sounds like a corrupt download. The file is fine. Nox needs
+macOS 13 or newer: the WebKit in older versions cannot draw the colours the
+diff and review views are made of.
 
 Linux packages are built on Ubuntu 22.04, so they need glibc 2.35 or newer.
 There is no AppImage.
@@ -77,18 +79,23 @@ demo project. No Rust build, and nothing touches your disk.
 
 ## What makes it different
 
-### It does not lose your work. Ever.
+### It does not lose your work
 
 Close the window with unsaved changes and Nox doesn't ask you a question. It
 keeps them, and hands them back next time you open it, still unsaved and still
-undoable back to what is on disk.
+undoable back to what is on disk. That holds even if the file itself has gone
+by then: the tab comes back as unsaved rather than vanishing with it.
 
-A dialog can be answered wrong at 2am. Persistence can't.
+A dialog can be answered wrong at 2am. Persistence can't. The one gap is a
+crash, rather than a quit, in the fraction of a second between a keystroke
+and the session file catching up with it.
 
 Saving writes to a temporary file and renames it into place, so a crash or a
-full disk part way through can't leave you with half a file. If something else
-changes a file while you have it open, Nox tells you instead of quietly picking
-a winner.
+full disk part way through can't leave you with half a file, and a keystroke
+that lands while a save is in flight is kept. If something else changes a
+file while you have it open, Nox tells you instead of quietly picking a
+winner, with one exception it cannot see: a change that lands in the same
+filesystem tick as its own save.
 
 ### Undo works across files
 
@@ -106,28 +113,36 @@ there's no half-finished state to clean up by hand.
 <!-- SCREENSHOT: review -->
 ![Reviewing a change an agent proposed](docs/screenshots/review.png)
 
-Nox can run an AI agent, and that agent cannot touch your files. It reads your
-code through a read-only door and hands back a *proposal*. You get a diff, hunk
+Nox can run an AI agent, and nothing that agent asks Nox for can touch your
+files. It reads your code through a read-only door and hands back a *proposal*. You get a diff, hunk
 by hunk, and you keep the parts you want. Nothing is written until you say so,
 and one button takes a whole session back out again.
 
-Everything it read, everything it ran, and everything it was refused shows up
-in the Agents panel. You can check what happened rather than trust it.
+Everything it read through Nox, everything it asked Nox to run, and everything
+it was refused shows up in the Agents panel, and you can copy a session's whole
+trail out as JSON. You can check what happened rather than trust it. What a
+program you bring yourself does on its own, with its own files and its own
+network, never passes through Nox, so Nox cannot see it or log it.
 
 #### Setting up a model
 
 Run **Configure Agents** from the command palette. Nox creates the file for
 you, fills it with a working example, and opens it. Point the example at an
 [Ollama](https://ollama.com) server, save, and you're done. There's no account,
-no API key, and no telemetry.
+no API key, and no telemetry. Nox makes one network request of its own: ten
+seconds after launch it fetches the release feed from GitHub to learn whether
+a newer version exists. The address is fixed, so the request carries nothing
+about you or your install, and finding a newer version only shows a toast.
+**Check for Updates on Launch** in Settings turns it off.
 
-The model runs on your own machine and Nox will only talk to your own machine.
-That limit lives in the part of the app a web page has no way to reach, so it
-isn't a setting that can be flipped by accident or by a page you happened to
-open.
+The model runs on your own machine, and the model integration will only talk
+to your own machine. That limit lives in the part of the app a web page has
+no way to reach, so it isn't a setting that can be flipped by accident or by
+a page you happened to open.
 
-**It reads and it proposes. It cannot run commands.** That isn't a switch you
-left off. Nox has no way to express "run this" to an agent yet.
+**The local model reads and it proposes. It cannot run commands.** That isn't a
+switch you left off: the model's vocabulary has no "run this" in it. A program
+you bring yourself is a different matter, and is described below.
 
 **It is never allowed to guess.** The model names the text it wants replaced
 and Nox goes and finds it, refusing anything it can't match exactly or finds
@@ -140,7 +155,12 @@ text used to be.
 
 **Or bring your own.** An agent can be any program that reads and writes a
 small JSON format on its input and output. There's a
-[140-line example](examples/uppercase-agent.mjs) you can copy.
+[140-line example](examples/uppercase-agent.mjs) you can copy. Know what you
+are starting: it is a program running as you, with your privileges and whatever
+network it likes, and its own reads and writes never pass through Nox, so Nox
+cannot see or log them. Unlike the local model, it can ask Nox to run commands,
+which Nox checks against its permission model. Configure only programs you
+would run from a shell.
 
 #### Change a selection
 
@@ -174,9 +194,10 @@ way it might be wrong. Answers last as long as the app is open and are saved
 nowhere, for the same reason.
 
 **Asking can't change anything.** A session started this way is allowed to talk
-and nothing else. Nox blocks the rest itself rather than asking the model
-nicely in a prompt. That matters: an agent running as a separate program never
-reads that prompt.
+and nothing else through Nox. Nox blocks the rest of the protocol itself rather
+than asking the model nicely in a prompt. That matters: an agent running as a
+separate program never reads that prompt. What such a program does on its own,
+outside the protocol, is beyond Nox's reach either way.
 
 The Answers section stays hidden until you've set up a model that can run. One
 caveat worth knowing: asked to explain some code *and* say what was surprising
@@ -332,11 +353,13 @@ For anyone who wants the deep version:
 Built with [Tauri](https://tauri.app), [Svelte](https://svelte.dev) and
 [CodeMirror 6](https://codemirror.net). The Rust side owns the window, the
 filesystem and project search. The editor itself lives in the renderer.
+Every library the bundle carries is listed, with its licence, in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ```bash
 npm test          # the unit suite (the count is in Status above)
 npm run check     # TypeScript + Svelte
-npm run app:build # a distributable, ~4 MB on macOS
+npm run app:build # a distributable, ~5 MB on macOS
 ```
 
 There's a second suite in [`e2e/`](e2e/README.md) that drives the built

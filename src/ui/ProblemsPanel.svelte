@@ -4,7 +4,7 @@
   import Icon from './Icon.svelte';
   import PanelEmpty from './PanelEmpty.svelte';
   import PanelHeader from './PanelHeader.svelte';
-  import { problemRows, problemTotals } from './problems';
+  import { problemRows } from './problems';
 
   /**
    * Everything the language servers have to say, across the whole project.
@@ -20,6 +20,10 @@
   const focusRequest = ui.focusProblemsRequest;
 
   const diagnostics = lsp.diagnostics;
+  // A running total (A4-010), not `problemTotals($diagnostics)` re-walked on
+  // every publish — the rows below still need the full map, but the summary
+  // line does not.
+  const diagnosticsTotals = lsp.diagnosticsTotals;
   const rootPath = workspace.rootPath;
 
   let focused = $state(-1);
@@ -43,7 +47,7 @@
   });
 
   const rows = $derived(problemRows($diagnostics, $rootPath));
-  const totals = $derived(problemTotals($diagnostics));
+  const totals = $derived($diagnosticsTotals);
 
   const summary = $derived.by(() => {
     if (totals.files === 0) return 'No problems';

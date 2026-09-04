@@ -38,6 +38,16 @@ const BATCH_INTERVAL: Duration = Duration::from_millis(90);
 const BATCH_FILES: usize = 40;
 /// A line longer than this is truncated in the preview; the match still counts.
 const PREVIEW_BUDGET: usize = 320;
+/// Matches beyond this many in one file are not collected (A4-005).
+///
+/// `SearchRequest::max_results` is checked in the collector, after a whole
+/// `FileResult` has already arrived over the channel — so it bounds the
+/// overall run but not any one file. A single large minified file has no cap
+/// of its own: every match gets its own `SearchMatch` with up to
+/// `PREVIEW_BUDGET` UTF-16 units of preview, so a two-character query against
+/// an 8 MB bundle can build hundreds of thousands of them into one `FileResult`
+/// before the collector ever gets to look at the running total.
+const MAX_MATCHES_PER_FILE: usize = 1_000;
 /// Context kept before the match when a long line has to be trimmed.
 const PREVIEW_LEAD: usize = 60;
 
@@ -74,6 +84,8 @@ struct SearchMatch {
 struct FileResult {
     path: String,
     matches: Vec<SearchMatch>,
+    /// True when this file had more matches than `MAX_MATCHES_PER_FILE`.
+    truncated: bool,
 }
 
 #[derive(Serialize, Clone)]
@@ -180,13 +192,21 @@ fn preview_for(line: &str, match_start: usize, match_end: usize) -> (String, u32
 fn search_file(path: &std::path::Path, matcher: &Regex, limit: u64) -> Option<FileResult> {
     let contents = read_text(path, limit)?;
     let mut matches = Vec::new();
+    let mut truncated = false;
 
-    for (index, line) in contents.lines().enumerate() {
+    'lines: for (index, line) in contents.lines().enumerate() {
         for found in matcher.find_iter(line) {
             // A zero-width match (e.g. the pattern `x*`) would otherwise loop
             // the renderer's highlighting forever.
             if found.start() == found.end() {
                 continue;
+            }
+            if matches.len() >= MAX_MATCHES_PER_FILE {
+                // Stop scanning this file rather than only capping what gets
+                // kept: the point is to bound the work one file can cost, not
+                // just the size of the event it produces.
+                truncated = true;
+                break 'lines;
             }
             let (preview, column, length) = preview_for(line, found.start(), found.end());
             let offset = line[..found.start()].encode_utf16().count() as u32 - column;
@@ -207,6 +227,7 @@ fn search_file(path: &std::path::Path, matcher: &Regex, limit: u64) -> Option<Fi
     Some(FileResult {
         path: path.to_string_lossy().into_owned(),
         matches,
+        truncated,
     })
 }
 
@@ -708,5 +729,43 @@ mod tests {
         let start = line.find("needle").unwrap();
         let (_, column, _) = preview_for(line, start, start + 6);
         assert_eq!(column, 3, "emoji (2) + space (1)");
+    }
+
+    /// A file with one match per line, `lines` lines long.
+    fn matching_file(scratch: &Scratch, name: &str, lines: usize) -> std::path::PathBuf {
+        let body = "needle\n".repeat(lines);
+        scratch.write(name, &body);
+        scratch.0.join(name)
+    }
+
+    /// Guards A4-005: a file with far more matches than `MAX_MATCHES_PER_FILE`
+    /// used to collect every one of them into a single `FileResult` — each
+    /// with its own up-to-`PREVIEW_BUDGET` preview String — before the
+    /// collector's overall `max_results` check ever saw it. This is what
+    /// stops that: the scan itself gives up at the cap.
+    #[test]
+    fn a_file_past_the_cap_stops_at_max_matches_per_file_and_reports_truncated() {
+        let scratch = Scratch::new("search-cap");
+        let path = matching_file(&scratch, "big.txt", MAX_MATCHES_PER_FILE + 500);
+        let matcher = build_matcher(&request("needle", false, false, true)).unwrap();
+
+        let result = search_file(&path, &matcher, 10 * 1024 * 1024).expect("matches found");
+        assert_eq!(result.matches.len(), MAX_MATCHES_PER_FILE);
+        assert!(result.truncated);
+        // The cap stops the scan; it must not report a line past where it did.
+        assert_eq!(result.matches.last().unwrap().line as usize, MAX_MATCHES_PER_FILE);
+    }
+
+    /// The other half: a file under the cap is not touched by it at all, and
+    /// still reports every match it has.
+    #[test]
+    fn a_file_under_the_cap_is_not_truncated() {
+        let scratch = Scratch::new("search-cap");
+        let path = matching_file(&scratch, "small.txt", 500);
+        let matcher = build_matcher(&request("needle", false, false, true)).unwrap();
+
+        let result = search_file(&path, &matcher, 10 * 1024 * 1024).expect("matches found");
+        assert_eq!(result.matches.len(), 500);
+        assert!(!result.truncated);
     }
 }

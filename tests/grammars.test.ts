@@ -39,6 +39,20 @@ const SOURCE: Record<string, string> = {
   php: '<?php\nfunction greet(string $name): string {\n  return "hi $name";\n}\n',
 };
 
+/**
+ * The seven added for A1-005 (2026-09-02): every one a legacy mode the
+ * package already shipped while Nox opened the file as plain text.
+ */
+const SOURCE_2026_09: Record<string, string> = {
+  csharp: 'using System;\n\nnamespace Nox {\n  public class Editor {\n    public string Name => "nox";\n  }\n}\n',
+  kotlin: 'package nox\n\nfun main() {\n  val name = "nox"\n  println(name)\n}\n',
+  swift: 'import Foundation\n\nstruct Editor {\n  let name = "nox"\n  func greet() -> String { return "hi \\(name)" }\n}\n',
+  lua: '-- greet\nlocal function greet(name)\n  return "hi " .. name\nend\nprint(greet("nox"))\n',
+  powershell: '# greet\nfunction Greet($name) {\n  Write-Output "hi $name"\n}\nGreet "nox"\n',
+  ini: '; settings\n[editor]\nname = nox\ntabs = 2\n',
+  dockerfile: 'FROM node:24\nWORKDIR /app\nCOPY . .\nRUN npm ci\nCMD ["node", "index.js"]\n',
+};
+
 /** The classes `noxHighlightStyle` assigns across a parse of `doc`. */
 async function highlightedClasses(languageId: string, doc: string): Promise<string[]> {
   const grammar = await loadLanguage(languageId);
@@ -61,8 +75,8 @@ async function highlightedClasses(languageId: string, doc: string): Promise<stri
   return classes;
 }
 
-describe('the grammars added on 2026-08-26', () => {
-  for (const [languageId, doc] of Object.entries(SOURCE)) {
+function describeGrammars(sources: Record<string, string>): void {
+  for (const [languageId, doc] of Object.entries(sources)) {
     describe(languageId, () => {
       it('reports a grammar', () => {
         expect(hasGrammar(languageId)).toBe(true);
@@ -79,6 +93,14 @@ describe('the grammars added on 2026-08-26', () => {
       });
     });
   }
+}
+
+describe('the grammars added on 2026-08-26', () => {
+  describeGrammars(SOURCE);
+});
+
+describe('the grammars added on 2026-09-02', () => {
+  describeGrammars(SOURCE_2026_09);
 });
 
 describe('the language table and the grammar table', () => {

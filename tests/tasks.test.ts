@@ -363,6 +363,36 @@ describe('running', () => {
     expect(h.platform.spawned[0]?.command).toBe('npm');
   });
 
+  /**
+   * What `tasks.runLast` repeats.
+   *
+   * The command reads `lastTaskId` and runs it again, so the whole of its
+   * behaviour is whether that signal names the task that actually ran. It is
+   * set in `run` after the approval, not before it, which is the half worth
+   * pinning: a task the user cancelled must not become the one Run Last Task
+   * repeats, or a refused project task is one chord away from running anyway.
+   *
+   * This does not cover the command's `enabled` predicate or its keybinding.
+   */
+  it('remembers the task that ran, and not one that was refused', async () => {
+    const h = await harness({
+      user: ONE('test', 'npm', ['test']),
+      project: ONE('build', 'make', ['all']),
+    });
+    harnesses.push(h);
+
+    expect(h.tasks.lastTaskId.get()).toBeNull();
+
+    const run = h.tasks.run('test');
+    (await nthProcess(h.platform, 0)).end(0);
+    await run;
+    expect(h.tasks.lastTaskId.get()).toBe('test');
+
+    answerWith(h.ui, 'cancel');
+    expect(await h.tasks.run('build')).toBeNull();
+    expect(h.tasks.lastTaskId.get()).toBe('test');
+  });
+
   it('does not run a project task until it is confirmed', async () => {
     const h = await harness({ project: ONE('test', 'npm', ['test']) });
     harnesses.push(h);
