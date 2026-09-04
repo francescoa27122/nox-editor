@@ -23,6 +23,11 @@ import {
   rectangularSelection,
   scrollPastEnd,
 } from '@codemirror/view';
+import {
+  resolveIndentation,
+  type Indentation,
+  type ResolvedIndentation,
+} from '@core/indentation';
 import type { Settings } from '@services/config/schema';
 import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
@@ -137,8 +142,14 @@ function themeExtension(s: Settings): Extension {
   });
 }
 
-function indentExtension(s: Settings): Extension {
-  return indentUnit.of(s['editor.insertSpaces'] ? ' '.repeat(s['editor.tabSize']) : '\t');
+/** The preference, which is what a buffer with no detected indentation uses. */
+function settingsIndentation(s: Settings): ResolvedIndentation {
+  return { insertSpaces: s['editor.insertSpaces'], tabSize: s['editor.tabSize'] };
+}
+
+function indentExtension(s: Settings, indent: Indentation | null): Extension {
+  const { insertSpaces, tabSize } = resolveIndentation(indent, settingsIndentation(s));
+  return indentUnit.of(insertSpaces ? ' '.repeat(tabSize) : '\t');
 }
 
 function lineNumbersExtension(s: Settings): Extension {
@@ -165,14 +176,18 @@ function whitespaceExtension(s: Settings): Extension {
   }
 }
 
-function compartmentContent(name: CompartmentName, s: Settings): Extension {
+function compartmentContent(
+  name: CompartmentName,
+  s: Settings,
+  indent: Indentation | null,
+): Extension {
   switch (name) {
     case 'theme':
       return themeExtension(s);
     case 'tabSize':
-      return EditorState.tabSize.of(s['editor.tabSize']);
+      return EditorState.tabSize.of(resolveIndentation(indent, settingsIndentation(s)).tabSize);
     case 'indentUnit':
-      return indentExtension(s);
+      return indentExtension(s, indent);
     case 'wrap':
       return s['editor.wordWrap'] ? EditorView.lineWrapping : [];
     case 'lineNumbers':
@@ -272,9 +287,12 @@ function staticExtensions(): Extension[] {
  * Build the full extension list for a new buffer state. Passed to
  * `WorkspaceService` as its `StateFactory`.
  */
-export function buildExtensions(settings: Settings): Extension[] {
+export function buildExtensions(
+  settings: Settings,
+  indent: Indentation | null = null,
+): Extension[] {
   const configured = (Object.keys(compartments) as CompartmentName[]).map((name) =>
-    compartments[name].of(compartmentContent(name, settings)),
+    compartments[name].of(compartmentContent(name, settings, indent)),
   );
   return [
     // **First in the array, so leftmost on screen**, outside the line
@@ -306,17 +324,23 @@ export function buildExtensions(settings: Settings): Extension[] {
  * Reconfiguration effects for the settings that changed. Passing the changed
  * keys keeps a font-size tweak from rebuilding the grammar and gutters too.
  */
-export function reconfigureEffects(settings: Settings, changed: ReadonlySet<string>) {
+export function reconfigureEffects(
+  settings: Settings,
+  changed: ReadonlySet<string>,
+  indent: Indentation | null = null,
+) {
   const names = new Set<CompartmentName>();
   for (const key of changed) {
     for (const name of SETTING_TO_COMPARTMENTS[key as keyof Settings] ?? []) names.add(name);
   }
-  return [...names].map((name) => compartments[name].reconfigure(compartmentContent(name, settings)));
+  return [...names].map((name) =>
+    compartments[name].reconfigure(compartmentContent(name, settings, indent)),
+  );
 }
 
 /** Reconfigure every compartment — used when a whole settings file loads. */
-export function reconfigureAllEffects(settings: Settings) {
+export function reconfigureAllEffects(settings: Settings, indent: Indentation | null = null) {
   return (Object.keys(compartments) as CompartmentName[]).map((name) =>
-    compartments[name].reconfigure(compartmentContent(name, settings)),
+    compartments[name].reconfigure(compartmentContent(name, settings, indent)),
   );
 }
