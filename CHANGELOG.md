@@ -8,6 +8,12 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Indent guides.** A faint line at each indent level beside the code, so
+  the shape of a nested block is visible without counting spaces. On by
+  default; **Toggle Indent Guides** in the palette or *Indent Guides* in
+  Settings turns them off. Drawn for the lines on screen only, so a large
+  file costs no more than a small one.
+
 - **Tab can leave the editor.** <kbd>Ctrl M</kbd>, or **Toggle Tab Key Moves
   Focus** from the palette, switches Tab from indenting to moving focus, the
   way it does in every other control, so a keyboard user can reach the status

@@ -4541,6 +4541,14 @@ export class NoxApp {
         run: () => this.config.set('editor.wordWrap', !this.config.get('editor.wordWrap')),
       },
       {
+        id: 'view.toggleIndentGuides',
+        title: 'Toggle Indent Guides',
+        category: 'View',
+        keywords: ['indent', 'guides', 'indentation', 'lines', 'nesting'],
+        run: () =>
+          this.config.set('editor.indentGuides', !this.config.get('editor.indentGuides')),
+      },
+      {
         id: 'view.toggleIndentType',
         title: 'Toggle Tabs and Spaces',
         category: 'View',
