@@ -33,6 +33,7 @@ import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
 import { gitBlameField } from './git-blame';
 import { gitGutter, gitGutterField } from './git-gutter';
+import { indentGuidesExtension } from './indent-guides';
 import { lspDiagnosticsExtension } from './lsp';
 
 /**
@@ -102,6 +103,7 @@ const compartments = {
   provenance: new Compartment(),
   gitGutter: new Compartment(),
   sticky: new Compartment(),
+  guides: new Compartment(),
 } as const;
 
 type CompartmentName = keyof typeof compartments;
@@ -128,6 +130,7 @@ const SETTING_TO_COMPARTMENTS: Partial<Record<keyof Settings, CompartmentName[]>
   'workbench.showChangeMarks': ['provenance'],
   'editor.gitGutter': ['gitGutter'],
   'editor.stickyScroll': ['sticky'],
+  'editor.indentGuides': ['guides'],
 };
 
 // --- Per-compartment content ------------------------------------------------
@@ -214,6 +217,8 @@ function compartmentContent(
       return s['editor.gitGutter'] ? gitGutter() : [];
     case 'sticky':
       return stickyScrollExtension(s['editor.stickyScroll']);
+    case 'guides':
+      return indentGuidesExtension(s['editor.indentGuides']);
   }
 }
 

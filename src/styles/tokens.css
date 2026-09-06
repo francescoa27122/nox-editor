@@ -141,6 +141,14 @@
   --nox-gutter-fg: #6d7d94;
   --nox-gutter-active-fg: #93a2ba;
   --nox-match-bracket: rgba(125, 211, 224, 0.2);
+  /* Indent guides. Not text and not a boundary, so no contrast floor
+     applies; deliberately far under the gutter's line numbers (4.61:1),
+     because a guide that competes with the code it sits beside is noise on
+     every line. 1.59:1 over bg-editor, which is where VS Code's dark theme
+     puts its own (#404040 on #1e1e1e is 1.61:1); the first draft at 0.22
+     measured 1.34:1 and vanished in a screenshot. The hue is the border
+     family's, so it reads as structure rather than as a mark. */
+  --nox-indent-guide: rgba(125, 140, 165, 0.32);
   /* A plugin's `highlight` decoration. Weaker than a search match and
      weaker than the selection on purpose: a plugin's opinion about a
      range should not outrank what the user is looking for or holding. */

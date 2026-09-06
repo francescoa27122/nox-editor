@@ -276,6 +276,11 @@ export const SETTINGS_SCHEMA = {
     description: 'Keep the enclosing function or class pinned above the editor.',
     category: 'Editor',
   }),
+  'editor.indentGuides': bool(true, {
+    label: 'Indent Guides',
+    description: 'Draw a faint line at each indent level beside the code.',
+    category: 'Editor',
+  }),
   'editor.bracketMatching': bool(true, {
     label: 'Bracket Matching',
     description: 'Highlight the bracket matching the one at the cursor.',

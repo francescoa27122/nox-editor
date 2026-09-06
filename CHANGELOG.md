@@ -6,6 +6,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Indent guides.** A faint line at each indent level beside the code, so
+  the shape of a nested block is visible without counting spaces. On by
+  default; **Toggle Indent Guides** in the palette or *Indent Guides* in
+  Settings turns them off. Drawn for the lines on screen only, so a large
+  file costs no more than a small one.
+
 ## [0.12.0] - 2026-09-05
 
 Nox can tell you who wrote a line, run your project's own commands, and open
