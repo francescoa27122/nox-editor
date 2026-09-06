@@ -1,4 +1,4 @@
-import { history } from '@codemirror/commands';
+import { history, isolateHistory } from '@codemirror/commands';
 import { describe, expect, it } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import type { Author } from '../src/services/transactions';
@@ -245,6 +245,53 @@ describe('grouped undo', () => {
     expect(workspace.pendingGroupedUndo()).toBe(result.id);
 
     expect(workspace.undoChangeSet(result.id).undone).toEqual([a, b]);
+    expect(workspace.textOf(b)).toBe('beta\n');
+  });
+
+  /**
+   * Guards A3-006. Grouped undo decided "is the set still on top" by
+   * comparing CodeMirror's `undoDepth` against the depth recorded when the
+   * set landed. History is trimmed above 100 events (back to 101 once it
+   * passes 120), so the depth cycles and a recorded value recurs while some
+   * later edit is on top: `pendingGroupedUndo` offered the set again, and
+   * taking it undid the user's last keystroke in this buffer instead.
+   *
+   * The edits are isolated so each is its own history event; the loop runs
+   * past one full cycle of the trim rather than stopping at the count the
+   * cycle happened to recur at when this was found.
+   */
+  it('does not offer a set once history trimming brings its depth back around', async () => {
+    const { workspace, a, b } = await setup();
+    workspace.setActive(a);
+    const type = (text: string) =>
+      workspace.applyTransaction(
+        a,
+        workspace.stateOf(a)!.update({
+          changes: { from: 0, insert: text },
+          annotations: isolateHistory.of('full'),
+        }),
+      );
+
+    for (let i = 0; i < 110; i++) type('.');
+    const result = workspace.apply({
+      description: 'Replace across files',
+      author: agent,
+      edits: [prepend(a, 'SET '), prepend(b, 'SET ')],
+    });
+    if (!result.ok) throw new Error('setup failed');
+    expect(workspace.pendingGroupedUndo()).toBe(result.id);
+
+    for (let i = 0; i < 40; i++) {
+      type('!');
+      expect(workspace.pendingGroupedUndo(), `after ${i + 1} later edits`).toBeNull();
+    }
+
+    // Asked for anyway: the set is not on top in `a`, so `a` is skipped and
+    // keeps every keystroke, while `b` is still undone.
+    const outcome = workspace.undoChangeSet(result.id);
+    expect(outcome.skipped).toEqual([a]);
+    expect(outcome.undone).toEqual([b]);
+    expect(workspace.textOf(a)).toBe(`${'!'.repeat(40)}SET ${'.'.repeat(110)}alpha\n`);
     expect(workspace.textOf(b)).toBe('beta\n');
   });
 

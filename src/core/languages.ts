@@ -66,6 +66,29 @@ export const LANGUAGES: readonly LanguageInfo[] = [
   { id: 'php', name: 'PHP', extensions: ['php'], lineComment: '//' },
   { id: 'svelte', name: 'Svelte', extensions: ['svelte'] },
   { id: 'vue', name: 'Vue', extensions: ['vue'] },
+  // The seven below are the languages `@codemirror/legacy-modes` already
+  // shipped a mode for and Nox opened as plain text anyway. Makefile is not
+  // among them: no mode exists, and a language named here with no grammar is
+  // what `tests/grammars.test.ts` refuses.
+  { id: 'csharp', name: 'C#', extensions: ['cs'], lineComment: '//' },
+  { id: 'kotlin', name: 'Kotlin', extensions: ['kt', 'kts'], lineComment: '//' },
+  { id: 'swift', name: 'Swift', extensions: ['swift'], lineComment: '//' },
+  { id: 'lua', name: 'Lua', extensions: ['lua'], lineComment: '--' },
+  { id: 'powershell', name: 'PowerShell', extensions: ['ps1', 'psm1', 'psd1'], lineComment: '#' },
+  {
+    id: 'ini',
+    name: 'INI',
+    extensions: ['ini', 'cfg', 'properties'],
+    filenames: ['.env', '.editorconfig', '.gitconfig'],
+    lineComment: '#',
+  },
+  {
+    id: 'dockerfile',
+    name: 'Dockerfile',
+    extensions: ['dockerfile'],
+    filenames: ['Dockerfile', 'Containerfile'],
+    lineComment: '#',
+  },
   {
     id: 'plaintext',
     name: 'Plain Text',

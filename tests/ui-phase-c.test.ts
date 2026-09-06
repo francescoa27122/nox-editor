@@ -52,6 +52,10 @@ describe('the status bar', () => {
         ],
       ]),
     );
+    // A4-010: the bar reads `diagnosticsTotals`, a running total the service
+    // keeps in step with `diagnostics` itself — poking `diagnostics` directly
+    // here, bypassing `#publishDiagnostics`, has to poke this too.
+    app.lsp.diagnosticsTotals.set({ errors: 1, warnings: 1, files: 1 });
     flush();
 
     const button = mounted!.container.querySelector<HTMLElement>('.item.problems');
@@ -120,6 +124,9 @@ describe('the rail', () => {
         ],
       ]),
     );
+    // A4-010: see the same note above — `diagnosticsTotals` is a companion
+    // signal now, not derived from `diagnostics` on read.
+    app.lsp.diagnosticsTotals.set({ errors: 1, warnings: 0, files: 1 });
     flush();
     expect(mounted!.container.querySelector('.badge')?.textContent?.trim()).toBe('1');
   });

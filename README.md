@@ -113,13 +113,16 @@ there's no half-finished state to clean up by hand.
 <!-- SCREENSHOT: review -->
 ![Reviewing a change an agent proposed](docs/screenshots/review.png)
 
-Nox can run an AI agent, and that agent cannot touch your files. It reads your
-code through a read-only door and hands back a *proposal*. You get a diff, hunk
+Nox can run an AI agent, and nothing that agent asks Nox for can touch your
+files. It reads your code through a read-only door and hands back a *proposal*. You get a diff, hunk
 by hunk, and you keep the parts you want. Nothing is written until you say so,
 and one button takes a whole session back out again.
 
-Everything it read, everything it ran, and everything it was refused shows up
-in the Agents panel. You can check what happened rather than trust it.
+Everything it read through Nox, everything it asked Nox to run, and everything
+it was refused shows up in the Agents panel, and you can copy a session's whole
+trail out as JSON. You can check what happened rather than trust it. What a
+program you bring yourself does on its own, with its own files and its own
+network, never passes through Nox, so Nox cannot see it or log it.
 
 #### Setting up a model
 
@@ -137,8 +140,9 @@ to your own machine. That limit lives in the part of the app a web page has
 no way to reach, so it isn't a setting that can be flipped by accident or by
 a page you happened to open.
 
-**It reads and it proposes. It cannot run commands.** That isn't a switch you
-left off. Nox has no way to express "run this" to an agent yet.
+**The local model reads and it proposes. It cannot run commands.** That isn't a
+switch you left off: the model's vocabulary has no "run this" in it. A program
+you bring yourself is a different matter, and is described below.
 
 **It is never allowed to guess.** The model names the text it wants replaced
 and Nox goes and finds it, refusing anything it can't match exactly or finds
@@ -151,7 +155,12 @@ text used to be.
 
 **Or bring your own.** An agent can be any program that reads and writes a
 small JSON format on its input and output. There's a
-[140-line example](examples/uppercase-agent.mjs) you can copy.
+[140-line example](examples/uppercase-agent.mjs) you can copy. Know what you
+are starting: it is a program running as you, with your privileges and whatever
+network it likes, and its own reads and writes never pass through Nox, so Nox
+cannot see or log them. Unlike the local model, it can ask Nox to run commands,
+which Nox checks against its permission model. Configure only programs you
+would run from a shell.
 
 #### Change a selection
 
@@ -185,9 +194,10 @@ way it might be wrong. Answers last as long as the app is open and are saved
 nowhere, for the same reason.
 
 **Asking can't change anything.** A session started this way is allowed to talk
-and nothing else. Nox blocks the rest itself rather than asking the model
-nicely in a prompt. That matters: an agent running as a separate program never
-reads that prompt.
+and nothing else through Nox. Nox blocks the rest of the protocol itself rather
+than asking the model nicely in a prompt. That matters: an agent running as a
+separate program never reads that prompt. What such a program does on its own,
+outside the protocol, is beyond Nox's reach either way.
 
 The Answers section stays hidden until you've set up a model that can run. One
 caveat worth knowing: asked to explain some code *and* say what was surprising
@@ -269,7 +279,7 @@ endings, the language, the wrap.
 ## Status
 
 **v0.12.** It's young, and it's a personal project rather than a product, but
-it's real software with 2,438 tests and I use it. Expect rough edges. Open an
+it's real software with 2,771 tests and I use it. Expect rough edges. Open an
 issue if you hit one, and run **Copy Diagnostics** from the palette first: it
 puts the version, the platform and what recently went wrong on your clipboard,
 with your home directory stripped out of the paths.
@@ -283,6 +293,14 @@ annotates what you have *open* rather than what's saved, so a line you just
 typed reads Uncommitted instead of borrowing the name above it. Still not a Git
 client: no push, pull, rebase or amend, and nothing that can discard your
 working tree.
+
+**0.12.0 also runs your project's own commands** (**Run Task…**, from a
+`tasks.json` you write), and a project can carry its own in `.nox/tasks.json`,
+which Nox shows you before it runs the first time because that file arrived
+with the clone. A path on the command line, or a file opened with Nox from the
+Finder, opens. And a full audit of the codebase closed sixty-nine findings in
+the same release, one of them a keystroke that a save in flight could lose;
+[CHANGELOG.md](CHANGELOG.md) has the list.
 
 Also in 0.5.0: **you can change the keys** (every command, including the ones
 with none), **a project can carry its own conventions** in `.nox/settings.json`,

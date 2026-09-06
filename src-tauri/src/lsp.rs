@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::agent::read_lines;
+use crate::agent::{read_lines, wait_unlocked};
 
 /// Suppresses the console window Windows would otherwise give a
 /// console-subsystem child of a GUI process. `winbase.h`'s value; not worth a
@@ -368,17 +368,18 @@ pub fn nox_lsp_start(
 
             // stdout closing is the earliest reliable sign the server is done.
             // Reaping here also stops the child becoming a zombie when nobody
-            // calls `stop`.
-            let code = child
-                .lock()
-                .ok()
-                .and_then(|mut child| child.wait().ok())
-                .and_then(|status| status.code());
+            // calls `stop`. Polled with the lock released between polls, so a
+            // `stop` for a server that closed stdout and kept running does not
+            // block behind this; `wait_unlocked` says why.
+            let code =
+                wait_unlocked(&child, |child| child.try_wait()).and_then(|status| status.code());
 
-            // Forget it, or the id stays registered for the life of the app and
-            // starting under it again is refused as "already running" — which
-            // is exactly what happens after the window reloads and the
-            // renderer's counter starts over.
+            // Forget it: the entry is stale now the child is gone. Left in place,
+            // a later `stop` for this id would act on a dead child, `stop_all` would
+            // iterate it, and the registry would grow by one for every server that
+            // ever ran. A reload cannot collide on the id, whatever this comment
+            // once said: `platform/tauri.ts` puts a per-load token in every id, so
+            // a fresh renderer never reuses one.
             if let Some(state) = app.try_state::<LspState>() {
                 if let Ok(mut servers) = state.0.lock() {
                     servers.remove(&id);
@@ -419,6 +420,12 @@ pub fn nox_lsp_start(
 
 /// Send one message. The framing is added here so a caller cannot half-send a
 /// message by computing its length on the wrong side of the encoding.
+///
+/// Stays a plain `#[tauri::command]` on purpose. `didChange` notifications are
+/// fired without being awaited, and a sync body runs to completion before the
+/// next IPC message is read, which is what keeps their versions in order.
+/// Under `(async)` two sends would race for the registry lock and a version
+/// could go backwards at the server.
 #[tauri::command]
 pub fn nox_lsp_send(state: State<'_, LspState>, id: String, message: String) -> Result<()> {
     let mut servers = state.0.lock().map_err(poisoned)?;
@@ -447,18 +454,27 @@ pub fn nox_lsp_stop(state: State<'_, LspState>, id: String) -> Result<()> {
 /// leave orphans running with nothing left to talk to them.
 #[tauri::command]
 pub fn nox_lsp_stop_all(state: State<'_, LspState>) -> Result<()> {
-    let servers: Vec<Running> = state
-        .0
-        .lock()
-        .map_err(poisoned)?
-        .drain()
-        .map(|(_, server)| server)
-        .collect();
+    state.stop_all()
+}
 
-    for server in servers {
-        stop(server);
+impl LspState {
+    /// Stop every server. Also the exit hook's call in `lib.rs`, for the
+    /// same reason as `AgentState::kill_all`: a quit that skips the
+    /// renderer's `beforeunload` must not leave servers behind.
+    pub fn stop_all(&self) -> Result<()> {
+        let servers: Vec<Running> = self
+            .0
+            .lock()
+            .map_err(poisoned)?
+            .drain()
+            .map(|(_, server)| server)
+            .collect();
+
+        for server in servers {
+            stop(server);
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 /// Dropping stdin closes it, which is how a well-behaved server is asked to

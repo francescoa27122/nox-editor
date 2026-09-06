@@ -73,7 +73,7 @@ pub struct EncodedText {
     pub encoding: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_read_text_file(path: String) -> Result<String> {
     let target = Path::new(&path);
     let bytes = fs::read(target).map_err(|e| describe(&e, target))?;
@@ -91,7 +91,7 @@ pub fn nox_read_text_file(path: String) -> Result<String> {
 /// `nox_read_text_file` above is deliberately left strict. It is what config,
 /// workspace settings and git read through, and those are Nox's own files:
 /// UTF-8 or nothing is correct there.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_read_encoded_file(path: String, encoding: Option<String>) -> Result<EncodedText> {
     let target = Path::new(&path);
     let bytes = fs::read(target).map_err(|e| describe(&e, target))?;
@@ -112,7 +112,7 @@ pub fn nox_read_encoded_file(path: String, encoding: Option<String>) -> Result<E
 /// Refuses rather than substitutes when the text will not fit the charset —
 /// see `encoding::encode`. The refusal happens before the file is touched, so
 /// a save that cannot be done faithfully leaves the original alone.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_write_encoded_file(path: String, contents: String, encoding: String) -> Result<()> {
     let bytes = crate::encoding::encode(&contents, &encoding)?;
     write_atomic(&path, &bytes)
@@ -131,7 +131,7 @@ pub fn nox_write_encoded_file(path: String, contents: String, encoding: String) 
 /// The temp file lives in the target's own directory rather than the system
 /// temp dir, because rename across filesystems is not a rename — it is a copy,
 /// which would put the truncation risk straight back.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_write_text_file(path: String, contents: String) -> Result<()> {
     write_atomic(&path, contents.as_bytes())
 }
@@ -258,7 +258,7 @@ fn copy_permissions(from: &Path, to: &Path) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_read_dir(path: String) -> Result<Vec<DirEntry>> {
     let target = Path::new(&path);
     let mut entries = Vec::new();
@@ -278,12 +278,12 @@ pub fn nox_read_dir(path: String) -> Result<Vec<DirEntry>> {
     Ok(entries)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_exists(path: String) -> bool {
     Path::new(&path).exists()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_stat(path: String) -> Result<FileStat> {
     let target = Path::new(&path);
     let metadata = fs::metadata(target).map_err(|e| describe(&e, target))?;
@@ -302,13 +302,13 @@ pub fn nox_stat(path: String) -> Result<FileStat> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_create_dir(path: String) -> Result<()> {
     let target = Path::new(&path);
     fs::create_dir_all(target).map_err(|e| describe(&e, target))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_create_file(path: String) -> Result<()> {
     let target = Path::new(&path);
     if target.exists() {
@@ -322,7 +322,7 @@ pub fn nox_create_file(path: String) -> Result<()> {
     fs::write(target, "").map_err(|e| describe(&e, target))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_rename(from: String, to: String) -> Result<()> {
     let source = Path::new(&from);
     let target = Path::new(&to);
@@ -365,7 +365,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// The tradeoff is that `NsFileManager` does not record Finder's "Put Back"
 /// metadata, so a trashed file restores to the Trash folder rather than
 /// hopping home. That is a fair price for a delete that cannot hang.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_trash(path: String) -> Result<()> {
     let target = Path::new(&path);
     if !target.exists() {
@@ -386,7 +386,7 @@ pub fn nox_trash(path: String) -> Result<()> {
     outcome.map_err(|e| format!("io: could not move {path} to trash ({e})"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_copy_file(from: String, to: String) -> Result<()> {
     let source = Path::new(&from);
     let target = Path::new(&to);
@@ -503,7 +503,7 @@ pub fn nox_config_dir(app: tauri::AppHandle) -> Result<String> {
     Ok(dir.to_string_lossy().into_owned())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_read_config(app: tauri::AppHandle, name: String) -> Result<Option<String>> {
     let path = config_path(&app, &name)?;
     match fs::read_to_string(&path) {
@@ -536,7 +536,7 @@ pub(crate) fn write_config_atomically(path: &Path, contents: &str) -> Result<()>
     outcome
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn nox_write_config(app: tauri::AppHandle, name: String, contents: String) -> Result<()> {
     let path = config_path(&app, &name)?;
     write_config_atomically(&path, &contents)

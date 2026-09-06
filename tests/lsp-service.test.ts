@@ -115,6 +115,83 @@ describe('diagnostics', () => {
   });
 });
 
+/**
+ * A4-010: `diagnosticsTotals` is what `StatusBar`, `Sidebar` and
+ * `ProblemsPanel` now read for their aggregate count, instead of each
+ * re-walking the whole `diagnostics` map on every publish via
+ * `problemTotals`. It is kept by the delta each publish makes rather than
+ * recomputed, so these check it stays *correct* under exactly the load that
+ * made recomputing it expensive: a burst of per-file publishes, a
+ * republished batch whose severity mix changes rather than just its count,
+ * and a dead server taking its share of the total with it.
+ */
+describe('diagnosticsTotals', () => {
+  const WARNING = { ...ERROR, severity: 2 as const };
+
+  it('stays correct across a burst of per-file publishes', async () => {
+    // The shape the finding names: a server's cold-start sweep of a large
+    // tree, one publish per file.
+    const { service, spawned } = await setup();
+    await service.start();
+
+    let expectedErrors = 0;
+    let expectedWarnings = 0;
+    for (let i = 0; i < 200; i++) {
+      const diagnostic = i % 3 === 0 ? WARNING : ERROR;
+      if (diagnostic.severity === 2) expectedWarnings++;
+      else expectedErrors++;
+      spawned[0]!.publish(`file:///w/src/f${i}.ts`, [diagnostic]);
+    }
+
+    expect(service.diagnosticsTotals.get()).toEqual({
+      errors: expectedErrors,
+      warnings: expectedWarnings,
+      files: 200,
+    });
+  });
+
+  it('drops a file from the total when its batch clears, not just from the map', async () => {
+    const { service, spawned } = await setup();
+    await service.start();
+    spawned[0]!.publish('file:///w/src/a.ts', [ERROR]);
+    spawned[0]!.publish('file:///w/src/b.ts', [ERROR, WARNING]);
+    expect(service.diagnosticsTotals.get()).toEqual({ errors: 2, warnings: 1, files: 2 });
+
+    spawned[0]!.publish('file:///w/src/a.ts', []);
+
+    expect(service.diagnosticsTotals.get()).toEqual({ errors: 1, warnings: 1, files: 1 });
+  });
+
+  /**
+   * The case a plain "add the new batch's counts" would get wrong: a
+   * republish for a URI already in the map has to *replace* its share of the
+   * total, not add to it, and the replacement can move errors into warnings
+   * without changing the file or diagnostic count at all.
+   */
+  it('adjusts the total when a republished batch changes severity mix, not just count', async () => {
+    const { service, spawned } = await setup();
+    await service.start();
+    spawned[0]!.publish('file:///w/src/a.ts', [ERROR, ERROR]);
+    expect(service.diagnosticsTotals.get()).toEqual({ errors: 2, warnings: 0, files: 1 });
+
+    spawned[0]!.publish('file:///w/src/a.ts', [WARNING]);
+
+    expect(service.diagnosticsTotals.get()).toEqual({ errors: 0, warnings: 1, files: 1 });
+  });
+
+  it('drops a dead server\'s share of the total along with its diagnostics', async () => {
+    const { service, spawned } = await setup();
+    await service.start();
+    spawned[0]!.publish('file:///w/src/a.ts', [ERROR]);
+    spawned[0]!.publish('file:///w/src/b.ts', [WARNING]);
+    expect(service.diagnosticsTotals.get()).toEqual({ errors: 1, warnings: 1, files: 2 });
+
+    spawned[0]!.die(1);
+
+    expect(service.diagnosticsTotals.get()).toEqual({ errors: 0, warnings: 0, files: 0 });
+  });
+});
+
 describe('a server that dies', () => {
   it('clears every diagnostic it published, so no squiggle outlives it', async () => {
     const { service, spawned } = await setup();
@@ -247,6 +324,10 @@ describe('stopping', () => {
     await service.stop();
 
     expect(service.diagnostics.get().size).toBe(0);
+    // A4-010: `diagnosticsTotals` is a companion signal, not derived from
+    // `diagnostics` on read, so clearing one without the other would have
+    // left the bar reporting problems that no longer exist.
+    expect(service.diagnosticsTotals.get()).toEqual({ errors: 0, warnings: 0, files: 0 });
     expect(service.sessions.get()).toEqual([]);
   });
 });

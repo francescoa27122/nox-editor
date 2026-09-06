@@ -1,18 +1,21 @@
 <script lang="ts">
   import { encodingLabel } from '@core/encoding';
+  import { resolveIndentation } from '@core/indentation';
   import { runnableAgents } from '@services/agent/config';
   import { hasGrammar } from '@editor/languages';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
   import { activeLanguageStatus, serverStatusLabel, serverStatusTitle } from './lsp-status';
-  import { problemTotals } from './problems';
 
   const app = useApp();
   const { workspace, config, commands, files, jobs, review, ui, lsp, keymap, agentConfig, agents } =
     app;
-  const diagnostics = lsp.diagnostics;
+  // A running total (A4-010), not `problemTotals($diagnostics)` re-walked on
+  // every publish: `lsp.diagnosticsTotals` is kept in step with the map by
+  // the delta each publish makes.
+  const diagnosticsTotals = lsp.diagnosticsTotals;
   const pluginStatus = app.plugins.status.items;
-  const problemCounts = $derived(problemTotals($diagnostics));
+  const problemCounts = $derived($diagnosticsTotals);
 
   /**
    * "Label (⌘⇧M)", or just the label when the command has no binding.
@@ -31,6 +34,7 @@
 
   const terminalOpen = ui.terminalOpen;
   const agentsOpen = ui.agentsOpen;
+  const tabMovesFocus = ui.tabMovesFocus;
   const configuredAgents = agentConfig.agents;
   const providers = agents.providers;
 
@@ -113,10 +117,23 @@
   const languageTitle = $derived(languageStatus?.title ?? active?.languageName ?? '');
   const dirtyCount = $derived($buffers.filter((b) => b.isDirty).length);
 
+  /**
+   * What this file is indented with, which is not always what the preference
+   * says (A1-004). `buffer.indent` is read from the file when it is opened,
+   * and the setting is the fallback for a file that shows no indentation.
+   * Reading the setting alone put "Spaces: 2" over a tab-indented file.
+   */
+  const indentation = $derived(
+    resolveIndentation(active?.indent ?? null, {
+      insertSpaces: $settings['editor.insertSpaces'],
+      tabSize: $settings['editor.tabSize'],
+    }),
+  );
+
   const indentLabel = $derived(
-    $settings['editor.insertSpaces']
-      ? `Spaces: ${$settings['editor.tabSize']}`
-      : `Tabs: ${$settings['editor.tabSize']}`,
+    indentation.insertSpaces
+      ? `Spaces: ${indentation.tabSize}`
+      : `Tabs: ${indentation.tabSize}`,
   );
 
   const selectionLabel = $derived.by(() => {
@@ -289,6 +306,19 @@
       <span class="item static accent">{selectionLabel}</span>
     {/if}
 
+    <!-- Only while the mode is on. The moment a person needs telling is
+         when Tab has stopped indenting and they do not remember why; the
+         rest of the time it is one more item in a bar that is full. -->
+    {#if $tabMovesFocus}
+      <button
+        class="item"
+        title={withChord('Tab moves focus instead of indenting. Click to turn that off', 'view.toggleTabFocus')}
+        onclick={() => void commands.execute('view.toggleTabFocus')}
+      >
+        Tab Moves Focus
+      </button>
+    {/if}
+
     {#if active}
       <button
         class="item"
@@ -330,6 +360,24 @@
       >
         {active.eol === '\r\n' ? 'CRLF' : 'LF'}
       </button>
+
+      <!-- Why a squiggle, a gutter mark or a fresh backup is missing on this
+           file. Without it the mode is indistinguishable from the editor
+           being broken, which is the whole reason it is on screen.
+
+           Static rather than a button, unlike its neighbours: there is no
+           action to offer. The mode follows from the file's size, it is not a
+           setting, and the way out of it is a smaller file. A control that
+           looked live and did nothing is the defect the language item below
+           was fixed for. -->
+      {#if active.isLarge}
+        <span
+          class="item static"
+          title="Large file: no language server, no gutter diff, and unsaved work backed up less often"
+        >
+          Large file
+        </span>
+      {/if}
 
       <!--
         One control, two facts: whether a grammar is installed and whether a
@@ -423,9 +471,13 @@
      smallest thing that says whose it is without a second row of chrome.
   */
   .item.plugin::before {
-    content: '2';
+    /* Written as a CSS escape rather than the character. The bullet shipped
+       once as U+0082 followed by a literal "2", which is what `\2022` becomes
+       when a tool reads `\202` as an octal escape, and the control byte was
+       invisible in every diff. A CSS escape survives that round trip. */
+    content: '\2022';
     color: var(--nox-accent-dim);
-    font-size: 9px;
+    font-size: var(--nox-fs-2xs);
   }
 
   button.item:hover {

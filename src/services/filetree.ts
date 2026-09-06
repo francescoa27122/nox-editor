@@ -95,6 +95,13 @@ export class FileTreeService {
   #dirs = new Map<string, DirState>();
   #expanded = new Set<string>();
   #excludes: Set<string> = new Set();
+  /**
+   * Bumped by every `setRoot` and every `buildIndex`, and checked after each
+   * await, so of two overlapping walks only the newest publishes. The older
+   * check, `#root !== root`, could not tell two walks of the *same* root
+   * apart, and two is what boot used to start.
+   */
+  #generation = 0;
 
   constructor(platform: Platform) {
     this.#platform = platform;
@@ -118,6 +125,7 @@ export class FileTreeService {
   }
 
   async setRoot(path: string | null): Promise<void> {
+    const generation = ++this.#generation;
     this.#root = path;
     this.#dirs.clear();
     this.#expanded.clear();
@@ -129,6 +137,8 @@ export class FileTreeService {
     }
     this.#expanded.add(path);
     await this.#load(path);
+    // A newer `setRoot` landed during the read: it owns the tree now.
+    if (generation !== this.#generation) return;
     this.#flatten();
     void this.buildIndex();
   }
@@ -195,6 +205,7 @@ export class FileTreeService {
     const root = this.#root;
     if (!root) return;
 
+    const generation = ++this.#generation;
     this.indexing.set(true);
     const files: string[] = [];
     const queue: { path: string; depth: number }[] = [{ path: root, depth: 0 }];
@@ -211,14 +222,15 @@ export class FileTreeService {
           continue; // Unreadable directory: skip, do not abort the walk.
         }
 
+        // Another walk started during the read, for a new root or for this
+        // one again: it is the one that will publish, so stop here.
+        if (generation !== this.#generation) return;
+
         for (const entry of entries) {
           if (this.#excludes.has(entry.name)) continue;
           if (entry.isDirectory) queue.push({ path: entry.path, depth: current.depth + 1 });
           else files.push(entry.path);
         }
-
-        // The root may change mid-walk if the user opens another folder.
-        if (this.#root !== root) return;
       }
       this.fileIndex.set(files);
     } finally {

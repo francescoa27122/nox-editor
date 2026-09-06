@@ -105,6 +105,19 @@ export class GitService {
   #timers = new Map<BufferId, ReturnType<typeof setTimeout>>();
   /** path -> when its base was last refetched on activation. */
   #refetched = new Map<string, number>();
+  /**
+   * The path `#pathOf` last resolved for a buffer, kept for `#drop` (A4-006).
+   *
+   * `buffer-closed` fires after `workspace.close` has already removed the
+   * buffer from `workspace.buffers` (see `workspace.ts`'s `close`), so by the
+   * time `#drop` runs, `#pathOf(id)` can no longer answer for it — the base
+   * text would sit in `#bases` forever, one entry per path ever opened, since
+   * nothing else ever revisits a path nobody has open. `#pathOf` populates
+   * this on every call that resolves a path, which happens on every document
+   * change the buffer is open for, so it is never stale while the buffer is
+   * still alive.
+   */
+  #lastPathOf = new Map<BufferId, string>();
   #unsubscribes: (() => void)[] = [];
   #started = false;
   #statusInFlight = false;
@@ -316,6 +329,7 @@ export class GitService {
     this.#bases.clear();
     this.#computed.clear();
     this.#refetched.clear();
+    this.#lastPathOf.clear();
     this.hunks.set(new Map());
     this.baseRevision.update((n) => n + 1);
     this.status.set(null);
@@ -332,12 +346,32 @@ export class GitService {
     // Closing the tab switches blame off with it. A buffer id is not reused,
     // so a surviving entry would be a leak rather than a restored setting.
     this.#setBlame(id, null);
-    const current = this.hunks.get();
-    if (current.has(id)) {
-      const next = new Map(current);
-      next.delete(id);
-      this.hunks.set(next);
+    this.#clearHunks(id);
+
+    // #bases and #refetched are keyed by path, not by buffer id, and never
+    // cleared on close (A4-006) — a day-long session opening and closing
+    // thousands of tracked files retained a full second copy of every one of
+    // them forever. `workspace.open` reuses an existing buffer for a path
+    // already open, so no other open buffer can share the path this one is
+    // closing under; the guard is still here because that invariant living
+    // in a different file is not a reason to trust it silently. Nothing
+    // reads this path's base again until it is reopened, at which point
+    // `buffer-opened`'s `#refresh` fetches it fresh.
+    const path = this.#lastPathOf.get(id);
+    this.#lastPathOf.delete(id);
+    if (path && !this.#workspace.buffers.get().some((buffer) => buffer.path === path)) {
+      this.#bases.delete(path);
+      this.#refetched.delete(path);
     }
+  }
+
+  /** Forget this buffer's hunks, if it has any. */
+  #clearHunks(id: BufferId): void {
+    const current = this.hunks.get();
+    if (!current.has(id)) return;
+    const next = new Map(current);
+    next.delete(id);
+    this.hunks.set(next);
   }
 
   /** Debounce changed buffers; a buffer whose revision moved gets a timer. */
@@ -363,6 +397,14 @@ export class GitService {
   async #refresh(id: BufferId): Promise<void> {
     const path = this.#pathOf(id);
     if (!path) return;
+    // The base is the other whole-file copy, and `gitFileBase` brings it back
+    // across the IPC hop before anything checks its size (A4-004). `#compute`
+    // still runs, so a buffer that crossed the line on an external reload
+    // loses the hunks it had rather than keeping them on screen.
+    if (this.#workspace.isLarge(id)) {
+      this.#compute(id);
+      return;
+    }
     let base: string | null;
     try {
       base = await this.#platform.gitFileBase(path);
@@ -523,19 +565,32 @@ export class GitService {
   }
 
   #pathOf(id: BufferId): string | null {
-    return this.#workspace.buffers.get().find((b) => b.id === id)?.path ?? null;
+    const path = this.#workspace.buffers.get().find((b) => b.id === id)?.path ?? null;
+    if (path) this.#lastPathOf.set(id, path);
+    return path;
   }
 
   #compute(id: BufferId): void {
     const path = this.#pathOf(id);
+    if (!path) return;
+
+    // Asked before `textOf`, which is a whole-document `toString`. The
+    // `MAX_DIFF_BYTES` test below refuses the diff at this size anyway, so
+    // nothing visible changes: what it stops is paying for the copy first
+    // (A4-004). `#computed` is still marked, or `#reconcile` would set a
+    // fresh timer on every keystroke for a buffer whose base is cached.
+    if (this.#workspace.isLarge(id)) {
+      this.#computed.set(id, this.#workspace.revisionOf(id));
+      this.#clearHunks(id);
+      return;
+    }
+
     const text = this.#workspace.textOf(id);
-    if (!path || text === undefined) return;
+    if (text === undefined) return;
 
     const base = this.#bases.get(path);
     const revision = this.#workspace.revisionOf(id);
     this.#computed.set(id, revision);
-
-    const current = this.hunks.get();
 
     if (
       base === null ||
@@ -543,12 +598,11 @@ export class GitService {
       base.length > MAX_DIFF_BYTES ||
       text.length > MAX_DIFF_BYTES
     ) {
-      if (!current.has(id)) return;
-      const next = new Map(current);
-      next.delete(id);
-      this.hunks.set(next);
+      this.#clearHunks(id);
       return;
     }
+
+    const current = this.hunks.get();
 
     const hunks = diffText(base, text);
     if (hunks.length === 0 && !current.has(id)) return;

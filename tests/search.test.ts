@@ -617,7 +617,11 @@ function controllableSearch() {
 }
 
 const oneResult: SearchFileResult[] = [
-  { path: '/w/a.ts', matches: [{ line: 1, column: 0, length: 6, preview: 'needle', previewOffset: 0 }] },
+  {
+    path: '/w/a.ts',
+    matches: [{ line: 1, column: 0, length: 6, preview: 'needle', previewOffset: 0 }],
+    truncated: false,
+  },
 ];
 
 describe('cancelling a search', () => {

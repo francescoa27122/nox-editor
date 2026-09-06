@@ -25,6 +25,21 @@ import { Signal } from '@core/signal';
 /** Counting stops here; past this a file is better served by project search. */
 const MAX_COUNTED_MATCHES = 10_000;
 
+/**
+ * Counting scans at most this many characters, even when far fewer than
+ * `MAX_COUNTED_MATCHES` turn up.
+ *
+ * `MAX_COUNTED_MATCHES` bounds matches, not text scanned: a query that is rare
+ * or absent walks the whole document to find that out, measured at 454 ms on
+ * a 10 MB file and 3.2 s on 64 MB (A4-002). Same order of magnitude as
+ * `MAX_DIFF_BYTES` (git.ts), which is what this is sized against rather than
+ * against `WORD_COMPLETION_MAX_BYTES` — a find count on a file this size is
+ * still worth having, only not an exact one. Past the ceiling `#count` reports
+ * whatever it found as a lower bound (`capped`), the same status the match cap
+ * already uses for "10000+", so the panel needs no new state to show it.
+ */
+const MAX_COUNTED_CHARS = 2_000_000;
+
 export interface FindOptions {
   caseSensitive: boolean;
   wholeWord: boolean;
@@ -112,6 +127,18 @@ export class FindController {
   readonly status = new Signal<FindStatus>(EMPTY);
 
   #view: EditorView | null = null;
+
+  /**
+   * Whether the panel is open and `refresh()` should keep the count live.
+   *
+   * Set by `reapply()`, the one place `ui.findOpen` becoming true already
+   * funnels through (see its own comment), and cleared by `clear()`, the
+   * matching funnel for becoming false. `query` is deliberately left alone by
+   * both — it survives a close on purpose (`reapply()`'s comment) — so this is
+   * the flag that actually stops `refresh()` scanning after Escape, rather
+   * than `query.get().length === 0`, which a remembered query never is.
+   */
+  #live = false;
 
   attach(view: EditorView | null): void {
     const previous = this.#view;
@@ -217,15 +244,25 @@ export class FindController {
    * unmarked document.
    *
    * Not `refresh()`, which is taken and does something quite different: that
-   * one runs on every doc and selection change and only re-counts, because it
-   * is on the typing path and must never dispatch.
+   * one runs on doc changes while the panel is open and only re-counts,
+   * because it is on the typing path and must never dispatch. Setting `#live`
+   * here, ahead of `#sync()`, is what lets `refresh()` tell "open" from
+   * "closed but remembering a query" apart.
    */
   reapply(): void {
+    this.#live = true;
     this.#sync();
   }
 
-  /** Clear the highlight so closing the panel leaves a clean editor. */
+  /**
+   * Clear the highlight so closing the panel leaves a clean editor, and stop
+   * `refresh()` scanning until the panel reopens (A4-002).
+   *
+   * `#live = false` here, not `query.set('')`: `query` outlives a close on
+   * purpose (see `reapply()`), so it cannot be what `refresh()` checks.
+   */
   clear(): void {
+    this.#live = false;
     const view = this.#view;
     if (!view) return;
     view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: '' })) });
@@ -424,9 +461,12 @@ export class FindController {
     const cursorPosition = view.state.selection.main.from;
     let total = 0;
     let current = 0;
-    let capped = false;
+    // Also true when the scan below stops at MAX_COUNTED_CHARS short of the
+    // document end, not only when it hits MAX_COUNTED_MATCHES — both mean
+    // "at least this many", not "exactly this many".
+    let capped = view.state.doc.length > MAX_COUNTED_CHARS;
 
-    const cursor = query.getCursor(view.state);
+    const cursor = query.getCursor(view.state, 0, Math.min(view.state.doc.length, MAX_COUNTED_CHARS));
     for (let value = cursor.next(); !value.done; value = cursor.next()) {
       total++;
       if (current === 0 && value.value.from >= cursorPosition) current = total;
@@ -439,8 +479,20 @@ export class FindController {
     this.status.set({ total, current, capped, invalidPattern: null });
   }
 
-  /** Called by the editor host on every doc/selection change. */
-  refresh(): void {
-    if (this.query.get().length > 0) this.#count();
+  /**
+   * Called by the editor host on every doc/selection change.
+   *
+   * A4-002: this used to recount on *every* dispatch, selection-only ones
+   * included, which made an arrow key or a mouse click in the document cost
+   * a full-document scan whenever a query was set — 454 ms on a 10 MB file.
+   * `docChanged` narrows that to dispatches that could actually move the
+   * count; `#live` stops it altogether once the panel has closed, which
+   * `query.get().length > 0` alone could not, because `query` is kept for
+   * `reapply()` on reopen and so is never what tells the two states apart.
+   * A genuine edit while the panel stays open still recounts, same as before
+   * — `MAX_COUNTED_CHARS` in `#count` is what bounds that case.
+   */
+  refresh(docChanged: boolean): void {
+    if (this.#live && docChanged && this.query.get().length > 0) this.#count();
   }
 }

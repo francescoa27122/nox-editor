@@ -64,8 +64,11 @@ const predefined = (item: PredefinedMenuItemId, label?: string): MenuNode =>
 
 /**
  * Commands the menu deliberately does not list, because a predefined item
- * covers them better. Each of these goes through the responder chain, so it
- * acts on whatever has focus rather than always on the editor.
+ * covers them better. The editing ones go through the responder chain, so
+ * they act on whatever has focus rather than always on the editor; About,
+ * Quit and Full Screen are the system's own items with the system's own
+ * wording. Off macOS there is no system to hand any of them to, and the
+ * commands themselves are what the drawn menu lists.
  *
  * Kept as data because `tests/menu.test.ts` asserts the coverage claim against
  * it: every other non-hidden command must appear exactly once.
@@ -73,7 +76,13 @@ const predefined = (item: PredefinedMenuItemId, label?: string): MenuNode =>
 export const COVERED_BY_SYSTEM_ITEMS: readonly string[] = [
   'edit.undo',
   'edit.redo',
+  'edit.cut',
+  'edit.copy',
+  'edit.paste',
   'edit.selectAll',
+  'app.about',
+  'app.quit',
+  'view.toggleFullscreen',
 ];
 
 export const LAYOUT: readonly MenuGroup[] = [

@@ -235,6 +235,11 @@ error" feature has something to filter on.
 
 ## 7. Where it draws
 
+> **Superseded on 2026-09-05.** Tasks draws in the bottom panel now, beside
+> the terminal, which is the second pass this section said it would take.
+> See `2026-09-05-bottom-panel-design.md`. The paragraphs below record why
+> the first pass went where it did.
+
 A panel in the **editor area**, the fifth in the slot that already holds
 review, agents, diff and welcome (`ui/App.svelte:145-161`).
 

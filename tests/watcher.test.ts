@@ -482,3 +482,30 @@ describe('reload behaviour', () => {
     expect(workspace.textOf(background)).toBe('background reload\n');
   });
 });
+
+describe('overlapping starts', () => {
+  /**
+   * The failure this prevents: two `start` calls inside one platform round
+   * trip registering two watches. The guard at the top of `start` only sees
+   * a start that has finished, so the second call ran the whole body again;
+   * the first disposer was overwritten and its watch leaked for the life of
+   * the window. Boot's `rootPath` subscription is where two can land close
+   * together.
+   */
+  it('registers one watch when two starts overlap', async () => {
+    const platform = new MemoryPlatform();
+    platform.seedFile('/w/a.ts', 'x');
+    const workspace = new WorkspaceService(platform, () => []);
+    const watcher = new FileWatcherService(
+      platform,
+      workspace,
+      new FileTreeService(platform),
+      new NotificationService(),
+    );
+
+    await Promise.all([watcher.start('/w'), watcher.start('/w')]);
+
+    expect(platform.watcherCount).toBe(1);
+    expect(watcher.active.get()).toBe(true);
+  });
+});

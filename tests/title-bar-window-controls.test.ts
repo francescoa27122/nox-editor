@@ -158,3 +158,45 @@ describe('what the window controls do', () => {
     expect(platform.notify).toBeNull();
   });
 });
+
+describe('the window commands', () => {
+  /**
+   * The failure this prevents: the three controls reaching the platform
+   * directly, which left minimise, maximise and close as the only user
+   * actions with no `Command`, so no `keybindings.json` rule and no plugin
+   * could reach them. The buttons must dispatch a command id like every
+   * other button in the app.
+   */
+  it('are what the buttons dispatch', async () => {
+    const container = await mountWith(new UndecoratedPlatform());
+    const execute = vi.spyOn(mounted!.app.commands, 'execute');
+
+    control(container, 'Minimise').click();
+    control(container, 'Maximise').click();
+    control(container, 'Close window').click();
+    await Promise.resolve();
+
+    expect(execute.mock.calls.map(([id]) => id)).toEqual([
+      'window.minimize',
+      'window.toggleMaximize',
+      'window.close',
+    ]);
+  });
+
+  /**
+   * And the commands do the thing, with no bar mounted at all: that is what
+   * makes them bindable.
+   */
+  it('reach the platform on their own', async () => {
+    const platform = new UndecoratedPlatform();
+    const app = new NoxApp(platform);
+
+    await app.commands.execute('window.minimize');
+    await app.commands.execute('window.toggleMaximize');
+    await app.commands.execute('window.close');
+
+    expect(platform.minimized).toHaveBeenCalledTimes(1);
+    expect(platform.toggled).toHaveBeenCalledTimes(1);
+    expect(platform.closed).toHaveBeenCalledTimes(1);
+  });
+});
