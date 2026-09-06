@@ -235,6 +235,7 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
     'view.increaseFontSize',
     'view.resetFontSize',
     'view.toggleExplorer',
+    'view.toggleIndentGuides',
     'view.toggleIndentType',
     'view.toggleLineNumbers',
     'view.toggleRelativeLineNumbers',
