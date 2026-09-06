@@ -8,6 +8,23 @@ are knowledge.**
 
 ---
 
+## 2026-09-06 - 0.13.0 shipped, unsigned, and the ceremony waits
+
+Francesco's Apple Developer Program application turned out not to be through
+(issues being resolved), so the signed dry run waits for it. He chose to ship
+0.13.0 unsigned now rather than hold the P1 agent fixes and single instance
+behind a certificate. Tagged `v0.13.0` on `ea44dcf` after #212 landed the
+child-lifetime fix on top of the prep; the release run passed its gate and
+built all four installers; published as latest.
+
+**Next, when the program is approved:** the key ceremony (signing spec §3),
+then the dry run as a prerelease tag against the next prepared version, then
+the three `codesign`/`spctl`/`stapler` checks from §4 before a real signed
+tag. Until then every macOS download still needs `xattr -dr
+com.apple.quarantine`, which the release notes say.
+
+---
+
 ## 2026-09-06 - 0.13.0 prepared, for the first signed build
 
 Francesco merged #201 as is (Windows takes the default for the code
