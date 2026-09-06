@@ -12,6 +12,8 @@ mod geometry;
 mod git;
 mod http;
 mod launch;
+// `pub` for `tests/child_lifetime.rs`, which stages a real parent death.
+pub mod lifetime;
 mod lsp;
 #[cfg(desktop)]
 mod menu;
@@ -250,10 +252,11 @@ pub fn run() {
             // every way out; `Exit` is the host's own last word, and a quit
             // that never touched the renderer still passes through it. A
             // crash does not: the release profile aborts on panic, and no
-            // hook runs after an abort. Tying a child's lifetime to the
-            // host's for that case needs a job object on Windows and a
-            // death signal on Linux, both of which are FFI this crate does
-            // not do yet.
+            // hook runs after an abort. That case is the OS's job, and
+            // `lifetime.rs` asks for it at every spawn: a death signal on
+            // Linux and a kill-on-close job object on Windows, so a crashed
+            // host still takes its children with it there. macOS has no such
+            // primitive for a piped child, which is why this hook stays.
             if let tauri::RunEvent::Exit = event {
                 use tauri::Manager;
                 let _ = app.state::<agent::AgentState>().kill_all();

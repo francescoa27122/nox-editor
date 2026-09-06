@@ -214,10 +214,18 @@ fn spawn_server(command: &str, args: &[String], cwd: Option<&str>) -> std::io::R
         #[cfg(windows)]
         builder.creation_flags(CREATE_NO_WINDOW);
 
+        // Dies with Nox, including a Nox that crashes; see `lifetime.rs`.
+        crate::lifetime::guard(&mut builder);
         builder
     }
 
-    let direct = build(command, args, cwd).spawn();
+    // The other half of the same arrangement, for whichever spawn succeeds.
+    let adopted = |child: Child| {
+        crate::lifetime::adopt(&child);
+        child
+    };
+
+    let direct = build(command, args, cwd).spawn().map(adopted);
 
     // Any failure retries, not only `NotFound`: the resolver decides whether
     // there is a file worth a second attempt, and returns nothing for a
@@ -229,7 +237,7 @@ fn spawn_server(command: &str, args: &[String], cwd: Option<&str>) -> std::io::R
             .unwrap_or_default();
         if let Some(shim) = resolve_shim(command, &path, cwd.map(Path::new)) {
             if let Ok(child) = build(&shim, args, cwd).spawn() {
-                return Ok(child);
+                return Ok(adopted(child));
             }
         }
         // The shim could not start either, so the first error is the one

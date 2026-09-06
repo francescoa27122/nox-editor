@@ -115,9 +115,12 @@ pub fn nox_agent_spawn(
     #[cfg(windows)]
     builder.creation_flags(CREATE_NO_WINDOW);
 
+    // Dies with Nox, including a Nox that crashes; see `lifetime.rs`.
+    crate::lifetime::guard(&mut builder);
     let mut child = builder
         .spawn()
         .map_err(|e| format!("spawn: could not start {command} ({e})"))?;
+    crate::lifetime::adopt(&child);
 
     let streams = (child.stdin.take(), child.stdout.take(), child.stderr.take());
     let (Some(stdin), Some(stdout), Some(stderr)) = streams else {

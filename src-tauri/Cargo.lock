@@ -2507,6 +2507,7 @@ dependencies = [
  "encoding_rs",
  "futures-util",
  "ignore",
+ "libc",
  "notify",
  "portable-pty",
  "regex",
@@ -2522,6 +2523,7 @@ dependencies = [
  "tauri-plugin-wdio-webdriver",
  "tokio",
  "trash",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

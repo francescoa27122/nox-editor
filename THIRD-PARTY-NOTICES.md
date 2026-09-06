@@ -66,6 +66,7 @@ end-to-end harness and never into a release, so it is not listed.
 | encoding_rs | 0.8.35 | (Apache-2.0 OR MIT) AND BSD-3-Clause | <https://github.com/hsivonen/encoding_rs> |
 | futures-util | 0.3.34 | MIT OR Apache-2.0 | <https://github.com/rust-lang/futures-rs> |
 | ignore | 0.4.33 | Unlicense OR MIT | <https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore> |
+| libc | 0.2.189 | MIT OR Apache-2.0 | <https://github.com/rust-lang/libc> (Linux only) |
 | notify | 8.2.0 | CC0-1.0 | <https://github.com/notify-rs/notify> |
 | portable-pty | 0.9.0 | MIT | <https://github.com/wezterm/wezterm> |
 | regex | 1.13.1 | MIT OR Apache-2.0 | <https://github.com/rust-lang/regex> |
@@ -80,6 +81,7 @@ end-to-end harness and never into a release, so it is not listed.
 | tauri-plugin-updater | 2.10.1 | Apache-2.0 OR MIT | <https://github.com/tauri-apps/plugins-workspace> |
 | tokio | 1.53.1 | MIT | <https://github.com/tokio-rs/tokio> |
 | trash | 5.2.6 | MIT | <https://github.com/ArturKovacs/trash> |
+| windows-sys | 0.61.2 | MIT OR Apache-2.0 | <https://github.com/microsoft/windows-rs> (Windows only) |
 
 ## Licence texts
 

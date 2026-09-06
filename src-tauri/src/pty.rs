@@ -227,6 +227,15 @@ fn open(spec: &Spec) -> Result<(Session, Box<dyn Read + Send>)> {
         .spawn_command(command)
         .map_err(|e| format!("spawn: could not start {program} ({e})"))?;
 
+    // On Windows the shell joins Nox's job object so a crashed Nox takes it
+    // down; `portable-pty` hands back no `Child`, hence the pid. On unix the
+    // kernel closes the master with the process and the shell gets a hangup,
+    // which is why this is the only call and not a `pre_exec` as well. See
+    // `lifetime.rs`.
+    if let Some(pid) = child.process_id() {
+        crate::lifetime::adopt_pid(pid);
+    }
+
     // The slave handle must go now. While any handle to it remains open the
     // master never reaches EOF, so the reader below would block for ever
     // after the shell exits and the session would never report as finished.
