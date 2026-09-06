@@ -70,6 +70,26 @@ export const blameCompartment = new Compartment();
  * `lspCompartment`: empty here, filled on every swap by `EditorPane`.
  */
 export const accessibleNameCompartment = new Compartment();
+
+/**
+ * Holds the Tab-indents binding, or nothing.
+ *
+ * Driven by `UIService.tabMovesFocus` rather than by `Settings`, and so
+ * absent from `compartments` below for the same reason `blameCompartment`
+ * is: a mode someone switches on to leave the editor is runtime state, not a
+ * preference to persist. When the compartment is empty no binding claims
+ * Tab, the keydown reaches the browser unprevented, and focus moves the way
+ * it does in every other control, which is the whole mechanism.
+ */
+export const tabKeyCompartment = new Compartment();
+
+/** What `tabKeyCompartment` holds for each state of the mode. */
+export function tabKeyExtension(movesFocus: boolean): Extension {
+  // Tab indents rather than moving focus, and Shift-Tab outdents. Both go
+  // when the mode is on: a keyboard user leaving the editor backwards needs
+  // Shift-Tab as much as the other one needs Tab.
+  return movesFocus ? [] : keymap.of([indentWithTab]);
+}
 import { languageCompartment } from './languages';
 import { pluginDecorationExtension } from './plugin-decorations';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
@@ -237,13 +257,13 @@ function editorKeymap(): Extension {
     // Tab accepts the highlighted completion, and otherwise indents.
     //
     // One key, two jobs, and no mode flag: `acceptCompletion` returns false
-    // when no picker is open, so the binding below it runs instead. Ordering
-    // is the whole mechanism — earlier entries are tried first — which is why
-    // this sits above `indentWithTab` rather than anywhere tidier.
+    // when no picker is open, so the next claim on Tab runs instead. That
+    // claim is `indentWithTab`, which lives in `tabKeyCompartment` so the
+    // Tab-moves-focus mode can remove it, and `buildExtensions` places that
+    // compartment *after* these static extensions. Ordering is the whole
+    // mechanism — earlier extensions are tried first — so accepting a
+    // completion still wins over indenting, and over leaving the editor.
     { key: 'Tab', run: acceptCompletion },
-    // Tab indents rather than moving focus. Shift-Tab still outdents; users
-    // who need to escape the editor by keyboard use ⌘⇧E to focus the explorer.
-    indentWithTab,
   ]);
 }
 
@@ -306,6 +326,10 @@ export function buildExtensions(
     // it; `tests/browser/blame-gutter.test.ts` is where that looking happens.
     blameCompartment.of([]),
     ...staticExtensions(),
+    // After the static keymap, so `acceptCompletion` is asked about Tab
+    // first; see `editorKeymap`. Off at every launch: `EditorPane` follows
+    // `UIService.tabMovesFocus` from there.
+    tabKeyCompartment.of(tabKeyExtension(false)),
     ...configured,
     // The gutter marks. Squiggles arrive per batch through `setDiagnostics`,
     // so nothing here is conditional on a server being configured — with none

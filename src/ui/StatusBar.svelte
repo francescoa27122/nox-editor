@@ -34,6 +34,7 @@
 
   const terminalOpen = ui.terminalOpen;
   const agentsOpen = ui.agentsOpen;
+  const tabMovesFocus = ui.tabMovesFocus;
   const configuredAgents = agentConfig.agents;
   const providers = agents.providers;
 
@@ -303,6 +304,19 @@
 
     {#if selectionLabel}
       <span class="item static accent">{selectionLabel}</span>
+    {/if}
+
+    <!-- Only while the mode is on. The moment a person needs telling is
+         when Tab has stopped indenting and they do not remember why; the
+         rest of the time it is one more item in a bar that is full. -->
+    {#if $tabMovesFocus}
+      <button
+        class="item"
+        title={withChord('Tab moves focus instead of indenting. Click to turn that off', 'view.toggleTabFocus')}
+        onclick={() => void commands.execute('view.toggleTabFocus')}
+      >
+        Tab Moves Focus
+      </button>
     {/if}
 
     {#if active}
