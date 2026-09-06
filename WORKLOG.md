@@ -8,6 +8,62 @@ are knowledge.**
 
 ---
 
+## 2026-09-05 - 0.12.0 tagged, and the changelog it needed first
+
+Asked to cut the tag the 2026-08-29 handoff left to the operator. Two things
+had changed under that handoff. The stray `v0.12.0` tag (A8-001) was already
+gone from the remote, so nothing needed deleting. And `CHANGELOG.md` had grown
+a full `[Unreleased]` section above the dated `[0.12.0]` heading: Tasks (#178),
+the `net.request` gate (#180) and the seven audit PRs (#182 to #188). A tag on
+`main` as it stood would have built a binary carrying all of that with a
+release page that mentioned only blame, which is the exact gap #149 to #151
+were about.
+
+**Shipped:** #204 folds `[Unreleased]` into `[0.12.0]`, dates it today, and
+writes the audit's user-facing fixes for the person downloading, P0 first, the
+macOS 13 floor under Changed and the Rust-layer findings under Security. README
+§Status gains a paragraph for Tasks, OS-handed files and the audit, and its
+test count is the measured 2,771. ROADMAP's Tasks and Snippets rows name their
+releases. Then `v0.12.0` on the merge commit `b98f534`, annotated.
+
+**Verified:** all three gate scripts locally before tagging (`readme-series`
+0.12, `release-notes` 244 lines, `cargo metadata --locked` exit 0), `npm test`
+2,771, `check` 0/0, `build` clean, `eslint` 0 errors. Release run 34008814475:
+gate green in a minute, four installers built, `latest.json` and signatures
+uploaded. **The release is a draft.** Publishing it is what makes `latest.json`
+reach every install through the updater, and that is the operator's click, not
+this session's.
+
+**Two local traps worth knowing.** A bare `npm run lint` on this Mac reports 46
+errors, all from a stale registered worktree under `.claude/worktrees/`; the
+tracked tree has 0 errors and the 9 known warnings. And `cargo test` had 2 of
+162 fail on its first cold run and pass on four reruns; the names were not
+captured, so it is a flake with no name yet.
+
+**Next, in order:**
+
+1. Decide the Gated findings. Five are already green PRs: #198 A7-001 (the
+   dispatcher rule), #199 A7-004, #200 A4-004, #201 A1-001, #202 A1-004 and
+   A1-007. Merge #203 first; it widens the sticky-scroll budget that was
+   failing #198's one red leg. Undecided and unbuilt: A5-003, A5-009, A6-007.
+2. Sign the builds. The largest remaining ship-readiness item, and a spend.
+3. Split `app.ts` (A2-007). The only Safe finding deliberately left.
+4. Persist the agent trail (A7-008 residue), and decide A7-009's other half,
+   which needs the crate's first `unsafe`.
+5. Dependabot #192 to #197; three had red checks.
+6. A8-008: v0.9.1 is still an unpublished draft that CHANGELOG calls released.
+7. The desktop walk against the packaged 0.12.0: blame on a real repository,
+   paste under WebView2, the macOS open handler, quitting with children alive.
+8. A5-011: the README hero still shows a 2-view rail.
+
+**Confidence:** high on the tag and the gate, every step of which ran and was
+read. High on the changelog matching what shipped, since it was written from
+the PR bodies and the finding list rather than from memory. The packaged
+0.12.0 has not been run on this machine; the e2e harness drove it on all three
+platforms on the PR and that is the whole of the evidence.
+
+---
+
 ## 2026-09-02 - Full-project audit, rated, and 69 findings fixed across seven PRs
 
 Asked for a defensible 1-to-100 rating of Nox backed by a full audit, then
