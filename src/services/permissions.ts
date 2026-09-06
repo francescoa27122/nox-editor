@@ -134,6 +134,22 @@ export interface PermissionRequest {
   commandId?: string;
 }
 
+/**
+ * A refusal with no capability behind it, because the command declared none.
+ *
+ * Its own shape rather than a {@link PermissionRequest} with the capability
+ * left out. Every other refusal answers "may you do this"; this one answers
+ * "you never said what you would do", and keeping `capability` required on a
+ * request is what stops a caller of `check` from asking about nothing at all.
+ */
+export interface UndeclaredCommand {
+  principal: Principal;
+  /** The command that declared nothing. */
+  commandId: string;
+  /** Its title, in the words a prompt would have used. */
+  description?: string;
+}
+
 /** How a decision was reached. Recorded so an audit can tell them apart. */
 export type DecisionSource =
   | 'user'
@@ -141,9 +157,17 @@ export type DecisionSource =
   | 'prompt'
   | 'remembered'
   | 'workspace-boundary'
-  | 'no-prompter';
+  | 'no-prompter'
+  /** The command declared no capabilities, so a non-user principal was refused. */
+  | 'undeclared';
 
-export interface PermissionDecision extends PermissionRequest {
+export interface PermissionDecision extends Omit<PermissionRequest, 'capability'> {
+  /**
+   * Absent only on an `undeclared` refusal, which is the one decision reached
+   * without a capability to reach it about. See
+   * {@link PermissionService.refuseUndeclared}.
+   */
+  capability?: Capability;
   granted: boolean;
   source: DecisionSource;
   at: number;
@@ -180,21 +204,35 @@ export interface Grant {
   at: number;
 }
 
-/** Thrown when a capability is refused. Never a silent no-op. */
+/**
+ * Thrown when a capability is refused. Never a silent no-op.
+ *
+ * It also carries the refusal of an {@link UndeclaredCommand}, rather than a
+ * second error class beside it, because every caller that already understands
+ * a denial should understand this one: `AgentRuntime` turns it into
+ * `permission-denied` on the wire, and `NoxApp` keeps it out of the
+ * notification area because a refusal is the model working.
+ */
 export class PermissionError extends Error {
-  readonly capability: Capability;
+  /** Absent when the refusal was for declaring no capability at all. */
+  readonly capability?: Capability;
   readonly principal: Principal;
   readonly resource?: string;
 
-  constructor(request: PermissionRequest) {
+  constructor(request: PermissionRequest | UndeclaredCommand) {
     super(
-      `${authorLabel(request.principal)} is not allowed to ${request.capability}` +
-        (request.resource ? ` on ${request.resource}` : ''),
+      'capability' in request
+        ? `${authorLabel(request.principal)} is not allowed to ${request.capability}` +
+            (request.resource ? ` on ${request.resource}` : '')
+        : `${authorLabel(request.principal)} is not allowed to run ${request.commandId}, ` +
+            'which declares no capabilities',
     );
     this.name = 'PermissionError';
-    this.capability = request.capability;
     this.principal = request.principal;
-    if (request.resource !== undefined) this.resource = request.resource;
+    if ('capability' in request) {
+      this.capability = request.capability;
+      if (request.resource !== undefined) this.resource = request.resource;
+    }
   }
 }
 
@@ -344,6 +382,30 @@ export class PermissionService {
     if (!(await this.check(request))) throw new PermissionError(request);
   }
 
+  /**
+   * Refuse a non-user principal a command that declares no capabilities.
+   *
+   * `Command.capabilities` says what a command needs permission to do, and an
+   * absent declaration means "nothing with a side effect". Nothing checks that
+   * claim: there is no way to ask a `run` function whether it reaches the OS.
+   * A security review on 2026-08-30 found twelve commands making the claim
+   * falsely, and gave them declarations; this is the rule that makes the
+   * thirteenth cost an agent workflow rather than an unlogged file write.
+   *
+   * Recorded before it throws, and under its own source, so an audit can tell
+   * "you did not say what you would do" apart from "policy said no". The hole
+   * this closes was silent as well as open, and fixing only the open half
+   * would leave the Agents panel showing nothing where a refusal happened.
+   *
+   * The user never reaches here: the dispatcher consults its guard only for a
+   * non-user principal, which is what keeps a person's own menu, keybinding
+   * and palette able to run every command there is.
+   */
+  refuseUndeclared(refusal: UndeclaredCommand): never {
+    this.#record(refusal, false, 'undeclared');
+    throw new PermissionError(refusal);
+  }
+
   #decide(request: PermissionRequest): Decision {
     const policy = this.policyFor(request.principal);
     return policy.rules[request.capability] ?? policy.fallback;
@@ -361,7 +423,11 @@ export class PermissionService {
     return !containsResolved(root, request.resource);
   }
 
-  #record(request: PermissionRequest, granted: boolean, source: DecisionSource): boolean {
+  #record(
+    request: PermissionRequest | UndeclaredCommand,
+    granted: boolean,
+    source: DecisionSource,
+  ): boolean {
     this.decisions.update((current) =>
       [...current, { ...request, granted, source, at: Date.now() }].slice(-500),
     );
