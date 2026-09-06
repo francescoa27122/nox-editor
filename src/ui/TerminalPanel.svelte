@@ -3,7 +3,6 @@
   import type { Terminal } from '@xterm/xterm';
   import type { FitAddon } from '@xterm/addon-fit';
   import { useApp } from './context';
-  import Icon from './Icon.svelte';
 
   /**
    * A real shell, below the editor.
@@ -19,9 +18,8 @@
   const { terminal, ui, config } = app;
 
   const open = ui.terminalOpen;
-  const status = terminal.status;
-  const exitCode = terminal.exitCode;
-  const error = terminal.error;
+  // The exit note and the error used to be read here for the panel's own
+  // header; `BottomPanel.svelte` shows them in the shared bar now.
   const focusRequest = ui.focusTerminalRequest;
   const restartRequest = terminal.restartRequest;
   const settings = config.settings;
@@ -185,33 +183,9 @@
 <section
   class="nox-terminal"
   class:is-hidden={!$open}
-  style="height: {$settings['terminal.height']}px"
   aria-label="Terminal"
   aria-hidden={!$open}
 >
-  <header class="nox-terminal-bar">
-    <span class="nox-terminal-title">
-      <Icon name="command" />
-      Terminal
-    </span>
-
-    {#if $status === 'exited'}
-      <span class="nox-terminal-note" data-tone="muted">
-        Shell exited{$exitCode === null ? '' : ` (${$exitCode})`}
-      </span>
-    {:else if $error}
-      <span class="nox-terminal-note" data-tone="danger">{$error}</span>
-    {/if}
-
-    <span class="nox-terminal-actions">
-      <button type="button" class="nox-button ghost small" onclick={() => void restart()} title="Restart the shell">
-        Restart
-      </button>
-      <button type="button" class="nox-button ghost small" onclick={() => ui.hideTerminal()} title="Hide the terminal">
-        Hide
-      </button>
-    </span>
-  </header>
 
   {#if terminal.available}
     <div class="nox-terminal-host" bind:this={host}></div>
@@ -227,16 +201,12 @@
     display: flex;
     flex-direction: column;
     /*
-      `flex: none` is load-bearing, not tidiness. The sibling `.nox-main-content`
-      is `flex: 1 1 auto`, and its flex-basis resolves to CodeMirror's full
-      document height — thousands of pixels. Shrinkage is distributed in
-      proportion to basis, so a shrinkable terminal surrenders
-      `overflow x 260/(260 + docHeight)` of its height and collapses to ~32px
-      no matter what `terminal.height` says. Measured, not theorised.
+      Fills the bottom panel, which owns the height (`terminal.height`) and
+      the `flex: none` that keeps a long document from squeezing it; see
+      `BottomPanel.svelte`. This used to be that rule's home.
     */
-    flex: none;
+    flex: 1 1 auto;
     min-height: 0;
-    border-top: 1px solid var(--nox-border);
     background: var(--nox-bg-editor);
   }
 
@@ -246,43 +216,6 @@
   */
   .nox-terminal.is-hidden {
     display: none;
-  }
-
-  .nox-terminal-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--nox-sp-4);
-    padding: 0 10px;
-    height: var(--nox-railbar-h);
-    flex: 0 0 auto;
-    background: var(--nox-bg-panel);
-    border-bottom: 1px solid var(--nox-border);
-    font-family: var(--nox-font-ui);
-    font-size: var(--nox-fs-xs);
-  }
-
-  .nox-terminal-title {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--nox-sp-3);
-    color: var(--nox-text-muted);
-    text-transform: uppercase;
-    letter-spacing: var(--nox-tracking-wide);
-    font-weight: var(--nox-fw-medium);
-  }
-
-  .nox-terminal-note[data-tone='muted'] {
-    color: var(--nox-text-muted);
-  }
-
-  .nox-terminal-note[data-tone='danger'] {
-    color: var(--nox-danger);
-  }
-
-  .nox-terminal-actions {
-    margin-left: auto;
-    display: inline-flex;
-    gap: var(--nox-sp-2);
   }
 
   .nox-terminal-host {

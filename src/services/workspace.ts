@@ -12,6 +12,7 @@ import {
 } from '@codemirror/state';
 import type { Encoding } from '@core/encoding';
 import { Emitter } from '@core/emitter';
+import { detectIndentation, type Indentation } from '@core/indentation';
 import { detectLanguage, languageById, type LanguageInfo } from '@core/languages';
 import { basename, canMoveInto, contains, dirname, join, topLevelPaths } from '@core/path';
 import { Signal } from '@core/signal';
@@ -124,6 +125,12 @@ export const MAX_FILE_BYTES = 64 * 1024 * 1024;
 export interface StateFactoryArgs {
   doc: string;
   languageId: string;
+  /**
+   * What the file's own text says about its indentation, or null when it says
+   * nothing (A1-004). Passed rather than re-derived because the buffer keeps
+   * it too, and one detection per open is the whole budget.
+   */
+  indent: Indentation | null;
 }
 
 export type StateFactory = (args: StateFactoryArgs) => Extension;
@@ -145,6 +152,14 @@ export interface BufferSnapshot {
   eol: Eol;
   encoding: Encoding;
   externalState: ExternalState;
+  /**
+   * This buffer's indentation override, or null to use the setting.
+   *
+   * Set from the file's own text when it was opened, and replaced outright
+   * when the user changes it by hand. The status bar reads this, so what it
+   * shows is what the editor is actually inserting.
+   */
+  indent: Indentation | null;
   /**
    * `Buffer.revision`, published so it can be *subscribed to*.
    *
@@ -186,6 +201,8 @@ class Buffer {
    */
   diskMtime = 0;
   externalState: ExternalState = 'none';
+  /** See `BufferSnapshot.indent`. */
+  indent: Indentation | null;
   /**
    * The pane whose view produced `state`, when one did.
    *
@@ -205,6 +222,7 @@ class Buffer {
     language: LanguageInfo;
     eol: Eol;
     encoding?: Encoding;
+    indent?: Indentation | null;
     state: EditorState;
   }) {
     this.id = init.id;
@@ -213,6 +231,7 @@ class Buffer {
     this.language = init.language;
     this.eol = init.eol;
     this.encoding = init.encoding ?? 'utf-8';
+    this.indent = init.indent ?? null;
     this.state = init.state;
     this.savedDoc = init.state.doc;
     this.savedEol = init.eol;
@@ -247,6 +266,7 @@ class Buffer {
       eol: this.eol,
       encoding: this.encoding,
       externalState: this.externalState,
+      indent: this.indent,
       revision: this.revision,
     };
   }
@@ -267,6 +287,14 @@ export interface WorkspaceEvents {
    */
   'buffer-activated': { id: BufferId };
   'buffer-closed': { id: BufferId };
+  /**
+   * A buffer's indentation override changed and the view must reconfigure.
+   *
+   * Its own event rather than `buffer-reset`, which is the other way a pane
+   * re-reads a buffer: that one costs the scroll position, and clicking the
+   * status bar is far too cheap an act to pay it.
+   */
+  'indentation-changed': { id: BufferId };
   saved: { id: BufferId; path: string };
   /** The file changed or vanished behind Nox's back. */
   'external-change': { id: BufferId; state: ExternalState; reloaded: boolean };
@@ -543,6 +571,9 @@ export class WorkspaceService {
 
     const { doc, eol, encoding } = decode(raw, readEncoding);
     const language = detectLanguage(path);
+    // A1-004. Once, here, over a bounded sample: the alternative was every
+    // keypress in a tab-indented file inserting the configured spaces.
+    const indent = detectIndentation(doc);
 
     const buffer = new Buffer({
       id: this.#mintId(),
@@ -551,9 +582,10 @@ export class WorkspaceService {
       language,
       eol,
       encoding,
+      indent,
       state: EditorState.create({
         doc,
-        extensions: this.#createState({ doc, languageId: language.id }),
+        extensions: this.#createState({ doc, languageId: language.id, indent }),
       }),
     });
 
@@ -593,7 +625,10 @@ export class WorkspaceService {
       encoding: options.encoding,
       state: EditorState.create({
         doc: '',
-        extensions: this.#createState({ doc: '', languageId: language.id }),
+        // The file is gone, so there is nothing to read an indentation off;
+        // the text arrives afterwards as an edit, and the setting is the
+        // answer for it the same way it is for an untitled buffer.
+        extensions: this.#createState({ doc: '', languageId: language.id, indent: null }),
       }),
     });
     buffer.externalState = 'deleted';
@@ -615,7 +650,9 @@ export class WorkspaceService {
       eol: '\n',
       state: EditorState.create({
         doc,
-        extensions: this.#createState({ doc, languageId: language.id }),
+        // Nothing to detect: an untitled buffer is either empty or holds text
+        // the caller supplied, and neither is a file with a house style.
+        extensions: this.#createState({ doc, languageId: language.id, indent: null }),
       }),
     });
     this.#insert(buffer);
@@ -1028,6 +1065,22 @@ export class WorkspaceService {
     buffer.eol = eol;
     buffer.revision++;
     this.#sync();
+  }
+
+  /**
+   * Override what this buffer indents with, or clear the override with null.
+   *
+   * Per buffer and not per preference on purpose (A1-004): detection is per
+   * file, so the control that corrects it has to be too, the way every editor
+   * with a detected indentation in its status bar works. `editor.insertSpaces`
+   * and `editor.tabSize` stay the default a file with nothing to say uses.
+   */
+  setIndentation(id: BufferId, indent: Indentation | null): void {
+    const buffer = this.#map.get(id);
+    if (!buffer) return;
+    buffer.indent = indent;
+    this.#sync();
+    this.events.emit('indentation-changed', { id });
   }
 
   /** Replace a buffer's state outright (used by session restore and reload). */

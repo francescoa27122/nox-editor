@@ -158,6 +158,10 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
     'review.show',
     'tasks.show',
     'view.dismiss',
+    // Shows or hides the bottom panel. Opening its terminal view goes
+    // through `terminal.focus`, which declares `shell.exec`; this falls back
+    // to the tasks view where there is no shell and starts nothing itself.
+    'view.toggleBottomPanel',
   ],
 
   /** Rearrange panes over files that are already open. */
@@ -257,11 +261,15 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
    * The honest fix is a `settings.write` capability, which is a change to the
    * vocabulary rather than to this table.
    */
+  // A mode, not a preference: it is never written to disk, and what it
+  // changes is which control the next Tab lands on.
+  'changing what one key does inside the window': ['view.toggleTabFocus'],
   'changing one cosmetic preference': [
     'view.decreaseFontSize',
     'view.increaseFontSize',
     'view.resetFontSize',
     'view.toggleExplorer',
+    'view.toggleIndentGuides',
     'view.toggleIndentType',
     'view.toggleLineNumbers',
     'view.toggleRelativeLineNumbers',
