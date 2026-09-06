@@ -45,6 +45,15 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Height* setting is now *Panel Height* and keeps its key, so nothing you
   have set changes.
 
+### Fixed
+
+- **A Nox that crashes takes its agents, language servers and terminals
+  with it** on Linux and Windows. A clean quit always did; a crash left them
+  running with nobody listening. The operating system now does the killing,
+  so it no longer depends on Nox being alive to do it. On macOS a terminal's
+  shell already died with the app, and still does; an agent or a language
+  server there does not yet.
+
 ### Security
 
 - **A plugin or an agent can only run a command that says what it does.**

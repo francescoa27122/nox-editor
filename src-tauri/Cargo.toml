@@ -78,6 +78,19 @@ tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 # So: optional dependency, off by default. A release build does not compile
 # it. `lib.rs` additionally requires `debug_assertions`, so even
 # `--release --features wdio` registers nothing.
+# The crate's first FFI, and the only two crates it reaches for it. Both were
+# already in the graph as transitive dependencies. `src/lifetime.rs` says
+# what each call does and why a child's lifetime needs the OS's help.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
 [features]
 wdio = ["dep:tauri-plugin-wdio-webdriver"]
 

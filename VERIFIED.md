@@ -22,14 +22,14 @@ commands cannot kill different registries. Not run in the packaged app: a
 desktop walk that quits Nox with an agent, a terminal and a language server
 running and then checks the process table is the check that would close this.
 
-Not done, and why: a kill-on-close job object on Windows and
-`PR_SET_PDEATHSIG` on Linux, which are what would cover a host crash.
-`std::process` and `portable-pty` expose neither. Each needs Win32 or libc
-calls through `unsafe` FFI, either hand-declared or through `windows-sys` or
-`libc` as a direct dependency (both are transitive today, neither is direct).
-The crate has no `unsafe` block at all, and adding its first, or a new direct
-dependency, is a decision for the lead rather than a fix agent. The Known debt
-row for agent sandboxing now says the lifetime gap out loud.
+Done on 2026-09-06, after the lead decided the crate could take its first
+`unsafe`: `src-tauri/src/lifetime.rs` sets `PR_SET_PDEATHSIG` on Linux and
+puts every child in a kill-on-close job object on Windows, through `libc` and
+`windows-sys`, both promoted from transitive to direct. `tests/child_lifetime.rs`
+stages a real parent death on those two platforms, red before the module was
+implemented and green after, in CI. macOS still has no primitive for a
+piped child; a shell in a pty dies there through the kernel closing the pty
+master, and the Known-debt row for agent sandboxing says which case remains.
 
 ## A7-010
 
