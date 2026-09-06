@@ -29,6 +29,14 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **A file over 5 MB opens in a lighter mode.** Below the 64 MB refusal
+  everything used to run at full cost on every pause in typing: the language
+  server was sent the whole text, the session backup copied it, the gutter
+  diffed it. Over 5 MB the server is never told about the file (told and then
+  abandoned would leave it diagnosing stale lines), the backup slows from
+  0.4 s to 2 s rather than stopping, and the status bar says *Large file*
+  with what is off in its tooltip. Nothing about smaller files changes.
+
 - **Tasks run below the editor, not instead of it.** A bottom panel holds
   the terminal and the tasks view with a tab for each, so a build's output
   sits under the code you are building rather than replacing it. **Toggle
@@ -36,6 +44,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   open last; <kbd>Ctrl `</kbd> still means the terminal. The *Terminal
   Height* setting is now *Panel Height* and keeps its key, so nothing you
   have set changes.
+
+### Security
+
+- **A plugin or an agent can only run a command that says what it does.**
+  The permission check used to skip any command that declared no
+  capabilities, so a command nobody had thought to label was reachable by an
+  agent without a prompt and without a line in the decision log. The
+  dispatcher now refuses an undeclared command to anything that is not you.
+  Every command you run yourself is unchanged.
+
+- **An agent reads only what is inside the folder you have open.** It could
+  read any path you can, including Nox's own `agents.json`, `servers.json`
+  and the session file that holds your unsaved text, and the brief it
+  received carried the selection of any open file. Reads outside the
+  workspace root are refused and logged; a file you have open from outside
+  the root is not handed over either. With no folder open nothing changes.
 
 ## [0.12.0] - 2026-09-05
 
