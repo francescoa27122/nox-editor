@@ -8,6 +8,59 @@ are knowledge.**
 
 ---
 
+## 2026-09-06 - 0.12.0 published, and the five changes a daily user will feel
+
+Francesco asked for the v0.12.0 draft to be published, and for that to be
+the rule from now on, then for the five UI changes the previous entry named.
+The release is public and marked latest. The five, in the order they landed:
+
+1. **#202 merged** (indentation detection, Ctrl+G), after #203 widened the
+   sticky-scroll budget that was reddening unrelated pull requests.
+2. **#206, Tab leaves the editor and Alt opens the menu bar** (A5-009,
+   A5-003). `Ctrl+M` toggles a mode, not a setting; `tabKeyCompartment`
+   holds `indentWithTab` and `EditorPane` follows `ui.tabMovesFocus`. A bare
+   Alt focuses the drawn bar, Alt+letter opens a menu, and `core/mnemonics.ts`
+   decides the letters over the real `LAYOUT`. The bar reads
+   `defaultPrevented` after the keymap's capture-phase handler so claimed
+   chords stay claimed.
+3. **#207, indent guides**, `core/indent-guides.ts` for the decision and a
+   `ViewPlugin` over `view.visibleRanges` for the rendering. The guide colour
+   was measured, not guessed: 0.22 alpha came out at 1.34:1 and vanished in
+   a screenshot; 0.32 is 1.59:1, which is where VS Code's dark guide sits.
+4. **#208, the bottom panel.** `ui/BottomPanel.svelte` hosts Terminal and
+   Tasks with a tab strip, one at a time, below the editor. `terminal.height`
+   keeps its key. `Mod+J` toggles whichever view was last. Spec in
+   `docs/superpowers/specs/2026-09-05-bottom-panel-design.md`.
+5. **#201 (single instance and file associations) is not merged.** It
+   conflicts with main and its own body warns that on Windows the installer
+   makes Nox the default opener for 57 extensions, which is a louder claim
+   than the decision asked for. That needs Francesco's word, not a rebase.
+
+**Verified:** every new test run red before its code and green after. Each
+branch: `npm test` (2786 to 2814), `check` 0/0, `eslint` 0 errors, `build`.
+The indent guides also ran `test:editor` in real Chromium (12/12), which is
+the typing-path guard rule 5 rests on. Guides and the bottom panel were
+opened in the browser build and looked at: guides on column 0 and every
+indent stop with the colour set to red, none on a ` *` comment line; the
+tasks view under `scheduler.ts` rather than instead of it, Hide closing it.
+
+**Method notes.** Branch protection requires up-to-date branches, so every
+merge invalidates every other open PR: serialise merges and expect one
+`update-branch` per PR per merge. The CI flake #203 fixed (enclosingSymbols
+4.1x against a 4x budget on the Windows leg) hit #206 before #203 landed.
+The Browser pane's synthesised `cmd+shift+p` did not reach the page and typed
+into the buffer instead; drive the app through the drawn menu bar there.
+
+**Next:** decide #201's Windows-default question, then #198 (the dispatcher
+rule), #199, #200. Then the packaged-app walk for 0.13.0, which now has four
+UI changes nobody has driven with a real keyboard: a real Alt on Windows, the
+terminal tab with a real shell, Tab leaving the editor, guides at 4-wide tabs.
+
+**Confidence:** high on the code and its tests. Medium on the Alt handling
+under WebView2, which jsdom cannot prove either way. Low on nothing.
+
+---
+
 ## 2026-09-05 - 0.12.0 tagged, and the changelog it needed first
 
 Asked to cut the tag the 2026-08-29 handoff left to the operator. Two things
