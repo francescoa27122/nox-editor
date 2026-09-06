@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { mnemonicsFor } from '@core/mnemonics';
   import { useApp } from './context';
   import ContextMenu, { type MenuAnchor, type MenuItem } from './ContextMenu.svelte';
   import type { MenuNode } from '@platform/types';
@@ -49,6 +50,29 @@
       .filter((node): node is Extract<MenuNode, { kind: 'submenu' }> => node.kind === 'submenu')
       .map((node) => ({ label: node.label, items: node.items }));
   });
+
+  /** The Alt letter of each menu, in `menus` order. Null where none is free. */
+  const mnemonics = $derived(mnemonicsFor(menus.map((menu) => menu.label)));
+
+  /** A title split around its underlined letter, for the template. */
+  function splitAt(label: string, letter: string | null): [string, string, string] {
+    const at = letter ? label.toUpperCase().indexOf(letter) : -1;
+    if (at < 0) return [label, '', ''];
+    return [label.slice(0, at), label.slice(at, at + 1), label.slice(at + 1)];
+  }
+
+  /**
+   * Whether the Alt that is down was pressed on its own.
+   *
+   * The platform's rule: a bare Alt, pressed and released with nothing in
+   * between, moves the keyboard to the bar and back; Alt held for a chord
+   * (`Alt+Z`, `Alt+ArrowUp`) is a chord and nothing else. Any other key
+   * while Alt is down disarms the release. Plain rather than `$state`: read
+   * and written only inside the handlers below, and nothing renders it.
+   */
+  let altArmed = false;
+  /** Whether Alt is currently held, which is when the underlines show. */
+  let altHeld = $state(false);
 
   let buttons: (HTMLButtonElement | null)[] = $state([]);
   /** Index of the open menu, or null. Only ever one at a time. */
@@ -148,6 +172,63 @@
     }
   }
 
+  function barHasFocus(): boolean {
+    return buttons.some((button) => button !== null && button === document.activeElement);
+  }
+
+  /**
+   * Alt, at the window, after the keymap.
+   *
+   * `KeymapService.attach` listens in the capture phase and prevents the
+   * default of any chord it resolves, so by the time this bubble-phase
+   * listener runs a claimed `Alt+letter` is already marked. Reading
+   * `defaultPrevented` is what lets the keymap keep `Alt+Z` for word wrap
+   * without this bar knowing the table: whichever letters the keymap does
+   * not take are the bar's.
+   */
+  function onWindowKeydown(event: KeyboardEvent) {
+    if (event.key === 'Alt') {
+      if (!event.repeat) {
+        altArmed = true;
+        altHeld = true;
+      }
+      return;
+    }
+    if (!event.altKey) return;
+    // A second key makes it a chord, whatever the key is.
+    altArmed = false;
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    // `code`, not `key`: under Alt several layouts report a different
+    // character (⌥ on a Mac never reaches here, but AltGr layouts do).
+    const letter = /^Key([A-Z])$/.exec(event.code)?.[1];
+    if (!letter) return;
+    const index = mnemonics.indexOf(letter);
+    if (index < 0) return;
+    event.preventDefault();
+    openAt(index);
+  }
+
+  function onWindowKeyup(event: KeyboardEvent) {
+    if (event.key !== 'Alt') return;
+    altHeld = false;
+    if (!altArmed) return;
+    altArmed = false;
+    if (open !== null) return;
+    // Focused directly rather than through `ui.focusMenuBar()`: that request
+    // is answered in a microtask, and a keyup handler that hands focus over a
+    // tick later loses to whatever the keyup's default does with it first.
+    // The way back is the service's, so the pane that lost the keyboard is
+    // the one that gets it.
+    if (barHasFocus()) ui.focusEditor();
+    else buttons[focused]?.focus();
+  }
+
+  /** Alt-Tab away and back must not leave a stale arm behind. */
+  function onWindowBlur() {
+    altArmed = false;
+    altHeld = false;
+  }
+
   /**
    * Not `$state`: read and written only inside the effect below, and making it
    * reactive would re-run that effect on its own write.
@@ -195,9 +276,12 @@
   stop with a roving tabindex, so the container is what owns navigation. No
   native element expresses a menubar, hence the explicit role.
 -->
+<svelte:window onkeydown={onWindowKeydown} onkeyup={onWindowKeyup} onblur={onWindowBlur} />
+
 <div
   class="menu-bar"
   class:showing={open !== null}
+  class:alt-held={altHeld}
   role="menubar"
   aria-label="Main"
   aria-orientation="horizontal"
@@ -205,6 +289,7 @@
   onkeydown={onBarKeydown}
 >
   {#each menus as menu, index (menu.label)}
+    {@const [before, letter, after] = splitAt(menu.label, mnemonics[index] ?? null)}
     <button
       bind:this={buttons[index]}
       class="menu-title"
@@ -220,7 +305,7 @@
         if (open !== null && open !== index) openAt(index);
       }}
     >
-      {menu.label}
+      {before}<span class="mnemonic">{letter}</span>{after}
     </button>
   {/each}
 </div>
@@ -275,6 +360,16 @@
 
   .menu-bar::-webkit-scrollbar {
     display: none;
+  }
+
+  /*
+    The letter Alt opens the menu with, underlined only while Alt is held,
+    which is when Windows draws its own. An always-on underline reads as a
+    link in a bar that has none.
+  */
+  .menu-bar.alt-held .mnemonic {
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   /*

@@ -6,28 +6,26 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-
-- **A plugin or an agent can no longer make Nox reach the network without
-  being allowed to.** Reading a file is allowed by default, on the argument
-  that what is read cannot leave your machine without a separate permission,
-  and that second permission was never actually being asked for. So a plugin
-  could read a file it was never questioned about and then ask Nox to send it
-  to a model, also without a question. The five commands that can reach the
-  network now declare it, and it is refused outright for anything that is not
-  you. Nothing about running your own agent changes.
-
-- **A program that prints without ever starting a new line can no longer take
-  Nox down with it.** Anything Nox supervises and reads line by line, which is
-  a language server's diagnostics, an agent, and now a task, was buffered whole
-  until a newline arrived. A build script that pipes something large through
-  `tr -d '\n'` never sends one, so the buffer grew until the process died and
-  took the unsaved work with it, and the search for that newline restarted from
-  the beginning on every read, so it got slower the longer it went on. A line
-  is capped now: past a megabyte it is handed over as it stands and the next
-  one starts.
-
 ### Added
+
+- **Indent guides.** A faint line at each indent level beside the code, so
+  the shape of a nested block is visible without counting spaces. On by
+  default; **Toggle Indent Guides** in the palette or *Indent Guides* in
+  Settings turns them off. Drawn for the lines on screen only, so a large
+  file costs no more than a small one.
+
+- **Tab can leave the editor.** <kbd>Ctrl M</kbd>, or **Toggle Tab Key Moves
+  Focus** from the palette, switches Tab from indenting to moving focus, the
+  way it does in every other control, so a keyboard user can reach the status
+  bar and the rest of the window without a mouse. The status bar says *Tab
+  Moves Focus* while it is on, and clicking that turns it off. Off at every
+  launch: it is a way out, not a preference.
+
+- **Alt opens the menu bar on Windows and Linux.** A bare Alt puts the
+  keyboard on the bar and a second bare Alt gives it back; Alt with a letter
+  opens that menu, and the letter is underlined while Alt is held. Alt held
+  for a chord, such as <kbd>Alt Z</kbd> for word wrap, is a chord and nothing
+  else. <kbd>F10</kbd> still works.
 
 - **Open a file from your desktop.** The installers register Nox for plain
   text and for the code it highlights, so a `.txt`, a `.rs` or a `.py` opens
@@ -44,6 +42,66 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   including tabs with unsaved text. A launch that arrives while Nox is running
   now hands its files to the window you already have and brings it to the
   front.
+
+### Changed
+
+- **A file over 5 MB opens in a lighter mode.** Below the 64 MB refusal
+  everything used to run at full cost on every pause in typing: the language
+  server was sent the whole text, the session backup copied it, the gutter
+  diffed it. Over 5 MB the server is never told about the file (told and then
+  abandoned would leave it diagnosing stale lines), the backup slows from
+  0.4 s to 2 s rather than stopping, and the status bar says *Large file*
+  with what is off in its tooltip. Nothing about smaller files changes.
+
+- **Tasks run below the editor, not instead of it.** A bottom panel holds
+  the terminal and the tasks view with a tab for each, so a build's output
+  sits under the code you are building rather than replacing it. **Toggle
+  Bottom Panel** (<kbd>Mod J</kbd>) shows or hides whichever view you had
+  open last; <kbd>Ctrl `</kbd> still means the terminal. The *Terminal
+  Height* setting is now *Panel Height* and keeps its key, so nothing you
+  have set changes.
+
+### Security
+
+- **A plugin or an agent can only run a command that says what it does.**
+  The permission check used to skip any command that declared no
+  capabilities, so a command nobody had thought to label was reachable by an
+  agent without a prompt and without a line in the decision log. The
+  dispatcher now refuses an undeclared command to anything that is not you.
+  Every command you run yourself is unchanged.
+
+- **An agent reads only what is inside the folder you have open.** It could
+  read any path you can, including Nox's own `agents.json`, `servers.json`
+  and the session file that holds your unsaved text, and the brief it
+  received carried the selection of any open file. Reads outside the
+  workspace root are refused and logged; a file you have open from outside
+  the root is not handed over either. With no folder open nothing changes.
+
+## [0.12.0] - 2026-09-05
+
+Nox can tell you who wrote a line, run your project's own commands, and open
+a file the operating system hands it. Under that, a full audit of the
+codebase closed sixty-nine findings, and one of them could lose a keystroke.
+
+### Added
+
+- **Blame.** <kbd>Mod ⌥ B</kbd>, or **Toggle Blame** from the palette or the
+  editor's right-click menu, puts a column beside your code naming the commit
+  and the author of every line. Hover one for the full identity, the date the
+  author wrote it, and the commit's subject.
+
+  It is **on demand**, not always on, and per file rather than everywhere: Nox
+  never runs `git blame` for a file you have not asked about, because that walk
+  is the most expensive thing it can ask git for.
+
+  It annotates **what you have open**, not what is saved. Type a new line and it
+  reads *Uncommitted* rather than borrowing the name from the line above it, and
+  everything below it stays with its own author instead of sliding out of step.
+  Lines you go on to type after that show nothing at all until you save, which
+  is the honest answer: Nox does not re-run blame while you type.
+
+  A file outside a repository, or one git has never seen, turns the column on
+  and shows nothing rather than raising an error.
 
 - **Tasks.** Your project's own commands, from the palette (**Run Task…**) or
   <kbd>Mod ⇧ B</kbd> for the last one, with their output kept in a panel.
@@ -75,30 +133,196 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   errors to one and its progress to the other and pulling them apart puts the
   error somewhere other than the step it belongs to.
 
-## [0.12.0] - 2026-08-29
+- **The operating system can hand Nox a file.** A path on the command line
+  opens, and so does a file you drop on the Dock icon or open with Nox from
+  the Finder. Nox does not yet offer itself as the opener for any file type,
+  and a second launch still opens a second window rather than reusing the
+  first; both are decisions still open.
 
-Nox can tell you who wrote a line. Blame was the last thing missing from the
-Git work that landed in 0.5.0, and it completes it.
+- **Open Recent…** in the File menu and the palette, listing the files you
+  have had open most recently. Before, the only way to them was quick-open
+  with nothing typed.
 
-### Added
+- **Seven more languages are highlighted:** C#, Kotlin, Swift, Lua,
+  PowerShell, INI and Dockerfile. Each was already listed in the language
+  picker and rendered flat.
 
-- **Blame.** <kbd>Mod ⌥ B</kbd>, or **Toggle Blame** from the palette or the
-  editor's right-click menu, puts a column beside your code naming the commit
-  and the author of every line. Hover one for the full identity, the date the
-  author wrote it, and the commit's subject.
+- **The Windows and Linux menu bar has Cut, Copy, Paste, Exit, About Nox and
+  Toggle Full Screen.** All six were reachable from the palette and none from
+  the menu, which is where a person new to the editor looks first.
 
-  It is **on demand**, not always on, and per file rather than everywhere: Nox
-  never runs `git blame` for a file you have not asked about, because that walk
-  is the most expensive thing it can ask git for.
+- **Copy the Last Agent Session Trail** puts what an agent did, as JSON, on
+  your clipboard. The trail is also bounded now: a session that runs past its
+  request budget ends as failed with the reason on the trail, instead of
+  filling memory until you notice.
 
-  It annotates **what you have open**, not what is saved. Type a new line and it
-  reads *Uncommitted* rather than borrowing the name from the line above it, and
-  everything below it stays with its own author instead of sliding out of step.
-  Lines you go on to type after that show nothing at all until you save, which
-  is the honest answer: Nox does not re-run blame while you type.
+- **The review panel shows hidden characters.** A proposed change that
+  carries a bidirectional override or a zero-width character, the kind that
+  reads as one thing and applies as another, shows each one as an escape
+  rather than rendering it invisibly.
 
-  A file outside a repository, or one git has never seen, turns the column on
-  and shows nothing rather than raising an error.
+- **A crash leaves a trace.** A panic in the Rust layer of a release build
+  used to write nothing anywhere. It now writes `panic.log` next to your
+  settings, and **Copy Diagnostics** carries it.
+
+- **SECURITY.md** says how to report a vulnerability, and
+  **THIRD-PARTY-NOTICES.md** attributes every library Nox ships.
+
+### Changed
+
+- **Nox needs macOS 13 or newer.** The installer used to accept 10.15, whose
+  WebKit cannot draw the colour mixing the diff and the gutters use, so on
+  those systems the change colouring silently vanished. The floor now says
+  what the code needs.
+
+### Fixed
+
+- **A keystroke typed while a save was writing is kept.** While the file was
+  being written, a character typed in that moment was reverted from the
+  buffer, never reached the disk, and left the tab marked clean, and undo could
+  not bring it back. It happened a few percent of the time on a manual save on
+  a fast disk, and on the normal path under after-delay autosave, where the
+  save fires exactly when you pause and the next keystroke lands inside the
+  write. A save no longer replaces a document that moved while it was in
+  flight.
+
+- **A file that changed on disk no longer overwrites what you typed while Nox
+  was reading it.** The reload decided for a clean buffer used to land on top
+  of keystrokes that arrived during the read, and mark the buffer clean.
+
+- **The cursor stays where it was across a save and across a reload.** Saving
+  a file without a final newline, with *insert final newline* on, sent the
+  cursor to the top and scrolled there with it. So did every reload of a file
+  another program changed.
+
+- **After-delay autosave saves the file you edited**, not whichever tab was in
+  front when the timer fired.
+
+- **Restoring a session keeps a tab whose file has vanished**, with its
+  unsaved text, rather than silently dropping it. And a dropped tab no longer
+  restarts the backup numbering, which could overwrite a different tab's
+  unsaved text with its own.
+
+- **The same file in two panes no longer freezes the tab strip** when you
+  close the pane or move the editor to the next one.
+
+- **Taking back a set of changes at once**, which is what undoing an agent
+  session or a multi-file rename does, no longer fails when one of the files
+  is open in two panes, and no longer undoes your own last edit instead of
+  the set when the history behind it has been trimmed.
+
+- **Save As onto a file that is already open** no longer leaves two tabs
+  holding the same path.
+
+- **A file with mixed line endings keeps its majority ending** on save rather
+  than being quietly normalised to CRLF, and replace on a CRLF file that is
+  not open no longer leaves a carriage return on the line.
+
+- **Nothing you do in the editor waits on git or the disk.** Commit, with its
+  hooks, switching branches, every filesystem call and every save's write ran
+  on the thread that draws the window, so a slow pre-commit hook froze it.
+  They run off it now.
+
+- **Reload Window shuts down what it started.** It used to reload the page
+  and leave every language server running behind it.
+
+- **Stopping a terminal, an agent or a language server cannot hang** behind
+  a child that closed its output but kept running. Measured at 29 seconds
+  before and under a tenth of one after.
+
+- **A loud program cannot repaint the window per line.** Terminal and agent
+  output arrive in one event per burst.
+
+- **Sticky scroll no longer walks the whole syntax tree on every keystroke.**
+  At 64,000 lines that walk cost 28 ms a keystroke, on by default.
+
+- **Find no longer rescans the document on every keystroke**, and stops
+  scanning when you close it. At 10 MB the rescan cost half a second and
+  survived closing the bar.
+
+- **A diff of thousands of changed lines is bounded.** Eight thousand changed
+  lines used to take over a second and two gigabytes.
+
+- **Project search caps the matches it reports per file**, so one minified
+  file cannot produce one enormous result.
+
+- **Closing a file frees its git base text.** It was kept for every file ever
+  opened.
+
+- **Session restore opens the active tab first**, and the rest in parallel,
+  rather than every tab in sequence before the first paint.
+
+- **Sticky error toasts are capped**, and a burst of diagnostics from a
+  language server no longer costs more the larger it gets.
+
+- **A plugin or an agent can no longer make Nox reach the network without
+  being allowed to.** Reading a file is allowed by default, on the argument
+  that what is read cannot leave your machine without a separate permission,
+  and that second permission was never actually being asked for. So a plugin
+  could read a file it was never questioned about and then ask Nox to send it
+  to a model, also without a question. The five commands that can reach the
+  network now declare it, and it is refused outright for anything that is not
+  you. Nothing about running your own agent changes.
+
+- **A program that prints without ever starting a new line can no longer take
+  Nox down with it.** Anything Nox supervises and reads line by line, which is
+  a language server's diagnostics, an agent, and now a task, was buffered whole
+  until a newline arrived. A build script that pipes something large through
+  `tr -d '\n'` never sends one, so the buffer grew until the process died and
+  took the unsaved work with it, and the search for that newline restarted from
+  the beginning on every read, so it got slower the longer it went on. A line
+  is capped now: past a megabyte it is handed over as it stands and the next
+  one starts.
+
+- **Agents, language servers and terminals die when Nox quits.** They used to
+  survive it. A host crash can still orphan them, and that is recorded as
+  known debt.
+
+- **Undo Last Agent Session says when the text is still on disk.** After a
+  save it took the text out of the buffer and reported that it had taken back
+  everything.
+
+- **Plugin status-bar items no longer start with a stray 2**, which was a
+  corrupted glyph in the stylesheet.
+
+- **Line numbers are readable.** They painted at 2:1 against the project's
+  own 4.5:1 floor for anything a person reads; they are at 4.6:1 now in
+  Eclipse and 5:1 in Umbra. Two text-on-selection pairs in the palette and
+  the explorer were lifted the same way.
+
+- **Key hints use your platform's spelling.** Windows and Linux saw macOS
+  glyphs for Backspace, Delete, Enter and Tab everywhere.
+
+- **The menu bar fits at the 640 px minimum window width** instead of
+  clipping *Tools* behind a hidden scrollbar.
+
+- **Screen readers hear an error toast as an error**, are told which file the
+  editor holds, which mode the palette is in, and how many results it found.
+
+- **The File menu no longer lists two near-identical New File and New Folder
+  pairs.**
+
+### Security
+
+- **A repository's own git configuration cannot run a program when you open
+  it.** `core.fsmonitor` in a cloned repository's `.git/config` names a
+  program, and git ran it during the status Nox takes on open. Every git read
+  now ignores it; commit still honours repository configuration, because
+  hooks are expected there.
+
+- **A language server's `Content-Length` header can no longer crash Nox**
+  with a value near the integer limit.
+
+- **`localhost` in an agent's address is pinned to 127.0.0.1** rather than
+  handed to the system resolver, which could send it elsewhere.
+
+- **Unsaved-buffer backups and the files Nox writes under its own settings
+  are readable only by you** on macOS and Linux. They took the default mode
+  before, which on a shared machine is readable by every local user.
+
+- **A language server named by a bare `.cmd` on Windows is resolved to its
+  shim** rather than run through `cmd /C`, and a configuration name like
+  `C:evil.json` is refused.
 
 ## [0.11.0] - 2026-08-29
 

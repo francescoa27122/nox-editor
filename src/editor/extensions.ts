@@ -23,11 +23,17 @@ import {
   rectangularSelection,
   scrollPastEnd,
 } from '@codemirror/view';
+import {
+  resolveIndentation,
+  type Indentation,
+  type ResolvedIndentation,
+} from '@core/indentation';
 import type { Settings } from '@services/config/schema';
 import { addCursorAbove, addCursorBelow } from './commands';
 import { foldingExtension } from './folding';
 import { gitBlameField } from './git-blame';
 import { gitGutter, gitGutterField } from './git-gutter';
+import { indentGuidesExtension } from './indent-guides';
 import { lspDiagnosticsExtension } from './lsp';
 
 /**
@@ -65,6 +71,26 @@ export const blameCompartment = new Compartment();
  * `lspCompartment`: empty here, filled on every swap by `EditorPane`.
  */
 export const accessibleNameCompartment = new Compartment();
+
+/**
+ * Holds the Tab-indents binding, or nothing.
+ *
+ * Driven by `UIService.tabMovesFocus` rather than by `Settings`, and so
+ * absent from `compartments` below for the same reason `blameCompartment`
+ * is: a mode someone switches on to leave the editor is runtime state, not a
+ * preference to persist. When the compartment is empty no binding claims
+ * Tab, the keydown reaches the browser unprevented, and focus moves the way
+ * it does in every other control, which is the whole mechanism.
+ */
+export const tabKeyCompartment = new Compartment();
+
+/** What `tabKeyCompartment` holds for each state of the mode. */
+export function tabKeyExtension(movesFocus: boolean): Extension {
+  // Tab indents rather than moving focus, and Shift-Tab outdents. Both go
+  // when the mode is on: a keyboard user leaving the editor backwards needs
+  // Shift-Tab as much as the other one needs Tab.
+  return movesFocus ? [] : keymap.of([indentWithTab]);
+}
 import { languageCompartment } from './languages';
 import { pluginDecorationExtension } from './plugin-decorations';
 import { provenanceField, provenanceGutter, provenanceTooltip } from './provenance';
@@ -97,6 +123,7 @@ const compartments = {
   provenance: new Compartment(),
   gitGutter: new Compartment(),
   sticky: new Compartment(),
+  guides: new Compartment(),
 } as const;
 
 type CompartmentName = keyof typeof compartments;
@@ -123,6 +150,7 @@ const SETTING_TO_COMPARTMENTS: Partial<Record<keyof Settings, CompartmentName[]>
   'workbench.showChangeMarks': ['provenance'],
   'editor.gitGutter': ['gitGutter'],
   'editor.stickyScroll': ['sticky'],
+  'editor.indentGuides': ['guides'],
 };
 
 // --- Per-compartment content ------------------------------------------------
@@ -137,8 +165,14 @@ function themeExtension(s: Settings): Extension {
   });
 }
 
-function indentExtension(s: Settings): Extension {
-  return indentUnit.of(s['editor.insertSpaces'] ? ' '.repeat(s['editor.tabSize']) : '\t');
+/** The preference, which is what a buffer with no detected indentation uses. */
+function settingsIndentation(s: Settings): ResolvedIndentation {
+  return { insertSpaces: s['editor.insertSpaces'], tabSize: s['editor.tabSize'] };
+}
+
+function indentExtension(s: Settings, indent: Indentation | null): Extension {
+  const { insertSpaces, tabSize } = resolveIndentation(indent, settingsIndentation(s));
+  return indentUnit.of(insertSpaces ? ' '.repeat(tabSize) : '\t');
 }
 
 function lineNumbersExtension(s: Settings): Extension {
@@ -165,14 +199,18 @@ function whitespaceExtension(s: Settings): Extension {
   }
 }
 
-function compartmentContent(name: CompartmentName, s: Settings): Extension {
+function compartmentContent(
+  name: CompartmentName,
+  s: Settings,
+  indent: Indentation | null,
+): Extension {
   switch (name) {
     case 'theme':
       return themeExtension(s);
     case 'tabSize':
-      return EditorState.tabSize.of(s['editor.tabSize']);
+      return EditorState.tabSize.of(resolveIndentation(indent, settingsIndentation(s)).tabSize);
     case 'indentUnit':
-      return indentExtension(s);
+      return indentExtension(s, indent);
     case 'wrap':
       return s['editor.wordWrap'] ? EditorView.lineWrapping : [];
     case 'lineNumbers':
@@ -199,6 +237,8 @@ function compartmentContent(name: CompartmentName, s: Settings): Extension {
       return s['editor.gitGutter'] ? gitGutter() : [];
     case 'sticky':
       return stickyScrollExtension(s['editor.stickyScroll']);
+    case 'guides':
+      return indentGuidesExtension(s['editor.indentGuides']);
   }
 }
 
@@ -222,13 +262,13 @@ function editorKeymap(): Extension {
     // Tab accepts the highlighted completion, and otherwise indents.
     //
     // One key, two jobs, and no mode flag: `acceptCompletion` returns false
-    // when no picker is open, so the binding below it runs instead. Ordering
-    // is the whole mechanism — earlier entries are tried first — which is why
-    // this sits above `indentWithTab` rather than anywhere tidier.
+    // when no picker is open, so the next claim on Tab runs instead. That
+    // claim is `indentWithTab`, which lives in `tabKeyCompartment` so the
+    // Tab-moves-focus mode can remove it, and `buildExtensions` places that
+    // compartment *after* these static extensions. Ordering is the whole
+    // mechanism — earlier extensions are tried first — so accepting a
+    // completion still wins over indenting, and over leaving the editor.
     { key: 'Tab', run: acceptCompletion },
-    // Tab indents rather than moving focus. Shift-Tab still outdents; users
-    // who need to escape the editor by keyboard use ⌘⇧E to focus the explorer.
-    indentWithTab,
   ]);
 }
 
@@ -272,9 +312,12 @@ function staticExtensions(): Extension[] {
  * Build the full extension list for a new buffer state. Passed to
  * `WorkspaceService` as its `StateFactory`.
  */
-export function buildExtensions(settings: Settings): Extension[] {
+export function buildExtensions(
+  settings: Settings,
+  indent: Indentation | null = null,
+): Extension[] {
   const configured = (Object.keys(compartments) as CompartmentName[]).map((name) =>
-    compartments[name].of(compartmentContent(name, settings)),
+    compartments[name].of(compartmentContent(name, settings, indent)),
   );
   return [
     // **First in the array, so leftmost on screen**, outside the line
@@ -288,6 +331,10 @@ export function buildExtensions(settings: Settings): Extension[] {
     // it; `tests/browser/blame-gutter.test.ts` is where that looking happens.
     blameCompartment.of([]),
     ...staticExtensions(),
+    // After the static keymap, so `acceptCompletion` is asked about Tab
+    // first; see `editorKeymap`. Off at every launch: `EditorPane` follows
+    // `UIService.tabMovesFocus` from there.
+    tabKeyCompartment.of(tabKeyExtension(false)),
     ...configured,
     // The gutter marks. Squiggles arrive per batch through `setDiagnostics`,
     // so nothing here is conditional on a server being configured — with none
@@ -306,17 +353,23 @@ export function buildExtensions(settings: Settings): Extension[] {
  * Reconfiguration effects for the settings that changed. Passing the changed
  * keys keeps a font-size tweak from rebuilding the grammar and gutters too.
  */
-export function reconfigureEffects(settings: Settings, changed: ReadonlySet<string>) {
+export function reconfigureEffects(
+  settings: Settings,
+  changed: ReadonlySet<string>,
+  indent: Indentation | null = null,
+) {
   const names = new Set<CompartmentName>();
   for (const key of changed) {
     for (const name of SETTING_TO_COMPARTMENTS[key as keyof Settings] ?? []) names.add(name);
   }
-  return [...names].map((name) => compartments[name].reconfigure(compartmentContent(name, settings)));
+  return [...names].map((name) =>
+    compartments[name].reconfigure(compartmentContent(name, settings, indent)),
+  );
 }
 
 /** Reconfigure every compartment — used when a whole settings file loads. */
-export function reconfigureAllEffects(settings: Settings) {
+export function reconfigureAllEffects(settings: Settings, indent: Indentation | null = null) {
   return (Object.keys(compartments) as CompartmentName[]).map((name) =>
-    compartments[name].reconfigure(compartmentContent(name, settings)),
+    compartments[name].reconfigure(compartmentContent(name, settings, indent)),
   );
 }

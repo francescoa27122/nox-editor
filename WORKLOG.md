@@ -8,6 +8,167 @@ are knowledge.**
 
 ---
 
+## 2026-09-06 - The next-steps pass: three gated decisions landed, and the packaged app walked
+
+Francesco said "next steps", so this took the list from the entry below in
+order, stopping only where a decision is his.
+
+**Shipped:** #198 (A7-001, the dispatcher refuses an undeclared command to a
+plugin or an agent), #199 (A7-004, agent context reads scoped to the
+workspace root) and #200 (A4-004, large-file mode above 5 MB), each brought
+up to date with main, re-gated, and merged on all eleven checks; #200 needed
+one conflict resolved by hand (`isLarge` and `indent` both new on the buffer
+snapshot). Dependabot #196 (svelte) and #197 (typescript-language-server)
+merged the same way. The v0.9.1 draft is published as a non-latest release, so
+CHANGELOG stops lying about it (A8-008).
+
+**The packaged app was walked**, for the first time since 0.9.x on a real
+machine: `npm run app:build` (the .app bundled; the DMG script failed after
+it), launched by executable path with `--geometry`, sha256 of the process
+matched the build, `rootPath` pointed at a two-commit fixture repository.
+`.desktop-pass-report.md` has the twelve items with evidence. 10 PASS: the
+`nox: geometry` line, the traffic-light inset, all three new View menu items,
+the bottom panel with a real zsh prompt, `echo walk` typed once and echoed
+once (so the harness's `eecchhoo` was the driver, as suspected), scrollback
+surviving a switch to Tasks and back, Hide and reopen on the last view,
+indent guides aligned on a tab-indented file (detected as Tabs: 2) and a
+space-indented one, blame naming the fixture author per commit, and Quit
+taking its shell child with it (A7-009's exit half, seen). 1 PARTIAL: the Tab
+Moves Focus readout appeared, but the background harness cannot send a Tab
+keystroke. 1 UNSEEN: native Paste, because the harness refuses any menu item
+that touches the clipboard. Session file restored from its backup afterwards.
+
+**Left where it is, and why.**
+- **#201** (single instance and file associations) conflicts with main and,
+  by its own body, makes Nox the default opener for 57 extensions on Windows.
+  That is Francesco's call before a rebase.
+- **Dependabot #192, #194, #195** fail CI on their own: reqwest 0.13 breaks
+  the Rust build on all three platforms, the Tauri group breaks the web and
+  e2e legs, jsdom 30 breaks three web legs. Each is a code change, not a
+  rebase. **#193** (the codemirror group) was green but its head ref moved
+  under `update-branch`; Dependabot was asked to rebase it.
+- **Signing** needs certificates only Francesco can obtain.
+- **Splitting `app.ts`** and **persisting the agent trail** are the two
+  remaining pieces of feature work on the list, untouched this pass.
+
+**Method notes.** `app_type` with `target: "focused"` reaches xterm's helper
+textarea where a coordinate click does not. The background harness sends
+Return, Escape, Backspace, Delete and ⌘A only, so drive everything else from
+the native menu bar; `app_menu list View` is also the cheapest proof that a
+command reached the native menu.
+
+**Confidence:** high on everything merged, all of it gated twice. High on
+the walk's ten passes, each backed by a screenshot in the session. The two
+open walk items are harness limits, not doubts about the code.
+
+---
+
+## 2026-09-06 - 0.12.0 published, and the five changes a daily user will feel
+
+Francesco asked for the v0.12.0 draft to be published, and for that to be
+the rule from now on, then for the five UI changes the previous entry named.
+The release is public and marked latest. The five, in the order they landed:
+
+1. **#202 merged** (indentation detection, Ctrl+G), after #203 widened the
+   sticky-scroll budget that was reddening unrelated pull requests.
+2. **#206, Tab leaves the editor and Alt opens the menu bar** (A5-009,
+   A5-003). `Ctrl+M` toggles a mode, not a setting; `tabKeyCompartment`
+   holds `indentWithTab` and `EditorPane` follows `ui.tabMovesFocus`. A bare
+   Alt focuses the drawn bar, Alt+letter opens a menu, and `core/mnemonics.ts`
+   decides the letters over the real `LAYOUT`. The bar reads
+   `defaultPrevented` after the keymap's capture-phase handler so claimed
+   chords stay claimed.
+3. **#207, indent guides**, `core/indent-guides.ts` for the decision and a
+   `ViewPlugin` over `view.visibleRanges` for the rendering. The guide colour
+   was measured, not guessed: 0.22 alpha came out at 1.34:1 and vanished in
+   a screenshot; 0.32 is 1.59:1, which is where VS Code's dark guide sits.
+4. **#208, the bottom panel.** `ui/BottomPanel.svelte` hosts Terminal and
+   Tasks with a tab strip, one at a time, below the editor. `terminal.height`
+   keeps its key. `Mod+J` toggles whichever view was last. Spec in
+   `docs/superpowers/specs/2026-09-05-bottom-panel-design.md`.
+5. **#201 (single instance and file associations) is not merged.** It
+   conflicts with main and its own body warns that on Windows the installer
+   makes Nox the default opener for 57 extensions, which is a louder claim
+   than the decision asked for. That needs Francesco's word, not a rebase.
+
+**Verified:** every new test run red before its code and green after. Each
+branch: `npm test` (2786 to 2814), `check` 0/0, `eslint` 0 errors, `build`.
+The indent guides also ran `test:editor` in real Chromium (12/12), which is
+the typing-path guard rule 5 rests on. Guides and the bottom panel were
+opened in the browser build and looked at: guides on column 0 and every
+indent stop with the colour set to red, none on a ` *` comment line; the
+tasks view under `scheduler.ts` rather than instead of it, Hide closing it.
+
+**Method notes.** Branch protection requires up-to-date branches, so every
+merge invalidates every other open PR: serialise merges and expect one
+`update-branch` per PR per merge. The CI flake #203 fixed (enclosingSymbols
+4.1x against a 4x budget on the Windows leg) hit #206 before #203 landed.
+The Browser pane's synthesised `cmd+shift+p` did not reach the page and typed
+into the buffer instead; drive the app through the drawn menu bar there.
+
+**Next:** decide #201's Windows-default question, then #198 (the dispatcher
+rule), #199, #200. Then the packaged-app walk for 0.13.0, which now has four
+UI changes nobody has driven with a real keyboard: a real Alt on Windows, the
+terminal tab with a real shell, Tab leaving the editor, guides at 4-wide tabs.
+
+**Confidence:** high on the code and its tests. Medium on the Alt handling
+under WebView2, which jsdom cannot prove either way. Low on nothing.
+
+---
+
+## 2026-09-05 - 0.12.0 tagged, and the changelog it needed first
+
+Asked to cut the tag the 2026-08-29 handoff left to the operator. Two things
+had changed under that handoff. The stray `v0.12.0` tag (A8-001) was already
+gone from the remote, so nothing needed deleting. And `CHANGELOG.md` had grown
+a full `[Unreleased]` section above the dated `[0.12.0]` heading: Tasks (#178),
+the `net.request` gate (#180) and the seven audit PRs (#182 to #188). A tag on
+`main` as it stood would have built a binary carrying all of that with a
+release page that mentioned only blame, which is the exact gap #149 to #151
+were about.
+
+**Shipped:** #204 folds `[Unreleased]` into `[0.12.0]`, dates it today, and
+writes the audit's user-facing fixes for the person downloading, P0 first, the
+macOS 13 floor under Changed and the Rust-layer findings under Security. README
+§Status gains a paragraph for Tasks, OS-handed files and the audit, and its
+test count is the measured 2,771. ROADMAP's Tasks and Snippets rows name their
+releases. Then `v0.12.0` on the merge commit `b98f534`, annotated.
+
+**Verified:** all three gate scripts locally before tagging (`readme-series`
+0.12, `release-notes` 244 lines, `cargo metadata --locked` exit 0), `npm test`
+2,771, `check` 0/0, `build` clean, `eslint` 0 errors. Release run 34008814475:
+gate green in a minute, four installers built, `latest.json` and signatures
+uploaded. **The release is a draft.** Publishing it is what makes `latest.json`
+reach every install through the updater, and that is the operator's click, not
+this session's.
+
+**Two local traps worth knowing.** A bare `npm run lint` on this Mac reports 46
+errors, all from a stale registered worktree under `.claude/worktrees/`; the
+tracked tree has 0 errors and the 9 known warnings. And `cargo test` had 2 of
+162 fail on its first cold run and pass on four reruns; the names were not
+captured, so it is a flake with no name yet.
+
+**Next, in order:**
+
+1. Decide the Gated findings. Five are already green PRs: #198 A7-001 (the
+   dispatcher rule), #199 A7-004, #200 A4-004, #201 A1-001, #202 A1-004 and
+   A1-007. Merge #203 first; it widens the sticky-scroll budget that was
+   failing #198's one red leg. Undecided and unbuilt: A5-003, A5-009, A6-007.
+2. Sign the builds. The largest remaining ship-readiness item, and a spend.
+3. Split `app.ts` (A2-007). The only Safe finding deliberately left.
+4. Persist the agent trail (A7-008 residue), and decide A7-009's other half,
+   which needs the crate's first `unsafe`.
+5. Dependabot #192 to #197; three had red checks.
+6. A8-008: v0.9.1 is still an unpublished draft that CHANGELOG calls released.
+7. The desktop walk against the packaged 0.12.0: blame on a real repository,
+   paste under WebView2, the macOS open handler, quitting with children alive.
+8. A5-011: the README hero still shows a 2-view rail.
+
+**Confidence:** high on the tag and the gate, every step of which ran and was
+read. High on the changelog matching what shipped, since it was written from
+the PR bodies and the finding list rather than from memory. The packaged
+0.12.0 has not been run on this machine; the e2e harness drove it on all three
+platforms on the PR and that is the whole of the evidence.
 ## 2026-09-03 - A1-001 Gated half: single instance, then file associations
 
 Gated decision 3 approved: both halves, single instance first, because the

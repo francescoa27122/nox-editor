@@ -258,7 +258,14 @@ describe('enforcement in the dispatcher', () => {
     const commands = new CommandRegistry();
     const saved: string[] = [];
 
+    // The same two steps `NoxApp` installs: refuse a command that declares
+    // nothing, then require each capability a command does declare. Copied
+    // rather than imported because this suite builds a registry and a service
+    // directly, and the point of the file is to exercise the pair.
     commands.setGuard(async (command, principal, resource) => {
+      if (!command.capabilities?.length) {
+        permissions.refuseUndeclared({ principal, commandId: command.id, description: command.title });
+      }
       for (const capability of command.capabilities ?? []) {
         await permissions.require({
           principal,
@@ -317,11 +324,47 @@ describe('enforcement in the dispatcher', () => {
     expect(saved).toEqual(['/w/a.ts', '/w/b.ts']);
   });
 
-  it('does not gate commands that declare no capability', async () => {
+  /**
+   * The rule this file used to pin the opposite of. Until 2026-09-03 the
+   * assertion here was that an undeclared command runs, which is what left
+   * every command whose author forgot a declaration reachable by an agent with
+   * no check and no log entry. `nav.goToLine` is the same harmless command it
+   * always was; what changed is that "declares nothing" is now refused rather
+   * than trusted, so a command that reaches the OS and says nothing about it
+   * fails closed.
+   */
+  it('refuses a non-user principal a command that declares no capability', async () => {
+    const { permissions, commands } = setup();
+    permissions.setDefaultPolicy(policy({}, 'allow'));
+
+    // Allow-everything policy on purpose: the refusal is the declaration
+    // being absent, not the policy denying anything.
+    await expect(
+      commands.execute('nav.goToLine', undefined, { principal: agent }),
+    ).rejects.toThrow(PermissionError);
+  });
+
+  it('records the refusal so it is not silent', async () => {
+    const { permissions, commands } = setup();
+
+    await commands.execute('nav.goToLine', undefined, { principal: agent }).catch(() => {});
+
+    const decision = permissions.decisions.get().at(-1);
+    expect(decision?.granted).toBe(false);
+    // Its own source, so an audit can tell "you did not say what you would do"
+    // apart from "policy said no".
+    expect(decision?.source).toBe('undeclared');
+    expect(decision?.commandId).toBe('nav.goToLine');
+    expect(decision?.capability).toBeUndefined();
+  });
+
+  it('still runs an undeclared command for the user', async () => {
     const { permissions, commands } = setup();
     permissions.setDefaultPolicy(policy({}, 'deny'));
 
-    expect(await commands.execute('nav.goToLine', undefined, { principal: agent })).toBe(true);
+    expect(await commands.execute('nav.goToLine')).toBe(true);
+    expect(await commands.execute('nav.goToLine', undefined, { principal: USER })).toBe(true);
+    expect(permissions.decisions.get()).toEqual([]);
   });
 
   it('carries the resource from the command into the decision', async () => {

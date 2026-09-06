@@ -17,6 +17,29 @@ import type { SelectionRecord, WorkspaceService } from './workspace';
  */
 
 const SESSION_FILE = 'session.json';
+
+/** Tab churn during startup, and a burst of typing, should be one write. */
+const SAVE_DEBOUNCE_MS = 400;
+
+/**
+ * The same debounce, for a session holding a dirty buffer over
+ * `LARGE_FILE_BYTES`.
+ *
+ * The backup is the one thing large-file mode must not simply switch off: it
+ * *is* the unsaved work, and dropping it would mean the larger the file the
+ * less Nox protects what you typed into it. So it is written less often
+ * rather than less completely. The debounce is trailing, so the text still
+ * reaches disk once typing stops; what changes is that pauses shorter than
+ * this cost one write between them instead of one each, and a 5 MB backup
+ * costs 4.9 ms of `toString` plus `JSON.stringify` on the renderer side alone
+ * before Rust copies it again (see `LARGE_FILE_BYTES`).
+ *
+ * The exposure that buys is bounded and worth naming: a *crash* loses at most
+ * this much typing in a file over the threshold rather than 400 ms of it.
+ * Quitting and closing the window call `save()` directly and are unaffected.
+ */
+const LARGE_FILE_SAVE_DEBOUNCE_MS = 2_000;
+
 /**
  * 2 added editor groups. 3 added cursor positions and unsaved file contents.
  * 4 moved that content out into per-buffer backup files. Older sessions are
@@ -349,14 +372,25 @@ export class SessionService {
     }
   }
 
-  /** Debounced — tab churn during startup should produce one write. */
+  /** Debounced: see `SAVE_DEBOUNCE_MS`. */
   schedule(): void {
     if (!this.#ready) return;
     if (this.#saveTimer) clearTimeout(this.#saveTimer);
     this.#saveTimer = setTimeout(() => {
       this.#saveTimer = null;
       void this.save();
-    }, 400);
+    }, this.#debounceMs());
+  }
+
+  /**
+   * How long this save waits. O(open tabs) and it runs per keystroke, which
+   * is the order of the `#sync` fan-out that publishes the very list it reads;
+   * `isLarge` is a field decided when the buffer opened, not a size measured
+   * here.
+   */
+  #debounceMs(): number {
+    const large = this.#workspace.buffers.get().some((buffer) => buffer.isLarge && buffer.isDirty);
+    return large ? LARGE_FILE_SAVE_DEBOUNCE_MS : SAVE_DEBOUNCE_MS;
   }
 
   async save(): Promise<void> {

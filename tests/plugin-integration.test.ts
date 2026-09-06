@@ -20,7 +20,7 @@ import { PLUGIN_PROTOCOL_VERSION } from '../src/services/plugin/protocol';
 const CONFIG = '/cfg';
 
 /** A worker that greets correctly and answers every invoke. */
-function scriptedWorker() {
+function scriptedWorker(commandId: string) {
   const written: Record<string, unknown>[] = [];
   const buffered: string[] = [];
   let onLine: ((line: string) => void) | null = null;
@@ -43,7 +43,7 @@ function scriptedWorker() {
         emit({
           id: 500,
           method: 'command.execute',
-          params: { commandId: 'view.toggleWordWrap' },
+          params: { commandId },
         });
         emit({ id: message.id, ok: true });
       }
@@ -61,8 +61,13 @@ function scriptedWorker() {
 }
 
 class PluginPlatform extends MemoryPlatform {
-  worker = scriptedWorker();
+  readonly worker: ReturnType<typeof scriptedWorker>;
   readonly startedWith: PluginWorkerSpec[] = [];
+
+  constructor(commandId = 'notes.new') {
+    super();
+    this.worker = scriptedWorker(commandId);
+  }
 
   override async configDir(): Promise<string | null> {
     return CONFIG;
@@ -81,8 +86,8 @@ afterEach(async () => {
   app = null;
 });
 
-async function setup(manifest: unknown, source = '// a plugin\n') {
-  const platform = new PluginPlatform();
+async function setup(manifest: unknown, source = '// a plugin\n', commandId = 'notes.new') {
+  const platform = new PluginPlatform(commandId);
   platform.mkdirp(`${CONFIG}/plugins/demo`);
   await platform.writeTextFile(`${CONFIG}/plugins/demo/plugin.json`, JSON.stringify(manifest));
   await platform.writeTextFile(`${CONFIG}/plugins/demo/main.js`, source);
@@ -127,14 +132,42 @@ describe('a plugin folder', () => {
 
   it('reaches a real command through the real dispatcher', async () => {
     const { app: instance } = await setup(MANIFEST);
+    instance.permissions.setDefaultPolicy({ fallback: 'allow', rules: {} });
+
+    await instance.commands.execute('plugin.demo.greet');
+
+    // `notes.new` is a genuine Nox command with a visible effect, executed by
+    // the plugin over the wire. Nothing about this path is a plugin-shaped
+    // copy of the real one: it *is* the real one.
+    await vi.waitFor(() => expect(instance.notes.notes.get()).toHaveLength(1));
+  });
+
+  /**
+   * The dispatcher rule (A7-001), at the seam rather than in a unit test.
+   *
+   * This case used to drive `view.toggleWordWrap` as the command above, and it
+   * passed because the dispatcher consulted its guard only for a command that
+   * declared something. That was the defect: an absent declaration meant "needs
+   * no permission" for every non-user principal, so a plugin reached any of the
+   * hundred-odd undeclared commands unchecked and unlogged. The policy here is
+   * allow-everything, to show the refusal is the missing declaration rather
+   * than a denial.
+   */
+  it('is refused a command that declares nothing, however open the policy', async () => {
+    const { app: instance } = await setup(MANIFEST, '// a plugin\n', 'view.toggleWordWrap');
+    instance.permissions.setDefaultPolicy({ fallback: 'allow', rules: {} });
     const before = instance.config.get('editor.wordWrap');
 
     await instance.commands.execute('plugin.demo.greet');
 
-    // `view.toggleWordWrap` is a genuine Nox command with a visible effect,
-    // executed by the plugin over the wire. Nothing about this path is a
-    // plugin-shaped copy of the real one — it *is* the real one.
-    await vi.waitFor(() => expect(instance.config.get('editor.wordWrap')).toBe(!before));
+    await vi.waitFor(() =>
+      expect(instance.permissions.decisions.get().at(-1)).toMatchObject({
+        commandId: 'view.toggleWordWrap',
+        granted: false,
+        source: 'undeclared',
+      }),
+    );
+    expect(instance.config.get('editor.wordWrap')).toBe(before);
   });
 });
 
