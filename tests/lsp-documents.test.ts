@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import { DocumentSync } from '../src/services/lsp/documents';
-import { WorkspaceService } from '../src/services/workspace';
+import { LARGE_FILE_BYTES, WorkspaceService } from '../src/services/workspace';
 
 /**
  * What the server is told about the documents.
@@ -33,6 +33,17 @@ class RecordingSession {
     return this.sent[this.sent.length - 1];
   }
 }
+
+const LINE = 'const filler = 1;\n';
+
+/** Source-shaped text of exactly `length` characters. */
+function docOf(length: number): string {
+  return LINE.repeat(Math.ceil(length / LINE.length)).slice(0, length);
+}
+
+// Built once: each of these is 5 MB, and the tests below share them.
+const AT_THRESHOLD = docOf(LARGE_FILE_BYTES);
+const OVER_THRESHOLD = docOf(LARGE_FILE_BYTES + 1);
 
 function setup() {
   const platform = new MemoryPlatform();
@@ -164,6 +175,91 @@ describe('closing', () => {
 
     workspace.close(id, { force: true });
     expect(sync.openUris()).toEqual([]);
+  });
+});
+
+/**
+ * Large files (A4-004): a buffer over `LARGE_FILE_BYTES` is never announced
+ * to a server at all.
+ *
+ * The protocol shape is the whole point, and it is why these assert on the
+ * messages rather than on a flag. The other way to switch the cost off is
+ * didOpen once and then no didChange, which leaves the server holding a copy
+ * that goes stale from the first keystroke: every diagnostic it publishes
+ * after that lands on a line that has moved, while looking entirely
+ * plausible. That is the exact failure full-text sync exists to prevent. A
+ * document the server was never told about cannot drift.
+ *
+ * What these do *not* catch: whether a server would have coped. Nothing here
+ * runs a real one.
+ */
+describe('large files', () => {
+  it('says nothing at all about a buffer over the threshold', async () => {
+    const { platform, workspace, session, sync } = setup();
+    platform.seedFile('/w/src/huge.ts', OVER_THRESHOLD);
+    await workspace.openFolder('/w');
+    await workspace.open('/w/src/huge.ts');
+
+    expect(session.sent).toEqual([]);
+    expect(sync.openUris()).toEqual([]);
+  });
+
+  it('sends nothing when it is edited, and no didClose when it is closed', async () => {
+    // A didClose for a document that was never opened is the mirror of the
+    // stale-copy problem: it names a URI the server has no record of.
+    vi.useFakeTimers();
+    const { platform, workspace, session } = setup();
+    platform.seedFile('/w/src/huge.ts', OVER_THRESHOLD);
+    await workspace.openFolder('/w');
+    const id = (await workspace.open('/w/src/huge.ts'))!;
+
+    workspace.applyEdits(id, [{ from: 0, to: 0, insert: '// x\n' }]);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(session.sent).toEqual([]);
+
+    workspace.close(id, { force: true });
+    await vi.advanceTimersByTimeAsync(600);
+    expect(session.sent).toEqual([]);
+  });
+
+  it('closes a document that crosses the threshold on an external reload', async () => {
+    // The one case where the server has already been told. Leaving it open
+    // and simply stopping the didChanges is what this rules out.
+    vi.useFakeTimers();
+    const { workspace, session, sync } = setup();
+    await workspace.openFolder('/w');
+    const id = (await workspace.open('/w/src/main.ts'))!;
+    expect(session.methods()).toEqual(['textDocument/didOpen']);
+
+    workspace.replaceContents(id, OVER_THRESHOLD);
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(session.methods()).toEqual(['textDocument/didOpen', 'textDocument/didClose']);
+    expect(sync.openUris()).toEqual([]);
+  });
+
+  /**
+   * The regression that matters more than the feature: everything at or below
+   * the threshold is untouched. `LARGE_FILE_BYTES` itself is not large, so
+   * this pins the comparison as well as the behaviour.
+   */
+  it('syncs a buffer exactly at the threshold, in full, as before', async () => {
+    vi.useFakeTimers();
+    const { platform, workspace, session, sync } = setup();
+    platform.seedFile('/w/src/big.ts', AT_THRESHOLD);
+    await workspace.openFolder('/w');
+    const id = (await workspace.open('/w/src/big.ts'))!;
+
+    expect(sync.openUris()).toEqual(['file:///w/src/big.ts']);
+    const opened = session.sent[0]?.params.textDocument as { text: string } | undefined;
+    expect(opened?.text.length).toBe(AT_THRESHOLD.length);
+
+    workspace.applyEdits(id, [{ from: 0, to: 0, insert: '// x\n' }]);
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(session.methods()).toEqual(['textDocument/didOpen', 'textDocument/didChange']);
+    const changed = session.last()?.params.contentChanges as [{ text: string }];
+    expect(changed[0].text.length).toBe(AT_THRESHOLD.length + 5);
   });
 });
 

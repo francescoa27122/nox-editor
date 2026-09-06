@@ -1,5 +1,6 @@
 <script lang="ts">
   import { relative } from '@core/path';
+  import { concernsIn, revealHidden, type Concern } from '@core/trojan';
   import { authorLabel } from '@services/transactions';
   import { useApp } from './context';
   import Icon from './Icon.svelte';
@@ -35,8 +36,27 @@
     return root && path.startsWith(root) ? relative(root, path) : path;
   }
 
-  /** Trailing newlines are part of the line data; they are not part of reading it. */
-  const display = (line: string) => line.replace(/\n$/, '');
+  /**
+   * Trailing newlines are part of the line data; they are not part of reading
+   * it. Hidden characters are the opposite: part of reading it and drawn as
+   * nothing, so they are shown as `<U+XXXX>` in place. A bidi override would
+   * otherwise put this line on screen in an order the file will not hold,
+   * and a human deciding from the diff is the whole defence on this path.
+   */
+  const display = (line: string) => revealHidden(line.replace(/\n$/, ''));
+
+  const CONCERNS: Record<Concern, string> = {
+    bidi: 'bidi controls',
+    'zero-width': 'zero-width characters',
+    'mixed-script': 'a name mixing scripts',
+  };
+
+  /** What to warn about in a hunk's inserted lines, or null. */
+  function warningFor(added: string[]): string | null {
+    const concerns = concernsIn(added);
+    if (concerns.length === 0) return null;
+    return `contains ${concerns.map((concern) => CONCERNS[concern]).join(', ')}`;
+  }
 
 </script>
 
@@ -84,6 +104,7 @@
           </div>
 
           {#each file.hunks as hunk (hunk.id)}
+            {@const warning = warningFor(hunk.added)}
             <div class="hunk" class:rejected={!hunk.accepted}>
               <button
                 class="toggle"
@@ -96,6 +117,15 @@
               </button>
               {#if !hunk.inScope}
                 <span class="scope-note">outside your selection</span>
+              {/if}
+              {#if warning}
+                <span
+                  class="trojan-note"
+                  title="Text that could read differently from how it is stored. The hidden characters are shown as <U+XXXX> below."
+                >
+                  <Icon name="warning" size={11} />
+                  {warning}
+                </span>
               {/if}
 
               <div class="lines">
@@ -226,6 +256,17 @@
 
   .scope-note {
     color: var(--nox-text-muted);
+    font-size: var(--nox-fs-xs);
+    margin-left: var(--nox-sp-2);
+  }
+
+  /* The warning colour rather than danger: it is a reason to read closely,
+     not a verdict, and the reader may well be looking at an emoji. */
+  .trojan-note {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--nox-sp-1);
+    color: var(--nox-warning);
     font-size: var(--nox-fs-xs);
     margin-left: var(--nox-sp-2);
   }

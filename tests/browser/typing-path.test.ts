@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { document, fastestKeystroke, mountEditor, type Editor } from './support/keystroke';
+import {
+  document,
+  fastestKeystroke,
+  mountEditor,
+  mountEditorWithGrammar,
+  typeOneCharacterAndFlushMeasure,
+  type Editor,
+} from './support/keystroke';
 import { MAX_DECORATIONS } from '../../src/core/plugin-decorations';
 import { applyPluginDecorations } from '../../src/editor/plugin-decorations';
 
@@ -97,6 +104,71 @@ describe('the typing path is flat in document size', () => {
   it('leaves most of the frame for everything else', () => {
     const ms = keystrokeAt(16_000);
     expect(ms, `keystroke at 16,000 lines took ${ms.toFixed(2)}ms`).toBeLessThan(8);
+  });
+});
+
+/**
+ * The same claim, with a real grammar attached and fully parsed — the case
+ * the suite above cannot see (A4-013).
+ *
+ * `mountEditor` builds a state with no language, so `syntaxTree(state)` is
+ * empty and every extension keyed on it (sticky scroll, folding, bracket
+ * matching, `indentOnInput`) runs against nothing: a document-sized walk
+ * behind one of those looks exactly as flat as no walk at all. A4-001
+ * shipped precisely that — sticky scroll walking the whole parsed tree on
+ * every keystroke once a large file's tree was fully parsed, a normal
+ * thing to have happened (scrolling to the end, a session restored near the
+ * bottom, the symbol palette's own forced parse) — and this suite, as it
+ * stood, would not have failed on it.
+ *
+ * `mountEditorWithGrammar` is what closes the first half of that gap:
+ * TypeScript's grammar, attached directly and parsed in full before the
+ * first keystroke, on top of every other extension `mountEditor` already
+ * carries. `typeOneCharacterAndFlushMeasure` closes the second, and matters
+ * more than it looks: sticky scroll's expensive walk runs inside a
+ * `requestMeasure` write phase, which is scheduled on the next animation
+ * frame and never reached by a tight loop of dispatches with no frame in
+ * between — confirmed by instrumenting `sticky.ts`'s `paint` during a plain
+ * `typeOneCharacter` batch here and finding it ran zero times. A keystroke
+ * timed that way would report this suite flat regardless of what sticky
+ * scroll did, for the same reason `mountEditor`'s missing grammar did: not
+ * because the work is cheap, but because the harness never asked for it.
+ */
+describe('the typing path is flat in document size, with a real grammar attached', () => {
+  let open: Editor | null = null;
+
+  afterEach(() => {
+    open?.destroy();
+    open = null;
+  });
+
+  const keystrokeAt = (lines: number): number => {
+    open?.destroy();
+    open = mountEditorWithGrammar(document(lines));
+    const ms = fastestKeystroke(open.view, 7, 20, typeOneCharacterAndFlushMeasure);
+    open.destroy();
+    open = null;
+    return ms;
+  };
+
+  /**
+   * Same budget and same shape as the undecorated case above: 8x the
+   * document for the same keystroke, flat is ~1x. A4-001's own walk
+   * measured 8.20 ms at 16,000 lines against 1.50 ms at 2,000 — a ~5.5x
+   * ratio, comfortably past this budget — so a reintroduced document-sized
+   * walk behind any grammar-keyed extension has room to be caught here
+   * before it reaches the 3x line.
+   */
+  it('costs the same at 16,000 lines as at 2,000', () => {
+    const small = keystrokeAt(2_000);
+    const large = keystrokeAt(16_000);
+    const ratio = large / small;
+
+    expect(
+      ratio,
+      `keystroke (grammar attached): ${ratio.toFixed(2)}x for 8x the document ` +
+        `(budget 3x; flat is ~1x) [${small.toFixed(3)}ms -> ${large.toFixed(3)}ms]`,
+    ).toBeLessThan(3);
   });
 });
 

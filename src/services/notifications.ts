@@ -37,6 +37,22 @@ const DEFAULT_TIMEOUTS: Record<NotificationKind, number> = {
   error: 0,
 };
 
+/**
+ * Sticky notifications (timeout 0, i.e. errors) beyond this many are
+ * evicted, oldest first (A4-011).
+ *
+ * The four-slot eviction below only ever looked at the auto-dismissing
+ * kinds, on purpose — a sticky one is shown sticky because it must be read,
+ * and a burst of routine successes must not silently take it with them. But
+ * "must be read" is not "must be kept forever": autosave retried against a
+ * read-only file, or a formatter failing on every save, raises one sticky
+ * error per attempt, and none of them auto-dismiss. Fifty stacked toasts is
+ * already an unusable list before this bound is ever reached, so the cap
+ * only ever catches the genuinely unbounded case — a loop the user has not
+ * noticed yet — not ordinary use.
+ */
+const MAX_STICKY = 50;
+
 export interface NotificationEvents {
   /** Raised once per notification, at the moment it is shown. */
   notified: Notification;
@@ -73,11 +89,17 @@ export class NotificationService {
     // the four slots. A sticky notification (timeout 0, i.e. an error) was
     // shown sticky precisely because it must be read; four routine successes
     // arriving in a burst used to evict it silently, and its orphaned timer
-    // kept ticking against an id that no longer existed.
+    // kept ticking against an id that no longer existed. Sticky ones get
+    // their own, much larger bound (MAX_STICKY) instead, since they compete
+    // with each other, not with the transient four.
     this.items.update((list) => {
       const next = [...list, notification];
       const transient = next.filter((n) => n.timeout > 0);
-      const evict = new Set(transient.slice(0, Math.max(0, transient.length - 4)));
+      const sticky = next.filter((n) => n.timeout === 0);
+      const evict = new Set([
+        ...transient.slice(0, Math.max(0, transient.length - 4)),
+        ...sticky.slice(0, Math.max(0, sticky.length - MAX_STICKY)),
+      ]);
       // Hygiene, not behavior: a ghost timer's dismiss would be a no-op and
       // the map self-heals when it fires. Cleared anyway so the map never
       // holds an id the list doesn't.

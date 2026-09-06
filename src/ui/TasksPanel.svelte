@@ -17,7 +17,7 @@
    */
 
   const app = useApp();
-  const { tasks, ui, commands, platform } = app;
+  const { tasks, commands, platform } = app;
 
   /**
    * Whether this build can start a process at all.
@@ -84,47 +84,6 @@
 </script>
 
 <section class="tasks" aria-label="Tasks">
-  <header>
-    <div class="heading">
-      <h2>Tasks</h2>
-      <p>{$list.length} defined{$running.size > 0 ? ` · ${$running.size} running` : ''}</p>
-    </div>
-    <div class="actions">
-      {#if $trusted.size > 0}
-        <!--
-          A grant you cannot see is a grant you cannot withdraw. The spec said
-          the panel listed what was approved and it did not: a trusted task was
-          indistinguishable from one that never asks. Shaped after the agents
-          panel's revoke button, where the count is the disclosure.
-        -->
-        <button
-          class="nox-button small"
-          onclick={() => void commands.execute('tasks.forgetTrust')}
-          title="Project tasks will ask again before they run"
-        >
-          Forget {$trusted.size} approved
-        </button>
-      {/if}
-      <button
-        class="nox-button small"
-        disabled={$running.size === 0}
-        onclick={() => void commands.execute('tasks.stop')}
-        title="Stop every running task"
-      >
-        Stop All
-      </button>
-      <button class="nox-button small" onclick={() => void commands.execute('tasks.edit')}>
-        Edit Tasks
-      </button>
-      <button
-        class="nox-button ghost small"
-        onclick={() => ui.tasksOpen.set(false)}
-        title="Back to the editor (Esc)"
-      >
-        Close
-      </button>
-    </div>
-  </header>
 
   {#if !canRun}
     <p class="problem note">
@@ -232,31 +191,6 @@
     flex-direction: column;
     height: 100%;
     background: var(--nox-bg-editor);
-  }
-
-  header {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--nox-sp-4);
-    padding: var(--nox-sp-4) var(--nox-sp-5) var(--nox-sp-3);
-  }
-
-  h2 {
-    font-size: var(--nox-fs-md);
-    margin: 0 0 2px;
-  }
-
-  .heading p {
-    margin: 0;
-    font-size: var(--nox-fs-sm);
-    color: var(--nox-text-muted);
-  }
-
-  .actions {
-    display: flex;
-    gap: var(--nox-sp-2);
-    margin-left: auto;
-    flex: none;
   }
 
   .problem,
@@ -451,6 +385,7 @@
      for prose code. Without it this fell back to the UA's own monospace. */
   .tasks :global(code) {
     font-family: var(--nox-font-mono);
-    font-size: 0.92em;
+    /* One step under the prose around it, which is `--nox-fs-sm`. */
+    font-size: var(--nox-fs-xs);
   }
 </style>

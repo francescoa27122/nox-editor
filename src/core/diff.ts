@@ -10,6 +10,28 @@
  * refinement can layer on top later without changing any of this.
  */
 
+/**
+ * Bounds Myers' edit distance search (A4-003).
+ *
+ * Both time and memory scale with D: O((N+M)·D) time, O(D·(N+M)) memory,
+ * because `myers` keeps every round's frontier for `backtrack` to walk. An
+ * unbounded D turns a large rewrite into a multi-second, multi-gigabyte
+ * diff: 8,000 lines all different measured at 1.6 s and 2 GB on this
+ * machine (D = 16,000 there, since nothing on either side matches), and
+ * each doubling of D is roughly 4x on both axes. Past this many rounds, the
+ * two texts have nothing in common worth expressing as hunks — `diffLines`
+ * falls back to one replacement covering the trimmed middle, which is what
+ * a rewrite looks like to the reader regardless of what Myers would
+ * eventually have found.
+ *
+ * 1,000 keeps that same 8,000-line case around 60-85 ms and 190 MB RSS on
+ * this machine, comfortably inside a frame budget's worth of headroom for
+ * something that used to run over a second; an ordinary edit's D stays in
+ * the single digits regardless of file size (see `diffLines`'s trim above),
+ * so this only ever bites a genuine rewrite.
+ */
+const MAX_D = 1_000;
+
 /** A run of changed lines: what was there, and what replaces it. */
 export interface Hunk {
   /** 0-based index into the *before* lines where the hunk starts. */
@@ -63,22 +85,34 @@ export function diffLines(before: readonly string[], after: readonly string[]): 
     return [{ fromLine: start, removed: [...a], added: [...b] }];
   }
 
-  return toHunks(myers(a, b), a, b, start);
+  const ops = myers(a, b);
+  if (ops === null) {
+    // D exceeded MAX_D: report the trimmed middle as one wholesale
+    // replacement rather than continuing the search. The same shape the
+    // shortcut above already returns when one side is empty, so `toHunks`
+    // gains no new output shape to handle.
+    return [{ fromLine: start, removed: [...a], added: [...b] }];
+  }
+  return toHunks(ops, a, b, start);
 }
 
 type Op = 'equal' | 'delete' | 'insert';
 
-function myers(a: readonly string[], b: readonly string[]): Op[] {
+/** `null` means the edit distance exceeded `MAX_D`; the search was abandoned. */
+function myers(a: readonly string[], b: readonly string[]): Op[] | null {
   const n = a.length;
   const m = b.length;
   const max = n + m;
   const offset = max;
   const v = new Int32Array(2 * max + 1);
   const trace: Int32Array[] = [];
+  const limit = Math.min(max, MAX_D);
 
-  for (let d = 0; d <= max; d++) {
+  for (let d = 0; d <= limit; d++) {
     // The frontier as it stood *before* this round, which is what walking
-    // back from the end needs to find each step's predecessor.
+    // back from the end needs to find each step's predecessor. Bailing out
+    // via `limit` above, rather than after the fact, is what keeps this
+    // array's growth bounded by MAX_D instead of by the full edit distance.
     trace.push(v.slice());
 
     for (let k = -d; k <= d; k += 2) {
@@ -100,8 +134,7 @@ function myers(a: readonly string[], b: readonly string[]): Op[] {
     }
   }
 
-  /* Unreachable: d = n + m always reaches the end. */
-  return [];
+  return null;
 }
 
 function backtrack(trace: Int32Array[], d: number, offset: number, n: number, m: number): Op[] {

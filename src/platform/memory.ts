@@ -265,6 +265,8 @@ export class MemoryPlatform implements Platform {
   installedUpdate: string | null = null;
   /** Whether `relaunch` was called, for tests. */
   relaunched = false;
+  /** Whether `reloadWindow` was called, for tests. */
+  reloaded = false;
 
   seedUpdate(info: UpdateInfo): void {
     this.#update = info;
@@ -456,6 +458,10 @@ export class MemoryPlatform implements Platform {
 
   async relaunch(): Promise<void> {
     this.relaunched = true;
+  }
+
+  async reloadWindow(): Promise<void> {
+    this.reloaded = true;
   }
 
   async gitStatus(root: string): Promise<string> {
@@ -946,7 +952,10 @@ export class MemoryPlatform implements Platform {
 
         totalMatches += matches.length;
         totalFiles += 1;
-        batch.push({ path, matches });
+        // No per-file cap here (A4-005 is the Rust walker's fix): the
+        // browser build's `findMatches` runs over test and dev fixtures, not
+        // the kind of multi-megabyte minified file the cap exists for.
+        batch.push({ path, matches, truncated: false });
 
         if (batch.length >= 20) {
           onBatch(batch);
@@ -983,6 +992,23 @@ export class MemoryPlatform implements Platform {
     // A browser cannot hand us real filesystem paths, and there is no OS to
     // drag from in a test. `externalFileDrop` is false so nothing subscribes.
     return () => {};
+  }
+
+  #openHandlers = new Set<(paths: readonly string[]) => void>();
+
+  async onOpenRequested(handler: (paths: readonly string[]) => void): Promise<() => void> {
+    this.#openHandlers.add(handler);
+    return () => {
+      this.#openHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Seam: what the OS would do when it hands Nox a path, at launch or later.
+   * Tests only; a browser tab is never handed one.
+   */
+  requestOpen(paths: readonly string[]): void {
+    for (const handler of [...this.#openHandlers]) handler(paths);
   }
 
   /**
@@ -1142,6 +1168,14 @@ export class MemoryPlatform implements Platform {
 
   async toggleMaximizeWindow(): Promise<boolean> {
     return false;
+  }
+
+  /** What the window would report; there is none, so a flag stands in. */
+  fullscreen = false;
+
+  async toggleFullscreen(): Promise<boolean> {
+    this.fullscreen = !this.fullscreen;
+    return this.fullscreen;
   }
 
   async closeWindow(): Promise<void> {}

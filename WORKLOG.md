@@ -8,6 +8,179 @@ are knowledge.**
 
 ---
 
+## 2026-09-06 - 0.12.0 published, and the five changes a daily user will feel
+
+Francesco asked for the v0.12.0 draft to be published, and for that to be
+the rule from now on, then for the five UI changes the previous entry named.
+The release is public and marked latest. The five, in the order they landed:
+
+1. **#202 merged** (indentation detection, Ctrl+G), after #203 widened the
+   sticky-scroll budget that was reddening unrelated pull requests.
+2. **#206, Tab leaves the editor and Alt opens the menu bar** (A5-009,
+   A5-003). `Ctrl+M` toggles a mode, not a setting; `tabKeyCompartment`
+   holds `indentWithTab` and `EditorPane` follows `ui.tabMovesFocus`. A bare
+   Alt focuses the drawn bar, Alt+letter opens a menu, and `core/mnemonics.ts`
+   decides the letters over the real `LAYOUT`. The bar reads
+   `defaultPrevented` after the keymap's capture-phase handler so claimed
+   chords stay claimed.
+3. **#207, indent guides**, `core/indent-guides.ts` for the decision and a
+   `ViewPlugin` over `view.visibleRanges` for the rendering. The guide colour
+   was measured, not guessed: 0.22 alpha came out at 1.34:1 and vanished in
+   a screenshot; 0.32 is 1.59:1, which is where VS Code's dark guide sits.
+4. **#208, the bottom panel.** `ui/BottomPanel.svelte` hosts Terminal and
+   Tasks with a tab strip, one at a time, below the editor. `terminal.height`
+   keeps its key. `Mod+J` toggles whichever view was last. Spec in
+   `docs/superpowers/specs/2026-09-05-bottom-panel-design.md`.
+5. **#201 (single instance and file associations) is not merged.** It
+   conflicts with main and its own body warns that on Windows the installer
+   makes Nox the default opener for 57 extensions, which is a louder claim
+   than the decision asked for. That needs Francesco's word, not a rebase.
+
+**Verified:** every new test run red before its code and green after. Each
+branch: `npm test` (2786 to 2814), `check` 0/0, `eslint` 0 errors, `build`.
+The indent guides also ran `test:editor` in real Chromium (12/12), which is
+the typing-path guard rule 5 rests on. Guides and the bottom panel were
+opened in the browser build and looked at: guides on column 0 and every
+indent stop with the colour set to red, none on a ` *` comment line; the
+tasks view under `scheduler.ts` rather than instead of it, Hide closing it.
+
+**Method notes.** Branch protection requires up-to-date branches, so every
+merge invalidates every other open PR: serialise merges and expect one
+`update-branch` per PR per merge. The CI flake #203 fixed (enclosingSymbols
+4.1x against a 4x budget on the Windows leg) hit #206 before #203 landed.
+The Browser pane's synthesised `cmd+shift+p` did not reach the page and typed
+into the buffer instead; drive the app through the drawn menu bar there.
+
+**Next:** decide #201's Windows-default question, then #198 (the dispatcher
+rule), #199, #200. Then the packaged-app walk for 0.13.0, which now has four
+UI changes nobody has driven with a real keyboard: a real Alt on Windows, the
+terminal tab with a real shell, Tab leaving the editor, guides at 4-wide tabs.
+
+**Confidence:** high on the code and its tests. Medium on the Alt handling
+under WebView2, which jsdom cannot prove either way. Low on nothing.
+
+---
+
+## 2026-09-05 - 0.12.0 tagged, and the changelog it needed first
+
+Asked to cut the tag the 2026-08-29 handoff left to the operator. Two things
+had changed under that handoff. The stray `v0.12.0` tag (A8-001) was already
+gone from the remote, so nothing needed deleting. And `CHANGELOG.md` had grown
+a full `[Unreleased]` section above the dated `[0.12.0]` heading: Tasks (#178),
+the `net.request` gate (#180) and the seven audit PRs (#182 to #188). A tag on
+`main` as it stood would have built a binary carrying all of that with a
+release page that mentioned only blame, which is the exact gap #149 to #151
+were about.
+
+**Shipped:** #204 folds `[Unreleased]` into `[0.12.0]`, dates it today, and
+writes the audit's user-facing fixes for the person downloading, P0 first, the
+macOS 13 floor under Changed and the Rust-layer findings under Security. README
+§Status gains a paragraph for Tasks, OS-handed files and the audit, and its
+test count is the measured 2,771. ROADMAP's Tasks and Snippets rows name their
+releases. Then `v0.12.0` on the merge commit `b98f534`, annotated.
+
+**Verified:** all three gate scripts locally before tagging (`readme-series`
+0.12, `release-notes` 244 lines, `cargo metadata --locked` exit 0), `npm test`
+2,771, `check` 0/0, `build` clean, `eslint` 0 errors. Release run 34008814475:
+gate green in a minute, four installers built, `latest.json` and signatures
+uploaded. **The release is a draft.** Publishing it is what makes `latest.json`
+reach every install through the updater, and that is the operator's click, not
+this session's.
+
+**Two local traps worth knowing.** A bare `npm run lint` on this Mac reports 46
+errors, all from a stale registered worktree under `.claude/worktrees/`; the
+tracked tree has 0 errors and the 9 known warnings. And `cargo test` had 2 of
+162 fail on its first cold run and pass on four reruns; the names were not
+captured, so it is a flake with no name yet.
+
+**Next, in order:**
+
+1. Decide the Gated findings. Five are already green PRs: #198 A7-001 (the
+   dispatcher rule), #199 A7-004, #200 A4-004, #201 A1-001, #202 A1-004 and
+   A1-007. Merge #203 first; it widens the sticky-scroll budget that was
+   failing #198's one red leg. Undecided and unbuilt: A5-003, A5-009, A6-007.
+2. Sign the builds. The largest remaining ship-readiness item, and a spend.
+3. Split `app.ts` (A2-007). The only Safe finding deliberately left.
+4. Persist the agent trail (A7-008 residue), and decide A7-009's other half,
+   which needs the crate's first `unsafe`.
+5. Dependabot #192 to #197; three had red checks.
+6. A8-008: v0.9.1 is still an unpublished draft that CHANGELOG calls released.
+7. The desktop walk against the packaged 0.12.0: blame on a real repository,
+   paste under WebView2, the macOS open handler, quitting with children alive.
+8. A5-011: the README hero still shows a 2-view rail.
+
+**Confidence:** high on the tag and the gate, every step of which ran and was
+read. High on the changelog matching what shipped, since it was written from
+the PR bodies and the finding list rather than from memory. The packaged
+0.12.0 has not been run on this machine; the e2e harness drove it on all three
+platforms on the PR and that is the whole of the evidence.
+
+---
+
+## 2026-09-02 - Full-project audit, rated, and 69 findings fixed across seven PRs
+
+Asked for a defensible 1-to-100 rating of Nox backed by a full audit, then
+remediation. Eight parallel read-only audit lanes, five adversarial verifiers
+over every P0 and P1, seven fix branches, seven per-branch verification passes
+and one merged regression pass.
+
+**The number: 59/100 before, 78/100 after.** Categories summed to 64 before; one
+P0 capped the total at 59. No P0 remains, so 5 of the 19 point move is the cap
+lifting rather than new quality. Full rubric and justification in
+`AUDIT/RATING.md` and `AUDIT/RATING-AFTER.md`.
+
+**The P0.** A keystroke typed while a save's write was in flight was reverted
+from the buffer, never written, and the tab marked clean. Not recoverable by
+undo: with the production history extension the keystroke and the whole-document
+replacement join one history event. Reproduced three times independently. A few
+percent per manual save on a fast disk, the normal path under after-delay
+autosave. Fixed in #188.
+
+**Shipped:** 69 findings fixed, every one with a test run failing before and
+passing after. #182 security (6), #183 ship readiness (11), #184 systems (8),
+#185 UI (9), #186 agent (6), #187 features (9), #188 performance (20). All seven
+green on all 11 required checks, and all seven merged. 11 Gated findings
+untouched, written up for a decision in `AUDIT/GATED-DECISIONS.md`. 5 Safe findings deliberately left, the
+largest being A2-007, splitting `app.ts`, which is a refactor.
+
+**Verified:** every P0 and P1 fix mutation-checked. Contrast numbers, licence
+rows, action SHAs and the Rust floor all recomputed independently rather than
+taken from reports; one overstated count was caught. Merged regression pass:
+2,770 tests, `test:editor` 12/12, clippy clean, cargo 159/159, and eight core
+flows walked in a real browser with one pre-existing HMR message as the only
+console output.
+
+**Three defects found while fixing, not by the audit:** raising the macOS floor
+to 13.0 exposed two scrims using unprefixed `backdrop-filter`, which Safari
+shipped in 18, so blur failed silently on 13 through 17 (A8-013, fixed).
+`tasks.runLast` shipped in #178 with no test naming it (test added). And a
+features test that edited the active buffer around the live view threw only once
+the performance branch's save formatting routed through that view, which no
+single branch's CI could see.
+
+**The mistake worth keeping.** I audited `54cece6` believing it was the head of
+`main`. It was five PRs behind. Everything was re-derived against `origin/main`
+afterwards and the finding list survived almost intact (0 fixed upstream, 5
+changed, 71 still present), but I had already told Francesco that A7-001 was
+fixed upstream, reading that from a new test file rather than the dispatcher.
+The dispatcher is byte-identical. **Fetch before believing a local ref, and read
+the code a commit changed, not the tests it added.**
+
+**Next: A7-001 is the highest-value open decision.** Upstream closed the twelve
+exploitable instances and pinned the set with a test; the dispatcher rule that
+closes the class is Gated and recommended in `AUDIT/GATED-DECISIONS.md`.
+
+**Blocked:** 11 Gated findings, chiefly A7-001 (the dispatcher rule), A8-001
+(deleting the stray `v0.12.0` tag from the public remote) and A1-001's Gated
+half (file associations and single instance).
+
+**Confidence:** high on the fixes, all mutation-checked and CI-green. Medium on
+the number itself, which is a judgement against a rubric; a reader weighting the
+unsigned builds or the agent boundary harder could argue 74. Low on anything
+about the packaged desktop app, which was never built or walked in this session.
+
+---
+
 ## 2026-08-29 (cloud) - 0.12.0 prepared, and handed over
 
 Blame and the docs pass merged as #174 after CI caught a clippy failure the

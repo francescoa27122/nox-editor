@@ -305,6 +305,51 @@ export function createSymbolCache(): (tree: Tree, doc: Text) => FileSymbol[] {
   };
 }
 
+/**
+ * The declarations enclosing `pos`, outermost first — what sticky scroll
+ * needs, without `fileSymbols`' walk over the whole tree (A4-001).
+ *
+ * Where `stickyRows` filters `fileSymbols`' output line by line, this walks
+ * the other direction: from the node at `pos` up through `.parent`, which
+ * only ever visits the nesting chain the file actually has at that position.
+ * That chain's length is nesting depth, not document size, which is the
+ * property the caller needs — see `sticky.ts`.
+ *
+ * The pinning rule is the same one `stickyRows` applies: a declaration pins
+ * only once its own start line is strictly above `topLine`, and only while it
+ * is still open (`endLine >= topLine`). For a node whose range is being
+ * compared against `pos = doc.line(topLine).from`, those two conditions
+ * together are exactly "the node's character range contains `pos`" — which is
+ * exactly the set `.parent` walks, since a tree's nodes nest by containment.
+ * `fileSymbols` and `stickyRows` stay as they are for the symbol palette,
+ * which genuinely needs every symbol in the file rather than the chain above
+ * one position.
+ */
+export function enclosingSymbols(
+  tree: Tree,
+  doc: Text,
+  pos: number,
+  topLine: number,
+  max: number,
+): StickyRow[] {
+  // Collected innermost first, since that is the order `.parent` visits them.
+  const pinned: Array<{ text: string; from: number }> = [];
+  for (let node: SyntaxNode | null = tree.resolveInner(pos, 1); node; node = node.parent) {
+    const rule = RULES[node.name];
+    if (!rule || nameOf(node, rule, doc) === null) continue;
+    const startLine = doc.lineAt(node.from).number;
+    const endLine = doc.lineAt(node.to).number;
+    if (startLine < topLine && endLine >= topLine) {
+      pinned.push({ text: doc.lineAt(node.from).text.trim(), from: node.from });
+    }
+  }
+  // The strip reads outermost first, and capping keeps the outermost rows
+  // (see `stickyRows`'s own note on why) — both are the reverse of collection
+  // order, so one reverse before the cap does both at once.
+  pinned.reverse();
+  return pinned.slice(0, max).map((row, depth) => ({ ...row, depth }));
+}
+
 /** One line of the sticky strip: what it says, how deep, and where a click lands. */
 export interface StickyRow {
   /** The declaration's source line, trimmed — what the reader was looking at. */

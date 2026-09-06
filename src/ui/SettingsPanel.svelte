@@ -496,7 +496,8 @@
 
   code {
     font-family: var(--nox-font-mono);
-    font-size: 0.92em;
+    /* One step under the heading paragraph it sits in, `--nox-fs-sm`. */
+    font-size: var(--nox-fs-xs);
     color: var(--nox-text-muted);
   }
 

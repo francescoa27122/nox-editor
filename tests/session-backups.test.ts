@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import { SessionService } from '../src/services/session';
-import { WorkspaceService } from '../src/services/workspace';
+import { LARGE_FILE_BYTES, WorkspaceService } from '../src/services/workspace';
 
 /**
  * Unsaved work lives beside `session.json`, not inside it.
@@ -31,6 +31,61 @@ const dirty = (workspace: WorkspaceService, id: string, text: string) =>
 
 const sizeOf = async (platform: MemoryPlatform, name: string) =>
   (await platform.readConfigFile(name))?.length;
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/**
+ * Large files (A4-004) get a slower clock, not a missing backup.
+ *
+ * Switching the backup off above a size would mean the larger the file the
+ * less Nox protects what you typed into it, which is the opposite of what
+ * this file exists for. The debounce is trailing either way, so the text
+ * still lands once typing stops. What these pin is the wait, and what they
+ * do not catch is the cost it is there to save: nothing here measures a
+ * write.
+ */
+describe('the save debounce', () => {
+  it('waits longer when a dirty buffer is over the large-file threshold', async () => {
+    vi.useFakeTimers();
+    const { platform, workspace, session } = setup();
+    platform.seedFile('/work/huge.ts', 'x\n'.repeat(LARGE_FILE_BYTES / 2 + 1));
+    const id = (await workspace.open('/work/huge.ts'))!;
+    dirty(workspace, id, '//\n');
+    session.schedule();
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await platform.readConfigFile('session.json')).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(await platform.readConfigFile('session.json')).not.toBeNull();
+  });
+
+  /** The regression: an ordinary session is on the clock it always was. */
+  it('keeps the 400 ms wait for buffers under the threshold', async () => {
+    vi.useFakeTimers();
+    const { platform, workspace, session } = setup();
+    const id = (await workspace.open('/work/a.ts'))!;
+    dirty(workspace, id, '// x\n');
+    session.schedule();
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await platform.readConfigFile('session.json')).not.toBeNull();
+  });
+
+  /** A large buffer that is clean carries no text, so it costs nothing. */
+  it('keeps the 400 ms wait when the large buffer is not dirty', async () => {
+    vi.useFakeTimers();
+    const { platform, workspace, session } = setup();
+    platform.seedFile('/work/huge.ts', 'x\n'.repeat(LARGE_FILE_BYTES / 2 + 1));
+    await workspace.open('/work/huge.ts');
+    session.schedule();
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await platform.readConfigFile('session.json')).not.toBeNull();
+  });
+});
 
 describe('backups', () => {
   it('keep session.json small however large the buffer is', async () => {

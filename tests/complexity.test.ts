@@ -1,9 +1,13 @@
+import { parser as jsParser } from '@lezer/javascript';
+import { Text } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { diffText } from '../src/core/diff';
+import { detectIndentation } from '../src/core/indentation';
 import { parseGitBlame } from '../src/core/git-blame';
 import { fuzzyFilter } from '../src/core/fuzzy';
 import { buildSearchRegex, findMatches } from '../src/core/search-match';
 import { computeReplacements } from '../src/core/replace';
+import { enclosingSymbols } from '../src/core/symbols';
 import { objectSpans, unfence } from '../src/services/agent/ollama';
 import {
   blamePorcelain,
@@ -45,6 +49,38 @@ import { describeGrowth, growth } from './support/growth';
  */
 describe('the pure layers still scale', () => {
   /**
+   * A1-004: indentation detection costs the same on a 60 MB file as on a
+   * short one, because it reads a bounded sample rather than the document.
+   *
+   * **The budget is 6x here rather than 24x, and that is deliberate.** Every
+   * other guard in this file watches a *linear* claim, so its budget has to
+   * clear the input ratio. This one watches a *constant* claim, so the
+   * expected ratio is 1.0 and a budget above the input ratio would assert
+   * nothing at all: at 32x the input, a detector that walked the whole
+   * document would report about 32x and sail under 24. Six is well clear of
+   * measurement noise on identical work and well under the 32x the mutation
+   * produces.
+   *
+   * Verified: removing the `MAX_SAMPLE_LINES` and `MAX_SAMPLE_CHARS` bounds
+   * reports **35.6x** and fails this.
+   *
+   * What it does not catch on its own is which of the two bounds is missing,
+   * since either one alone still bounds a corpus of ordinary short lines.
+   * `tests/indentation.test.ts` covers the line bound behaviourally and says
+   * so; the byte bound is argued in `core/indentation.ts` and unguarded.
+   */
+  it('reads a file for its indentation in constant time, whatever the file', () => {
+    const g = growth(
+      (lines) => sourceFile(lines),
+      (text) => void detectIndentation(text),
+      2_000,
+      64_000,
+    );
+
+    expect(g.ratio, describeGrowth('detectIndentation', g, 6)).toBeLessThan(6);
+  });
+
+  /**
    * Catches quadratic work added anywhere on the diff path. Verified: a nested
    * loop over the line array reports **51.2x** and fails this.
    *
@@ -71,6 +107,45 @@ describe('the pure layers still scale', () => {
     );
 
     expect(g.ratio, describeGrowth('diffText', g, 24)).toBeLessThan(24);
+  });
+
+  /**
+   * A4-003: `diffLines` used to keep every Myers frontier, so a rewrite where
+   * D sits close to N+M cost O((N+M)·D) time and O(D·(N+M)) memory instead of
+   * scaling with the input — 8,000 lines all different measured at 1.6 s and
+   * 2 GB (`tests/diff.test.ts` pins the wall-clock side of that directly).
+   * `MAX_D` bounds the search, so past it the cost is O(MAX_D·(N+M)): linear
+   * in the input at a fixed constant, which is what this checks the same way
+   * the guard above checks a small edit, over an input that keeps D pinned at
+   * its maximum — every line different — at both sizes, so both runs are
+   * already past the cap and the whole difference is the O(N+M) part.
+   *
+   * Measured over 3 local runs at 8x the input: **3.5x-4.6x**, comfortably
+   * under even the 8x a linear cost would produce, let alone the budget.
+   * Verified: reverting `MAX_D` to `Number.POSITIVE_INFINITY` (the old,
+   * unbounded search) reports **67.3x** and fails this, almost exactly the
+   * ~64x a quadratic implementation predicts; that run took 21.6 s against
+   * this test's 0.7 s with the cap in place.
+   */
+  it('diffs a whole-file rewrite in proportion to the file, once D is capped', () => {
+    const allDifferent = (lines: number): [string, string] => {
+      const before: string[] = [];
+      const after: string[] = [];
+      for (let i = 0; i < lines; i++) {
+        before.push(`before line ${i}\n`);
+        after.push(`after line ${i}\n`);
+      }
+      return [before.join(''), after.join('')];
+    };
+
+    const g = growth(
+      (lines) => allDifferent(lines),
+      ([before, after]) => void diffText(before, after),
+      1_000,
+      8_000,
+    );
+
+    expect(g.ratio, describeGrowth('diffText (rewrite)', g, 24)).toBeLessThan(24);
   });
 
   /**
@@ -206,6 +281,59 @@ describe('the pure layers still scale', () => {
    * would not have grown to 24x at 8x the input, it would have timed the
    * suite out. This one is a canary rather than a stopwatch.
    */
+  /**
+   * A4-001: sticky scroll used to derive its pinned rows from `fileSymbols`,
+   * a walk over the *whole* parsed tree, on every keystroke. What the panel
+   * actually needs is the chain of declarations enclosing one position, which
+   * `enclosingSymbols` gets by walking `.parent` from that position instead —
+   * a cost bounded by nesting depth, not document length. `sourceFile` nests
+   * two deep (a class, then a method) at any size, so this input's nesting
+   * does not grow with `lines` the way the six guards above's inputs do; the
+   * claim here is closer to flat than to linear, which is why this test uses
+   * its own tighter budget rather than the file's shared 24x.
+   *
+   * Measured locally: `enclosingSymbols` **0.8x-1.0x** at 16x the input (it
+   * does not grow at all, within noise); the walk it replaced, `stickyRows(
+   * fileSymbols(...))` over the same fixture and position, measured
+   * **17.4x-19.4x**, tracking the document, as A4-001 found by reading the
+   * code.
+   *
+   * **The budget is 8, and it was 4 until it flaked.** A shared CI runner
+   * measured 4.30x on 2026-09-04 for a call whose true growth is about 1x:
+   * the numbers here are 1.32ms and 5.67ms, small enough that one descheduled
+   * slice of the larger sample moves the ratio further than any real
+   * regression would. Widening it does not weaken what this catches, because
+   * the thing it exists to catch measured 17x on the same fixture. What a
+   * tighter budget bought was not sensitivity but a red build on an unrelated
+   * pull request, which is worse than useless: it teaches people that a red
+   * complexity guard means nothing.
+   *
+   * If this flakes again the answer is a longer sample rather than a wider
+   * budget, since the noise is in the measurement and not in the code.
+   */
+  it('pins sticky rows in proportion to nesting depth, not document length', () => {
+    const ts = jsParser.configure({ dialect: 'ts' });
+
+    const g = growth(
+      (lines) => {
+        const source = sourceFile(lines);
+        const doc = Text.of(source.split('\n'));
+        const tree = ts.parse(source);
+        // Three quarters of the way in, so both sizes measure a position deep
+        // inside the generated classes rather than the empty tail `sourceFile`
+        // pads with once it has enough lines.
+        const pos = Math.floor(doc.length * 0.75);
+        const topLine = doc.lineAt(pos).number;
+        return { doc, tree, pos, topLine } as const;
+      },
+      ({ doc, tree, pos, topLine }) => void enclosingSymbols(tree, doc, pos, topLine, 5),
+      2_000,
+      32_000,
+    );
+
+    expect(g.ratio, describeGrowth('enclosingSymbols', g, 8)).toBeLessThan(8);
+  });
+
   it('survives an unclosed fence with a long whitespace tail', () => {
     const g = growth(
       (size) => '```json\n' + ' '.repeat(size),

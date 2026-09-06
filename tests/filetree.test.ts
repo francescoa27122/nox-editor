@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryPlatform } from '../src/platform/memory';
 import type { DirEntry } from '../src/platform/types';
 import { FileTreeService } from '../src/services/filetree';
@@ -222,5 +222,37 @@ describe('FileTreeService and directories it cannot read', () => {
     await tree.setRoot(null);
 
     expect(tree.rootError.get()).toBeNull();
+  });
+});
+
+/** Counts `readDir` per directory, so a test can see how many walks ran. */
+class CountingPlatform extends MemoryPlatform {
+  readonly reads = new Map<string, number>();
+
+  override async readDir(path: string): Promise<DirEntry[]> {
+    this.reads.set(path, (this.reads.get(path) ?? 0) + 1);
+    return super.readDir(path);
+  }
+}
+
+describe('overlapping walks', () => {
+  /**
+   * The failure this prevents: two `setRoot` calls for the same root each
+   * running a full index walk. The only abort check was a root *change*,
+   * which two walks of one root both pass, so boot's duplicate call doubled
+   * every launch's directory reads. Of two overlapping walks only the newest
+   * may run to the end.
+   */
+  it('lets only the newest of two overlapping setRoot calls walk the tree', async () => {
+    const platform = new CountingPlatform();
+    platform.seedFile('/w/src/main.ts', '');
+    platform.seedFile('/w/src/deep/nested.ts', '');
+    const tree = new FileTreeService(platform);
+
+    await Promise.all([tree.setRoot('/w'), tree.setRoot('/w')]);
+    await vi.waitFor(() => expect(tree.fileIndex.get()).toContain('/w/src/deep/nested.ts'));
+
+    expect(platform.reads.get('/w/src')).toBe(1);
+    expect(platform.reads.get('/w/src/deep')).toBe(1);
   });
 });

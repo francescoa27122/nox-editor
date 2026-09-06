@@ -103,8 +103,6 @@ describe('what the menu contains', () => {
       'explorer.duplicate',
       'explorer.copyPath',
       'explorer.copyRelativePath',
-      'explorer.newFile',
-      'explorer.newFolder',
     ]) {
       expect(file).toContain(id);
     }
@@ -116,6 +114,49 @@ describe('what the menu contains', () => {
     expect(view).toContain('explorer.selectAll');
     expect(view).not.toContain('explorer.delete');
     expect(view).not.toContain('explorer.rename');
+  });
+
+  /**
+   * The failure this prevents, from the 2026-09 audit (A1-009): `agents.show`
+   * and `agents.undoLastSession` carried `category: 'View'` and sat between
+   * Toggle Sidebar and Increase Font Size, away from the rest of Agents under
+   * Tools. Stated over every `agents.*` id so the next one cannot drift.
+   */
+  it('files every agents command under Tools, beside the rest of Agents', () => {
+    const app = new NoxApp(new SystemMenuPlatform());
+    const tools = app.menu
+      .describe()
+      .find((n): n is Extract<MenuNode, { kind: 'submenu' }> => n.kind === 'submenu' && n.label === 'Tools');
+    if (!tools) throw new Error('no Tools menu');
+    const listed = commandIds(tools.items);
+
+    const agents = app.commands.palette().filter((command) => command.id.startsWith('agents.'));
+    expect(agents.length).toBeGreaterThan(2);
+    for (const command of agents) {
+      expect(command.category, command.id).toBe('Agents');
+      expect(listed, command.id).toContain(command.id);
+    }
+  });
+
+  /**
+   * The failure this prevents, from the 2026-09 audit (A1-008): two New
+   * File / New Folder pairs in the File menu, resolving their folder by
+   * different rules that neither title stated. The explorer pair is the
+   * context menu's, dispatched by id with the clicked path, and stays a
+   * command; the menu lists the File pair only.
+   */
+  it('lists one New File and one New Folder, not the explorer pair as well', () => {
+    const app = new NoxApp(new SystemMenuPlatform());
+    const listed = commandIds(app.menu.describe());
+
+    expect(listed).toContain('file.newInFolder');
+    expect(listed).toContain('file.newFolder');
+    expect(listed).not.toContain('explorer.newFile');
+    expect(listed).not.toContain('explorer.newFolder');
+    // Still registered and still dispatchable: the explorer's context menu
+    // depends on both.
+    expect(app.commands.has('explorer.newFile')).toBe(true);
+    expect(app.commands.has('explorer.newFolder')).toBe(true);
   });
 
   /**
@@ -207,6 +248,31 @@ describe('what the menu contains', () => {
         expect(doubled, `${node.label} has two rules in a row`).toBe(false);
       }
     });
+  });
+
+  /**
+   * The failure this prevents, found by the 2026-09 audit (A1-003): the
+   * drawn menu dropped every predefined item and put nothing in its place,
+   * so a Windows or Linux user had no Cut, Copy or Paste under Edit, no About
+   * or Exit under Nox, and no Full Screen under View. Those are Nox commands
+   * now, and off macOS the menu has to list them where the system items
+   * would have been.
+   */
+  it('lists the commands behind the system items where there is no system', () => {
+    const app = new NoxApp(new MemoryPlatform());
+    const menuFor = (label: string) => {
+      const node = app.menu
+        .describe()
+        .find((n): n is Extract<MenuNode, { kind: 'submenu' }> =>
+          n.kind === 'submenu' && n.label === label,
+        );
+      if (!node) throw new Error(`no ${label} menu`);
+      return commandIds(node.items);
+    };
+
+    expect(menuFor('Edit')).toEqual(expect.arrayContaining(['edit.cut', 'edit.copy', 'edit.paste']));
+    expect(menuFor('Nox')).toEqual(expect.arrayContaining(['app.about', 'app.quit']));
+    expect(menuFor('View')).toContain('view.toggleFullscreen');
   });
 
   /** Hidden commands are hidden from the palette; a menu is no different. */

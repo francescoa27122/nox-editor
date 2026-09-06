@@ -755,4 +755,96 @@ describe('one file in two groups', () => {
 
     expect(layout(workspace)).toEqual([['a.ts']]);
   });
+
+  /**
+   * Guards A3-003. `mirrorInto` refuses a duplicate, but the other routes
+   * into a group did not check, so closing the copy's pane, or moving the
+   * tab across, put the same buffer twice in one pane. `TabBar` keys its
+   * tabs by buffer id, and Svelte throws on a duplicate key, so the strip
+   * stopped updating. These hold every route to "no id twice in one pane";
+   * they do not mount the strip, so the throw itself is not observed here.
+   */
+  describe('a mirrored buffer never appears twice in one pane', () => {
+    const ids = (workspace: WorkspaceService) =>
+      workspace.groups.get().map((group) => group.tabs.map((tab) => tab.id));
+
+    const noDuplicates = (workspace: WorkspaceService) => {
+      for (const group of ids(workspace)) {
+        expect(new Set(group).size, `duplicate tab in ${JSON.stringify(group)}`).toBe(group.length);
+      }
+    };
+
+    it('when the copy’s pane is closed', async () => {
+      const { workspace } = setup();
+      const id = (await workspace.open('/w/a.ts'))!;
+      const copy = workspace.openCopyToSide()!;
+
+      expect(workspace.closeGroup(copy)).toBe(true);
+
+      noDuplicates(workspace);
+      expect(layout(workspace)).toEqual([['a.ts']]);
+      expect(workspace.activeId.get()).toBe(id);
+    });
+
+    it('when the original’s pane is closed', async () => {
+      const { workspace } = setup();
+      const id = (await workspace.open('/w/a.ts'))!;
+      const original = workspace.activeGroupId.get();
+      workspace.openCopyToSide();
+
+      expect(workspace.closeGroup(original)).toBe(true);
+
+      noDuplicates(workspace);
+      expect(layout(workspace)).toEqual([['a.ts']]);
+      expect(workspace.activeId.get()).toBe(id);
+    });
+
+    it('when the tab is moved to the next pane from the original', async () => {
+      const { workspace } = setup();
+      await workspace.open('/w/a.ts');
+      const original = workspace.activeGroupId.get();
+      workspace.openCopyToSide();
+      workspace.focusGroup(original);
+
+      workspace.moveActiveToGroup(1);
+
+      noDuplicates(workspace);
+      // The original pane emptied and folded away; the copy is the one left.
+      expect(layout(workspace)).toEqual([['a.ts']]);
+    });
+
+    /**
+     * This direction did not duplicate; it silently did nothing, because
+     * `moveTab` looked the buffer up by id and found the *original* pane
+     * first, so it moved the tab from there to there.
+     */
+    it('when the tab is moved to the previous pane from the copy', async () => {
+      const { workspace } = setup();
+      await workspace.open('/w/a.ts');
+      const copy = workspace.openCopyToSide()!;
+      expect(workspace.activeGroupId.get()).toBe(copy);
+
+      workspace.moveActiveToGroup(-1);
+
+      noDuplicates(workspace);
+      expect(layout(workspace)).toEqual([['a.ts']]);
+    });
+
+    it('when the tab is dragged onto the strip already showing it', async () => {
+      const { workspace } = setup();
+      const id = (await workspace.open('/w/a.ts'))!;
+      const original = workspace.activeGroupId.get();
+      const copy = workspace.openCopyToSide()!;
+      workspace.focusGroup(original);
+      await workspace.open('/w/b.ts');
+      expect(layout(workspace)).toEqual([['a.ts', 'b.ts'], ['a.ts']]);
+
+      // The drop path: `TabBar` names the strip it landed on.
+      workspace.moveTab(id, 0, copy);
+
+      noDuplicates(workspace);
+      expect(layout(workspace)).toEqual([['b.ts'], ['a.ts']]);
+      expect(workspace.activeId.get()).toBe(id);
+    });
+  });
 });
