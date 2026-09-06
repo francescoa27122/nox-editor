@@ -4750,6 +4750,27 @@ export class NoxApp {
         run: () => this.tasks.stop(),
       },
       {
+        id: 'view.toggleBottomPanel',
+        title: 'Toggle Bottom Panel',
+        category: 'View',
+        keywords: ['panel', 'bottom', 'terminal', 'tasks', 'hide', 'show'],
+        // No `capabilities`: it shows or hides a panel. Opening the terminal
+        // view goes through `focusTerminal` only where a shell exists, which
+        // is the same gate `terminal.focus` declares `shell.exec` behind;
+        // with no shell the panel falls back to tasks and starts nothing.
+        run: () => {
+          if (this.ui.bottomOpen()) {
+            this.ui.hideBottomPanel();
+            return;
+          }
+          if (this.ui.bottomView.get() === 'terminal' && this.terminal.available) {
+            this.ui.focusTerminal();
+          } else {
+            this.ui.showTasks();
+          }
+        },
+      },
+      {
         id: 'tasks.show',
         title: 'Show Tasks',
         category: 'Tasks',
@@ -5199,6 +5220,9 @@ export class NoxApp {
       // chord is Ctrl+M in VS Code on every platform, so this is the one
       // spelling that is both free and already known.
       'Ctrl+M': 'view.toggleTabFocus',
+      // The chord VS Code uses for the same panel. `Ctrl+\`` keeps meaning
+      // the terminal specifically; this one means whichever view was last.
+      'Mod+J': 'view.toggleBottomPanel',
       // The problems list is the panel most worth a hotkey, and ⌘⇧M is the
       // convention everywhere. References keeps no chord of its own: its
       // natural entry is Shift+F12, which already fills and shows the view.

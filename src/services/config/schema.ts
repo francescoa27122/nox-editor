@@ -171,9 +171,11 @@ export const SETTINGS_SCHEMA = {
     category: 'Terminal',
     advanced: true,
   }),
+  // The key predates the bottom panel and keeps its name so every existing
+  // settings file still means what it meant; the panel holds Tasks too now.
   'terminal.height': num(260, { min: 80, max: 900 }, {
-    label: 'Terminal Height',
-    description: 'Height of the terminal panel in pixels.',
+    label: 'Panel Height',
+    description: 'Height of the bottom panel, which holds the terminal and tasks, in pixels.',
     category: 'Terminal',
     advanced: true,
   }),

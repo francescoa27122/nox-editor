@@ -179,16 +179,26 @@ export class UIService {
    */
   readonly diffOpen = new Signal(false);
   /**
-   * Whether the tasks panel is showing, in the same slot again.
+   * Whether the tasks view of the bottom panel is showing.
    *
-   * The editor area rather than the sidebar, on the agents panel's argument
-   * two fields up: a task's output is an audit trail of what ran, and it wraps
-   * to nonsense in a 200px column. It would sit better *below* the editor
-   * beside the terminal, for the reason `terminalOpen` gives, and there is no
-   * bottom-panel container to put it in. See the Known debt table and
-   * `docs/superpowers/specs/2026-08-30-tasks-design.md` §7.
+   * Below the editor, beside the terminal, for the reason `terminalOpen`
+   * gives: a task is a build, and watching it fail next to the code that
+   * failed is what the panel is for. It took the editor area until
+   * 2026-09-05, because there was no bottom-panel container to put it in;
+   * `ui/BottomPanel.svelte` is that container now. Not the sidebar, on the
+   * agents panel's argument: output wraps to nonsense in a 200px column.
+   *
+   * At most one of this and `terminalOpen` is true. `showTasks` and
+   * `focusTerminal` hold that, and `tests/bottom-panel.test.ts` pins it.
+   * See `docs/superpowers/specs/2026-09-05-bottom-panel-design.md`.
    */
   readonly tasksOpen = new Signal(false);
+  /**
+   * Which view of the bottom panel was showing last, so Toggle Bottom Panel
+   * reopens the one you closed rather than always the terminal. Survives the
+   * panel being hidden, which is what makes it useful.
+   */
+  readonly bottomView = new Signal<'terminal' | 'tasks'>('terminal');
   /**
    * Whether the welcome screen was asked for.
    *
@@ -308,9 +318,11 @@ export class UIService {
     this.tabMovesFocus.update((on) => !on);
   }
 
-  /** Open the terminal panel and put the cursor in it. */
+  /** Open the terminal view of the bottom panel and put the cursor in it. */
   focusTerminal(): void {
+    this.tasksOpen.set(false);
     this.terminalOpen.set(true);
+    this.bottomView.set('terminal');
     this.focusZone.set('terminal');
     this.focusTerminalRequest.update((n) => n + 1);
   }
@@ -334,7 +346,6 @@ export class UIService {
   showAgents(): void {
     this.reviewOpen.set(false);
     this.diffOpen.set(false);
-    this.tasksOpen.set(false);
     this.agentsOpen.set(true);
   }
 
@@ -342,16 +353,38 @@ export class UIService {
   showDiff(): void {
     this.reviewOpen.set(false);
     this.agentsOpen.set(false);
-    this.tasksOpen.set(false);
     this.diffOpen.set(true);
   }
 
-  /** Show the tasks panel, which shares the same slot again. */
+  /**
+   * Show the tasks view of the bottom panel.
+   *
+   * Clears the terminal rather than the editor-slot panels: the bottom panel
+   * shows one view at a time, and the editor above it is untouched, which
+   * is the point of the panel being below rather than instead.
+   */
   showTasks(): void {
-    this.reviewOpen.set(false);
-    this.agentsOpen.set(false);
-    this.diffOpen.set(false);
+    this.terminalOpen.set(false);
     this.tasksOpen.set(true);
+    this.bottomView.set('tasks');
+  }
+
+  /** Hide the tasks view. A running task keeps running; see `dismissTop`. */
+  hideTasks(): void {
+    if (!this.tasksOpen.get()) return;
+    this.tasksOpen.set(false);
+    this.focusEditor();
+  }
+
+  /** Whether either view of the bottom panel is showing. */
+  bottomOpen(): boolean {
+    return this.terminalOpen.get() || this.tasksOpen.get();
+  }
+
+  /** Close whichever view of the bottom panel is showing. */
+  hideBottomPanel(): void {
+    if (this.terminalOpen.get()) this.hideTerminal();
+    else this.hideTasks();
   }
 
   /**
@@ -365,7 +398,6 @@ export class UIService {
     this.reviewOpen.set(false);
     this.agentsOpen.set(false);
     this.diffOpen.set(false);
-    this.tasksOpen.set(false);
     this.welcomeOpen.set(true);
   }
 

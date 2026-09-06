@@ -124,6 +124,10 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
     'review.show',
     'tasks.show',
     'view.dismiss',
+    // Shows or hides the bottom panel. Opening its terminal view goes
+    // through `terminal.focus`, which declares `shell.exec`; this falls back
+    // to the tasks view where there is no shell and starts nothing itself.
+    'view.toggleBottomPanel',
   ],
 
   /** Rearrange panes over files that are already open. */
