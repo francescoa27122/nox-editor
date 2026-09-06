@@ -123,6 +123,22 @@
   /** The buffer `autosaveTimer` was armed for; see `scheduleAutosave`. */
   let autosaveTarget: string | null = null;
 
+  /**
+   * The settings keys whose compartments read a buffer's indentation
+   * (A1-004). `reconfigureEffects` takes changed *settings* keys, so naming
+   * these two is how a one-file indentation change reconfigures exactly the
+   * `tabSize` and `indentUnit` compartments and nothing else. Nothing checks
+   * that this still matches `SETTING_TO_COMPARTMENTS` in `extensions.ts`;
+   * `tests/indentation.test.ts` fails if it stops.
+   */
+  const INDENT_KEYS: ReadonlySet<string> = new Set(['editor.insertSpaces', 'editor.tabSize']);
+
+  /** What this buffer was read to indent with, or null to use the setting. */
+  function indentOf(id: string | null) {
+    if (!id) return null;
+    return workspace.buffers.get().find((b) => b.id === id)?.indent ?? null;
+  }
+
   onMount(() => {
     if (!host) return;
 
@@ -233,14 +249,25 @@
 
     const offConfig = config.changed.subscribe((keys) => {
       if (!view || keys.size === 0) return;
-      const effects = reconfigureEffects(config.settings.get(), keys);
+      const effects = reconfigureEffects(config.settings.get(), keys, indentOf(currentId));
       if (effects.length > 0) view.dispatch({ effects });
+    });
+
+    // A1-004: changing a buffer's indentation by hand is a settings change
+    // that happened to one file, so it reconfigures through the same door,
+    // naming the two keys whose compartments read it.
+    const offIndent = workspace.events.on('indentation-changed', ({ id }) => {
+      if (!view || id !== currentId) return;
+      view.dispatch({
+        effects: reconfigureEffects(config.settings.get(), INDENT_KEYS, indentOf(id)),
+      });
     });
 
     return () => {
       offReset();
       offSaved();
       offConfig();
+      offIndent();
       offDispatcher();
       offDiagnostics();
       offGit();
@@ -378,7 +405,10 @@
     const languageId = buffer?.languageId ?? 'plaintext';
     view.dispatch({
       effects: [
-        ...reconfigureAllEffects(config.settings.get()),
+        // The buffer's own indentation travels with the settings, or
+        // `reconfigureAllEffects` would put the preference back over what the
+        // file was read to use on every tab switch.
+        ...reconfigureAllEffects(config.settings.get(), buffer?.indent ?? null),
         languageCompartment.reconfigure(cachedLanguage(languageId) ?? []),
         // `setState` resets every compartment to the state's own
         // configuration, so this is re-applied on each swap rather than once.

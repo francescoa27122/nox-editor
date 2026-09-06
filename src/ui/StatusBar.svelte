@@ -1,5 +1,6 @@
 <script lang="ts">
   import { encodingLabel } from '@core/encoding';
+  import { resolveIndentation } from '@core/indentation';
   import { runnableAgents } from '@services/agent/config';
   import { hasGrammar } from '@editor/languages';
   import { useApp } from './context';
@@ -115,10 +116,23 @@
   const languageTitle = $derived(languageStatus?.title ?? active?.languageName ?? '');
   const dirtyCount = $derived($buffers.filter((b) => b.isDirty).length);
 
+  /**
+   * What this file is indented with, which is not always what the preference
+   * says (A1-004). `buffer.indent` is read from the file when it is opened,
+   * and the setting is the fallback for a file that shows no indentation.
+   * Reading the setting alone put "Spaces: 2" over a tab-indented file.
+   */
+  const indentation = $derived(
+    resolveIndentation(active?.indent ?? null, {
+      insertSpaces: $settings['editor.insertSpaces'],
+      tabSize: $settings['editor.tabSize'],
+    }),
+  );
+
   const indentLabel = $derived(
-    $settings['editor.insertSpaces']
-      ? `Spaces: ${$settings['editor.tabSize']}`
-      : `Tabs: ${$settings['editor.tabSize']}`,
+    indentation.insertSpaces
+      ? `Spaces: ${indentation.tabSize}`
+      : `Tabs: ${indentation.tabSize}`,
   );
 
   const selectionLabel = $derived.by(() => {

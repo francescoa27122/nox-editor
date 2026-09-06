@@ -16,7 +16,9 @@ import { flush, mountComponent, type Mounted } from './support/component';
  *
  * That is now `git.focus`, and Find Previous keeps `Shift+F3` — the symmetric
  * half of `F3`, so that pair stays whole. What it costs is the shifted half of
- * the `Mod+G` pair, and one line of `keybindings.json` takes it back.
+ * macOS's `⌘G` pair (A1-007 gave `Ctrl+G` to Go to Line off macOS, so there
+ * is no pair to halve there), and one line of `keybindings.json` takes it
+ * back.
  *
  * A table-wide assertion rather than one about Git, for the same reason
  * `command-titles.test.ts` gives: each tooltip is individually plausible, and
