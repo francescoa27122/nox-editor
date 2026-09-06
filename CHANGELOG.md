@@ -6,6 +6,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-06
+
+Nox is the editor your desktop opens files with now, and one that keeps the
+code on screen while a build runs under it. A bottom panel, indent guides, a
+Tab that can leave the editor, an Alt that opens the menu, one window rather
+than two, and a tighter line around what an agent may do and read.
+
 ### Added
 
 - **Indent guides.** A faint line at each indent level beside the code, so
@@ -1937,7 +1944,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/francescoa27122/nox-editor/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francescoa27122/nox-editor/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francescoa27122/nox-editor/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francescoa27122/nox-editor/compare/v0.9.1...v0.10.0

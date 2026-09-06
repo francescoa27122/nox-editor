@@ -8,6 +8,38 @@ are knowledge.**
 
 ---
 
+## 2026-09-06 - 0.13.0 prepared, for the first signed build
+
+Francesco merged #201 as is (Windows takes the default for the code
+extensions; the changelog says which files are left alone), was approved for
+the Apple Developer Program, and asked for 0.13.0 to be prepared so the first
+signed build can be a `v0.13.0-rc1` dry run, per the signing spec's §4.
+
+**Shipped:** version 0.13.0 across `package.json`, the two Nox entries in
+`package-lock.json`, `tauri.conf.json`, `Cargo.toml` and the one `Cargo.lock`
+line. CHANGELOG `[Unreleased]` cut to `[0.13.0] - 2026-09-06` with a lede and
+both compare links; it carries the four UI changes, the two file-opening
+entries from #201, large-file mode, and the two agent-boundary changes. README
+§Status opens `**v0.13.**` with a paragraph for the release and the measured
+test count.
+
+**Verified:** `readme-series.mjs` prints 0.13, `release-notes.mjs 0.13.0`
+prints 75 lines, `cargo metadata --locked` exit 0 after the hand-edited lock
+line, and the full gate on the prep commit.
+
+**Next:** the key ceremony is Francesco's (spec §3, steps 2 to 8: CSR,
+Developer ID Application certificate, `.p12`, app-specific password, six
+`gh secret set`). Then `git tag v0.13.0-rc1 && git push origin v0.13.0-rc1`,
+watch the macOS legs say which path the signing guard took, download the DMG
+in a browser, and run the three `codesign`/`spctl`/`stapler` checks from §4.
+Only then the real tag. Tagging stays Francesco's.
+
+**Also in flight:** #212, the crate's first `unsafe` (a death signal on
+Linux, a job object on Windows), pushed red-first as a draft so CI records
+the grandchild outliving its parent before the fix lands.
+
+---
+
 ## 2026-09-06 - The next-steps pass: three gated decisions landed, and the packaged app walked
 
 Francesco said "next steps", so this took the list from the entry below in
