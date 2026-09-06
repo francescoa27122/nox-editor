@@ -1,5 +1,6 @@
 <script lang="ts">
   import { encodingLabel } from '@core/encoding';
+  import { resolveIndentation } from '@core/indentation';
   import { runnableAgents } from '@services/agent/config';
   import { hasGrammar } from '@editor/languages';
   import { useApp } from './context';
@@ -33,6 +34,7 @@
 
   const terminalOpen = ui.terminalOpen;
   const agentsOpen = ui.agentsOpen;
+  const tabMovesFocus = ui.tabMovesFocus;
   const configuredAgents = agentConfig.agents;
   const providers = agents.providers;
 
@@ -115,10 +117,23 @@
   const languageTitle = $derived(languageStatus?.title ?? active?.languageName ?? '');
   const dirtyCount = $derived($buffers.filter((b) => b.isDirty).length);
 
+  /**
+   * What this file is indented with, which is not always what the preference
+   * says (A1-004). `buffer.indent` is read from the file when it is opened,
+   * and the setting is the fallback for a file that shows no indentation.
+   * Reading the setting alone put "Spaces: 2" over a tab-indented file.
+   */
+  const indentation = $derived(
+    resolveIndentation(active?.indent ?? null, {
+      insertSpaces: $settings['editor.insertSpaces'],
+      tabSize: $settings['editor.tabSize'],
+    }),
+  );
+
   const indentLabel = $derived(
-    $settings['editor.insertSpaces']
-      ? `Spaces: ${$settings['editor.tabSize']}`
-      : `Tabs: ${$settings['editor.tabSize']}`,
+    indentation.insertSpaces
+      ? `Spaces: ${indentation.tabSize}`
+      : `Tabs: ${indentation.tabSize}`,
   );
 
   const selectionLabel = $derived.by(() => {
@@ -289,6 +304,19 @@
 
     {#if selectionLabel}
       <span class="item static accent">{selectionLabel}</span>
+    {/if}
+
+    <!-- Only while the mode is on. The moment a person needs telling is
+         when Tab has stopped indenting and they do not remember why; the
+         rest of the time it is one more item in a bar that is full. -->
+    {#if $tabMovesFocus}
+      <button
+        class="item"
+        title={withChord('Tab moves focus instead of indenting. Click to turn that off', 'view.toggleTabFocus')}
+        onclick={() => void commands.execute('view.toggleTabFocus')}
+      >
+        Tab Moves Focus
+      </button>
     {/if}
 
     {#if active}

@@ -118,7 +118,14 @@ export type SessionStatus =
 export type AgentAction =
   | { kind: 'instruction'; at: number; text: string }
   | { kind: 'note'; at: number; text: string }
-  | { kind: 'read'; at: number; method: string; target?: string }
+  | {
+      kind: 'read';
+      at: number;
+      method: string;
+      target?: string;
+      /** The read was refused: the buffer is outside the workspace root. */
+      refused?: true;
+    }
   /** What the opening brief handed the model before it asked for anything. */
   | { kind: 'brief'; at: number; detail: string }
   | {
@@ -813,6 +820,24 @@ export class AgentRuntime {
 
     const reader = this.#context.reader(principal);
 
+    // A read of a buffer outside the workspace root. `ContextReader` is what
+    // actually withholds the text; this exists so the agent gets a code it can
+    // act on rather than the `null` the reader returns, which it would read as
+    // an empty file, and so the refusal reaches the trail the panel renders.
+    // Both sides ask `ContextService.inScope`, which is the one rule.
+    //
+    // Named by id and never by filename: an agent that guessed an id it was
+    // never handed would otherwise learn the name of a file this boundary
+    // exists to keep from it.
+    const refuseOutside = (bufferId: BufferId): CoreResponse => {
+      record({ kind: 'read', method: request.method, target: bufferId, refused: true });
+      return failure(
+        request.id,
+        'permission-denied',
+        `Buffer ${bufferId} is outside the workspace folder`,
+      );
+    };
+
     try {
       switch (request.method) {
         // `openBuffers`, `viewport`, `workspaceTree` and `recentTransactions`
@@ -833,12 +858,13 @@ export class AgentRuntime {
           return success(request.id, reader.openBuffers());
 
         case 'context.bufferText': {
+          const { bufferId, ...options } = request.params;
+          if (!this.#context.inScope(bufferId)) return refuseOutside(bufferId);
           record({
             kind: 'read',
             method: request.method,
-            target: request.params.bufferId,
+            target: bufferId,
           });
-          const { bufferId, ...options } = request.params;
           const text = reader.bufferText(bufferId, options);
           if (text === null) return failure(request.id, 'not-found', `No buffer ${bufferId}`);
           // A plain whole-document read is the only one that may *refresh* the
@@ -876,12 +902,13 @@ export class AgentRuntime {
         }
 
         case 'context.selection': {
+          const { bufferId } = request.params;
+          if (!this.#context.inScope(bufferId)) return refuseOutside(bufferId);
           record({
             kind: 'read',
             method: request.method,
-            target: request.params.bufferId,
+            target: bufferId,
           });
-          const { bufferId } = request.params;
           const selection = reader.selection(bufferId);
           // A selection read hands back real document offsets and the text at
           // them — everything needed to compute an edit — so it is exposed to
@@ -897,13 +924,16 @@ export class AgentRuntime {
           return success(request.id, selection);
         }
 
-        case 'context.viewport':
+        case 'context.viewport': {
+          const { bufferId } = request.params;
+          if (!this.#context.inScope(bufferId)) return refuseOutside(bufferId);
           record({
             kind: 'read',
             method: request.method,
-            target: request.params.bufferId,
+            target: bufferId,
           });
-          return success(request.id, reader.viewport(request.params.bufferId));
+          return success(request.id, reader.viewport(bufferId));
+        }
 
         case 'context.workspaceTree':
           record({ kind: 'read', method: request.method });

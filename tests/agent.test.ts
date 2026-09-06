@@ -1896,6 +1896,67 @@ describe('the brief', () => {
   });
 });
 
+describe('the workspace boundary on reads', () => {
+  /**
+   * Open a file from outside the project, selected and active.
+   *
+   * The state the boundary exists for: Nox opens anything you point it at, so
+   * a `.env` or a credentials file can be the active tab when an agent starts
+   * on an instruction that has nothing to do with it.
+   */
+  async function withOutsideFile(fixture: Awaited<ReturnType<typeof setup>>) {
+    fixture.platform.seedFile('/elsewhere/.env', 'API_KEY=hunter2\n');
+    const id = (await fixture.workspace.open('/elsewhere/.env'))!;
+    fixture.workspace.setActive(id);
+    fixture.workspace.setSelection(id, { ranges: [[0, 15]], main: 0 });
+    return id;
+  }
+
+  it('refuses a read outside the root and shows the refusal on the trail', async () => {
+    const fixture = await setup();
+    const outside = await withOutsideFile(fixture);
+    const refusals: { code: string; message: string }[] = [];
+
+    const session = fixture.runtime.start(
+      new ProviderTransport(
+        new ScriptedProvider(async function* () {
+          const response = yield {
+            type: 'action',
+            request: { method: 'context.bufferText', params: { bufferId: outside } },
+          };
+          if (response && !response.ok) refusals.push(response.error);
+        }),
+      ),
+      'read the env file',
+    );
+    await settle(session);
+
+    // `permission-denied` and not `not-found`: the buffer is open and the
+    // answer is that this agent may not have it. `not-found` would invite an
+    // agent to go looking for another id for the same file.
+    expect(refusals.map((refusal) => refusal.code)).toEqual(['permission-denied']);
+    // On the trail, so the Agents panel shows the attempt. `ContextReader`
+    // answers `null`, which an agent reads as an empty file; without this row
+    // the only record of the refusal would be the message the agent got.
+    expect(
+      session.actions.get().filter((action) => action.kind === 'read' && action.refused === true),
+    ).toHaveLength(1);
+  });
+
+  it('keeps a selection from outside the root out of the brief', async () => {
+    const fixture = await setup();
+    await withOutsideFile(fixture);
+
+    const brief = fixture.runtime.brief(PRINCIPAL);
+    expect(brief).not.toContain('hunter2');
+    expect(brief).not.toContain('.env');
+    // The brief is built from the reader's listing, so an out-of-root file
+    // leaves it entirely rather than appearing with its text withheld. With
+    // the active file gone there is no active line and no selection to quote.
+    expect(brief).toBe(`Open files: a.txt [${fixture.a}], b.txt [${fixture.b}]`);
+  });
+});
+
 describe('a scoped session', () => {
   // The conversion nobody notices until it is wrong: context.selection counts
   // lines from 1 for humans, Hunk.fromLine counts from 0.
