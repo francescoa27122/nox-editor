@@ -14,6 +14,7 @@ import {
 } from '@codemirror/commands';
 import { selectNextOccurrence } from '@codemirror/search';
 import type { EditorView } from '@codemirror/view';
+import { resolveIndentation } from '@core/indentation';
 import { languageById } from '@core/languages';
 import { definitionTargets, type LspLocation } from '@core/lsp-definition';
 import { locationRows, referenceTargets, type LocationList } from '@core/lsp-references';
@@ -246,8 +247,10 @@ export class NoxApp {
     this.keymap = new KeymapService(this.commands, platform);
     // Buffers are created with the current settings and no grammar; the
     // grammar is reconfigured in once it resolves. See EditorPane.
-    this.workspace = new WorkspaceService(platform, () =>
-      buildExtensions(this.config.settings.get()),
+    this.workspace = new WorkspaceService(platform, (args) =>
+      // The detected indentation comes back through the factory args so a
+      // buffer opened from a tab-indented file is built with tabs (A1-004).
+      buildExtensions(this.config.settings.get(), args.indent),
     );
     this.files = new FileTreeService(platform);
     this.watcher = new FileWatcherService(
@@ -269,6 +272,20 @@ export class NoxApp {
     // command, so this single check covers everything a plugin or agent could
     // ask for — and the user never reaches it.
     this.commands.setGuard(async (command, principal, resource) => {
+      // A non-user principal may only run a command that says what it does.
+      // An absent `capabilities` means "nothing with a side effect", which is
+      // a claim nobody verifies, so an agent or a plugin reaching a command
+      // whose author forgot is refused rather than waved through. Refusing
+      // costs an agent workflow until the declaration is added; allowing costs
+      // an unlogged write. `tests/command-capabilities.test.ts` keeps the set
+      // of commands this refuses visible and grouped by why.
+      if (!command.capabilities?.length) {
+        this.permissions.refuseUndeclared({
+          principal,
+          commandId: command.id,
+          description: command.title,
+        });
+      }
       for (const capability of command.capabilities ?? []) {
         await this.permissions.require({
           principal,
@@ -4538,12 +4555,42 @@ export class NoxApp {
         run: () => this.config.set('editor.wordWrap', !this.config.get('editor.wordWrap')),
       },
       {
+        id: 'view.toggleIndentGuides',
+        title: 'Toggle Indent Guides',
+        category: 'View',
+        keywords: ['indent', 'guides', 'indentation', 'lines', 'nesting'],
+        run: () =>
+          this.config.set('editor.indentGuides', !this.config.get('editor.indentGuides')),
+      },
+      {
         id: 'view.toggleIndentType',
         title: 'Toggle Tabs and Spaces',
         category: 'View',
         keywords: ['indent', 'indentation', 'tab size', 'whitespace'],
-        run: () =>
-          this.config.set('editor.insertSpaces', !this.config.get('editor.insertSpaces')),
+        // Per file when there is a file, because detection is per file
+        // (A1-004): a control that flipped the global preference would leave
+        // the status bar reading whatever this buffer was detected as, and
+        // the click would look like it had done nothing. With no buffer open
+        // there is nothing to override, so it moves the default instead,
+        // which is the only thing the words can mean there.
+        run: () => {
+          const fallback = {
+            insertSpaces: this.config.get('editor.insertSpaces'),
+            tabSize: this.config.get('editor.tabSize'),
+          };
+          const active = this.workspace.activeSnapshot();
+          if (!active) {
+            this.config.set('editor.insertSpaces', !fallback.insertSpaces);
+            return;
+          }
+          const current = resolveIndentation(active.indent, fallback);
+          // The width is carried across rather than re-read: switching to
+          // tabs is not also a request to change the number beside them.
+          this.workspace.setIndentation(active.id, {
+            insertSpaces: !current.insertSpaces,
+            tabSize: current.tabSize,
+          });
+        },
       },
       {
         id: 'view.toggleLineNumbers',
@@ -4717,6 +4764,27 @@ export class NoxApp {
         run: () => this.tasks.stop(),
       },
       {
+        id: 'view.toggleBottomPanel',
+        title: 'Toggle Bottom Panel',
+        category: 'View',
+        keywords: ['panel', 'bottom', 'terminal', 'tasks', 'hide', 'show'],
+        // No `capabilities`: it shows or hides a panel. Opening the terminal
+        // view goes through `focusTerminal` only where a shell exists, which
+        // is the same gate `terminal.focus` declares `shell.exec` behind;
+        // with no shell the panel falls back to tasks and starts nothing.
+        run: () => {
+          if (this.ui.bottomOpen()) {
+            this.ui.hideBottomPanel();
+            return;
+          }
+          if (this.ui.bottomView.get() === 'terminal' && this.terminal.available) {
+            this.ui.focusTerminal();
+          } else {
+            this.ui.showTasks();
+          }
+        },
+      },
+      {
         id: 'tasks.show',
         title: 'Show Tasks',
         category: 'Tasks',
@@ -4797,6 +4865,17 @@ export class NoxApp {
         // No `capabilities`: it moves focus and nothing else.
         enabled: () => !this.platform.capabilities.applicationMenu,
         run: () => this.ui.focusMenuBar(),
+      },
+      {
+        id: 'view.toggleTabFocus',
+        // VS Code's wording, because the people who need this command know
+        // it by this name from there and search the palette for it.
+        title: 'Toggle Tab Key Moves Focus',
+        category: 'View',
+        keywords: ['tab', 'focus', 'trap', 'accessibility', 'keyboard', 'escape', 'leave'],
+        // No `capabilities`: it changes what one key does inside the window
+        // and touches nothing outside it.
+        run: () => this.ui.toggleTabFocus(),
       },
       {
         id: 'notes.focus',
@@ -5146,9 +5225,18 @@ export class NoxApp {
       'Mod+Alt+N': 'notes.open',
       // Bare F10 is free: all three existing F10 handlers require Shift, and
       // `editor-context-menu.test.ts` asserts an unmodified F10 is left
-      // alone. Alt-mnemonics were the alternative and collide — `Alt+G` is
-      // already `nav.goToLine` off macOS, which is the Go menu's own letter.
+      // alone. Alt-mnemonics were the alternative, and A5-003 is the decision
+      // about whether to add them; `Alt+G` stopped being `nav.goToLine` off
+      // macOS with A1-007, so that collision is gone but the decision is not
+      // this binding's to take.
       'F10': 'menubar.focus',
+      // `Ctrl`, not `Mod`: ⌘M is Minimize at the OS level on macOS, and the
+      // chord is Ctrl+M in VS Code on every platform, so this is the one
+      // spelling that is both free and already known.
+      'Ctrl+M': 'view.toggleTabFocus',
+      // The chord VS Code uses for the same panel. `Ctrl+\`` keeps meaning
+      // the terminal specifically; this one means whichever view was last.
+      'Mod+J': 'view.toggleBottomPanel',
       // The problems list is the panel most worth a hotkey, and ⌘⇧M is the
       // convention everywhere. References keeps no chord of its own: its
       // natural entry is Shift+F12, which already fills and shows the view.
@@ -5173,15 +5261,17 @@ export class NoxApp {
       // Edit
       'Mod+F': 'edit.find',
       'Mod+Alt+F': 'edit.replace',
-      'Mod+G': 'edit.findNext',
+      // Find Next is `F3` on every platform, and `Mod+G` as well on macOS
+      // only. See the Go to Line binding below `bindAll` for why the two
+      // differ (A1-007).
       F3: 'edit.findNext',
       // `Mod+Shift+G` used to be here, and is now the Git panel — see the
       // sidebar block above. Find Previous keeps `Shift+F3`, which is the
       // symmetric half of `F3` and so leaves that pair whole; what it costs
-      // is the shifted half of the `Mod+G` pair, and that is the whole price
-      // of the trade. One line of `keybindings.json` takes it back for anyone
-      // who wants it, which is the difference between removing a binding here
-      // and removing it from an editor that cannot be rebound.
+      // is the shifted half of macOS's `⌘G` pair, and that is the whole
+      // price of the trade. One line of `keybindings.json` takes it back for
+      // anyone who wants it, which is the difference between removing a
+      // binding here and removing it from an editor that cannot be rebound.
       'Shift+F3': 'edit.findPrevious',
       'Mod+Shift+L': 'edit.selectAllMatches',
       // ⌘⇧[ / ⌘⇧] already switch tabs, so folding takes the ⌥ variants.
@@ -5219,9 +5309,20 @@ export class NoxApp {
       'Mod+Alt+K': 'prefs.keybindings',
     });
 
-    // Go to Line: ⌃G matches macOS convention without colliding with ⌘G
-    // (Find Next). On Windows and Linux ⌃G is already Find Next, so use ⌥G.
-    this.keymap.bind(platformIsMac ? 'Ctrl+G' : 'Alt+G', 'nav.goToLine');
+    // Go to Line takes ⌃G everywhere, which is one chord that satisfies both
+    // conventions at once: on macOS it is the platform's own, and on Windows
+    // and Linux `Ctrl+G` is what VS Code, Sublime, Notepad++, gedit and Kate
+    // all give it (A1-007). It used to be ⌥G off macOS, which is Nox's own
+    // invention and appears in no other editor, and the reason was that
+    // `Mod+G` had taken `Ctrl+G` there for Find Next.
+    //
+    // So Find Next gives it up off macOS and keeps `F3`, which is the
+    // platform's chord for Find Next and was already bound beside it, with
+    // `Shift+F3` still Find Previous. Nothing is left unbound. On macOS ⌘G
+    // is still Find Next and ⌃G is still Go to Line, so nothing moves there
+    // at all, and the two bindings are separate chords rather than one.
+    this.keymap.bind('Ctrl+G', 'nav.goToLine');
+    if (platformIsMac) this.keymap.bind('Mod+G', 'edit.findNext');
 
     // ⌘1…⌘9 jump to a tab by position.
     for (let index = 0; index < 9; index++) {

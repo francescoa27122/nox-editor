@@ -82,11 +82,17 @@ describe('editor commands', () => {
     }
   });
 
+  /**
+   * The expectation moved with A1-004: this file's one indented line is four
+   * spaces, so four spaces is what its indent unit *is*, and outdent takes
+   * the whole of it. It used to take two, the configured default, which is
+   * exactly the re-indentation that finding is about.
+   */
   it('edit.outdent removes one indent unit from the cursor line', async () => {
     const { app, view } = await pane({ [A]: '    x\n' });
     view.dispatch({ selection: { anchor: 5 } });
     await app.commands.execute('edit.outdent');
-    expect(view.state.doc.line(1).text).toBe('  x');
+    expect(view.state.doc.line(1).text).toBe('x');
   });
 
   it('edit.selectNextOccurrence adds the next match as a second range', async () => {

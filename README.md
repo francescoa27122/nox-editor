@@ -279,7 +279,7 @@ endings, the language, the wrap.
 ## Status
 
 **v0.12.** It's young, and it's a personal project rather than a product, but
-it's real software with 2,438 tests and I use it. Expect rough edges. Open an
+it's real software with 2,771 tests and I use it. Expect rough edges. Open an
 issue if you hit one, and run **Copy Diagnostics** from the palette first: it
 puts the version, the platform and what recently went wrong on your clipboard,
 with your home directory stripped out of the paths.
@@ -293,6 +293,14 @@ annotates what you have *open* rather than what's saved, so a line you just
 typed reads Uncommitted instead of borrowing the name above it. Still not a Git
 client: no push, pull, rebase or amend, and nothing that can discard your
 working tree.
+
+**0.12.0 also runs your project's own commands** (**Run Task…**, from a
+`tasks.json` you write), and a project can carry its own in `.nox/tasks.json`,
+which Nox shows you before it runs the first time because that file arrived
+with the clone. A path on the command line, or a file opened with Nox from the
+Finder, opens. And a full audit of the codebase closed sixty-nine findings in
+the same release, one of them a keystroke that a save in flight could lose;
+[CHANGELOG.md](CHANGELOG.md) has the list.
 
 Also in 0.5.0: **you can change the keys** (every command, including the ones
 with none), **a project can carry its own conventions** in `.nox/settings.json`,

@@ -219,6 +219,26 @@ export function noxTheme(options: ThemeOptions): Extension {
         backgroundColor: 'var(--nox-line-active)',
       },
 
+      // --- Indent guides --------------------------------------------------
+      // One hairline per level, painted as a repeating gradient sized to the
+      // line's own guide count (`editor/indent-guides.ts` sets the two custom
+      // properties per line). A background rather than inserted elements, so
+      // nothing sits in the text for the cursor or a search to trip over.
+      // `content-box` origin so the first guide starts where the text does,
+      // inside the line's left padding. Only `background-image`, never the
+      // shorthand: the active line's colour above has to survive on the same
+      // element, and the shorthand would reset it. The two per-line
+      // properties are deliberately not `--nox-*`: they are a decoration's
+      // output, not design tokens, and `tests/token-definitions.test.ts`
+      // rightly refuses a `--nox-*` that `tokens.css` does not declare.
+      '.cm-line.cm-indentGuides': {
+        backgroundImage:
+          'repeating-linear-gradient(to right, var(--nox-indent-guide) 0 1px, transparent 1px var(--guide-step))',
+        backgroundOrigin: 'content-box',
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'calc(var(--guides) * var(--guide-step)) 100%',
+      },
+
       // --- Brackets & search ----------------------------------------------
       '.cm-matchingBracket, &.cm-focused .cm-matchingBracket': {
         backgroundColor: 'var(--nox-match-bracket)',

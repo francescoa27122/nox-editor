@@ -2,6 +2,7 @@ import { parser as jsParser } from '@lezer/javascript';
 import { Text } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { diffText } from '../src/core/diff';
+import { detectIndentation } from '../src/core/indentation';
 import { parseGitBlame } from '../src/core/git-blame';
 import { fuzzyFilter } from '../src/core/fuzzy';
 import { buildSearchRegex, findMatches } from '../src/core/search-match';
@@ -47,6 +48,38 @@ import { describeGrowth, growth } from './support/growth';
  * flaky required check blocks everyone with no override.
  */
 describe('the pure layers still scale', () => {
+  /**
+   * A1-004: indentation detection costs the same on a 60 MB file as on a
+   * short one, because it reads a bounded sample rather than the document.
+   *
+   * **The budget is 6x here rather than 24x, and that is deliberate.** Every
+   * other guard in this file watches a *linear* claim, so its budget has to
+   * clear the input ratio. This one watches a *constant* claim, so the
+   * expected ratio is 1.0 and a budget above the input ratio would assert
+   * nothing at all: at 32x the input, a detector that walked the whole
+   * document would report about 32x and sail under 24. Six is well clear of
+   * measurement noise on identical work and well under the 32x the mutation
+   * produces.
+   *
+   * Verified: removing the `MAX_SAMPLE_LINES` and `MAX_SAMPLE_CHARS` bounds
+   * reports **35.6x** and fails this.
+   *
+   * What it does not catch on its own is which of the two bounds is missing,
+   * since either one alone still bounds a corpus of ordinary short lines.
+   * `tests/indentation.test.ts` covers the line bound behaviourally and says
+   * so; the byte bound is argued in `core/indentation.ts` and unguarded.
+   */
+  it('reads a file for its indentation in constant time, whatever the file', () => {
+    const g = growth(
+      (lines) => sourceFile(lines),
+      (text) => void detectIndentation(text),
+      2_000,
+      64_000,
+    );
+
+    expect(g.ratio, describeGrowth('detectIndentation', g, 6)).toBeLessThan(6);
+  });
+
   /**
    * Catches quadratic work added anywhere on the diff path. Verified: a nested
    * loop over the line array reports **51.2x** and fails this.
@@ -262,12 +295,21 @@ describe('the pure layers still scale', () => {
    * Measured locally: `enclosingSymbols` **0.8x-1.0x** at 16x the input (it
    * does not grow at all, within noise); the walk it replaced, `stickyRows(
    * fileSymbols(...))` over the same fixture and position, measured
-   * **17.4x-19.4x** — tracking the document, as A4-001 found by reading the
-   * code. A budget of 4 sits well above the flat implementation's noise and
-   * well below the old one's near-linear growth, so this fails on the
-   * regression this exists to catch and would not have failed on the
-   * complexity claim `stickyRows` alone still makes (that one is still
-   * guarded structurally: it only ever seees rows that fit in `max`).
+   * **17.4x-19.4x**, tracking the document, as A4-001 found by reading the
+   * code.
+   *
+   * **The budget is 8, and it was 4 until it flaked.** A shared CI runner
+   * measured 4.30x on 2026-09-04 for a call whose true growth is about 1x:
+   * the numbers here are 1.32ms and 5.67ms, small enough that one descheduled
+   * slice of the larger sample moves the ratio further than any real
+   * regression would. Widening it does not weaken what this catches, because
+   * the thing it exists to catch measured 17x on the same fixture. What a
+   * tighter budget bought was not sensitivity but a red build on an unrelated
+   * pull request, which is worse than useless: it teaches people that a red
+   * complexity guard means nothing.
+   *
+   * If this flakes again the answer is a longer sample rather than a wider
+   * budget, since the noise is in the measurement and not in the code.
    */
   it('pins sticky rows in proportion to nesting depth, not document length', () => {
     const ts = jsParser.configure({ dialect: 'ts' });
@@ -289,7 +331,7 @@ describe('the pure layers still scale', () => {
       32_000,
     );
 
-    expect(g.ratio, describeGrowth('enclosingSymbols', g, 4)).toBeLessThan(4);
+    expect(g.ratio, describeGrowth('enclosingSymbols', g, 8)).toBeLessThan(8);
   });
 
   it('survives an unclosed fence with a long whitespace tail', () => {

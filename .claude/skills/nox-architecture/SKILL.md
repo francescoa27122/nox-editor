@@ -73,7 +73,9 @@ $effect(() => {
 
 ## Commands
 
-Every user action is a command, and **`capabilities` is the whole basis of permission enforcement.** A command with a side effect that omits it is a hole. Enforcement happens in exactly one place, the guard installed at `app.ts:248-257`, and the user principal skips it.
+Every user action is a command, and **`capabilities` is the whole basis of permission enforcement.** A command with a side effect that omits it is a hole. Enforcement happens in exactly one place, the guard installed at `app.ts:271-299`, and the user principal skips it.
+
+Since 2026-09-03 that guard **refuses** any command declaring nothing to a plugin or an agent, so an omission costs an agent workflow rather than an unlogged write. It is still an omission: the user is exempt, so a missing declaration is still wrong, and a new command that genuinely needs no capability must join the pinned groups in `tests/command-capabilities.test.ts` or that suite fails.
 
 Register in the one array in `app.ts#registerCommands` (`app.ts:2719-4528`), under its banner comment:
 
@@ -89,7 +91,7 @@ Register in the one array in `app.ts#registerCommands` (`app.ts:2719-4528`), und
 },
 ```
 
-Use `keyHint: 'Mod+Z'` when CodeMirror owns the chord rather than `services/keymap.ts`. `register` throws on a duplicate id (`commands.ts:120`). `execute` is async (`commands.ts:187`), so call it as `void commands.execute('…')`.
+Use `keyHint: 'Mod+Z'` when CodeMirror owns the chord rather than `services/keymap.ts`. `register` throws on a duplicate id (`commands.ts:124`). `execute` is async (`commands.ts:193`), so call it as `void commands.execute('…')`.
 
 `enabled` gates on **service state, not a platform capability flag**, wherever a service owns the capability: `() => this.git.started`, `() => this.updates.started`. The service only starts where the capability holds, and jsdom tests start it directly over `MemoryPlatform`, where a `platform.capabilities.*` gate reads false and the command becomes untestable. This repo learned it twice, on the LSP commands and then on `git.showDiff`. The exception is a capability with no service behind it: exactly three commands read `platform.capabilities` directly (`applicationMenu`, and `nativeDialogs` twice), because there is nothing else to ask.
 
@@ -164,7 +166,7 @@ The house style is **why, never what**. A comment restating the code is noise. O
 |---|---|
 | Logic in a component | If you're writing an `if` about *what should happen*, it belongs in a service |
 | Wiring a button to a service method | Give it a command id and dispatch that |
-| A side-effecting command with no `capabilities` | Silently unenforceable: the declaration *is* the enforcement |
+| A side-effecting command with no `capabilities` | Unenforceable for the user, refused outright to an agent: the declaration *is* the enforcement |
 | Reading a signal without binding it to a local const | The `$` prefix only works on a plain identifier |
 | Reaching for `derived()` from `core/signal.ts` | Dead code; use `$derived` or a service method |
 | A hardcoded default in a component | Every preference goes in the schema |

@@ -58,17 +58,60 @@ const click = (element: HTMLElement) =>
   element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
 describe('the status bar', () => {
-  it('changes the indent type through the command, not through config', async () => {
+  /**
+   * Rewritten for A1-004. It used to assert the click moved
+   * `editor.insertSpaces`, and it no longer does: indentation is detected per
+   * file, so the control that corrects it is per file too, and the setting
+   * stays the default a file with nothing to say falls back to. What the test
+   * was really for is unchanged, and is the second assertion.
+   */
+  it('changes the open file indent type through the command, not through config', async () => {
     const { app, container } = await mountBar();
-    const before = app.config.get('editor.insertSpaces');
+    const setting = app.config.get('editor.insertSpaces');
 
     click(item(container, 'Spaces:'));
     flush();
 
-    expect(app.config.get('editor.insertSpaces')).toBe(!before);
-    // The point of the fix: the click is a command dispatch, so the palette,
-    // the keybinding editor and the recency ranking all see it.
+    expect(app.workspace.activeSnapshot()?.indent).toEqual({ insertSpaces: false, tabSize: 2 });
+    expect(app.config.get('editor.insertSpaces')).toBe(setting);
+    // The point of the original fix: the click is a command dispatch, so the
+    // palette, the keybinding editor and the recency ranking all see it.
     expect(app.commands.lastExecuted.get()).toBe('view.toggleIndentType');
+  });
+
+  /**
+   * A1-004: the item is a readout as well as a control, and it used to read
+   * the preference. Over a tab-indented file that made it say "Spaces: 2"
+   * about a buffer that was inserting tabs.
+   */
+  it('shows what the open file is indented with, not the preference', async () => {
+    const platform = new MemoryPlatform();
+    platform.mkdirp('/w');
+    platform.seedFile('/w/tabs.go', 'func a() {\n\treturn 1\n}\n');
+    const { container } = await mountBar(platform, '/w/tabs.go');
+
+    expect(item(container, 'Tabs:').textContent?.trim()).toBe('Tabs: 2');
+  });
+
+  /**
+   * The click flips what the *item says*, not what the setting says. Flipping
+   * the setting instead would be a no-op on the screen for exactly the files
+   * detection exists for: over a tab-indented file with the spaces default,
+   * "Tabs: 2" would go to spaces-off, which still reads "Tabs: 2", and the
+   * control would look broken.
+   */
+  it('toggles away from the detected value, not away from the setting', async () => {
+    const platform = new MemoryPlatform();
+    platform.mkdirp('/w');
+    platform.seedFile('/w/tabs.go', 'func a() {\n\treturn 1\n}\n');
+    const { app, container } = await mountBar(platform, '/w/tabs.go');
+    expect(app.config.get('editor.insertSpaces')).toBe(true);
+
+    click(item(container, 'Tabs:'));
+    flush();
+
+    expect(app.workspace.activeSnapshot()?.indent).toEqual({ insertSpaces: true, tabSize: 2 });
+    expect(item(container, 'Spaces:').textContent?.trim()).toBe('Spaces: 2');
   });
 
   it('changes the line endings through the command, not through the workspace', async () => {
