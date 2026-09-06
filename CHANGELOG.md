@@ -6,6 +6,13 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-06
+
+Nox is the editor your desktop opens files with now, and one that keeps the
+code on screen while a build runs under it. A bottom panel, indent guides, a
+Tab that can leave the editor, an Alt that opens the menu, one window rather
+than two, and a tighter line around what an agent may do and read.
+
 ### Added
 
 - **Indent guides.** A faint line at each indent level beside the code, so
@@ -26,6 +33,22 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   opens that menu, and the letter is underlined while Alt is held. Alt held
   for a chord, such as <kbd>Alt Z</kbd> for word wrap, is a chord and nothing
   else. <kbd>F10</kbd> still works.
+
+- **Open a file from your desktop.** The installers register Nox for plain
+  text and for the code it highlights, so a `.txt`, a `.rs` or a `.py` opens
+  in Nox from Explorer, Finder or your file manager. Typing `nox notes.txt` at
+  a prompt already worked and still does.
+
+  **Data and config files are left alone**, along with `.html`, `.svg` and
+  `.plist`. A `.json`, a `.md` or a `.yml` usually already opens in something
+  you chose, and on Windows an install cannot politely offer: it takes the
+  default. So Nox does not ask for those, and stays one **Open With** away.
+
+- **A second file opens as a tab, not a second Nox.** Two Nox windows share
+  one session file, and whichever you quit last overwrote the other's tabs,
+  including tabs with unsaved text. A launch that arrives while Nox is running
+  now hands its files to the window you already have and brings it to the
+  front.
 
 ### Changed
 
@@ -1930,7 +1953,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/francescoa27122/nox-editor/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francescoa27122/nox-editor/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francescoa27122/nox-editor/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/francescoa27122/nox-editor/compare/v0.9.1...v0.10.0

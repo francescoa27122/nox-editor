@@ -278,11 +278,23 @@ endings, the language, the wrap.
 
 ## Status
 
-**v0.12.** It's young, and it's a personal project rather than a product, but
-it's real software with 2,771 tests and I use it. Expect rough edges. Open an
+**v0.13.** It's young, and it's a personal project rather than a product, but
+it's real software with 2,870 tests and I use it. Expect rough edges. Open an
 issue if you hit one, and run **Copy Diagnostics** from the palette first: it
 puts the version, the platform and what recently went wrong on your clipboard,
 with your home directory stripped out of the paths.
+
+**0.13.0 is the one your desktop knows about.** The installers register Nox
+for plain text and the code it highlights, so a double-click opens a file
+here, and a second file opens as a tab in the window you already have rather
+than as a second Nox. Below the code, **a bottom panel** holds the terminal
+and your project's tasks with a tab for each (<kbd>Mod J</kbd>), so a build's
+output sits under the file you are building instead of replacing it. **Indent
+guides** show the shape of a nested block. <kbd>Ctrl M</kbd> lets Tab leave
+the editor for a keyboard user, and on Windows and Linux a bare Alt opens the
+menu bar. A file over 5 MB opens in a lighter mode and says so. And the line
+around an agent is tighter: it may only run a command that declares what it
+does, and it reads only inside the folder you have open.
 
 **Git is complete as of 0.12.0.** It arrived in 0.5.0 with a gutter marking
 what the index doesn't hold yet, a side-by-side or inline diff of the file
