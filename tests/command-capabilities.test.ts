@@ -227,6 +227,9 @@ const NEEDS_NOTHING: Record<string, readonly string[]> = {
    * The honest fix is a `settings.write` capability, which is a change to the
    * vocabulary rather than to this table.
    */
+  // A mode, not a preference: it is never written to disk, and what it
+  // changes is which control the next Tab lands on.
+  'changing what one key does inside the window': ['view.toggleTabFocus'],
   'changing one cosmetic preference': [
     'view.decreaseFontSize',
     'view.increaseFontSize',

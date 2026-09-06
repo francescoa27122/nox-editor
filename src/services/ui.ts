@@ -246,6 +246,16 @@ export class UIService {
    * and a menu hanging open under a dialog would be two things claiming it.
    */
   readonly menuBarOpen = new Signal(false);
+  /**
+   * Whether Tab moves focus out of the editor instead of indenting.
+   *
+   * A mode rather than a setting, and off at every launch, because it is a
+   * way *out* rather than a preference: the editor claims Tab for indenting,
+   * which is right for typing and wrong for a keyboard user who wants the
+   * status bar. Held here rather than in the pane because the status bar
+   * shows it and the palette flips it, and neither of those is the pane.
+   */
+  readonly tabMovesFocus = new Signal(false);
   /** Bumped to ask the answers panel to take focus. */
   readonly focusAnswersRequest = new Signal(0);
   /** Bumped to ask the problems list to take focus. */
@@ -302,6 +312,10 @@ export class UIService {
   focusEditor(): void {
     this.focusZone.set('editor');
     this.focusEditorRequest.update((n) => n + 1);
+  }
+
+  toggleTabFocus(): void {
+    this.tabMovesFocus.update((on) => !on);
   }
 
   /** Open the terminal view of the bottom panel and put the cursor in it. */

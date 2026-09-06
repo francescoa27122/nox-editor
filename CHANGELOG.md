@@ -6,6 +6,21 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Tab can leave the editor.** <kbd>Ctrl M</kbd>, or **Toggle Tab Key Moves
+  Focus** from the palette, switches Tab from indenting to moving focus, the
+  way it does in every other control, so a keyboard user can reach the status
+  bar and the rest of the window without a mouse. The status bar says *Tab
+  Moves Focus* while it is on, and clicking that turns it off. Off at every
+  launch: it is a way out, not a preference.
+
+- **Alt opens the menu bar on Windows and Linux.** A bare Alt puts the
+  keyboard on the bar and a second bare Alt gives it back; Alt with a letter
+  opens that menu, and the letter is underlined while Alt is held. Alt held
+  for a chord, such as <kbd>Alt Z</kbd> for word wrap, is a chord and nothing
+  else. <kbd>F10</kbd> still works.
+
 ### Changed
 
 - **Tasks run below the editor, not instead of it.** A bottom panel holds

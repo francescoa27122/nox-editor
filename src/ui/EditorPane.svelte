@@ -34,6 +34,8 @@
     lspCompartment,
     reconfigureAllEffects,
     reconfigureEffects,
+    tabKeyCompartment,
+    tabKeyExtension,
   } from '@editor/extensions';
   import { completionExtension } from '@editor/completion';
   import { lspHoverExtension } from '@editor/hover';
@@ -74,6 +76,7 @@
 
   const groups = workspace.groups;
   const focusRequest = ui.focusEditorRequest;
+  const tabMovesFocus = ui.tabMovesFocus;
 
   /** This pane follows its own group's active tab, not the app-wide one. */
   const group = $derived($groups.find((candidate) => candidate.id === groupId) ?? null);
@@ -295,6 +298,13 @@
   $effect(() => {
     void $focusRequest;
     if (isActiveGroup) view?.focus();
+  });
+
+  // Every pane follows the mode, not only the active one: the point is that
+  // Tab leaves *whichever* editor has the keyboard.
+  $effect(() => {
+    const movesFocus = $tabMovesFocus;
+    view?.dispatch({ effects: tabKeyCompartment.reconfigure(tabKeyExtension(movesFocus)) });
   });
 
   /**
