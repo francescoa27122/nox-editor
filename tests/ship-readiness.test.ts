@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
+import { LANGUAGES } from '../src/core/languages';
+
 /**
  * What this guards.
  *
@@ -219,5 +221,145 @@ describe('A8-012: the bundle copyright is the LICENSE line', () => {
     expect(line).toBeDefined();
     const config = JSON.parse(read('src-tauri', 'tauri.conf.json')) as { bundle: { copyright: string } };
     expect(config.bundle.copyright).toBe(line);
+  });
+});
+
+describe('A1-001: the file types the installers claim', () => {
+  /**
+   * What this guards.
+   *
+   * `bundle.fileAssociations` is what makes Nox appear in Open With, and it
+   * is invisible until an installer runs: a misspelled key is dropped in
+   * silence, and a claimed extension the editor cannot name is a promise the
+   * status bar breaks. Neither shows up in any other suite, because nothing
+   * else in the repository reads this block at all.
+   *
+   * What it does not catch: what the platform installers do with a block
+   * that is well formed. Whether NSIS writes the registry entries, and
+   * whether Launch Services believes the Info.plist, can only be seen on a
+   * machine with the bundle installed.
+   */
+  const associations = (
+    JSON.parse(read('src-tauri', 'tauri.conf.json')) as {
+      bundle: { fileAssociations?: Record<string, unknown>[] };
+    }
+  ).bundle.fileAssociations;
+
+  /**
+   * The schema the Tauri CLI validates against, read out of the CLI that is
+   * actually installed rather than a copy. `tauri.conf.json` names it in
+   * `$schema` by URL, and nothing in this repository fetches that.
+   */
+  const schema = JSON.parse(read('node_modules', '@tauri-apps', 'cli', 'config.schema.json')) as {
+    definitions: Record<
+      string,
+      {
+        properties?: Record<string, unknown>;
+        required?: string[];
+        oneOf?: { enum?: string[] }[];
+      }
+    >;
+  };
+
+  /** The string values of a schema enum, which is written as a `oneOf` of one-value enums. */
+  const enumValues = (name: string): string[] =>
+    (schema.definitions[name]?.oneOf ?? []).flatMap((variant) => variant.enum ?? []);
+
+  it('is a block the Tauri schema recognises, key by key', () => {
+    expect(schema.definitions.BundleConfig?.properties).toHaveProperty('fileAssociations');
+    expect(associations?.length).toBeGreaterThan(0);
+
+    const association = schema.definitions.FileAssociation;
+    // `additionalProperties: false` is the silent failure this exists for: a
+    // key Tauri does not know is not an error, it is a claim that never
+    // reaches the installer.
+    const allowed = Object.keys(association?.properties ?? {});
+    expect(allowed).toContain('ext');
+    const roles = enumValues('BundleTypeRole');
+    const ranks = enumValues('HandlerRank');
+    expect(roles).toContain('Editor');
+    expect(ranks).toContain('Alternate');
+
+    for (const entry of associations ?? []) {
+      for (const required of association?.required ?? []) expect(entry).toHaveProperty(required);
+      expect(Object.keys(entry).filter((key) => !allowed.includes(key))).toEqual([]);
+      expect(Array.isArray(entry.ext)).toBe(true);
+      expect(roles).toContain(entry.role);
+      expect(ranks).toContain(entry.rank);
+    }
+  });
+
+  it('claims only extensions core/languages.ts can name, and claims each once', () => {
+    const known = new Set(LANGUAGES.flatMap((language) => language.extensions));
+    const claimed = (associations ?? []).flatMap((entry) => entry.ext as string[]);
+
+    expect(claimed.filter((ext) => !known.has(ext))).toEqual([]);
+    // Two associations claiming one extension is two ProgIDs for one file
+    // type on Windows, and the installer writes whichever it reaches last.
+    expect(new Set(claimed).size).toBe(claimed.length);
+    // The floor: an editor that cannot be offered a .txt is not an editor.
+    for (const ext of ['txt', 'rs', 'ts']) expect(claimed).toContain(ext);
+  });
+
+  /**
+   * `role` is `Editor` everywhere, because Nox edits every file it opens and
+   * a `Viewer` would be a lie.
+   *
+   * **`rank` cannot express the decision this was meant to pin.** The gated
+   * decision asked to be an option rather than a default, and `rank` is
+   * `LSHandlerRank`, which only macOS reads: on Windows `APP_ASSOCIATE`
+   * writes `Software\Classes\.<ext>` outright, so an install is a claim to
+   * be the default and there is no setting that softens it. What answers the
+   * decision on Windows is therefore the *list*, not the rank, which is why
+   * the data and config formats below are unclaimed rather than `Alternate`.
+   * `Owner` stays refused because nothing here is a format Nox invented.
+   */
+  it('offers itself as an editor, and never outranks the tool that owns a format', () => {
+    const rankOf = new Map<string, string>();
+    for (const entry of associations ?? []) {
+      expect(entry.role).toBe('Editor');
+      expect(entry.rank).not.toBe('Owner');
+      for (const ext of entry.ext as string[]) rankOf.set(ext, entry.rank as string);
+    }
+
+    // Deliberately unclaimed, though `languages.ts` knows every one of them.
+    // `.html`, `.htm` and `.xhtml` belong to the browser: on Windows the
+    // installer has no "offer only" setting (see below), so claiming them
+    // would take a double-click away from the thing the user meant. `.svg`
+    // is an image everywhere but here, `.plist` is a macOS system file that
+    // is often not text at all, and `.webmanifest` is a `.json` by another
+    // name that nobody goes looking for an editor for.
+    const claimed = new Set((associations ?? []).flatMap((entry) => entry.ext as string[]));
+    // The data and config formats join them, cut on 2026-09-04 once reading
+    // the generated installer showed a Windows install takes the default
+    // rather than offering: `.json`, `.md` and a `.yml` usually already have
+    // an opener their owner chose, and taking it silently is the complaint
+    // this list exists to avoid. Plain text and programming languages stay.
+    for (const ext of ['html', 'htm', 'xhtml', 'svg', 'plist', 'webmanifest',
+                       'json', 'jsonc', 'md', 'markdown', 'mdx', 'xml',
+                       'yml', 'yaml', 'toml', 'ini', 'cfg', 'properties']) {
+      expect(claimed.has(ext)).toBe(false);
+    }
+  });
+
+  /**
+   * `name` is doing two jobs, and the second one is not obvious from the
+   * schema: on macOS it is `CFBundleTypeName`, and on Windows it is the
+   * **ProgID**, written straight into `Software\Classes\<name>` by the
+   * `APP_ASSOCIATE` macro in the generated `installer.nsi`. Tauri defaults it
+   * to `ext[0]`, so an unnamed association would claim the registry key
+   * `txt`. A ProgID has to be namespaced or it collides with whatever else
+   * chose the same words.
+   *
+   * Read off the generated script rather than assumed: the same macro also
+   * writes `Software\Classes\.<ext>` itself, so on Windows an install
+   * makes Nox the *default* opener and backs the old value up for the
+   * uninstaller. `rank` cannot soften that; it is `LSHandlerRank`, and macOS
+   * is the only platform that reads it.
+   */
+  it('names each association as a namespaced Windows ProgID', () => {
+    for (const entry of associations ?? []) {
+      expect(entry.name).toMatch(/^Nox\.[A-Za-z]+$/);
+    }
   });
 });
