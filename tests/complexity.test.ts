@@ -2,6 +2,7 @@ import { parser as jsParser } from '@lezer/javascript';
 import { Text } from '@codemirror/state';
 import { describe, expect, it } from 'vitest';
 import { diffText } from '../src/core/diff';
+import { detectIndentation } from '../src/core/indentation';
 import { parseGitBlame } from '../src/core/git-blame';
 import { fuzzyFilter } from '../src/core/fuzzy';
 import { buildSearchRegex, findMatches } from '../src/core/search-match';
@@ -47,6 +48,38 @@ import { describeGrowth, growth } from './support/growth';
  * flaky required check blocks everyone with no override.
  */
 describe('the pure layers still scale', () => {
+  /**
+   * A1-004: indentation detection costs the same on a 60 MB file as on a
+   * short one, because it reads a bounded sample rather than the document.
+   *
+   * **The budget is 6x here rather than 24x, and that is deliberate.** Every
+   * other guard in this file watches a *linear* claim, so its budget has to
+   * clear the input ratio. This one watches a *constant* claim, so the
+   * expected ratio is 1.0 and a budget above the input ratio would assert
+   * nothing at all: at 32x the input, a detector that walked the whole
+   * document would report about 32x and sail under 24. Six is well clear of
+   * measurement noise on identical work and well under the 32x the mutation
+   * produces.
+   *
+   * Verified: removing the `MAX_SAMPLE_LINES` and `MAX_SAMPLE_CHARS` bounds
+   * reports **35.6x** and fails this.
+   *
+   * What it does not catch on its own is which of the two bounds is missing,
+   * since either one alone still bounds a corpus of ordinary short lines.
+   * `tests/indentation.test.ts` covers the line bound behaviourally and says
+   * so; the byte bound is argued in `core/indentation.ts` and unguarded.
+   */
+  it('reads a file for its indentation in constant time, whatever the file', () => {
+    const g = growth(
+      (lines) => sourceFile(lines),
+      (text) => void detectIndentation(text),
+      2_000,
+      64_000,
+    );
+
+    expect(g.ratio, describeGrowth('detectIndentation', g, 6)).toBeLessThan(6);
+  });
+
   /**
    * Catches quadratic work added anywhere on the diff path. Verified: a nested
    * loop over the line array reports **51.2x** and fails this.
