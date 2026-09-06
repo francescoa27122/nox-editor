@@ -6,6 +6,16 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Tasks run below the editor, not instead of it.** A bottom panel holds
+  the terminal and the tasks view with a tab for each, so a build's output
+  sits under the code you are building rather than replacing it. **Toggle
+  Bottom Panel** (<kbd>Mod J</kbd>) shows or hides whichever view you had
+  open last; <kbd>Ctrl `</kbd> still means the terminal. The *Terminal
+  Height* setting is now *Panel Height* and keeps its key, so nothing you
+  have set changes.
+
 ## [0.12.0] - 2026-09-05
 
 Nox can tell you who wrote a line, run your project's own commands, and open

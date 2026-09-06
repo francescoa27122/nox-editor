@@ -7,10 +7,9 @@
   import EditorArea from './EditorArea.svelte';
   import StatusBar from './StatusBar.svelte';
   import AgentPanel from './AgentPanel.svelte';
-  import TerminalPanel from './TerminalPanel.svelte';
+  import BottomPanel from './BottomPanel.svelte';
   import DiffView from './DiffView.svelte';
   import ReviewPanel from './ReviewPanel.svelte';
-  import TasksPanel from './TasksPanel.svelte';
   import Welcome from './Welcome.svelte';
   import Overlays from './Overlays.svelte';
   import Toasts from './Toasts.svelte';
@@ -39,8 +38,6 @@
   const agentsOpen = app.ui.agentsOpen;
   // svelte-ignore state_referenced_locally
   const diffOpen = app.ui.diffOpen;
-  // svelte-ignore state_referenced_locally
-  const tasksOpen = app.ui.tasksOpen;
   // svelte-ignore state_referenced_locally
   const welcomeOpen = app.ui.welcomeOpen;
 
@@ -73,14 +70,6 @@
    */
   const modalOpen = $derived($overlay !== null || $prompt !== null || $confirm !== null);
 
-  // svelte-ignore state_referenced_locally
-  const terminalOpen = app.ui.terminalOpen;
-  // Latches on first open. The panel hides itself thereafter rather than
-  // unmounting, which is what preserves the scrollback.
-  let terminalMounted = $state(false);
-  $effect(() => {
-    if ($terminalOpen) terminalMounted = true;
-  });
 
   const showExplorer = $derived($settings['workbench.showExplorer']);
   const showStatusBar = $derived($settings['workbench.showStatusBar']);
@@ -181,8 +170,6 @@
           <AgentPanel />
         {:else if $diffOpen}
           <DiffView />
-        {:else if $tasksOpen}
-          <TasksPanel />
         {:else if hasBuffers && !$welcomeOpen}
           <EditorArea />
         {:else}
@@ -197,12 +184,11 @@
       </div>
 
       <!--
-        Mounted from the first time it is opened and never unmounted, so the
-        scrollback survives hiding the panel. See TerminalPanel.
+        Terminal and Tasks, below the editor rather than instead of it. The
+        container is always mounted and hides itself, which is what keeps the
+        terminal's scrollback across hiding the panel. See BottomPanel.
       -->
-      {#if terminalMounted}
-        <TerminalPanel />
-      {/if}
+      <BottomPanel />
     </main>
   </div>
 
