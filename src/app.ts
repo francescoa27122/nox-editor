@@ -4832,6 +4832,17 @@ export class NoxApp {
         run: () => this.ui.focusMenuBar(),
       },
       {
+        id: 'view.toggleTabFocus',
+        // VS Code's wording, because the people who need this command know
+        // it by this name from there and search the palette for it.
+        title: 'Toggle Tab Key Moves Focus',
+        category: 'View',
+        keywords: ['tab', 'focus', 'trap', 'accessibility', 'keyboard', 'escape', 'leave'],
+        // No `capabilities`: it changes what one key does inside the window
+        // and touches nothing outside it.
+        run: () => this.ui.toggleTabFocus(),
+      },
+      {
         id: 'notes.focus',
         // "Open Notes Panel", not "Show Notes". The palette renders every row
         // as "<category>: <title>" and printed the object twice — but the
@@ -5184,6 +5195,10 @@ export class NoxApp {
       // macOS with A1-007, so that collision is gone but the decision is not
       // this binding's to take.
       'F10': 'menubar.focus',
+      // `Ctrl`, not `Mod`: ⌘M is Minimize at the OS level on macOS, and the
+      // chord is Ctrl+M in VS Code on every platform, so this is the one
+      // spelling that is both free and already known.
+      'Ctrl+M': 'view.toggleTabFocus',
       // The problems list is the panel most worth a hotkey, and ⌘⇧M is the
       // convention everywhere. References keeps no chord of its own: its
       // natural entry is Shift+F12, which already fills and shows the view.
