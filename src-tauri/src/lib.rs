@@ -12,6 +12,8 @@ mod geometry;
 mod git;
 mod http;
 mod launch;
+// `pub` for `tests/child_lifetime.rs`, which stages a real parent death.
+pub mod lifetime;
 mod lsp;
 #[cfg(desktop)]
 mod menu;
