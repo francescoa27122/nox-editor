@@ -8,6 +8,61 @@ are knowledge.**
 
 ---
 
+## 2026-09-06 - The next-steps pass: three gated decisions landed, and the packaged app walked
+
+Francesco said "next steps", so this took the list from the entry below in
+order, stopping only where a decision is his.
+
+**Shipped:** #198 (A7-001, the dispatcher refuses an undeclared command to a
+plugin or an agent), #199 (A7-004, agent context reads scoped to the
+workspace root) and #200 (A4-004, large-file mode above 5 MB), each brought
+up to date with main, re-gated, and merged on all eleven checks; #200 needed
+one conflict resolved by hand (`isLarge` and `indent` both new on the buffer
+snapshot). Dependabot #196 (svelte) and #197 (typescript-language-server)
+merged the same way. The v0.9.1 draft is published as a non-latest release, so
+CHANGELOG stops lying about it (A8-008).
+
+**The packaged app was walked**, for the first time since 0.9.x on a real
+machine: `npm run app:build` (the .app bundled; the DMG script failed after
+it), launched by executable path with `--geometry`, sha256 of the process
+matched the build, `rootPath` pointed at a two-commit fixture repository.
+`.desktop-pass-report.md` has the twelve items with evidence. 10 PASS: the
+`nox: geometry` line, the traffic-light inset, all three new View menu items,
+the bottom panel with a real zsh prompt, `echo walk` typed once and echoed
+once (so the harness's `eecchhoo` was the driver, as suspected), scrollback
+surviving a switch to Tasks and back, Hide and reopen on the last view,
+indent guides aligned on a tab-indented file (detected as Tabs: 2) and a
+space-indented one, blame naming the fixture author per commit, and Quit
+taking its shell child with it (A7-009's exit half, seen). 1 PARTIAL: the Tab
+Moves Focus readout appeared, but the background harness cannot send a Tab
+keystroke. 1 UNSEEN: native Paste, because the harness refuses any menu item
+that touches the clipboard. Session file restored from its backup afterwards.
+
+**Left where it is, and why.**
+- **#201** (single instance and file associations) conflicts with main and,
+  by its own body, makes Nox the default opener for 57 extensions on Windows.
+  That is Francesco's call before a rebase.
+- **Dependabot #192, #194, #195** fail CI on their own: reqwest 0.13 breaks
+  the Rust build on all three platforms, the Tauri group breaks the web and
+  e2e legs, jsdom 30 breaks three web legs. Each is a code change, not a
+  rebase. **#193** (the codemirror group) was green but its head ref moved
+  under `update-branch`; Dependabot was asked to rebase it.
+- **Signing** needs certificates only Francesco can obtain.
+- **Splitting `app.ts`** and **persisting the agent trail** are the two
+  remaining pieces of feature work on the list, untouched this pass.
+
+**Method notes.** `app_type` with `target: "focused"` reaches xterm's helper
+textarea where a coordinate click does not. The background harness sends
+Return, Escape, Backspace, Delete and ⌘A only, so drive everything else from
+the native menu bar; `app_menu list View` is also the cheapest proof that a
+command reached the native menu.
+
+**Confidence:** high on everything merged, all of it gated twice. High on
+the walk's ten passes, each backed by a screenshot in the session. The two
+open walk items are harness limits, not doubts about the code.
+
+---
+
 ## 2026-09-06 - 0.12.0 published, and the five changes a daily user will feel
 
 Francesco asked for the v0.12.0 draft to be published, and for that to be
