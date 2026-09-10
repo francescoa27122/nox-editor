@@ -10,8 +10,8 @@ description: Use when adding or changing anything that crosses Nox's Rust bounda
 **A Rust command is half the change.** The contract is the `Platform` interface, and it has three implementations that must all move together:
 
 1. `src/platform/types.ts`, add the method (with the doc comment, since this file is the spec)
-2. `src/platform/tauri.ts`, a thin adapter via `call<T>('nox_…', {…})`. Its own rule: *if you find yourself writing an `if` in this file, it belongs in a service* (`platform/tauri.ts:49-52`)
-3. **`src/platform/memory.ts`**, the fake. `web.ts` *extends* `MemoryPlatform` (`web.ts:13`) and overrides only `capabilities` and localStorage persistence, so it usually needs no edit. Touch it only to flip a capability flag.
+2. `src/platform/tauri.ts`, a thin adapter via `call<T>('nox_…', {…})`. Its own rule, at `src/platform/tauri.ts:57-60` (`Desktop target. Every method here is a thin adapter`): if you find yourself writing an `if` in this file, it belongs in a service
+3. **`src/platform/memory.ts`**, the fake. `export class WebPlatform extends MemoryPlatform` (`src/platform/web.ts:13`) overrides only `capabilities` and localStorage persistence, so it usually needs no edit. Touch it only to flip a capability flag.
 
 A fake is not a stub. Make it produce the **shape** the real thing produces, including the awkward parts: `gitBlame` renders real `--porcelain`, asymmetries and all, because a tidier shape would let a parser that mishandles the real one pass the whole suite.
 
@@ -37,16 +37,16 @@ pub fn nox_thing_start(
 ```
 
 - **Prefix `nox_`, snake_case.** No unprefixed command exists. `<module>_<verb>` is the pattern in `agent`/`git`/`http`/`lsp`/`pty`/`search`, but not a rule: all 15 `fs.rs` commands are bare (`nox_read_text_file`, `nox_stat`, `nox_trash`), and `watcher.rs` exports `nox_watch` and `nox_git_meta_watch`. Match the module you are editing.
-- **`pub fn`, never `async fn`.** There is not one async command in the crate. Validate, register, return immediately; move long work to `std::thread::spawn` (or `tauri::async_runtime::spawn` in `http.rs`). Awaiting in the command means the handle needed to *cancel* only arrives once there is nothing left to cancel (`http.rs:82-88`).
+- **`pub fn`, never `async fn`.** There is not one async command in the crate. Validate, register, return immediately; move long work to `std::thread::spawn` (or `tauri::async_runtime::spawn` in `http.rs`). Awaiting in the command means the handle needed to *cancel* only arrives once there is nothing left to cancel: `Returning immediately is the whole point` (`src-tauri/src/http.rs:87-91`).
 - **Error type is always `String`.** No error enum, no `thiserror`. Five of the eight command modules declare `pub type Result<T> = std::result::Result<T, String>;` at the top (`agent`, `fs`, `git`, `lsp`, `pty`). `http`, `search` and `watcher` spell it out inline. Either is fine.
 - Structs crossing the boundary derive `Serialize`/`Deserialize`. Add `#[serde(rename_all = "camelCase")]` whenever a field is multi-word. About half the derive sites have it. The ones without (`LinePayload`, `ExitPayload`, `DataPayload`, `MessagePayload`) are single-word throughout, so it would be a no-op rather than a deliberate exception.
 - Register in `lib.rs`: `.manage(...)` if stateful, and the path in `generate_handler![]`, grouped by module.
 
 ## Errors the renderer can branch on
 
-Rust returns `"<code>: <message>"`; `platform/tauri.ts:888-891` splits on the first `": "` and matches against six codes: `not-found`, `permission`, `exists`, `not-text`, `unsupported`, `io`.
+Rust returns `"<code>: <message>"`; `src/platform/tauri.ts:923-926` (`text.split(': ')`) splits on the first `": "` and matches against six codes: `not-found`, `permission`, `exists`, `not-text`, `unsupported`, `io`.
 
-Reuse `fs.rs:37-47`'s `describe()` for anything touching `std::fs`; write the code by hand otherwise (`format!("exists: a terminal with id {id} is already open")`).
+Reuse `describe` (`src-tauri/src/fs.rs:38-47`) for anything touching `std::fs`; write the code by hand otherwise (`format!("exists: a terminal with id {id} is already open")`).
 
 Three traps:
 
@@ -54,7 +54,7 @@ Three traps:
 - **An unrecognised prefix silently degrades.** `spawn:`, `pty:`, `lsp:`, `refused:` all become `code: 'io'` **and the prefix is stripped from the message**. Accepted behaviour, but if the renderer must branch on it, use one of the six.
 - **Name your path argument `path`.** `PlatformError.path` is populated from `args.path`.
 
-Git is deliberately different: git's own words come back verbatim under `io:`, with a stdout fallback because git prints "nothing to commit" on stdout (`git.rs:139-148`).
+Git is deliberately different: git's own words come back verbatim under `io:`, with a stdout fallback because git prints `nothing to commit` (`src-tauri/src/git.rs:156-166`) on stdout.
 
 ## Streaming
 
@@ -62,7 +62,7 @@ Tauri app-global events via `AppHandle::emit` (needs `use tauri::Emitter`), neve
 
 Ids are **chosen by the renderer** (agent, lsp, pty, http) so replies match without a round trip. Search is the exception: Rust allocates a `u64`.
 
-**Self-cleanup on child exit is mandatory.** The reader thread must deregister the id when the child dies, or the id stays registered for the life of the app and respawning under it is refused as "already running". That is exactly what happens after a window reload restarts the renderer's counter (`agent.rs:150-158`):
+**Self-cleanup on child exit is mandatory.** The reader thread must deregister the id when the child dies, or the id stays registered for the life of the app and respawning under it is refused as "already running". A window reload no longer collides on an id, because `platform/tauri.ts` puts a per-load token in every one, but without the cleanup the registry would still grow by one for every agent that ever ran. `src-tauri/src/agent.rs:192` (`agents.remove(&id)`) is where the deregistration lives:
 
 ```rust
 if let Some(state) = app.try_state::<AgentState>() {
@@ -74,7 +74,7 @@ if let Some(state) = app.try_state::<AgentState>() {
 
 Emit failure means the window is gone: `let _ = app.emit(...)` for fire-and-forget, or check and `break` out of a hot loop.
 
-On the TS side, attach the listener **before** calling the start command, and release it if the command throws (`platform/tauri.ts:448-478`).
+On the TS side, attach the listener **before** calling the start command, and release it if the command throws: `Attached *before* the start` (`src/platform/tauri.ts:477-509`).
 
 ## State
 
@@ -87,7 +87,7 @@ pub struct ThingState(Mutex<HashMap<String, Running>>);   // access via state.0.
 
 Named-field structs when there is more than one thing to hold. A type that is not `Default` (like `RecommendedWatcher`) needs a hand-written `impl Default`.
 
-Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.map_err(poisoned)?`. That is the pattern in `agent.rs:384`, `lsp.rs:397` and `pty.rs:364`. Modules with one lock site inline it instead (`search.rs:233`).
+Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.map_err(poisoned)?`. That is the pattern in `fn poisoned<T>(_: T) -> String` (`src-tauri/src/agent.rs:535`), and again at `src-tauri/src/lsp.rs:497` (`fn poisoned`) and `src-tauri/src/pty.rs:483` (`fn poisoned`). Modules with only a lock site or two inline it instead: `search lock poisoned` (`src-tauri/src/search.rs:254`).
 
 `*_all` teardown **drains into a `Vec` first, then acts**, which releases the lock before the killing.
 
@@ -95,21 +95,21 @@ Lock poisoning gets a module-level `fn poisoned<T>(_: T) -> String`, used as `.m
 
 | Rule | Where | Why |
 |---|---|---|
-| Loopback is **parsed**, not prefix-matched | `http.rs:42-53` | `localhost.evil.com` must fail |
-| Redirects `Policy::none()`, `.no_proxy()` | `http.rs:70-80` | `is_loopback` only proves the first hop |
+| Loopback is **parsed**, not prefix-matched | `src-tauri/src/http.rs:42-53` (`pub fn is_loopback`) | `localhost.evil.com` must fail |
+| Redirects `Policy::none()`, `.no_proxy()` | `src-tauri/src/http.rs:76-77` (`Policy::none()`) | `is_loopback` only proves the first hop |
 | No shell, argv only | `fs.rs`, `git.rs`, `lsp.rs` | `cmd /C` re-splits on spaces. Only `lsp.rs` falls back, and only after a direct spawn fails |
 | Six fixed git *writes and reads*, plus the read-only `nox_git_file_base` and `nox_git_blame` | `git.rs` module docs | Nothing that leaves the machine, rewrites history, or destroys working-tree work. `nox_git_blame` is the one `#[tauri::command(async)]`, because a sync body runs on the thread that draws the window and blame's cost follows a file's history |
-| `--literal-pathspecs` + `--` on every pathspec | `git.rs:225`, `:250` | A `*` in a filename is a filename |
-| Commit message on **stdin**, never argv | `git.rs:259-271` | Messages contain quotes, dashes, anything |
-| Branch name validated by `check-ref-format` first | `git.rs:317-324` | Only strings git blessed reach the write |
-| Empty unstage list returns early | `git.rs:246-248` | Bare `git reset --` resets the whole index |
-| Every path forced inside the repo | `git.rs:166-186` | |
-| `Content-Length` framing lives in Rust | `lsp.rs:8-13`, `:142-146` | Header counts bytes; the IPC string is UTF-16 |
-| Lost framing is an error, not a resync | `lsp.rs:109-113` | Guessing where the next message starts cannot recover |
-| Config names reject separators and `..` | `fs.rs:419-423` | Path traversal |
-| Rename/copy refuse to clobber | `fs.rs:301-306`, `:362-364` | `fs::rename` silently replaces on unix |
-| Writes go to a sibling temp, fsync, rename | `fs.rs:145-175` | Cross-filesystem temp reintroduces the truncation window |
-| Agents cannot spawn agents | `agent.rs:13-15` | Only the user, through configuration |
+| `--literal-pathspecs` + `--` on every pathspec | `src-tauri/src/git.rs:242` (`--literal-pathspecs`), `src-tauri/src/git.rs:267` (`--literal-pathspecs`) | A `*` in a filename is a filename |
+| Commit message on **stdin**, never argv | `src-tauri/src/git.rs:276-288` (`the message on stdin`) | Messages contain quotes, dashes, anything |
+| Branch name validated by `check-ref-format` first | `src-tauri/src/git.rs:334-341` (`check-ref-format --branch`) | Only strings git blessed reach the write |
+| Empty unstage list returns early | `src-tauri/src/git.rs:263-265` (`if paths.is_empty()`) | Bare `git reset --` resets the whole index |
+| Every path forced inside the repo | `src-tauri/src/git.rs:193-203` (`fn repo_relative`) | |
+| `Content-Length` framing lives in Rust | `src-tauri/src/lsp.rs:8-13` (`The framing lives here`), `src-tauri/src/lsp.rs:170-172` (`pub fn frame`) | Header counts bytes; the IPC string is UTF-16 |
+| Lost framing is an error, not a resync | `src-tauri/src/lsp.rs:121-125` (`lost its framing cannot be recovered`) | Guessing where the next message starts cannot recover |
+| Config names reject separators and `..` | `src-tauri/src/fs.rs:483-485` (`name.contains("..")`) | Path traversal |
+| Rename/copy refuse to clobber | `src-tauri/src/fs.rs:333-338` (`silently replaces the destination on unix`), `src-tauri/src/fs.rs:394-396` (`if target.exists()`) | `fs::rename` silently replaces on unix |
+| Writes go to a sibling temp, fsync, rename | `src-tauri/src/fs.rs:145-194` (`fn write_atomic`) | Cross-filesystem temp reintroduces the truncation window |
+| Agents cannot spawn agents | `src-tauri/src/agent.rs:13-15` (`the single most powerful thing Nox can do`) | Only the user, through configuration |
 
 ## Capabilities
 
@@ -119,9 +119,9 @@ You only edit it when the TS caller reaches for a plugin API or an unlisted core
 
 ## Testing
 
-**Design rule: if a command takes `State` or `AppHandle`, put the testable logic in a free function beside it.** That is why `write_config_atomically` (`fs.rs:466`) and `pty::open` (`pty.rs:121-125`) exist. Tests drive those directly, with no Tauri application around them.
+**Design rule: if a command takes `State` or `AppHandle`, put the testable logic in a free function beside it.** That is why `write_config_atomically` (`src-tauri/src/fs.rs:518`) and `fn open(spec: &Spec)` (`src-tauri/src/pty.rs:203`) exist. Tests drive those directly, with no Tauri application around them.
 
-Unit tests are `#[cfg(test)] mod tests` at the bottom of the module, in 7 of the 8 command modules (`agent.rs` has none, being covered by the renderer's fake-process tests in `services/agent/`). Where a test needs a temp directory, `fs.rs:491` and `git.rs:551` each hand-roll a `Scratch(PathBuf)` RAII helper rather than adding a `tempfile` dependency. Copy one of those instead of reaching for a crate.
+Unit tests are `#[cfg(test)] mod tests` at the bottom of the module, in 7 of the 8 command modules (`agent.rs` has none, being covered by the renderer's fake-process tests in `services/agent/`). Where a test needs a temp directory, `src-tauri/src/fs.rs:550` (`struct Scratch(PathBuf)`) and `src-tauri/src/git.rs:579` (`struct Scratch(PathBuf)`) each hand-roll a RAII helper rather than adding a `tempfile` dependency. Copy one of those instead of reaching for a crate.
 
 Pure helpers are made `pub` purely so tests can reach them (`MessageStream`, `frame`, `Utf8Stream`, `is_loopback`).
 

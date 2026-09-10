@@ -46,10 +46,10 @@ its output.
 
 ## Read before changing code
 
-- **`CONTRIBUTING.md:33-103`** is the five rules and the feature checklist. Read these first. They are not style preferences.
-- **`ARCHITECTURE.md:45-191`** is the layers and where everything lives.
-- **`ARCHITECTURE.md:192-2247`** is the decision log. Before changing anything load-bearing, check whether its current shape is already argued for. It usually is.
-- **`ARCHITECTURE.md:2625`** is the Known debt table. If you take a shortcut, add it there.
+- **`CONTRIBUTING.md:33-103`** (`## The five rules`) is the rules and the feature checklist. Read these first. They are not style preferences.
+- **`ARCHITECTURE.md:45-191`** (`## 2. Layers`) is the layers and where everything lives.
+- **`ARCHITECTURE.md:195-2250`** (`## 4. Key design decisions`) is the decision log. Before changing anything load-bearing, check whether its current shape is already argued for. It usually is.
+- **`ARCHITECTURE.md:2826`** (`## 7. Known debt`) is the Known debt table. If you take a shortcut, add it there.
 - **`AGENT-PLATFORM.md`** is the agent runtime, permissions and context API.
 
 ## Skills
@@ -70,7 +70,7 @@ Five project skills cover the subsystems in depth. Use them rather than re-deriv
 
 **2. Every user action is a `Command`.** Menus, palette, keybindings and buttons all dispatch the same `commandId`, which is why the palette and keybinding customisation are complete for free. A feature is not done until it has a command. A command with a side effect must declare `capabilities`, and that declaration is the entire basis of permission enforcement.
 
-**And the one that is easiest to forget:** *nothing new on the typing path* (`CONTRIBUTING.md:75-103`). Before adding per-keystroke, per-scroll or per-cursor work, ask what it costs on a 10 MB file. Prefer `view.visibleRanges`, debouncing, or pushing it to Rust.
+**And the one that is easiest to forget:** `### 5. Nothing new on the typing path` (`CONTRIBUTING.md:75-103`). Before adding per-keystroke, per-scroll or per-cursor work, ask what it costs on a 10 MB file. Prefer `view.visibleRanges`, debouncing, or pushing it to Rust.
 
 **`services/` and `core/` never import `@codemirror/view`.** That is what keeps them runnable headless under Vitest. They do use `@codemirror/state` and `@codemirror/commands` deliberately: `services/workspace.ts` owns an `EditorState` per buffer, which is what makes per-tab undo work. CodeMirror *extensions* live in `src/editor/`, and `ui/EditorPane.svelte` owns the one `EditorView` instance. `npm run lint` enforces this, along with the `Platform` boundary above it. See `eslint.config.js`.
 
@@ -89,7 +89,7 @@ Five project skills cover the subsystems in depth. Use them rather than re-deriv
 
 ## Gotchas
 
-- **The version is triple-sourced, and `CHANGELOG.md` is the fourth.** `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` must agree or the release workflow refuses the tag (`.github/workflows/release.yml:33-69`), and `CHANGELOG.md` must carry a `## [<version>]` section with something under it. That section *is* the release body (`.github/workflows/release.yml:71-94`).
+- **The version is triple-sourced, and `CHANGELOG.md` is the fourth.** `package.json`, `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` must agree or the release workflow refuses the tag: `Check the tag matches the configured version` (`.github/workflows/release.yml:36-67`). `CHANGELOG.md` must carry a `## [<version>]` section with something under it, and that section *is* the release body: `Read the release notes out of CHANGELOG.md` (`.github/workflows/release.yml:103-126`).
 - The release gate also reads the `**vX.Y.**` line opening README §Status (`scripts/readme-series.mjs`). Keep that line, and rewrite the whole section at a tag rather than just its number.
-- Do not touch the `conditions` spread at `vite.config.ts:28`. The comment above it records that the obvious rewrite broke `npm run dev`.
+- Do not touch the conditions spread at `vite.config.ts:33` (`conditions: ['browser']`). The comment above it records that the obvious rewrite broke `npm run dev`.
 - Tests use relative `'../src/…'` imports, never the `@core`/`@services` aliases.
