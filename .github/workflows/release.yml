@@ -307,7 +307,7 @@ jobs:
         run: |
           set -eu
           if [ -z "${APPLE_CERTIFICATE:-}" ]; then
-            echo "No Apple certificate: this build is ad-hoc signed, as every build is today."
+            echo "No Apple certificate: this build is ad-hoc signed, as every build before 0.13.1 was."
             echo "A fresh download will need 'xattr -dr com.apple.quarantine' to open."
             exit 0
           fi
@@ -375,33 +375,22 @@ jobs:
 
             ## Install
 
-            **macOS** — download the `.dmg` for your chip (`aarch64` is Apple
-            Silicon, `x64` is Intel), drag Nox to Applications, then run this
-            once:
+            **macOS**: download the `.dmg` for your chip (`aarch64` is Apple
+            Silicon, `x64` is Intel), drag Nox to Applications and open it.
+            The app is signed with an Apple Developer ID and notarized, so
+            macOS lets it through the way it does any other download. No
+            terminal command. Nox needs macOS 13 or newer.
 
-            ```bash
-            xattr -dr com.apple.quarantine /Applications/Nox.app
-            ```
+            **Updates** install from inside Nox: *Check for Updates…*, or the
+            toast shortly after launch. They are verified against the app's
+            own signing key and replace the app in place.
 
-            **You will need that command on a fresh download.** The app is
-            ad-hoc signed rather than signed with an Apple Developer ID, so
-            macOS quarantines it and refuses to open it with *"Nox is damaged
-            and can't be opened"* — which sounds like a corrupt download but
-            isn't. The command removes the quarantine flag. If you'd rather
-            not run it, build from source instead; `npm run app` does the same
-            thing from code you can read.
-
-            **You only need it once.** Updates installed from inside Nox —
-            *Check for Updates…*, or the toast shortly after launch — are
-            verified against the app's own signing key and replace the app in
-            place, so they never re-quarantine it. Only the first install
-            costs you the command.
-
-            **Linux** — take the `.deb` or the `.rpm`. Built on Ubuntu 22.04,
+            **Linux**: take the `.deb` or the `.rpm`. Built on Ubuntu 22.04,
             so it needs glibc 2.35 or newer. There is no AppImage.
 
-            **Windows** — take the `-setup.exe`. It is ad-hoc built rather
+            **Windows**: take the `-setup.exe`. It is ad-hoc built rather
             than signed with a code-signing certificate, so SmartScreen shows
             *"Windows protected your PC"* on first run: choose **More info**,
-            then **Run anyway**. Same trade as macOS above — a certificate
-            costs money annually, and building from source avoids both.
+            then **Run anyway**. A Windows certificate is a separate decision
+            (`ROADMAP.md` says why), and building from source avoids the
+            dialog.

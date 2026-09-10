@@ -6,6 +6,20 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-09
+
+The first release a Mac opens without a terminal command.
+
+### Changed
+
+- **macOS builds are signed and notarized.** The `.dmg` and the app inside it
+  carry a Developer ID Application signature and an Apple notarization ticket,
+  so a fresh download opens the way any other app does. The *"Nox is damaged
+  and can't be opened"* dialog, and the `xattr -dr com.apple.quarantine`
+  command it needed, are gone from this release on. Windows is unchanged:
+  SmartScreen still asks once on first run, and `ROADMAP.md` says why that
+  certificate is a separate decision.
+
 ## [0.13.0] - 2026-09-06
 
 Nox is the editor your desktop opens files with now, and one that keeps the
@@ -1953,7 +1967,8 @@ Recorded in [ARCHITECTURE.md](ARCHITECTURE.md) §7. The notable ones: no file
 watching, so external edits go undetected; the dirty flag is approximate above
 2 MB; keybindings are read-only; and the explorer has no context menu.
 
-[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/francescoa27122/nox-editor/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/francescoa27122/nox-editor/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/francescoa27122/nox-editor/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/francescoa27122/nox-editor/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/francescoa27122/nox-editor/compare/v0.10.0...v0.11.0

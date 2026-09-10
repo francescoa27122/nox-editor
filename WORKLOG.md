@@ -8,6 +8,50 @@ are knowledge.**
 
 ---
 
+## 2026-09-09 - Signed and notarized on macOS, and 0.13.1 prepared to carry it
+
+Francesco's Developer Program membership came through and he asked to run
+the ceremony. It ran on the Windows PC with OpenSSL rather than in Keychain
+Access; the signing spec's new §9 records that path and its traps.
+Certificate issued, `.p12` built with the G2 intermediate bundled, six
+secrets set: four by Claude from the files, `APPLE_ID` and `APPLE_PASSWORD`
+by Francesco. He tagged `v0.13.0-rc1`.
+
+**The dry run failed once, then passed.** Both macOS legs died at `security
+import` with "MAC verification failed": a `\r` from Windows line endings
+inside the generated password, which `gh secret set` trims off. Rebuilt the
+`.p12` with a clean password, reset both secrets, `gh run rerun --failed` on
+the same tag: both legs *Notarizing Finished with status Accepted*, and the
+rc draft holds signed `.dmg`s for both chips.
+
+**Shipped (this PR):** version 0.13.1 across `package.json`, both
+`package-lock.json` entries, `tauri.conf.json`, `Cargo.toml` and the one
+`Cargo.lock` line; CHANGELOG `[0.13.1]` with the signing entry and compare
+links; README *Try it* and *Status* rewritten for a signed macOS;
+`release.yml`'s release body and the guard's "as every build is today"
+wording; the ROADMAP *Installs like software* row; the spec's status line
+and §9.
+
+**Verified:** `npm test` 2,870 passed in 210 files, `check` 0 errors, `lint`
+0 errors and the 9 known warnings, `build` clean, `cargo metadata --locked`
+exit 0, `readme-series` prints 0.13, `release-notes 0.13.1` prints 11 lines,
+`release.yml` parses. Rust tests and clippy not rerun: no Rust source
+changed, only the version line.
+
+**Next:** Francesco runs the Mac-side check on the rc `.dmg` downloaded in
+a browser (`spctl -a -vvv -t install` should say *Notarized Developer ID*,
+then `xcrun stapler validate`), then tags `v0.13.1` on this PR's merge
+commit and publishes the draft. Delete the `v0.13.0-rc1` draft and tag
+afterwards.
+
+**Blocked:** tagging and publishing are his.
+
+**Confidence:** high that the build is signed and notarized; Apple accepted
+both submissions. Medium on the stapled ticket: the log does not print the
+staple step, so `stapler validate` on the Mac is what closes it.
+
+---
+
 ## 2026-09-06 - 0.13.0 shipped, unsigned, and the ceremony waits
 
 Francesco's Apple Developer Program application turned out not to be through
