@@ -8,6 +8,59 @@ are knowledge.**
 
 ---
 
+## 2026-09-10 - 0.13.1 tagged and built signed; the draft race; the citation test shipped
+
+Francesco's Mac-side check on the rc passed in full: `codesign` showed the
+chain to Apple Root CA with *Notarization Ticket=stapled*, `spctl` said
+*accepted, source=Notarized Developer ID*, `stapler validate` worked. He
+then gave a standing directive: **tag and merge without confirming, whenever
+applicable.** Recorded in the operating manual (rule 5) and in memory.
+
+**Shipped:** #219 merged, `v0.13.1` tagged on its merge commit and pushed;
+the release run passed on all four legs with *Notarizing Finished with status
+Accepted* on both macOS builds. #221, the `tests/skill-refs.test.ts` that
+holds every `file:line` citation in the five skills and `CLAUDE.md` to the
+symbol its sentence names, rebased over 106 commits: forty anchors had moved
+again and were re-derived, eleven by hand, and two sentences the re-derivation
+showed to be untrue were fixed (the workspace factory no longer discards its
+args; a reload no longer collides on an agent id). The `new-command` skill
+landed with it. The `v0.13.0-rc1` draft and tag are deleted.
+
+**The draft race.** Two build jobs started in the same second, each found no
+release for the tag, and each created a draft: "Nox v0.13.1" twice, assets
+split 8 and 6, each `latest.json` listing only its own platforms. Merged by
+hand: the five assets moved to the larger draft, the manifest rebuilt with the
+new asset ids (the manifest points at `api.github.com/.../releases/assets/<id>`,
+the same shape the published v0.13.0 uses, so ids matter), old manifest
+replaced, duplicate draft deleted. Verified 13 assets and all nine manifest
+urls resolving to assets in the draft. The durable fix is for the gate job to
+create the draft before the matrix starts; not built yet, see Next.
+
+**Verified:** #221 locally `npm test` 2,871 passed, `check` 0, `lint` 0
+errors and the 9 known warnings, and the citation test alone before and after
+each round of anchor fixes. Release run 34423337093 green; both notarization
+ids in the logs.
+
+**Not done, and why:** publishing the v0.13.1 draft. The auto-mode
+classifier refused the `gh release edit --draft=false` call as outward-facing,
+which agrees with the manual's line that publishing is distribution. One
+command of Francesco's does it.
+
+**Next:** make the gate job create the draft release so the race cannot
+recur. It already computes the body; the open question is whether
+tauri-action rewrites the body of a release it did not create. Then the green
+Dependabot PRs (#215 trash, #190 upload-artifact), then the Tauri group
+(#220), which fails four checks and matters most.
+
+**Blocked:** the publish click, per the classifier.
+
+**Confidence:** high on the release contents; the merged manifest was checked
+id by id. Medium on the race being rare rather than new: this is the first
+run with the `--locked` gate step, which may have changed the jobs' start
+timing.
+
+---
+
 ## 2026-09-09 - Signed and notarized on macOS, and 0.13.1 prepared to carry it
 
 Francesco's Developer Program membership came through and he asked to run
