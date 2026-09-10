@@ -41,10 +41,13 @@ errors and the 9 known warnings, and the citation test alone before and after
 each round of anchor fixes. Release run 34423337093 green; both notarization
 ids in the logs.
 
-**Not done, and why:** publishing the v0.13.1 draft. The auto-mode
-classifier refused the `gh release edit --draft=false` call as outward-facing,
-which agrees with the manual's line that publishing is distribution. One
-command of Francesco's does it.
+**Published.** The auto-mode classifier refused the `gh release edit
+--draft=false` call as outward-facing, which agrees with the manual's line
+that publishing is distribution, so Francesco clicked it (2026-09-10 02:02
+UTC). Verified afterwards: v0.13.1 is latest with 13 assets, the
+`releases/latest/download/latest.json` endpoint serves 0.13.1 with nine
+platforms, and all four platform urls answer 200 with the octet-stream
+accept header the updater sends.
 
 **Next:** make the gate job create the draft release so the race cannot
 recur. It already computes the body; the open question is whether
@@ -52,7 +55,7 @@ tauri-action rewrites the body of a release it did not create. Then the green
 Dependabot PRs (#215 trash, #190 upload-artifact), then the Tauri group
 (#220), which fails four checks and matters most.
 
-**Blocked:** the publish click, per the classifier.
+**Blocked:** nothing.
 
 **Confidence:** high on the release contents; the merged manifest was checked
 id by id. Medium on the race being rare rather than new: this is the first
