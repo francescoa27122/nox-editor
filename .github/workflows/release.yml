@@ -4,10 +4,10 @@ on:
   push:
     tags: ['v*']
 
-# Read-only at the top. The build job alone gets write, below, because it
-# is the one that uploads assets to the tag's release; the gate has no
-# business with a token that can. Every action is pinned by commit SHA for
-# the reason ci.yml gives: a tag can be moved, a SHA cannot.
+# Read-only at the top. The draft and build jobs get write, below, because
+# they are the ones that create the tag's release and upload assets to it;
+# the gate has no business with a token that can. Every action is pinned by
+# commit SHA for the reason ci.yml gives: a tag can be moved, a SHA cannot.
 permissions:
   contents: read
 
@@ -141,11 +141,77 @@ jobs:
         working-directory: src-tauri
         run: cargo metadata --format-version 1 --locked > /dev/null
 
+  # The draft release exists before any build job starts, so the four of
+  # them find it rather than race to create it. On v0.13.1 (2026-09-10) two
+  # jobs started in the same second, each looked for a draft, each found
+  # none, and each created one: two releases with the same name, the assets
+  # split 8 and 6, and two latest.json files that each knew only their own
+  # platforms. Merging them by hand took longer than the build.
+  #
+  # tauri-action finds an existing draft by tag but never rewrites its body
+  # (its create-release.ts skips updateRelease for drafts, because updating a
+  # draft's tag duplicates it), so the body has to be complete here: the
+  # changelog section the gate read, then the install text from
+  # .github/release-install.md. That file must keep naming only what
+  # bundle.targets in src-tauri/tauri.conf.json produces (app, dmg, deb, rpm,
+  # nsis); nothing checks the two agree.
+  #
+  # A job of its own, rather than a step at the end of the gate, so the only
+  # write-scoped token in the workflow never sits in a job that runs npm ci
+  # and the test suite.
+  draft:
+    name: draft
+    needs: gate
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/release-install.md
+          sparse-checkout-cone-mode: false
+
+      # Idempotent on purpose: a rerun of this job after the draft exists
+      # must not make a second one, which is the failure this job prevents.
+      # A published release under the tag is left alone too, and named, so
+      # that the build's own refusal ("NOT a draft") has a line above it that
+      # says why.
+      - name: Create the draft release before the matrix starts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ needs.gate.outputs.notes }}
+        run: |
+          set -eu
+          tag=$GITHUB_REF_NAME
+
+          if existing=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$existing" = "true" ]; then
+              echo "A draft release for $tag already exists; the build jobs will use it."
+            else
+              echo "A published release for $tag already exists. This tag has shipped;"
+              echo "the build jobs will refuse to upload over it."
+            fi
+            exit 0
+          fi
+
+          body="$RUNNER_TEMP/release-body.md"
+          {
+            printf '%s\n\n---\n\n' "$NOTES"
+            cat .github/release-install.md
+          } > "$body"
+
+          # --verify-tag: this workflow only runs on a pushed tag, so a
+          # missing one means the checkout and the event disagree, and that
+          # is worth a failure rather than a draft pointing at nothing.
+          gh release create "$tag" --draft --verify-tag --title "Nox $tag" --notes-file "$body"
+          echo "Draft release created for $tag."
+
   build:
     name: ${{ matrix.label }}
-    needs: gate
+    needs: [gate, draft]
     runs-on: ${{ matrix.os }}
-    # tauri-action creates the draft release and uploads the bundles to it.
+    # tauri-action uploads the bundles to the draft the job above created.
     permissions:
       contents: write
     strategy:
@@ -352,45 +418,12 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Nox ${{ github.ref_name }}
           # Left as a draft deliberately: publishing is a person's decision,
-          # not a workflow's. What the draft arrives with is now the changelog
-          # section for this version — read and validated by the gate — above
-          # the Install text below, so the page explains itself before anyone
-          # touches it.
-          #
-          # The file names below must match `bundle.targets` in
-          # src-tauri/tauri.conf.json — today `app`, `dmg`, `deb`, `rpm`,
-          # `nsis`. Offering a download that is not in that list sends people
-          # looking for a file the build never produced, and nothing here
-          # fails when they disagree: these are a string, not a manifest.
+          # not a workflow's. The draft, and its body, already exist: the
+          # draft job above made them. This step finds it by tag and uploads
+          # to it, and never touches the body.
           releaseDraft: true
           prerelease: false
           # Everything after `--` goes to cargo. --locked refuses to build
           # from a Cargo.lock that does not describe Cargo.toml, which is the
           # release-time half of the gate's lockfile check above.
           args: ${{ matrix.args }} ${{ steps.updater.outputs.args }} -- --locked
-          releaseBody: |
-            ${{ needs.gate.outputs.notes }}
-
-            ---
-
-            ## Install
-
-            **macOS**: download the `.dmg` for your chip (`aarch64` is Apple
-            Silicon, `x64` is Intel), drag Nox to Applications and open it.
-            The app is signed with an Apple Developer ID and notarized, so
-            macOS lets it through the way it does any other download. No
-            terminal command. Nox needs macOS 13 or newer.
-
-            **Updates** install from inside Nox: *Check for Updates…*, or the
-            toast shortly after launch. They are verified against the app's
-            own signing key and replace the app in place.
-
-            **Linux**: take the `.deb` or the `.rpm`. Built on Ubuntu 22.04,
-            so it needs glibc 2.35 or newer. There is no AppImage.
-
-            **Windows**: take the `-setup.exe`. It is ad-hoc built rather
-            than signed with a code-signing certificate, so SmartScreen shows
-            *"Windows protected your PC"* on first run: choose **More info**,
-            then **Run anyway**. A Windows certificate is a separate decision
-            (`ROADMAP.md` says why), and building from source avoids the
-            dialog.

@@ -12,10 +12,11 @@ Ready means the whole gate set below passes, not that the code is written. A
 red or conflicted head is work, never something to hand over. If a change turns
 out to be contentious rather than merely finished, say so and leave it open.
 
-**This does not extend to tagging or publishing a release.** That is still an
-explicit instruction each time: prepare the release, then hand the command
-over. The two have separate answers because a merge is reversible and a
-published tag is not.
+**Tagging is standing too, granted 2026-09-09** ("tag and merge without me
+confirming it, whenever it is applicable"): when a prepared version is merged
+and verified, push the `v*` tag and watch the release run. **Publishing the
+draft release is not.** That click is distribution and stays an explicit
+instruction each time; the draft the workflow produces is the hand-over.
 
 ## Verify before claiming anything works
 
