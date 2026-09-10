@@ -29,9 +29,15 @@ file and does not persist credentials, and it runs nothing from
 `node_modules`.
 
 **Shipped (this PR):** the `draft` job, `.github/release-install.md`, the
-tauri-action step trimmed to five inputs, and `CLAUDE.md`'s shipping section
+tauri-action step trimmed to five inputs, `CLAUDE.md`'s shipping section
 brought in line with the 2026-09-09 tagging directive (it still said tagging
-needs an instruction each time).
+needs an instruction each time), and `tests/workflow-hygiene.test.ts`
+changed from pinning the count of `contents: write` grants at one to naming
+the jobs allowed to hold one (`draft`, `build`). CI caught that: the first
+push failed all four web legs on the old pin, because the suite was not run
+locally before pushing. It was run before the second push, and the new
+assertion was mutation-checked: a write grant on the gate fails it with the
+gate named.
 
 **Verified:** `release.yml` parses (jobs `gate`, `draft`, `build`; `build`
 needs both); `bash -n` on the extracted step; and a rehearsal of the step's
