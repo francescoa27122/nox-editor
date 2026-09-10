@@ -8,6 +8,59 @@ are knowledge.**
 
 ---
 
+## 2026-09-10 - The draft job: one release per tag, made before the matrix starts
+
+The Next line from the entry below. `release.yml` gains a `draft` job between
+`gate` and `build` that creates the draft release, body and all, so the four
+build jobs find it by tag instead of racing to create it.
+
+**Why the body moves.** tauri-action at the pinned SHA finds an existing draft
+by listing releases and matching `tag_name`, but its `create-release.ts`
+skips `updateRelease` for drafts (line 139, with the comment that updating a
+draft's tag duplicates it). So a pre-created draft keeps whatever body it was
+made with, and the install text now lives in `.github/release-install.md`,
+composed under the gate's changelog notes by the new job. The `releaseBody`
+input on tauri-action is gone; it would have been dead.
+
+**Why a job and not a step.** The gate's header comment says it has no
+business with a write token, and that still holds: the new job is the only
+place `contents: write` meets a checkout, that checkout is sparse to the one
+file and does not persist credentials, and it runs nothing from
+`node_modules`.
+
+**Shipped (this PR):** the `draft` job, `.github/release-install.md`, the
+tauri-action step trimmed to five inputs, `CLAUDE.md`'s shipping section
+brought in line with the 2026-09-09 tagging directive (it still said tagging
+needs an instruction each time), and `tests/workflow-hygiene.test.ts`
+changed from pinning the count of `contents: write` grants at one to naming
+the jobs allowed to hold one (`draft`, `build`). CI caught that: the first
+push failed all four web legs on the old pin, because the suite was not run
+locally before pushing. It was run before the second push, and the new
+assertion was mutation-checked: a write grant on the gate fails it with the
+gate named.
+
+**Verified:** `release.yml` parses (jobs `gate`, `draft`, `build`; `build`
+needs both); `bash -n` on the extracted step; and a rehearsal of the step's
+shell against a throwaway `v0.0.0-gatetest` draft with `--verify-tag` removed
+(no tag was pushed, so no workflow fired): first run created the draft with
+the composed body, second run took the idempotent path and printed that the
+draft exists, `gh release view` showed notes, rule and install text in order,
+then the draft was deleted. Not verified: `sparse-checkout` of a single file
+in cone-mode-off, and the whole thing under a real tag push. That is what the
+rc below is for.
+
+**Next:** merge, then `v0.13.1-rc1` as a dry run of the workflow itself:
+expect exactly one draft named "Nox v0.13.1-rc1" with 13 assets and a
+nine-platform `latest.json`, then delete the draft and the tag and record the
+result here.
+
+**Blocked:** nothing.
+
+**Confidence:** high on the shell, which ran. Medium on the sparse checkout
+until the rc run shows the file arrived.
+
+---
+
 ## 2026-09-10 - 0.13.1 tagged and built signed; the draft race; the citation test shipped
 
 Francesco's Mac-side check on the rc passed in full: `codesign` showed the

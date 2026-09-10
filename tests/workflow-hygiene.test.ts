@@ -14,8 +14,8 @@ import { describe, expect, it } from 'vitest';
  * are exactly the lines a well-meant "bump the action" edit undoes.
  *
  * What this does not catch: a pinned SHA that is itself malicious, or a
- * job-level `permissions:` widening what the top level grants. It reads the
- * shape, not the intent.
+ * job that is on the allowlist below and widens further than it needs. It
+ * reads the shape, not the intent.
  */
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -44,15 +44,30 @@ describe('A8-011: workflow hygiene', () => {
     }
   });
 
+  /**
+   * Per job rather than a count, because a count cannot tell the gate from
+   * the build. The gate runs `npm ci` and the whole suite with a checkout
+   * that keeps its credentials, so it is the one job that must never hold
+   * a write token; `draft` creates the release and `build` uploads to it,
+   * and those are the only two with a reason to. Until 2026-09-10 the build
+   * was the only one, and this test pinned the count at one; the draft job
+   * that ended the two-drafts race made that pin wrong.
+   */
   it('starts every workflow read-only and widens only where the job needs it', () => {
     for (const file of files) {
       const text = read('.github', 'workflows', file);
       expect(text, file).toMatch(/^permissions:\n {2}contents: read$/m);
     }
-    // The one job that uploads to a release is the one that may write.
-    const release = read('.github', 'workflows', 'release.yml');
-    expect(release.match(/contents: write/g)?.length).toBe(1);
     expect(read('.github', 'workflows', 'ci.yml')).not.toContain('contents: write');
+
+    const release = read('.github', 'workflows', 'release.yml');
+    const jobs = release.slice(release.indexOf('\njobs:\n'));
+    const writers: string[] = [];
+    for (const match of jobs.matchAll(/^ {2}([a-z]+):\n([\s\S]*?)(?=^ {2}[a-z]+:\n|(?![\s\S]))/gm)) {
+      const [, name = '', body = ''] = match;
+      if (body.includes('contents: write')) writers.push(name);
+    }
+    expect(writers).toEqual(['draft', 'build']);
   });
 
   it('has a Dependabot config for the three ecosystems the build has', () => {
