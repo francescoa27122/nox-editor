@@ -36,32 +36,31 @@ back.**
 macOS, Windows and Linux all have builds. Take the `.dmg` for your Mac's chip,
 the `-setup.exe` on Windows, or the `.deb` or `.rpm` on Linux.
 
-Nox is not signed with a paid certificate on either platform that asks for one,
-so both interrupt the first run. Neither means the download is broken.
-
-On **Windows**, SmartScreen says *"Windows protected your PC"*. Choose **More
-info**, then **Run anyway**.
-
-On **macOS**, drag Nox to Applications and run this once:
+On **macOS**, drag Nox to Applications and open it. From 0.13.1 the app is
+signed with an Apple Developer ID and notarized, so macOS lets it through the
+way it does any other download. A release before 0.13.1 is ad-hoc signed
+instead: macOS quarantines it and calls it *"damaged"*, which sounds like a
+corrupt download and is not one. For those, run this once:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Nox.app
 ```
 
-You will need that command. Nox is ad-hoc signed rather than signed with an
-Apple Developer ID, so macOS quarantines it on download and calls it
-*"damaged"*. That sounds like a corrupt download. The file is fine. Nox needs
-macOS 13 or newer: the WebKit in older versions cannot draw the colours the
-diff and review views are made of.
+Nox needs macOS 13 or newer: the WebKit in older versions cannot draw the
+colours the diff and review views are made of.
+
+On **Windows**, SmartScreen says *"Windows protected your PC"* on the first
+run. Choose **More info**, then **Run anyway**. Nox is not signed with a
+Windows code-signing certificate, and the download is not broken.
 
 Linux packages are built on Ubuntu 22.04, so they need glibc 2.35 or newer.
 There is no AppImage.
 
 ### Or build it
 
-If there's no build for your platform, or you'd rather not run that command,
-build from source. It's the same thing, from code you can read. You need
-[Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your platform's
+If there's no build for your platform, or you'd rather not click through
+SmartScreen, build from source. It's the same thing, from code you can read.
+You need [Node 20+](https://nodejs.org), [Rust](https://rustup.rs), and your platform's
 [Tauri prerequisites](https://tauri.app/start/prerequisites/).
 
 ```bash
@@ -283,6 +282,12 @@ it's real software with 2,870 tests and I use it. Expect rough edges. Open an
 issue if you hit one, and run **Copy Diagnostics** from the palette first: it
 puts the version, the platform and what recently went wrong on your clipboard,
 with your home directory stripped out of the paths.
+
+**0.13.1 opens on a Mac without a terminal command.** The macOS builds are
+signed with an Apple Developer ID and notarized, so a fresh download runs the
+way any other app does, and the *"damaged"* dialog and the `xattr` command it
+needed are gone. Windows still shows SmartScreen once; the roadmap says why
+that certificate is a different decision.
 
 **0.13.0 is the one your desktop knows about.** The installers register Nox
 for plain text and the code it highlights, so a double-click opens a file

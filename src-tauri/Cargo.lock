@@ -2502,7 +2502,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "encoding_rs",
  "futures-util",

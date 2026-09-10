@@ -3,8 +3,10 @@
 The last code row of *"Installs like software"*. The workflow half is built and
 merged; the rest is a purchase and a keychain, and both are the operator's.
 
-Status: workflow merged 2026-08-22, waiting on enrolment. Windows deferred by
-decision the same day.
+Status: **done for macOS.** Certificate issued and all six secrets set
+2026-09-09; `v0.13.0-rc1` signed and notarized on both macOS legs the same
+day, and 0.13.1 is the first release to carry it. §9 records how the ceremony
+actually went. Windows deferred by decision 2026-08-22.
 
 ## 1. What this buys, and what it does not
 
@@ -185,3 +187,40 @@ membership does not break already-notarized builds — signatures carry a secure
 timestamp and notarization tickets do not expire — but no new build can be
 notarized until it is renewed. A **revoked** certificate is different and does
 break installed apps, which is a reason not to revoke one casually.
+
+## 9. How it actually went (2026-09-09)
+
+The ceremony ran on the Windows PC with the OpenSSL that Git Bash ships, not
+in Keychain Access, because that was the machine in front of the operator.
+The key, the `.p12` and its password live outside every repository, in a
+folder under the user profile; that location is in Claude's memory, not here.
+The same six secrets came out of it, and the runner imported the result
+without complaint. Five things a repeat should know:
+
+1. `export MSYS_NO_PATHCONV=1` before `openssl req`, or Git Bash rewrites the
+   `-subj "/CN=..."` argument as a Windows path and the request fails
+   silently.
+2. Export the `.p12` with `-legacy`. OpenSSL 3 defaults to AES and PBKDF2,
+   which `security import` has refused; `-legacy` produces what Keychain
+   Access itself would.
+3. Bundle Apple's *Developer ID Certification Authority* G2 intermediate with
+   `-certfile`. `tauri-macos-sign` imports the `.p12` alone and does nothing
+   about the chain.
+4. `openssl verify` refuses Apple's certificates with "unhandled critical
+   extension" because Apple marks its own OID critical. That is not a chain
+   problem; `-ignore_critical -partial_chain` says OK.
+5. **The one that cost a run.** `openssl rand -base64` on Windows ends its
+   line with `\r\n`, and stripping only the `\n` left a carriage return in
+   the password file. The `.p12` was built with that 45-byte password; `gh
+   secret set` trims `\r\n` from piped input and stored the 44-byte one. The
+   first `v0.13.0-rc1` attempt failed on both macOS legs with:
+
+   ```
+   security: SecKeychainItemImport: MAC verification failed during PKCS12 import (wrong password?)
+   ```
+
+   The guard had already printed the right line, which is what it is for: the
+   failure was in the material, not the workflow. A clean password, a rebuilt
+   `.p12`, both secrets reset, and `gh run rerun --failed` on the same tag
+   passed: *Notarizing Finished with status Accepted* on both legs. Check the
+   last byte of any generated password before it goes anywhere.
