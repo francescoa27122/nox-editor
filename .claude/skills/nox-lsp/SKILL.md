@@ -28,7 +28,7 @@ Use `LspService.requestFor(languageId, method, params)`. It does two things you 
 1. Picks a session whose status is **`running`**. `initializing` would queue behind a cold start and answer long after the keystroke; `failed` never answers.
 2. **Calls `entry.sync.flush()` before asking.**
 
-That flush is the single most important line in the subsystem (`services/lsp/index.ts:150`, immediately before `session.request` at `:152`). Document changes are debounced at 300 ms, but every request is *about* the document and completion fires on the keystroke, well inside that window. A server that has not been sent the change answers about the text it still holds. The comment at `documents.ts:76` records the symptom against a real tsserver: typing `console.` offered ~2010 globals instead of ~20 members. Hover, definition and rename would each have hit this separately.
+That flush is the single most important line in the subsystem: `entry.sync.flush()` (`src/services/lsp/index.ts:228`), immediately before `entry.session.request<T>` (`src/services/lsp/index.ts:230`). Document changes are debounced at 300 ms, but every request is *about* the document and completion fires on the keystroke, well inside that window. A server that has not been sent the change answers about the text it still holds. The comment at `src/services/lsp/documents.ts:76` (`2010 globals`) records the symptom against a real tsserver: typing `console.` offered ~2010 globals instead of ~20 members. Hover, definition and rename would each have hit this separately.
 
 Then put the response conversion in a pure `core/lsp-*.ts` function and test it there.
 
@@ -78,7 +78,7 @@ On close, pending debounced changes are **dropped, not flushed**. A `didChange` 
 
 Two edges are correctness, not tidiness:
 
-- **Nothing may be written before the `initialize` reply.** Requests made while `initializing` are queued in `#queue` and flushed on success. Note the failure path: `#fail` clears the queue (`session.ts:255`) *without rejecting* the queued promises, so a caller whose request landed during a handshake that then failed waits forever. Do not add a caller that awaits `request()` without its own timeout until that is fixed.
+- **Nothing may be written before the `initialize` reply.** Requests made while `initializing` are queued in `#queue` and flushed on success. Note the failure path: `#fail(message: string)` (`src/services/lsp/session.ts:339-343`) clears the queue *without rejecting* the queued promises, so a caller whose request landed during a handshake that then failed waits forever. Do not add a caller that awaits `request()` without its own timeout until that is fixed.
 - **Nothing may be written after the process is gone.**
 
 `start()` resolves either way. A server that cannot start is a state to render, not an exception every caller handles. Failure lands in `status = 'failed'` with `error` and the last 20 stderr lines, which are usually the only explanation.
@@ -87,7 +87,7 @@ Two edges are correctness, not tidiness:
 
 `stop()` is **ask, tell, then kill**: `shutdown` request, `exit` notification, then `kill()`. A server killed outright can leave its own child running; tsserver does. A failed or timed-out shutdown falls through to the kill so a broken server cannot hold the window open.
 
-The ask-tell pair is gated on `status === 'running'` (`session.ts:198`), so a `failed` or still-`initializing` session goes straight to `kill()`.
+The ask-tell pair is gated on `this.status.get() === 'running'` (`src/services/lsp/session.ts:255`), so a `failed` or still-`initializing` session goes straight to `kill()`.
 
 Restart backoff is `[1000, 2000, 4000]` then stop. Three attempts rides out a flap without spinning.
 

@@ -11,11 +11,11 @@ CodeMirror *extensions* live in `src/editor/`. The layer rule is narrower than "
 
 - **`services/` and `core/` never import `@codemirror/view`.** That is the invariant that keeps them headless. Verify with `grep -rn "from '@codemirror/view'" src/services src/core`, which returns nothing.
 - They *do* use `@codemirror/state` and `@codemirror/commands` on purpose: `services/workspace.ts` owns an `EditorState` per buffer (that is what makes per-tab undo work) and `services/transactions.ts` defines an `Annotation`. Both are DOM-free, so Vitest still runs them under Node.
-- `ui/EditorPane.svelte:2` value-imports `EditorView` because it owns the single view instance, and `app.ts:16` type-imports it to hold the reference. Neither is a violation; the rule is about `services/` and `core/`.
+- `src/ui/EditorPane.svelte:26` (`import { EditorView }`) value-imports it because it owns the single view instance, and `src/app.ts:16` (`import type { EditorView }`) type-imports it to hold the reference. Neither is a violation; the rule is about `services/` and `core/`.
 
 Nothing enforces this with a lint rule. It holds by review.
 
-Composition happens in one place: `src/editor/extensions.ts#buildExtensions`. `WorkspaceService` receives it wrapped in a closure that discards the factory args (`app.ts:226-228`), so `buildExtensions` takes `Settings`, not `StateFactoryArgs`.
+Composition happens in one place: `src/editor/extensions.ts#buildExtensions`. `WorkspaceService` receives it wrapped in a closure that unpacks the factory args, so `buildExtensions` takes `Settings` and the detected indent rather than `StateFactoryArgs`: `new WorkspaceService(platform, (args) =>` (`src/app.ts:250-254`).
 
 ## Quick reference
 
@@ -40,18 +40,18 @@ Adding one is exactly three edits in `extensions.ts`:
 2. an entry in `SETTING_TO_COMPARTMENTS` mapping the settings key to it
 3. a `case` in `compartmentContent`
 
-**Only edits 1 and 3 are compiler-checked.** `compartmentContent`'s switch has no `default:` and returns `Extension`, so a missing case fails with TS2366. But `SETTING_TO_COMPARTMENTS` is a `Partial<Record<…>>` (`extensions.ts:95`), so **omitting edit 2 compiles cleanly and silently produces a setting that never reconfigures anything.** That is the likeliest mistake and the one nothing will catch for you. Check it by hand.
+**Only edits 1 and 3 are compiler-checked.** `compartmentContent`'s switch has no `default:` and returns `Extension`, so a missing case fails with TS2366. But `SETTING_TO_COMPARTMENTS` (`src/editor/extensions.ts:132`) is a `Partial<Record<…>>`, so **omitting edit 2 compiles cleanly and silently produces a setting that never reconfigures anything.** That is the likeliest mistake and the one nothing will catch for you. Check it by hand.
 
 ### 2. A StateField must be unconditional; only its rendering is compartmentalised
 
 **Removing a `StateField` destroys the state it holds.** A compartment reconfigured to `[]` removes its extensions, so gating a field on a setting throws away every mark the moment the user toggles it off.
 
-The pattern (`extensions.ts:226-232`): the field goes in `staticExtensions()` unconditionally, and only the gutter/tooltip that renders it goes in the compartment. `provenanceField` and `gitGutterField` both do this. Copy it.
+The pattern, in `function staticExtensions(): Extension[]` (`src/editor/extensions.ts:276-297`): the field goes in unconditionally, and only the gutter/tooltip that renders it goes in the compartment. `provenanceField` and `gitGutterField` both do this. Copy it.
 
 ### 3. StateField vs ViewPlugin is a question about derivability
 
 - **Derivable from document + inputs → `ViewPlugin`.** Search highlighting (`search-highlight.ts`): given the query and the doc you can always recompute matches.
-- **Not recoverable once it happens → `StateField`.** Provenance (`provenance.ts:17-24`): nothing in the document remembers who made a change, so it must be recorded as it happens and mapped forward. A `StateField` also accumulates in background buffers, because the workspace updates their state whether or not a view exists.
+- **Not recoverable once it happens → `StateField`.** Provenance: nothing in the document remembers who made a change, so it must be recorded as it happens and mapped forward. A `StateField` also accumulates in background buffers, because the workspace updates their state whether or not a view exists. The header argues it at `src/editor/provenance.ts:17-25` (`the distinction matters`).
 
 ## Keymap ownership
 
@@ -76,7 +76,7 @@ if (tree === null) throw new Error('syntax tree did not finish parsing within 10
 return state.update({}).state;   // forces the re-snapshot, do not omit
 ```
 
-`tests/folding.test.ts:36-48` is the reference; that suite failed under CPU contention with only the first step.
+`function stateFor(doc: string)` (`tests/folding.test.ts:36-48`) is the reference; that suite failed under CPU contention with only the first step.
 
 **jsdom has no layout.** Components embedding CodeMirror are tested for wiring and text, not geometry. `tests/support/jsdom-layout.ts` fills `Range.getClientRects` with a single all-zero rectangle: enough for CodeMirror to *run*, not enough to claim anything about placement. A test must not assert where a tooltip sits or which symbol was under the pointer.
 
